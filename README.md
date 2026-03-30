@@ -1,5 +1,7 @@
-# Candela 🕯️
-
+<div align="center">
+  <img src="assets/logo.png" alt="Candela Logo" width="200" />
+  <h1>Candela</h1>
+</div>
 **Open-source, OTel-native LLM Observability & Engineering Platform.**
 
 Candela is a production-grade observatory for your LLM applications. It captures every trace, calculates every cent, and evaluates every output with deep integration into **OpenTelemetry**, **Google Cloud (Vertex AI)**, and the wider GenAI ecosystem.

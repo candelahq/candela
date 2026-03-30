@@ -35,50 +35,27 @@ func (m *mockSubmitter) getSpans() []storage.Span {
 	return cp
 }
 
-func TestExtractRequestInfoOpenAI(t *testing.T) {
-	body := `{
-		"model": "gpt-4o",
-		"messages": [{"role": "user", "content": "Hello"}]
-	}`
-	model, content := extractRequestInfo("openai", []byte(body))
-	if model != "gpt-4o" {
-		t.Errorf("model = %s, want gpt-4o", model)
-	}
-	if content == "" {
-		t.Error("expected non-empty content")
-	}
-}
-
 func TestExtractRequestInfoAnthropic(t *testing.T) {
 	body := `{
-		"model": "claude-3-5-sonnet-20241022",
+		"model": "claude-sonnet-4-20250514",
 		"messages": [{"role": "user", "content": "Hi"}]
 	}`
 	model, content := extractRequestInfo("anthropic", []byte(body))
-	if model != "claude-3-5-sonnet-20241022" {
-		t.Errorf("model = %s, want claude-3-5-sonnet-20241022", model)
+	if model != "claude-sonnet-4-20250514" {
+		t.Errorf("model = %s, want claude-sonnet-4-20250514", model)
 	}
 	if content == "" {
 		t.Error("expected non-empty content")
 	}
 }
 
-func TestExtractResponseInfoOpenAI(t *testing.T) {
+func TestExtractRequestInfoGoogle(t *testing.T) {
 	body := `{
-		"choices": [{"message": {"content": "Hello! How can I help?"}}],
-		"usage": {"prompt_tokens": 10, "completion_tokens": 8, "total_tokens": 18}
+		"contents": [{"parts": [{"text": "Hello"}]}]
 	}`
-
-	content, input, output := extractResponseInfo("openai", []byte(body))
-
-	if content != "Hello! How can I help?" {
-		t.Errorf("content = %q", content)
-	}
-	if input != 10 {
-		t.Errorf("input_tokens = %d, want 10", input)
-	}
-	if output != 8 {
-		t.Errorf("output_tokens = %d, want 8", output)
+	_, content := extractRequestInfo("google", []byte(body))
+	if content == "" {
+		t.Error("expected non-empty content")
 	}
 }
 
@@ -127,10 +104,9 @@ func TestIsStreamingRequest(t *testing.T) {
 		body     string
 		want     bool
 	}{
-		{"openai stream true", "openai", `{"stream": true}`, true},
-		{"openai stream false", "openai", `{"stream": false}`, false},
-		{"openai no stream", "openai", `{"model": "gpt-4o"}`, false},
-		{"anthropic stream", "anthropic", `{"stream": true}`, true},
+		{"anthropic stream true", "anthropic", `{"stream": true}`, true},
+		{"anthropic stream false", "anthropic", `{"stream": false}`, false},
+		{"anthropic no stream", "anthropic", `{"model": "claude-sonnet-4-20250514"}`, false},
 		{"google always false", "google", `{"contents": []}`, false},
 	}
 
@@ -144,45 +120,44 @@ func TestIsStreamingRequest(t *testing.T) {
 	}
 }
 
-func TestExtractStreamingUsageOpenAI(t *testing.T) {
-	data := `data: {"choices":[{"delta":{"content":"Hello"}}]}
+func TestExtractStreamingUsageAnthropic(t *testing.T) {
+	data := `data: {"type":"message_start","message":{"usage":{"input_tokens":10}}}
 
-data: {"choices":[{"delta":{"content":" world"}}]}
+data: {"type":"content_block_delta","delta":{"type":"text_delta","text":"Hello"}}
 
-data: {"choices":[],"usage":{"prompt_tokens":5,"completion_tokens":2}}
+data: {"type":"content_block_delta","delta":{"type":"text_delta","text":" world"}}
 
-data: [DONE]
+data: {"type":"message_delta","usage":{"output_tokens":4}}
 
 `
-	content, input, output := extractStreamingUsage("openai", []byte(data))
+	content, input, output := extractStreamingUsage("anthropic", []byte(data))
 	if content != "Hello world" {
 		t.Errorf("content = %q, want 'Hello world'", content)
 	}
-	if input != 5 {
-		t.Errorf("input = %d, want 5", input)
+	if input != 10 {
+		t.Errorf("input = %d, want 10", input)
 	}
-	if output != 2 {
-		t.Errorf("output = %d, want 2", output)
+	if output != 4 {
+		t.Errorf("output = %d, want 4", output)
 	}
 }
 
-func TestProxyEndToEnd(t *testing.T) {
-	// Create a fake upstream that mimics OpenAI.
+func TestProxyEndToEndAnthropic(t *testing.T) {
+	// Create a fake upstream that mimics Anthropic/Vertex AI response.
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Verify auth header was forwarded.
-		if r.Header.Get("Authorization") != "Bearer test-key" {
+		// Verify auth header was forwarded (Bearer token for Vertex AI).
+		if r.Header.Get("Authorization") != "Bearer test-adc-token" {
 			t.Error("auth header not forwarded")
 		}
 
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]interface{}{
-			"choices": []map[string]interface{}{
-				{"message": map[string]interface{}{"content": "I'm a test response"}},
+			"content": []map[string]interface{}{
+				{"type": "text", "text": "I'm Claude via Vertex AI"},
 			},
 			"usage": map[string]interface{}{
-				"prompt_tokens":     100,
-				"completion_tokens": 50,
-				"total_tokens":      150,
+				"input_tokens":  80,
+				"output_tokens": 30,
 			},
 		})
 	}))
@@ -192,7 +167,7 @@ func TestProxyEndToEnd(t *testing.T) {
 	calc := costcalc.New()
 
 	p := New(Config{
-		Providers: []Provider{{Name: "openai", UpstreamURL: upstream.URL}},
+		Providers: []Provider{{Name: "anthropic", UpstreamURL: upstream.URL}},
 		ProjectID: "test-project",
 	}, submitter, calc)
 
@@ -203,11 +178,11 @@ func TestProxyEndToEnd(t *testing.T) {
 	defer srv.Close()
 
 	// Make a proxied request.
-	body := `{"model": "gpt-4o", "messages": [{"role": "user", "content": "test"}]}`
+	body := `{"model": "claude-sonnet-4-20250514", "messages": [{"role": "user", "content": "test"}]}`
 	req, _ := http.NewRequest("POST",
-		fmt.Sprintf("%s/proxy/openai/v1/chat/completions", srv.URL),
+		fmt.Sprintf("%s/proxy/anthropic/v1/messages", srv.URL),
 		strings.NewReader(body))
-	req.Header.Set("Authorization", "Bearer test-key")
+	req.Header.Set("Authorization", "Bearer test-adc-token")
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := http.DefaultClient.Do(req)
@@ -216,7 +191,6 @@ func TestProxyEndToEnd(t *testing.T) {
 	}
 	defer resp.Body.Close()
 
-	// Verify the response was proxied correctly.
 	if resp.StatusCode != 200 {
 		respBody, _ := io.ReadAll(resp.Body)
 		t.Fatalf("status = %d, body = %s", resp.StatusCode, respBody)
@@ -225,12 +199,12 @@ func TestProxyEndToEnd(t *testing.T) {
 	var result map[string]interface{}
 	json.NewDecoder(resp.Body).Decode(&result)
 
-	choices, ok := result["choices"].([]interface{})
-	if !ok || len(choices) == 0 {
-		t.Fatal("expected choices in response")
+	contentArr, ok := result["content"].([]interface{})
+	if !ok || len(contentArr) == 0 {
+		t.Fatal("expected content in response")
 	}
 
-	// Wait briefly for async span creation.
+	// Wait for async span creation.
 	for i := 0; i < 50; i++ {
 		if len(submitter.getSpans()) > 0 {
 			break
@@ -247,20 +221,22 @@ func TestProxyEndToEnd(t *testing.T) {
 	if span.GenAI == nil {
 		t.Fatal("expected GenAI attributes")
 	}
-	if span.GenAI.Model != "gpt-4o" {
-		t.Errorf("model = %s, want gpt-4o", span.GenAI.Model)
+	if span.GenAI.Model != "claude-sonnet-4-20250514" {
+		t.Errorf("model = %s, want claude-sonnet-4-20250514", span.GenAI.Model)
 	}
-	if span.GenAI.InputTokens != 100 {
-		t.Errorf("input_tokens = %d, want 100", span.GenAI.InputTokens)
+	if span.GenAI.Provider != "anthropic" {
+		t.Errorf("provider = %s, want anthropic", span.GenAI.Provider)
 	}
-	if span.GenAI.OutputTokens != 50 {
-		t.Errorf("output_tokens = %d, want 50", span.GenAI.OutputTokens)
+	if span.GenAI.InputTokens != 80 {
+		t.Errorf("input_tokens = %d, want 80", span.GenAI.InputTokens)
+	}
+	if span.GenAI.OutputTokens != 30 {
+		t.Errorf("output_tokens = %d, want 30", span.GenAI.OutputTokens)
 	}
 	if span.ProjectID != "test-project" {
 		t.Errorf("project_id = %s, want test-project", span.ProjectID)
 	}
 }
-
 
 func TestTruncate(t *testing.T) {
 	if got := truncate("short", 100); got != "short" {
@@ -268,7 +244,7 @@ func TestTruncate(t *testing.T) {
 	}
 	long := strings.Repeat("a", 200)
 	got := truncate(long, 50)
-	if len(got) > 70 { // 50 + "[truncated]"
+	if len(got) > 70 {
 		t.Errorf("truncate long len = %d", len(got))
 	}
 	if !strings.Contains(got, "[truncated]") {
@@ -288,7 +264,9 @@ func TestGenerateIDs(t *testing.T) {
 	}
 
 	// Should be unique.
-	if generateTraceID() == generateTraceID() {
+	id1 := generateTraceID()
+	id2 := generateTraceID()
+	if id1 == id2 {
 		t.Error("trace IDs should be unique")
 	}
 }

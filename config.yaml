@@ -16,6 +16,17 @@ storage:
   #   username: "default"
   #   password: ""
 
+proxy:
+  enabled: true
+  project_id: "default"
+  # Routes registered:
+  #   /proxy/openai/    → https://api.openai.com
+  #   /proxy/google/    → https://generativelanguage.googleapis.com
+  #   /proxy/anthropic/ → https://api.anthropic.com
+  #
+  # Usage:
+  #   client = OpenAI(base_url="http://localhost:8080/proxy/openai/v1")
+
 worker:
   batch_size: 100
   flush_interval: "2s"

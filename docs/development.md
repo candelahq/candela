@@ -12,7 +12,7 @@ nix develop
 ```
 
 This will automatically install:
-- **Go 1.23**
+- **Go 1.26**
 - **Buf** (Protobuf management)
 - **Node.js 22** & **pnpm**
 - **Python 3.12** & **uv**

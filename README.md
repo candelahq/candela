@@ -43,7 +43,7 @@ You can get Candela running in less than 60 seconds using either a local binary 
 Ideal for local development. Uses **SQLite** by default.
 
 ```bash
-# Clone and enter the nix shell (or ensure Go 1.23 is installed)
+# Clone and enter the nix shell (or ensure Go 1.26 is installed)
 nix develop
 
 # Start the Candela server (defaults to SQLite + Port 8080)

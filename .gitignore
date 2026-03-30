@@ -41,3 +41,4 @@ result-*
 __pycache__/
 *.pyc
 .venv/
+*.db

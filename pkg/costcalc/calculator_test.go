@@ -36,9 +36,9 @@ func TestCalculate(t *testing.T) {
 			wantMax:      0.002,
 		},
 		{
-			name:         "Claude 3.5 Sonnet",
+			name:         "Claude Sonnet 4",
 			provider:     "anthropic",
-			model:        "claude-3.5-sonnet",
+			model:        "claude-sonnet-4-20250514",
 			inputTokens:  5000,
 			outputTokens: 1000,
 			wantMin:      0.029,

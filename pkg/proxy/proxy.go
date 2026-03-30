@@ -1,8 +1,9 @@
 // Package proxy implements an LLM API proxy that captures requests/responses
-// and creates observability spans. Supports OpenAI, Google Gemini, and Anthropic.
+// and creates observability spans. Supports OpenAI, Google Gemini, and Anthropic (via Vertex AI).
 //
 // Usage:
 //   client = OpenAI(base_url="http://localhost:8080/proxy/openai/v1")
+//   client = anthropic.Anthropic(base_url="http://localhost:8080/proxy/anthropic")
 //
 // The proxy forwards requests transparently, captures the full exchange,
 // extracts token usage, calculates cost, and stores as a trace.
@@ -51,11 +52,14 @@ type Config struct {
 }
 
 // DefaultProviders returns the standard LLM provider configurations.
+// Anthropic uses Vertex AI endpoint — set VERTEX_REGION and GCP_PROJECT env vars.
 func DefaultProviders() []Provider {
 	return []Provider{
 		{Name: "openai", UpstreamURL: "https://api.openai.com"},
 		{Name: "google", UpstreamURL: "https://generativelanguage.googleapis.com"},
-		{Name: "anthropic", UpstreamURL: "https://api.anthropic.com"},
+		// Anthropic via Vertex AI. Override upstream via config for your region/project:
+		// https://{REGION}-aiplatform.googleapis.com/v1/projects/{PROJECT}/locations/{REGION}/publishers/anthropic/models
+		{Name: "anthropic", UpstreamURL: "https://us-east5-aiplatform.googleapis.com"},
 	}
 }
 
@@ -329,7 +333,11 @@ func forwardHeaders(src *http.Request, dst *http.Request, provider string) {
 
 	// Provider-specific headers.
 	switch provider {
+	case "openai":
+		// OpenAI uses Authorization: Bearer — already forwarded above.
 	case "anthropic":
+		// Anthropic via Vertex AI uses Authorization: Bearer (ADC token).
+		// Direct API uses X-Api-Key. Forward both for flexibility.
 		for _, h := range []string{"X-Api-Key", "Anthropic-Version"} {
 			if v := src.Header.Get(h); v != "" {
 				dst.Header.Set(h, v)
@@ -413,6 +421,7 @@ func extractResponseInfo(provider string, body []byte) (content string, inputTok
 			}
 		}
 	case "anthropic":
+		// Works for both direct Anthropic API and Vertex AI Anthropic.
 		if usage, ok := resp["usage"].(map[string]interface{}); ok {
 			inputTokens = toInt64(usage["input_tokens"])
 			outputTokens = toInt64(usage["output_tokens"])
@@ -464,7 +473,6 @@ func extractStreamingUsage(provider string, data []byte) (content string, inputT
 
 		switch provider {
 		case "openai":
-			// Extract streaming content deltas.
 			if choices, ok := chunk["choices"].([]interface{}); ok && len(choices) > 0 {
 				if choice, ok := choices[0].(map[string]interface{}); ok {
 					if delta, ok := choice["delta"].(map[string]interface{}); ok {
@@ -474,7 +482,6 @@ func extractStreamingUsage(provider string, data []byte) (content string, inputT
 					}
 				}
 			}
-			// The final chunk contains usage.
 			if usage, ok := chunk["usage"].(map[string]interface{}); ok {
 				inputTokens = toInt64(usage["prompt_tokens"])
 				outputTokens = toInt64(usage["completion_tokens"])

@@ -84,10 +84,11 @@ func (c *Calculator) loadDefaults() {
 		{Provider: "openai", Model: "o1", InputPerMillion: 15.00, OutputPerMillion: 60.00},
 		{Provider: "openai", Model: "o1-mini", InputPerMillion: 3.00, OutputPerMillion: 12.00},
 
-		// Anthropic
-		{Provider: "anthropic", Model: "claude-3.5-sonnet", InputPerMillion: 3.00, OutputPerMillion: 15.00},
-		{Provider: "anthropic", Model: "claude-3.5-haiku", InputPerMillion: 0.80, OutputPerMillion: 4.00},
-		{Provider: "anthropic", Model: "claude-3-opus", InputPerMillion: 15.00, OutputPerMillion: 75.00},
+		// Anthropic (via Vertex AI or direct)
+		{Provider: "anthropic", Model: "claude-sonnet-4-20250514", InputPerMillion: 3.00, OutputPerMillion: 15.00},
+		{Provider: "anthropic", Model: "claude-haiku-3-5-20241022", InputPerMillion: 0.80, OutputPerMillion: 4.00},
+		{Provider: "anthropic", Model: "claude-3-5-sonnet-20241022", InputPerMillion: 3.00, OutputPerMillion: 15.00},
+		{Provider: "anthropic", Model: "claude-3-opus-20240229", InputPerMillion: 15.00, OutputPerMillion: 75.00},
 	}
 	for _, p := range defaults {
 		c.pricing[c.key(p.Provider, p.Model)] = p

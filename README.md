@@ -1,78 +1,155 @@
 # Candela 🕯️
 
-**Open-source, OTel-native LLM observability platform.**
+**Open-source, OTel-native LLM Observability & Engineering Platform.**
 
-Candela measures the light in your LLM applications — traces, costs, latency, and quality — with deep integration into OpenTelemetry, Google ADK, and the wider AI ecosystem.
+Candela is a production-grade observatory for your LLM applications. It captures every trace, calculates every cent, and evaluates every output with deep integration into **OpenTelemetry**, **Google Cloud (Vertex AI)**, and the wider GenAI ecosystem.
 
-## Features
+[![Go Reference](https://pkg.go.dev/badge/github.com/candelahq/candela.svg)](https://pkg.go.dev/github.com/candelahq/candela)
+[![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 
-- **OTel-native**: OTLP is the only ingestion protocol. No proprietary SDKs needed.
-- **Proto-first**: All service boundaries defined by Protobuf. ConnectRPC for frontend, gRPC for backend.
-- **Pluggable storage**: ClickHouse (default), BigQuery, PostgreSQL.
-- **Google-first**: Deep ADK, Cloud Trace, Vertex AI integration — but works anywhere.
-- **Zero-code instrumentation**: Leverage existing OpenTelemetry GenAI instrumentation libraries.
-- **LLM-first, traces-aware**: Optimized for GenAI spans, with full distributed trace context.
+---
 
-## Architecture
+## 🚀 Two Ways to Get Observability
 
-```
-Your Apps (ADK, LangChain, OpenAI, CrewAI, ...)
-    │ OTel SDK (auto-instrumented)
-    ▼
-Candela OTel Collector (custom distro)
-    │ OTLP/gRPC
-    ▼
-Candela Backend (Go)
-    │ ConnectRPC
-    ▼
-Candela Web UI (Next.js)
-```
+Candela offers a dual-mode ingestion strategy to fit any stage of your project:
 
-## Quick Start
+### 1. Zero-Code Proxy Mode (Quick Start)
+Drop Candela into your existing app by just changing your `base_url`. No instrumentation needed.
+- **OpenAI**: `http://localhost:8080/proxy/openai/v1`
+- **Google Gemini**: `http://localhost:8080/proxy/google/`
+- **Anthropic (via Vertex AI)**: `http://localhost:8080/proxy/anthropic/`
 
-```bash
-# Prerequisites: Docker, Docker Compose
+### 2. OTel-Native Agent Mode (Production)
+For deep observability into agent frameworks (**ADK**, **LangChain**, **CrewAI**), Candela ingests standard OTLP spans through a custom-built **OTel Collector distro**.
 
-# Start all services
-docker compose -f deploy/docker-compose.yml up
+---
 
-# Send sample traces
-# (instrument your app with any openinference-instrumentation-* library)
+## ✨ Key Features
 
-# Query traces
-grpcurl -plaintext localhost:8080 candela.v1.TraceService/ListTraces
-```
+- **🕯️ OTel-Native**: OTLP is our native language. No proprietary SDKs.
+- **💰 Real-time Cost Tracking**: Automatic token extraction and USD calculation for OpenAI, Google, and Anthropic.
+- **🧪 LLM-as-Judge (Phase 3)**: Automated quality scoring and evaluation rubrics.
+- **🗄️ Pluggable Storage**: **SQLite** for instant local dev; **ClickHouse** or **BigQuery** for the firehose.
+- **📡 SSE Streaming Support**: Captures full streaming responses without interfering with user latency.
+- **📦 Single-Binary Edge-Ready**: In-process queuing and processing for low-overhead deployments.
 
-## Development
+---
+
+## 🚀 Quick Start
+
+You can get Candela running in less than 60 seconds using either a local binary or Docker.
+
+### Option A: Local Binary (Fastest)
+Ideal for local development. Uses **SQLite** by default.
 
 ```bash
-# Enter the nix dev shell
+# Clone and enter the nix shell (or ensure Go 1.23 is installed)
 nix develop
 
-# Generate protobuf code
-cd proto && buf generate
-
-# Run the backend
+# Start the Candela server (defaults to SQLite + Port 8080)
 go run ./cmd/candela-server
-
-# Run the worker
-go run ./cmd/candela-worker
 ```
 
-## Project Structure
+### Option B: Docker Compose (Full Stack)
+Ideal for testing the full multi-service experience with **ClickHouse**.
+
+```bash
+# Start all services (server + collector + clickhouse)
+docker compose -f deploy/docker-compose.yml up
+```
+
+---
+
+## 🛠️ Route an LLM Call
+
+Once Candela is running, point your favorite LLM client at the Candela proxy (Port 8080) to start capturing observability data instantly.
+
+### OpenAI Example
+```python
+from openai import OpenAI
+
+client = OpenAI(
+    base_url="http://localhost:8080/proxy/openai/v1",
+    api_key="sk-..."
+)
+
+# Call as usual — Candela handles the rest
+response = client.chat.completions.create(...)
+```
+
+### Anthropic (via Vertex AI) Example
+```python
+from anthropic import Anthropic
+
+client = Anthropic(
+    base_url="http://localhost:8080/proxy/anthropic",
+    api_key="YOUR_GCP_TOKEN" # Uses ADC for GCP authentication
+)
+
+response = client.messages.create(...)
+```
+
+---
+
+## 🏗️ Architecture
+
+```mermaid
+graph TD
+    subgraph "Your Application"
+        App[App Logic]
+        SDK[OTel SDK / LLM Client]
+    end
+
+    subgraph "Candela Platform"
+        Proxy[LLM API Proxy]
+        Server[Go Backend Server]
+        Store[(Trace Store: SQLite/CH/BQ)]
+    end
+
+    subgraph "Upstream LLMs"
+        VAI[Vertex AI / Google]
+        ANT[Anthropic]
+        OAI[OpenAI]
+    end
+
+    App -->|Proxy Mode| Proxy
+    App -->|OTel Mode| Server
+    Proxy -->|Forward| VAI
+    Proxy -->|Forward| ANT
+    Proxy -->|Forward| OAI
+    Proxy -.->|Capture| Server
+    Server -->|Store| Store
+```
+
+---
+
+## 🗺️ Roadmap
+
+- **Phase 1: Foundation** ✅ (Ingestion, Proxy, Cost Calc, Docs)
+- **Phase 2: Visual Explorer** 🔜 (Waterfall traces, Cost Dashboards)
+- **Phase 3: Platform & Evaluation** 📋 (Admin Panel, Token Metering, LLM-as-Judge)
+- **Phase 4: Ecosystem & Polish** 📋 (Agent DAGs, Multi-tenant, BigQuery backend)
+
+---
+
+## 📂 Project Structure
 
 ```
 candela/
-├── proto/           # Protobuf definitions (source of truth)
+├── proto/           # Protobuf definitions (Source of Truth)
 ├── gen/             # Generated code (Go, TypeScript, Python)
-├── cmd/             # Binary entry points
-├── pkg/             # Go library packages
+├── cmd/             # Binary entry points (Server, CLI)
+├── pkg/             # Core library logic (Proxy, Storage, Cost)
+├── docs/            # Deep-dive documentation
 ├── collector/       # Custom OTel Collector distro
-├── web/             # Next.js UI
-├── eval/            # Python eval engine
-└── deploy/          # Docker Compose, Helm, Terraform
+├── ui/              # Next.js web interface (Coming in Phase 2)
 ```
+---
 
-## License
+## 🤝 Contributing
 
-TBD (Apache 2.0 planned)
+We are in early development! See [CONTRIBUTING.md](./CONTRIBUTING.md) for local setup instructions and architectural deep dives.
+
+## 📄 License
+
+Apache License 2.0. See [LICENSE](./LICENSE) for details.

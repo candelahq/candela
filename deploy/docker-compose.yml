@@ -16,16 +16,32 @@ services:
       timeout: 3s
       retries: 10
 
-  # Redis — span ingestion queue
-  redis:
-    image: redis:7-alpine
-    ports:
-      - "6379:6379"
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 5s
-      timeout: 3s
-      retries: 5
+  # --- FUTURE SCALE (Commented out for Phase 1) ---
+  # Redis — span ingestion queue for high-scale environments
+  # redis:
+  #   image: redis:7-alpine
+  #   ports:
+  #     - "6379:6379"
+  #   healthcheck:
+  #     test: ["CMD", "redis-cli", "ping"]
+  #     interval: 5s
+  #     timeout: 3s
+  #     retries: 5
+
+  # Candela Worker — separate span processor (redundant if using single-binary)
+  # candela-worker:
+  #   build:
+  #     context: ..
+  #     dockerfile: deploy/Dockerfile.worker
+  #   environment:
+  #     CANDELA_CONFIG: /app/config.yaml
+  #   volumes:
+  #     - ../config.yaml:/app/config.yaml:ro
+  #   depends_on:
+  #     clickhouse:
+  #       condition: service_healthy
+  #     redis:
+  #       condition: service_healthy
 
   # Candela Server — ConnectRPC API
   candela-server:
@@ -40,23 +56,6 @@ services:
       - ../config.yaml:/app/config.yaml:ro
     depends_on:
       clickhouse:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-
-  # Candela Worker — span processor
-  candela-worker:
-    build:
-      context: ..
-      dockerfile: deploy/Dockerfile.worker
-    environment:
-      CANDELA_CONFIG: /app/config.yaml
-    volumes:
-      - ../config.yaml:/app/config.yaml:ro
-    depends_on:
-      clickhouse:
-        condition: service_healthy
-      redis:
         condition: service_healthy
 
 volumes:

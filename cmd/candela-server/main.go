@@ -21,6 +21,7 @@ import (
 	"github.com/candelahq/candela/gen/go/candela/v1/candelav1connect"
 	"github.com/candelahq/candela/pkg/connecthandlers"
 	"github.com/candelahq/candela/pkg/costcalc"
+	"github.com/candelahq/candela/pkg/proxy"
 	"github.com/candelahq/candela/pkg/storage"
 	chstore "github.com/candelahq/candela/pkg/storage/clickhouse"
 	sqlitestore "github.com/candelahq/candela/pkg/storage/sqlite"
@@ -44,6 +45,10 @@ type Config struct {
 			Password string `yaml:"password"`
 		} `yaml:"clickhouse"`
 	} `yaml:"storage"`
+	Proxy struct {
+		Enabled   bool   `yaml:"enabled"`
+		ProjectID string `yaml:"project_id"`
+	} `yaml:"proxy"`
 	Worker struct {
 		BatchSize    int `yaml:"batch_size"`
 		FlushInterval string `yaml:"flush_interval"`
@@ -107,6 +112,16 @@ func main() {
 		Str("ingestion", ingestionPath).
 		Str("dashboard", dashboardPath).
 		Msg("ConnectRPC services registered")
+
+	// Register LLM proxy routes.
+	if cfg.Proxy.Enabled {
+		llmProxy := proxy.New(proxy.Config{
+			Providers: proxy.DefaultProviders(),
+			ProjectID: cfg.Proxy.ProjectID,
+		}, processor, calc)
+		llmProxy.RegisterRoutes(mux)
+		log.Info().Msg("🔀 LLM proxy enabled (/proxy/openai/, /proxy/google/, /proxy/anthropic/)")
+	}
 
 	addr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)
 	srv := &http.Server{

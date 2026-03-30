@@ -59,7 +59,7 @@ func DefaultProviders() []Provider {
 		{Name: "google", UpstreamURL: "https://generativelanguage.googleapis.com"},
 		// Anthropic via Vertex AI. Override upstream via config for your region/project:
 		// https://{REGION}-aiplatform.googleapis.com/v1/projects/{PROJECT}/locations/{REGION}/publishers/anthropic/models
-		{Name: "anthropic", UpstreamURL: "https://us-east5-aiplatform.googleapis.com"},
+		{Name: "anthropic", UpstreamURL: "https://us-central1-aiplatform.googleapis.com"},
 	}
 }
 

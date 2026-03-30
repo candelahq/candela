@@ -1,0 +1,21 @@
+# Candela Configuration
+# Copy to config.yaml and adjust for your environment.
+# If no config file is found, defaults to SQLite on port 8080.
+
+server:
+  host: "0.0.0.0"
+  port: 8080
+
+storage:
+  backend: "sqlite"  # Options: sqlite (default), clickhouse, bigquery
+  sqlite:
+    path: "candela.db"  # Use ":memory:" for ephemeral
+  # clickhouse:
+  #   addr: "localhost:9000"
+  #   database: "candela"
+  #   username: "default"
+  #   password: ""
+
+worker:
+  batch_size: 100
+  flush_interval: "2s"

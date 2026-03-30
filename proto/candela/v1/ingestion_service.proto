@@ -1,0 +1,24 @@
+syntax = "proto3";
+
+package candela.v1;
+
+option go_package = "github.com/candelahq/candela/gen/go/candela/v1";
+
+import "candela/types/trace.proto";
+
+// IngestionService handles internal span ingestion from the OTel Collector.
+// This is an internal gRPC service, not exposed externally.
+service IngestionService {
+  // IngestSpans receives a batch of spans for processing and storage.
+  rpc IngestSpans(IngestSpansRequest) returns (IngestSpansResponse);
+}
+
+message IngestSpansRequest {
+  repeated candela.types.Span spans = 1;
+}
+
+message IngestSpansResponse {
+  int32 accepted_count = 1;
+  int32 rejected_count = 2;
+  repeated string errors = 3;
+}

@@ -1,0 +1,78 @@
+syntax = "proto3";
+
+package candela.v1;
+
+option go_package = "github.com/candelahq/candela/gen/go/candela/v1";
+
+import "candela/types/project.proto";
+import "candela/types/common.proto";
+
+// ProjectService manages projects and API keys.
+// Exposed via ConnectRPC for the web UI.
+service ProjectService {
+  rpc CreateProject(CreateProjectRequest) returns (CreateProjectResponse);
+  rpc GetProject(GetProjectRequest) returns (GetProjectResponse);
+  rpc ListProjects(ListProjectsRequest) returns (ListProjectsResponse);
+  rpc DeleteProject(DeleteProjectRequest) returns (DeleteProjectResponse);
+
+  // API Key management
+  rpc CreateAPIKey(CreateAPIKeyRequest) returns (CreateAPIKeyResponse);
+  rpc ListAPIKeys(ListAPIKeysRequest) returns (ListAPIKeysResponse);
+  rpc RevokeAPIKey(RevokeAPIKeyRequest) returns (RevokeAPIKeyResponse);
+}
+
+message CreateProjectRequest {
+  string name = 1;
+  string description = 2;
+}
+
+message CreateProjectResponse {
+  candela.types.Project project = 1;
+}
+
+message GetProjectRequest {
+  string id = 1;
+}
+
+message GetProjectResponse {
+  candela.types.Project project = 1;
+}
+
+message ListProjectsRequest {
+  candela.types.PaginationRequest pagination = 1;
+}
+
+message ListProjectsResponse {
+  repeated candela.types.Project projects = 1;
+  candela.types.PaginationResponse pagination = 2;
+}
+
+message DeleteProjectRequest {
+  string id = 1;
+}
+
+message DeleteProjectResponse {}
+
+message CreateAPIKeyRequest {
+  string project_id = 1;
+  string name = 2;
+}
+
+message CreateAPIKeyResponse {
+  candela.types.APIKey api_key = 1;
+  string full_key = 2; // Only returned once at creation time
+}
+
+message ListAPIKeysRequest {
+  string project_id = 1;
+}
+
+message ListAPIKeysResponse {
+  repeated candela.types.APIKey api_keys = 1;
+}
+
+message RevokeAPIKeyRequest {
+  string id = 1;
+}
+
+message RevokeAPIKeyResponse {}

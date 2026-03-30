@@ -15,7 +15,7 @@
         devShells.default = pkgs.mkShell {
           buildInputs = with pkgs; [
             # Go
-            go_1_23
+            go_1_26
             gopls
             golangci-lint
             gotools

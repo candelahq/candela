@@ -1,0 +1,42 @@
+# Candela Collector configuration for local development.
+#
+# Start with: ./candela-collector --config=collector-config.yaml
+# Or use with a standard otelcol: otelcol --config=collector-config.yaml
+
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: "0.0.0.0:4317"
+      http:
+        endpoint: "0.0.0.0:4318"
+
+processors:
+  batch:
+    timeout: 5s
+    send_batch_size: 256
+
+  # Custom GenAI processor — enriches spans with cost data.
+  genai: {}
+
+exporters:
+  # Send to Candela backend (OTLP/gRPC)
+  otlp/candela:
+    endpoint: "localhost:8080"
+    tls:
+      insecure: true
+
+  # Debug output (stdout)
+  debug:
+    verbosity: basic
+
+  # Optional: dual-write to Google Cloud Trace
+  # otlp/cloudtrace:
+  #   endpoint: "cloudtrace.googleapis.com:443"
+
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [genai, batch]
+      exporters: [otlp/candela, debug]

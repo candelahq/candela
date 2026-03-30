@@ -1,0 +1,63 @@
+services:
+  # ClickHouse — trace/span storage
+  clickhouse:
+    image: clickhouse/clickhouse-server:24.12
+    ports:
+      - "8123:8123"   # HTTP interface
+      - "9000:9000"   # Native protocol
+    volumes:
+      - clickhouse_data:/var/lib/clickhouse
+    environment:
+      CLICKHOUSE_DB: candela
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1
+    healthcheck:
+      test: ["CMD", "clickhouse-client", "--query", "SELECT 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # Redis — span ingestion queue
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # Candela Server — ConnectRPC API
+  candela-server:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.server
+    ports:
+      - "8080:8080"
+    environment:
+      CANDELA_CONFIG: /app/config.yaml
+    volumes:
+      - ../config.yaml:/app/config.yaml:ro
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  # Candela Worker — span processor
+  candela-worker:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.worker
+    environment:
+      CANDELA_CONFIG: /app/config.yaml
+    volumes:
+      - ../config.yaml:/app/config.yaml:ro
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+volumes:
+  clickhouse_data:

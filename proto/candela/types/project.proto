@@ -1,0 +1,27 @@
+syntax = "proto3";
+
+package candela.types;
+
+option go_package = "github.com/candelahq/candela/gen/go/candela/types";
+
+import "google/protobuf/timestamp.proto";
+
+// A project is the top-level organizational unit in Candela.
+message Project {
+  string id = 1;
+  string name = 2;
+  string description = 3;
+  google.protobuf.Timestamp created_at = 4;
+  google.protobuf.Timestamp updated_at = 5;
+}
+
+// An API key used to authenticate ingestion and queries.
+message APIKey {
+  string id = 1;
+  string project_id = 2;
+  string name = 3;
+  string key_prefix = 4;       // First 8 chars for identification (full key only shown once)
+  bool active = 5;
+  google.protobuf.Timestamp created_at = 6;
+  google.protobuf.Timestamp expires_at = 7;
+}

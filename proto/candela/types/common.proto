@@ -1,0 +1,36 @@
+syntax = "proto3";
+
+package candela.types;
+
+option go_package = "github.com/candelahq/candela/gen/go/candela/types";
+
+import "google/protobuf/timestamp.proto";
+
+// Pagination request parameters.
+message PaginationRequest {
+  int32 page_size = 1;
+  string page_token = 2;
+}
+
+// Pagination response metadata.
+message PaginationResponse {
+  string next_page_token = 1;
+  int32 total_count = 2;
+}
+
+// Time range filter for queries.
+message TimeRange {
+  google.protobuf.Timestamp start = 1;
+  google.protobuf.Timestamp end = 2;
+}
+
+// Key-value attribute pair.
+message Attribute {
+  string key = 1;
+  oneof value {
+    string string_value = 2;
+    int64 int_value = 3;
+    double double_value = 4;
+    bool bool_value = 5;
+  }
+}

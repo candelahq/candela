@@ -1,0 +1,21 @@
+version: v2
+managed:
+  enabled: true
+  override:
+    - file_option: go_package_prefix
+      value: github.com/candelahq/candela/gen/go
+plugins:
+  # Go protobuf
+  - remote: buf.build/protocolbuffers/go
+    out: ../gen/go
+    opt: paths=source_relative
+  # Go ConnectRPC
+  - remote: buf.build/connectrpc/go
+    out: ../gen/go
+    opt: paths=source_relative
+  # TypeScript (ES) protobuf
+  - remote: buf.build/bufbuild/es
+    out: ../gen/ts
+  # TypeScript ConnectRPC
+  - remote: buf.build/connectrpc/es
+    out: ../gen/ts

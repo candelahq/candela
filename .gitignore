@@ -1,0 +1,43 @@
+# Binaries
+/candela-server
+/candela-worker
+/candela-collector
+/candela-cli
+
+# Generated code
+/gen/
+
+# Build artifacts
+/dist/
+*.exe
+*.test
+*.out
+*.prof
+
+# Dependencies
+/vendor/
+node_modules/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Environment
+.env
+.env.local
+
+# Nix
+result
+result-*
+
+# Python
+__pycache__/
+*.pyc
+.venv/

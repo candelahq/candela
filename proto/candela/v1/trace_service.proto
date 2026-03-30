@@ -1,0 +1,71 @@
+syntax = "proto3";
+
+package candela.v1;
+
+option go_package = "github.com/candelahq/candela/gen/go/candela/v1";
+
+import "candela/types/common.proto";
+import "candela/types/trace.proto";
+
+// TraceService provides APIs for querying and retrieving traces.
+// Exposed via ConnectRPC for the web UI.
+service TraceService {
+  // GetTrace returns a single trace with all its spans.
+  rpc GetTrace(GetTraceRequest) returns (GetTraceResponse);
+
+  // ListTraces returns a paginated list of trace summaries.
+  rpc ListTraces(ListTracesRequest) returns (ListTracesResponse);
+
+  // SearchSpans searches for individual spans matching criteria.
+  rpc SearchSpans(SearchSpansRequest) returns (SearchSpansResponse);
+}
+
+message GetTraceRequest {
+  string trace_id = 1;
+}
+
+message GetTraceResponse {
+  candela.types.Trace trace = 1;
+}
+
+message ListTracesRequest {
+  // Filters
+  string project_id = 1;
+  string environment = 2;
+  candela.types.TimeRange time_range = 3;
+
+  // Optional filters
+  string model = 10;             // Filter by model name
+  string provider = 11;          // Filter by provider
+  candela.types.SpanStatus status = 12;  // Filter by status
+  string search = 13;            // Free-text search in span names
+
+  // Pagination
+  candela.types.PaginationRequest pagination = 20;
+
+  // Sort
+  string order_by = 30;          // "start_time", "duration", "total_cost", "total_tokens"
+  bool descending = 31;
+}
+
+message ListTracesResponse {
+  repeated candela.types.TraceSummary traces = 1;
+  candela.types.PaginationResponse pagination = 2;
+}
+
+message SearchSpansRequest {
+  string project_id = 1;
+  candela.types.TimeRange time_range = 2;
+
+  // Span filters
+  candela.types.SpanKind kind = 10;
+  string model = 11;
+  string name_contains = 12;
+
+  candela.types.PaginationRequest pagination = 20;
+}
+
+message SearchSpansResponse {
+  repeated candela.types.Span spans = 1;
+  candela.types.PaginationResponse pagination = 2;
+}

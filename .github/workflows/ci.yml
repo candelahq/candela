@@ -19,6 +19,15 @@ jobs:
         with:
           go-version-file: go.mod
 
+      - uses: bufbuild/buf-setup-action@v1
+        with:
+          github_token: ${{ github.token }}
+
+      - name: Generate proto (gen/ is gitignored)
+        run: |
+          cd proto
+          buf generate
+
       - name: Build
         run: go build ./...
 
@@ -44,6 +53,15 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
+
+      - uses: bufbuild/buf-setup-action@v1
+        with:
+          github_token: ${{ github.token }}
+
+      - name: Generate proto
+        run: |
+          cd proto
+          buf generate
 
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v6

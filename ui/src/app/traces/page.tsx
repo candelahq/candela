@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { createClient } from "@connectrpc/connect";
 import { transport } from "@/lib/connect";
 import { TraceService } from "@/gen/v1/trace_service_pb";
@@ -22,6 +23,7 @@ export default function TracesPage() {
   const [traces, setTraces] = useState<TraceSummaryRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const router = useRouter();
 
   useEffect(() => {
     const client = createClient(TraceService, transport);
@@ -127,7 +129,7 @@ export default function TracesPage() {
                 {traces.map((t) => {
                   const st = statusLabel(t.status);
                   return (
-                    <tr key={t.traceId} style={{ cursor: "pointer" }}>
+                    <tr key={t.traceId} style={{ cursor: "pointer" }} onClick={() => router.push(`/traces/${t.traceId}`)}>
                       <td>
                         <span className="mono">{t.traceId.slice(0, 12)}…</span>
                       </td>

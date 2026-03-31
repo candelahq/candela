@@ -45,12 +45,14 @@ func New(cfg Config) (*Store, error) {
 		"PRAGMA busy_timeout=5000",
 	} {
 		if _, err := db.Exec(pragma); err != nil {
+			db.Close()
 			return nil, fmt.Errorf("setting pragma: %w", err)
 		}
 	}
 
 	s := &Store{db: db}
 	if err := s.migrate(); err != nil {
+		db.Close()
 		return nil, fmt.Errorf("running migrations: %w", err)
 	}
 
@@ -127,9 +129,12 @@ func (s *Store) IngestSpans(ctx context.Context, spans []storage.Span) error {
 			genAI = &storage.GenAIAttributes{}
 		}
 
-		attrsJSON, _ := json.Marshal(span.Attributes)
+		attrsJSON, err := json.Marshal(span.Attributes)
+		if err != nil {
+			return fmt.Errorf("marshaling attributes for span %s: %w", span.SpanID, err)
+		}
 
-		_, err := stmt.ExecContext(ctx,
+		_, err = stmt.ExecContext(ctx,
 			span.SpanID, span.TraceID, span.ParentSpanID,
 			span.Name, int(span.Kind), int(span.Status), span.StatusMessage,
 			span.StartTime.Format(time.RFC3339Nano),
@@ -367,8 +372,14 @@ func scanSpans(rows *sql.Rows) ([]storage.Span, error) {
 
 		span.Kind = storage.SpanKind(kind)
 		span.Status = storage.SpanStatus(status)
-		span.StartTime, _ = time.Parse(time.RFC3339Nano, startStr)
-		span.EndTime, _ = time.Parse(time.RFC3339Nano, endStr)
+		span.StartTime, err = time.Parse(time.RFC3339Nano, startStr)
+		if err != nil {
+			return nil, fmt.Errorf("parsing start_time for span %s: %w", span.SpanID, err)
+		}
+		span.EndTime, err = time.Parse(time.RFC3339Nano, endStr)
+		if err != nil {
+			return nil, fmt.Errorf("parsing end_time for span %s: %w", span.SpanID, err)
+		}
 		span.Duration = time.Duration(durationNs)
 
 		if genAI.Model != "" {
@@ -377,7 +388,9 @@ func scanSpans(rows *sql.Rows) ([]storage.Span, error) {
 
 		if attrsJSON != "" && attrsJSON != "{}" {
 			span.Attributes = make(map[string]string)
-			json.Unmarshal([]byte(attrsJSON), &span.Attributes)
+			if err := json.Unmarshal([]byte(attrsJSON), &span.Attributes); err != nil {
+				return nil, fmt.Errorf("unmarshaling attributes for span %s: %w", span.SpanID, err)
+			}
 		}
 
 		spans = append(spans, span)

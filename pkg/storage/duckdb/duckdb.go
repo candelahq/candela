@@ -38,6 +38,7 @@ func New(cfg Config) (*Store, error) {
 
 	s := &Store{db: db}
 	if err := s.migrate(); err != nil {
+		db.Close()
 		return nil, fmt.Errorf("running migrations: %w", err)
 	}
 

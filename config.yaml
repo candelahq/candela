@@ -1,13 +1,14 @@
 # Candela Configuration
 # Copy to config.yaml and adjust for your environment.
-# If no config file is found, defaults to SQLite on port 8080.
 
 server:
   host: "0.0.0.0"
   port: 8080
 
 storage:
-  backend: "sqlite"  # Options: sqlite (default), bigquery
+  backend: "duckdb"  # Options: duckdb (default), sqlite, bigquery
+  duckdb:
+    path: "candela.duckdb"  # DuckDB file path (OLAP, high-performance)
   sqlite:
     path: "candela.db"  # Use ":memory:" for ephemeral
   # bigquery:
@@ -31,6 +32,14 @@ proxy:
   #
   # Usage:
   #   client = OpenAI(base_url="http://localhost:8080/proxy/openai/v1")
+
+cors:
+  # Origins allowed to make cross-origin requests.
+  # Defaults to localhost:3000 + localhost:8080 if omitted.
+  # Use ["*"] to allow all origins (not recommended for production).
+  allowed_origins:
+    - "http://localhost:3000"
+    - "http://localhost:8080"
 
 worker:
   batch_size: 100

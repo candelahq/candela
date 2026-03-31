@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useReducer, useState } from "react";
 import { traceClient } from "@/lib/api";
 import type { Span } from "@/gen/types/trace_pb";
 import { SpanKind } from "@/gen/types/trace_pb";
@@ -13,9 +13,7 @@ export interface SpanNode {
   span: Span;
   children: SpanNode[];
   depth: number;
-  /** Offset from trace start in ms */
   offsetMs: number;
-  /** Duration in ms */
   durationMs: number;
 }
 
@@ -90,8 +88,7 @@ function buildTree(spans: Span[], traceStartMs: number): SpanNode[] {
   const roots: SpanNode[] = [];
   for (const node of nodeMap.values()) {
     if (node.span.parentSpanId && nodeMap.has(node.span.parentSpanId)) {
-      const parent = nodeMap.get(node.span.parentSpanId)!;
-      parent.children.push(node);
+      nodeMap.get(node.span.parentSpanId)!.children.push(node);
     } else {
       roots.push(node);
     }
@@ -119,28 +116,56 @@ function flattenTree(nodes: SpanNode[]): SpanNode[] {
 }
 
 // ──────────────────────────────────────────
+// Reducer (avoids set-state-in-effect lint)
+// ──────────────────────────────────────────
+
+type TraceState = {
+  trace: TraceData | null;
+  loading: boolean;
+  error: string | null;
+};
+
+type TraceAction =
+  | { type: "success"; trace: TraceData }
+  | { type: "error"; message: string }
+  | { type: "not_found" };
+
+function traceReducer(_state: TraceState, action: TraceAction): TraceState {
+  switch (action.type) {
+    case "success":
+      return { trace: action.trace, loading: false, error: null };
+    case "error":
+      return { trace: null, loading: false, error: action.message };
+    case "not_found":
+      return { trace: null, loading: false, error: "Trace not found" };
+  }
+}
+
+// ──────────────────────────────────────────
 // Hook
 // ──────────────────────────────────────────
 
 /**
  * Hook for fetching a single trace with its span tree.
- * Encapsulates the GetTrace RPC, tree building, and flattening.
+ * Uses useReducer to dispatch state transitions from async callbacks.
  */
 export function useTrace(traceId: string) {
-  const [trace, setTrace] = useState<TraceData | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [state, dispatch] = useReducer(traceReducer, {
+    trace: null,
+    loading: true,
+    error: null,
+  });
   const [selectedSpanId, setSelectedSpanId] = useState<string | null>(null);
 
   useEffect(() => {
-    setLoading(true);
-    setError(null);
+    let cancelled = false;
 
     traceClient
       .getTrace({ traceId })
       .then((res) => {
+        if (cancelled) return;
         if (!res.trace) {
-          setError("Trace not found");
+          dispatch({ type: "not_found" });
           return;
         }
         const t = res.trace;
@@ -148,26 +173,32 @@ export function useTrace(traceId: string) {
         const tree = buildTree(t.spans, traceStartMs);
         const flatSpans = flattenTree(tree);
 
-        setTrace({
-          traceId: t.traceId,
-          rootSpanName: t.rootSpanName || "unknown",
-          totalDurationMs: durationToMs(t.duration),
-          totalTokens: Number(t.totalTokens) || 0,
-          totalCostUsd: t.totalCostUsd || 0,
-          spanCount: t.spanCount || t.spans.length,
-          environment: t.environment || "—",
-          startTime: t.startTime
-            ? new Date(traceStartMs).toLocaleString()
-            : "—",
-          tree,
-          flatSpans,
+        dispatch({
+          type: "success",
+          trace: {
+            traceId: t.traceId,
+            rootSpanName: t.rootSpanName || "unknown",
+            totalDurationMs: durationToMs(t.duration),
+            totalTokens: Number(t.totalTokens) || 0,
+            totalCostUsd: t.totalCostUsd || 0,
+            spanCount: t.spanCount || t.spans.length,
+            environment: t.environment || "—",
+            startTime: t.startTime
+              ? new Date(traceStartMs).toLocaleString()
+              : "—",
+            tree,
+            flatSpans,
+          },
         });
       })
-      .catch((err) => setError(err.message))
-      .finally(() => setLoading(false));
+      .catch((err) => {
+        if (!cancelled) dispatch({ type: "error", message: err.message });
+      });
+
+    return () => { cancelled = true; };
   }, [traceId]);
 
-  const selectedNode = trace?.flatSpans.find(
+  const selectedNode = state.trace?.flatSpans.find(
     (n) => n.span.spanId === selectedSpanId
   );
 
@@ -175,9 +206,9 @@ export function useTrace(traceId: string) {
     setSelectedSpanId((prev) => (prev === spanId ? null : spanId));
 
   return {
-    trace,
-    loading,
-    error,
+    trace: state.trace,
+    loading: state.loading,
+    error: state.error,
     selectedSpanId,
     selectedNode,
     toggleSpan,

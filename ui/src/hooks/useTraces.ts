@@ -1,24 +1,91 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useReducer, useRef } from "react";
 import { traceClient } from "@/lib/api";
 import type { TraceSummaryRow, TraceFilters } from "@/types/traces";
 import { DEFAULT_FILTERS } from "@/types/traces";
+
+type State = {
+  traces: TraceSummaryRow[];
+  loading: boolean;
+  error: string | null;
+  filters: TraceFilters;
+};
+
+type Action =
+  | { type: "fetch"; filters: TraceFilters }
+  | { type: "success"; traces: TraceSummaryRow[] }
+  | { type: "error"; message: string }
+  | { type: "set_filters"; filters: TraceFilters }
+  | { type: "clear_filters" };
+
+function reducer(state: State, action: Action): State {
+  switch (action.type) {
+    case "fetch":
+      return { ...state, loading: true, error: null, filters: action.filters };
+    case "success":
+      return { ...state, loading: false, traces: action.traces };
+    case "error":
+      return { ...state, loading: false, error: action.message };
+    case "set_filters":
+      return { ...state, filters: action.filters };
+    case "clear_filters":
+      return { ...state, loading: true, error: null, filters: DEFAULT_FILTERS };
+  }
+}
+
+function mapTrace(t: {
+  traceId: string;
+  rootSpanName: string;
+  primaryModel: string;
+  primaryProvider: string;
+  environment: string;
+  duration?: { seconds: bigint; nanos: number };
+  totalTokens: bigint;
+  totalCostUsd: number;
+  status: number;
+  spanCount: number;
+  llmCallCount: number;
+  startTime?: { seconds: bigint; nanos: number };
+}): TraceSummaryRow {
+  const durSeconds = Number(t.duration?.seconds ?? 0);
+  const durNanos = Number(t.duration?.nanos ?? 0);
+  return {
+    traceId: t.traceId,
+    rootSpanName: t.rootSpanName || "unknown",
+    primaryModel: t.primaryModel || "—",
+    primaryProvider: t.primaryProvider || "—",
+    environment: t.environment || "—",
+    durationMs: durSeconds * 1000 + durNanos / 1e6,
+    totalTokens: Number(t.totalTokens) || 0,
+    totalCostUsd: t.totalCostUsd || 0,
+    status: t.status,
+    spanCount: t.spanCount || 0,
+    llmCallCount: t.llmCallCount || 0,
+    startTime: t.startTime
+      ? new Date(
+          Number(t.startTime.seconds) * 1000 +
+            Math.floor(Number(t.startTime.nanos) / 1e6)
+        ).toLocaleString()
+      : "—",
+  };
+}
 
 /**
  * Hook for fetching and filtering traces.
  * Encapsulates the ListTraces RPC, debounced search, and filter state.
  */
 export function useTraces() {
-  const [traces, setTraces] = useState<TraceSummaryRow[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [filters, setFilters] = useState<TraceFilters>(DEFAULT_FILTERS);
+  const [state, dispatch] = useReducer(reducer, {
+    traces: [],
+    loading: true,
+    error: null,
+    filters: DEFAULT_FILTERS,
+  });
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const fetchTraces = useCallback((f: TraceFilters) => {
-    setLoading(true);
-    setError(null);
+    dispatch({ type: "fetch", filters: f });
     traceClient
       .listTraces({
         pagination: { pageSize: 100 },
@@ -30,42 +97,18 @@ export function useTraces() {
         descending: f.descending,
       })
       .then((res) => {
-        const mapped = (res.traces || []).map((t) => {
-          const durSeconds = Number(t.duration?.seconds ?? 0);
-          const durNanos = Number(t.duration?.nanos ?? 0);
-          const durationMs = durSeconds * 1000 + durNanos / 1e6;
-
-          return {
-            traceId: t.traceId,
-            rootSpanName: t.rootSpanName || "unknown",
-            primaryModel: t.primaryModel || "—",
-            primaryProvider: t.primaryProvider || "—",
-            environment: t.environment || "—",
-            durationMs,
-            totalTokens: Number(t.totalTokens) || 0,
-            totalCostUsd: t.totalCostUsd || 0,
-            status: t.status,
-            spanCount: t.spanCount || 0,
-            llmCallCount: t.llmCallCount || 0,
-            startTime: t.startTime
-              ? new Date(
-                  Number(t.startTime.seconds) * 1000 +
-                    Math.floor(Number(t.startTime.nanos) / 1e6)
-                ).toLocaleString()
-              : "—",
-          };
+        dispatch({
+          type: "success",
+          traces: (res.traces || []).map(mapTrace),
         });
-        setTraces(mapped);
       })
-      .catch((err) => setError(err.message))
-      .finally(() => setLoading(false));
+      .catch((err) => dispatch({ type: "error", message: err.message }));
   }, []);
 
-  /** Update filters with debounced search, immediate for other fields. */
   const updateFilters = useCallback(
     (patch: Partial<TraceFilters>) => {
-      const next = { ...filters, ...patch };
-      setFilters(next);
+      const next = { ...state.filters, ...patch };
+      dispatch({ type: "set_filters", filters: next });
 
       const isSearch = "search" in patch;
       if (debounceRef.current) clearTimeout(debounceRef.current);
@@ -76,33 +119,35 @@ export function useTraces() {
         fetchTraces(next);
       }
     },
-    [filters, fetchTraces]
+    [state.filters, fetchTraces]
   );
 
   const clearFilters = useCallback(() => {
-    setFilters(DEFAULT_FILTERS);
+    dispatch({ type: "clear_filters" });
     fetchTraces(DEFAULT_FILTERS);
   }, [fetchTraces]);
 
   const hasActiveFilters = !!(
-    filters.search ||
-    filters.model ||
-    filters.provider ||
-    filters.status
+    state.filters.search ||
+    state.filters.model ||
+    state.filters.provider ||
+    state.filters.status
   );
 
-  const refresh = useCallback(() => fetchTraces(filters), [filters, fetchTraces]);
+  const refresh = useCallback(
+    () => fetchTraces(state.filters),
+    [state.filters, fetchTraces]
+  );
 
   return {
-    traces,
-    loading,
-    error,
-    filters,
+    traces: state.traces,
+    loading: state.loading,
+    error: state.error,
+    filters: state.filters,
     hasActiveFilters,
     updateFilters,
     clearFilters,
     refresh,
-    /** Call on mount to trigger initial fetch. */
-    fetchInitial: () => fetchTraces(filters),
+    fetchInitial: () => fetchTraces(state.filters),
   };
 }

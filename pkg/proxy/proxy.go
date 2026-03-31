@@ -43,6 +43,7 @@ type Proxy struct {
 	calc      *costcalc.Calculator
 	client    *http.Client
 	projectID string
+	breakers  map[string]*CircuitBreaker
 }
 
 // Config holds proxy configuration.
@@ -66,8 +67,11 @@ func DefaultProviders() []Provider {
 // New creates a new LLM proxy.
 func New(cfg Config, submitter SpanSubmitter, calc *costcalc.Calculator) *Proxy {
 	providers := make(map[string]Provider)
+	breakers := make(map[string]*CircuitBreaker)
+	cbCfg := DefaultCircuitBreakerConfig()
 	for _, p := range cfg.Providers {
 		providers[p.Name] = p
+		breakers[p.Name] = NewCircuitBreaker(cbCfg)
 	}
 
 	return &Proxy{
@@ -75,6 +79,7 @@ func New(cfg Config, submitter SpanSubmitter, calc *costcalc.Calculator) *Proxy 
 		submitter: submitter,
 		calc:      calc,
 		projectID: cfg.ProjectID,
+		breakers:  breakers,
 		client: &http.Client{
 			Timeout: 5 * time.Minute, // LLM calls can be slow
 		},
@@ -93,6 +98,12 @@ func (p *Proxy) RegisterRoutes(mux *http.ServeMux) {
 
 func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 	startTime := time.Now()
+
+	// Generate or accept request ID.
+	requestID := r.Header.Get("X-Request-ID")
+	if requestID == "" {
+		requestID = generateSpanID() + generateSpanID() // 32-char hex
+	}
 
 	// Extract provider from path: /proxy/{provider}/v1/...
 	parts := strings.SplitN(strings.TrimPrefix(r.URL.Path, "/proxy/"), "/", 2)
@@ -135,19 +146,50 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 	// Forward headers (auth, content-type, etc).
 	forwardHeaders(r, upstreamReq, providerName)
 
+	// Propagate request ID to upstream.
+	upstreamReq.Header.Set("X-Request-ID", requestID)
+
 	// Execute the upstream request.
 	resp, err := p.client.Do(upstreamReq)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("upstream error: %v", err), http.StatusBadGateway)
+		p.recordCircuitBreaker(providerName, true)
 		return
 	}
 	ttfb := time.Since(startTime)
 	defer resp.Body.Close()
 
+	// Record circuit breaker state based on upstream response.
+	p.recordCircuitBreaker(providerName, resp.StatusCode >= 500)
+
+	// Return request ID to the client.
+	w.Header().Set("X-Request-ID", requestID)
+
+	// Check circuit breaker — if open, skip observability but still forward.
+	cbAllow := p.breakers[providerName].AllowRequest()
+
 	if isStreaming && resp.StatusCode == http.StatusOK {
-		p.handleStreamingResponse(w, r, resp, provider, reqBody, startTime, ttfb)
+		p.handleStreamingResponse(w, r, resp, provider, reqBody, startTime, ttfb, requestID, cbAllow)
 	} else {
-		p.handleStandardResponse(w, r, resp, provider, reqBody, startTime, ttfb)
+		p.handleStandardResponse(w, r, resp, provider, reqBody, startTime, ttfb, requestID, cbAllow)
+	}
+}
+
+// recordCircuitBreaker records success/failure for the provider's circuit breaker.
+func (p *Proxy) recordCircuitBreaker(providerName string, failed bool) {
+	cb, ok := p.breakers[providerName]
+	if !ok {
+		return
+	}
+	if failed {
+		cb.RecordFailure()
+		if cb.State() == CircuitOpen {
+			slog.Warn("circuit breaker tripped",
+				"provider", providerName,
+				"state", cb.State().String())
+		}
+	} else {
+		cb.RecordSuccess()
 	}
 }
 
@@ -156,6 +198,8 @@ func (p *Proxy) handleStandardResponse(
 	resp *http.Response, provider Provider,
 	reqBody []byte, startTime time.Time,
 	ttfb time.Duration,
+	requestID string,
+	cbAllow bool,
 ) {
 	// Read the full response.
 	respBody, err := io.ReadAll(resp.Body)
@@ -176,7 +220,11 @@ func (p *Proxy) handleStandardResponse(
 	w.Write(respBody)
 
 	// Create observability span (async — don't block the response).
-	go p.createSpan(r.Context(), provider, reqBody, respBody, startTime, endTime, resp.StatusCode, ttfb)
+	if cbAllow {
+		go p.createSpan(r.Context(), provider, reqBody, respBody, startTime, endTime, resp.StatusCode, ttfb, requestID)
+	} else {
+		slog.Debug("skipping span creation (circuit open)", "provider", provider.Name, "request_id", requestID)
+	}
 }
 
 func (p *Proxy) handleStreamingResponse(
@@ -184,6 +232,8 @@ func (p *Proxy) handleStreamingResponse(
 	resp *http.Response, provider Provider,
 	reqBody []byte, startTime time.Time,
 	ttfb time.Duration,
+	requestID string,
+	cbAllow bool,
 ) {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
@@ -216,8 +266,10 @@ func (p *Proxy) handleStreamingResponse(
 			w.Write(buf[:n])
 			flusher.Flush()
 
-			// Buffer for span creation.
-			streamBuffer.Write(buf[:n])
+			// Buffer for span creation (only if circuit allows).
+			if cbAllow {
+				streamBuffer.Write(buf[:n])
+			}
 		}
 		if err != nil {
 			break
@@ -227,7 +279,11 @@ func (p *Proxy) handleStreamingResponse(
 	endTime := time.Now()
 
 	// Parse the accumulated stream to extract usage data.
-	go p.createStreamingSpan(r.Context(), provider, reqBody, streamBuffer.Bytes(), startTime, endTime, ttfb, ttft)
+	if cbAllow {
+		go p.createStreamingSpan(r.Context(), provider, reqBody, streamBuffer.Bytes(), startTime, endTime, ttfb, ttft, requestID)
+	} else {
+		slog.Debug("skipping streaming span (circuit open)", "provider", provider.Name, "request_id", requestID)
+	}
 }
 
 func (p *Proxy) createSpan(
@@ -236,6 +292,7 @@ func (p *Proxy) createSpan(
 	startTime, endTime time.Time,
 	statusCode int,
 	ttfb time.Duration,
+	requestID string,
 ) {
 	model, inputContent := extractRequestInfo(provider.Name, reqBody)
 	outputContent, inputTokens, outputTokens := extractResponseInfo(provider.Name, respBody)
@@ -269,9 +326,10 @@ func (p *Proxy) createSpan(
 			OutputContent: truncate(outputContent, 10000),
 		},
 		Attributes: map[string]string{
-			"proxy.upstream": provider.UpstreamURL,
-			"http.status":    fmt.Sprintf("%d", statusCode),
-			"http.ttfb_ms":   fmt.Sprintf("%d", ttfb.Milliseconds()),
+			"proxy.upstream":   provider.UpstreamURL,
+			"http.status":      fmt.Sprintf("%d", statusCode),
+			"http.ttfb_ms":     fmt.Sprintf("%d", ttfb.Milliseconds()),
+			"http.request_id":  requestID,
 		},
 	}
 
@@ -282,6 +340,7 @@ func (p *Proxy) createSpan(
 		"tokens", totalTokens,
 		"cost_usd", cost,
 		"latency", endTime.Sub(startTime),
+		"request_id", requestID,
 	)
 }
 
@@ -291,6 +350,7 @@ func (p *Proxy) createStreamingSpan(
 	startTime, endTime time.Time,
 	ttfb time.Duration,
 	ttft time.Duration,
+	requestID string,
 ) {
 	model, inputContent := extractRequestInfo(provider.Name, reqBody)
 	outputContent, inputTokens, outputTokens := extractStreamingUsage(provider.Name, streamData)
@@ -319,10 +379,11 @@ func (p *Proxy) createStreamingSpan(
 			OutputContent: truncate(outputContent, 10000),
 		},
 		Attributes: map[string]string{
-			"proxy.upstream":  provider.UpstreamURL,
-			"proxy.streaming": "true",
-			"http.ttfb_ms":    fmt.Sprintf("%d", ttfb.Milliseconds()),
-			"llm.ttft_ms":     fmt.Sprintf("%d", ttft.Milliseconds()),
+			"proxy.upstream":   provider.UpstreamURL,
+			"proxy.streaming":  "true",
+			"http.ttfb_ms":     fmt.Sprintf("%d", ttfb.Milliseconds()),
+			"llm.ttft_ms":      fmt.Sprintf("%d", ttft.Milliseconds()),
+			"http.request_id":  requestID,
 		},
 	}
 
@@ -333,6 +394,7 @@ func (p *Proxy) createStreamingSpan(
 		"tokens", totalTokens,
 		"cost_usd", cost,
 		"latency", endTime.Sub(startTime),
+		"request_id", requestID,
 	)
 }
 

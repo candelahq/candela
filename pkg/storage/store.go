@@ -5,8 +5,19 @@ package storage
 
 import (
 	"context"
+	"strings"
 	"time"
 )
+
+// EscapeLike escapes SQL LIKE wildcard characters (% and _) in user input.
+// Without this, a search for "100%" would match "100", "1000", etc.
+// Both DuckDB and SQLite use backslash as the ESCAPE character.
+func EscapeLike(s string) string {
+	s = strings.ReplaceAll(s, `\`, `\\`)
+	s = strings.ReplaceAll(s, `%`, `\%`)
+	s = strings.ReplaceAll(s, `_`, `\_`)
+	return s
+}
 
 // SpanKind mirrors the proto SpanKind enum for Go-native use.
 type SpanKind int

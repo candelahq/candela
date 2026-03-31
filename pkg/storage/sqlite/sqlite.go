@@ -253,14 +253,14 @@ func (s *Store) SearchSpans(ctx context.Context, q storage.SpanQuery) (*storage.
 		WHERE project_id = ? AND start_time >= ? AND start_time <= ?
 			AND (? = 0 OR kind = ?)
 			AND (? = '' OR gen_ai_model = ?)
-			AND (? = '' OR name LIKE '%' || ? || '%')
+			AND (? = '' OR name LIKE '%' || ? || '%' ESCAPE '\')
 		ORDER BY start_time DESC
 		LIMIT ?
 	`, q.ProjectID,
 		q.StartTime.Format(time.RFC3339Nano), q.EndTime.Format(time.RFC3339Nano),
 		int(q.Kind), int(q.Kind),
 		q.Model, q.Model,
-		q.NameContains, q.NameContains,
+		q.NameContains, storage.EscapeLike(q.NameContains),
 		q.PageSize,
 	)
 	if err != nil {

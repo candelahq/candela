@@ -74,9 +74,11 @@ func (s *Store) migrate() error {
 			gen_ai_input_content  VARCHAR DEFAULT '',
 			gen_ai_output_content VARCHAR DEFAULT '',
 
-			attributes STRUCT(key VARCHAR, value VARCHAR)[],
+			attributes STRUCT(key VARCHAR, value VARCHAR)[]
 
-			PRIMARY KEY (trace_id, span_id)
+			-- No PRIMARY KEY: OLAP convention. Duplicates are rare and handled
+			-- at query time (or via periodic compaction). This keeps the Appender
+			-- API path fast and matches BigQuery behavior in production.
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_spans_project_time ON spans(project_id, start_time)`,
 		`CREATE INDEX IF NOT EXISTS idx_spans_trace ON spans(trace_id)`,
@@ -242,13 +244,13 @@ func (s *Store) SearchSpans(ctx context.Context, q storage.SpanQuery) (*storage.
 		WHERE project_id = ? AND start_time >= ? AND start_time <= ?
 			AND (? = 0 OR kind = ?)
 			AND (? = '' OR gen_ai_model = ?)
-			AND (? = '' OR name LIKE '%' || ? || '%')
+			AND (? = '' OR name LIKE '%' || ? || '%' ESCAPE '\')
 		ORDER BY start_time DESC
 		LIMIT ?
 	`, q.ProjectID, q.StartTime, q.EndTime,
 		int(q.Kind), int(q.Kind),
 		q.Model, q.Model,
-		q.NameContains, q.NameContains,
+		q.NameContains, storage.EscapeLike(q.NameContains),
 		q.PageSize,
 	)
 	if err != nil {

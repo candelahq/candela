@@ -226,6 +226,9 @@ func (s *Store) QueryTraces(ctx context.Context, q storage.TraceQuery) (*storage
 		t.ProjectID = q.ProjectID
 		traces = append(traces, t)
 	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterating traces: %w", err)
+	}
 
 	return &storage.TraceResult{Traces: traces, TotalCount: len(traces)}, nil
 }
@@ -321,6 +324,9 @@ func (s *Store) GetModelBreakdown(ctx context.Context, q storage.UsageQuery) ([]
 		}
 		models = append(models, m)
 	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterating models: %w", err)
+	}
 	return models, nil
 }
 
@@ -375,6 +381,9 @@ func scanSpans(rows *sql.Rows) ([]storage.Span, error) {
 		}
 
 		spans = append(spans, span)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterating spans: %w", err)
 	}
 	return spans, nil
 }

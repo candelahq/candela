@@ -2,10 +2,10 @@ syntax = "proto3";
 
 package candela.v1;
 
-option go_package = "github.com/candelahq/candela/gen/go/candela/v1";
-
-import "candela/types/project.proto";
 import "candela/types/common.proto";
+import "candela/types/project.proto";
+
+option go_package = "github.com/candelahq/candela/gen/go/candela/v1";
 
 // ProjectService manages projects and API keys.
 // Exposed via ConnectRPC for the web UI.

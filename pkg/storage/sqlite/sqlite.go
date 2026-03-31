@@ -403,13 +403,13 @@ func scanSpans(rows *sql.Rows) ([]storage.Span, error) {
 
 func buildTrace(traceID string, spans []storage.Span) *storage.Trace {
 	trace := &storage.Trace{
-		TraceID:   traceID,
-		StartTime: spans[0].StartTime,
-		EndTime:   spans[0].EndTime,
-		ProjectID: spans[0].ProjectID,
+		TraceID:     traceID,
+		StartTime:   spans[0].StartTime,
+		EndTime:     spans[0].EndTime,
+		ProjectID:   spans[0].ProjectID,
 		Environment: spans[0].Environment,
-		SpanCount: len(spans),
-		Spans:     spans,
+		SpanCount:   len(spans),
+		Spans:       spans,
 	}
 
 	for _, sp := range spans {

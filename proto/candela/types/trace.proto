@@ -2,22 +2,22 @@ syntax = "proto3";
 
 package candela.types;
 
-option go_package = "github.com/candelahq/candela/gen/go/candela/types";
-
-import "google/protobuf/timestamp.proto";
-import "google/protobuf/duration.proto";
 import "candela/types/common.proto";
+import "google/protobuf/duration.proto";
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/candelahq/candela/gen/go/candela/types";
 
 // SpanKind categorizes the type of operation a span represents.
 enum SpanKind {
   SPAN_KIND_UNSPECIFIED = 0;
-  SPAN_KIND_LLM = 1;         // LLM completion/chat call
-  SPAN_KIND_AGENT = 2;       // Agent lifecycle (ADK, CrewAI, etc.)
-  SPAN_KIND_TOOL = 3;        // Tool/function invocation
-  SPAN_KIND_RETRIEVAL = 4;   // Vector DB / RAG retrieval
-  SPAN_KIND_EMBEDDING = 5;   // Embedding generation
-  SPAN_KIND_CHAIN = 6;       // LangChain chain execution
-  SPAN_KIND_GENERAL = 7;     // Traditional span (HTTP, DB, gRPC)
+  SPAN_KIND_LLM = 1; // LLM completion/chat call
+  SPAN_KIND_AGENT = 2; // Agent lifecycle (ADK, CrewAI, etc.)
+  SPAN_KIND_TOOL = 3; // Tool/function invocation
+  SPAN_KIND_RETRIEVAL = 4; // Vector DB / RAG retrieval
+  SPAN_KIND_EMBEDDING = 5; // Embedding generation
+  SPAN_KIND_CHAIN = 6; // LangChain chain execution
+  SPAN_KIND_GENERAL = 7; // Traditional span (HTTP, DB, gRPC)
 }
 
 // SpanStatus represents the outcome of a span.
@@ -30,34 +30,34 @@ enum SpanStatus {
 // GenAI-specific attributes extracted from OTel semantic conventions.
 message GenAIAttributes {
   // Model information
-  string model = 1;                 // gen_ai.request.model
-  string provider = 2;              // gen_ai.system (openai, google_ai, anthropic, etc.)
+  string model = 1; // gen_ai.request.model
+  string provider = 2; // gen_ai.system (openai, google_ai, anthropic, etc.)
 
   // Token usage
-  int64 input_tokens = 10;          // gen_ai.usage.input_tokens
-  int64 output_tokens = 11;         // gen_ai.usage.output_tokens
-  int64 total_tokens = 12;          // computed
+  int64 input_tokens = 10; // gen_ai.usage.input_tokens
+  int64 output_tokens = 11; // gen_ai.usage.output_tokens
+  int64 total_tokens = 12; // computed
 
   // Cost (calculated by Candela)
   double cost_usd = 20;
 
   // Request parameters
-  double temperature = 30;          // gen_ai.request.temperature
-  int64 max_tokens = 31;            // gen_ai.request.max_tokens
-  double top_p = 32;                // gen_ai.request.top_p
+  double temperature = 30; // gen_ai.request.temperature
+  int64 max_tokens = 31; // gen_ai.request.max_tokens
+  double top_p = 32; // gen_ai.request.top_p
 
   // Content (optional, can be large — may be stored in blob store)
-  string input_content = 40;        // Prompt / input messages
-  string output_content = 41;       // Completion / output messages
-  string input_content_ref = 42;    // Reference to blob store if content is large
-  string output_content_ref = 43;   // Reference to blob store if content is large
+  string input_content = 40; // Prompt / input messages
+  string output_content = 41; // Completion / output messages
+  string input_content_ref = 42; // Reference to blob store if content is large
+  string output_content_ref = 43; // Reference to blob store if content is large
 }
 
 // Tool call information for agent/tool spans.
 message ToolAttributes {
   string tool_name = 1;
-  string tool_input = 2;    // JSON-encoded input
-  string tool_output = 3;   // JSON-encoded output
+  string tool_input = 2; // JSON-encoded input
+  string tool_output = 3; // JSON-encoded output
 }
 
 // A single span within a trace.
@@ -135,6 +135,6 @@ message TraceSummary {
   double total_cost_usd = 13;
 
   SpanStatus status = 14;
-  string primary_model = 15;   // Most-used model in the trace
+  string primary_model = 15; // Most-used model in the trace
   string primary_provider = 16;
 }

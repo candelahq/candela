@@ -12,10 +12,10 @@ import (
 	"syscall"
 	"time"
 
-	"log/slog"
 	"golang.org/x/net/http2"
 	"golang.org/x/net/http2/h2c"
 	"gopkg.in/yaml.v3"
+	"log/slog"
 
 	"github.com/candelahq/candela/gen/go/candela/v1/candelav1connect"
 	"github.com/candelahq/candela/pkg/connecthandlers"
@@ -39,7 +39,7 @@ type Config struct {
 		DuckDB  struct {
 			Path string `yaml:"path"` // e.g. "candela.duckdb"
 		} `yaml:"duckdb"`
-		SQLite  struct {
+		SQLite struct {
 			Path string `yaml:"path"` // e.g. "candela.db" or ":memory:"
 		} `yaml:"sqlite"`
 		BigQuery struct {
@@ -58,7 +58,7 @@ type Config struct {
 		AllowedOrigins []string `yaml:"allowed_origins"` // e.g. ["http://localhost:3000"]
 	} `yaml:"cors"`
 	Worker struct {
-		BatchSize    int    `yaml:"batch_size"`
+		BatchSize     int    `yaml:"batch_size"`
 		FlushInterval string `yaml:"flush_interval"`
 	} `yaml:"worker"`
 }

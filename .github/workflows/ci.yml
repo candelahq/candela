@@ -1,0 +1,78 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Build
+        run: go build ./...
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Test
+        run: go test ./... -v -race -count=1 -coverprofile=coverage.out -timeout 60s
+
+      - name: Coverage summary
+        run: go tool cover -func=coverage.out | tail -1
+
+      - name: govulncheck
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          govulncheck ./...
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v6
+        with:
+          version: latest
+
+      - name: gofmt check
+        run: |
+          if [ -n "$(gofmt -l .)" ]; then
+            echo "Files not formatted:"
+            gofmt -l .
+            exit 1
+          fi
+
+  proto:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: bufbuild/buf-setup-action@v1
+        with:
+          github_token: ${{ github.token }}
+
+      - name: buf lint
+        run: buf lint proto/
+
+      - name: buf format check
+        run: buf format --diff --exit-code proto/
+
+      - name: buf breaking (PR only)
+        if: github.event_name == 'pull_request'
+        run: buf breaking proto/ --against '.git#branch=main,subdir=proto'

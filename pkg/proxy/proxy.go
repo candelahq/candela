@@ -426,165 +426,22 @@ func forwardHeaders(src *http.Request, dst *http.Request, provider string) {
 	}
 }
 
-// --- Request parsing ---
+// --- Request parsing (delegated to per-provider parsers) ---
 
 func isStreamingRequest(provider string, body []byte) bool {
-	var req map[string]interface{}
-	if err := json.Unmarshal(body, &req); err != nil {
-		return false
-	}
-
-	switch provider {
-	case "openai":
-		if v, ok := req["stream"].(bool); ok {
-			return v
-		}
-	case "anthropic":
-		if v, ok := req["stream"].(bool); ok {
-			return v
-		}
-	case "google":
-		// Google uses a different endpoint for streaming, not a body param.
-		return false
-	}
-	return false
+	return getParser(provider).IsStreaming(body)
 }
 
 func extractRequestInfo(provider string, body []byte) (model, content string) {
-	var req map[string]interface{}
-	if err := json.Unmarshal(body, &req); err != nil {
-		return "", ""
-	}
-
-	switch provider {
-	case "openai":
-		model, _ = req["model"].(string)
-		if messages, ok := req["messages"].([]interface{}); ok {
-			b, _ := json.Marshal(messages)
-			content = string(b)
-		}
-	case "anthropic":
-		model, _ = req["model"].(string)
-		if messages, ok := req["messages"].([]interface{}); ok {
-			b, _ := json.Marshal(messages)
-			content = string(b)
-		}
-	case "google":
-		// Model is in the URL path for Google.
-		if contents, ok := req["contents"].([]interface{}); ok {
-			b, _ := json.Marshal(contents)
-			content = string(b)
-		}
-	}
-	return
+	return getParser(provider).ParseRequest(body)
 }
 
 func extractResponseInfo(provider string, body []byte) (content string, inputTokens, outputTokens int64) {
-	var resp map[string]interface{}
-	if err := json.Unmarshal(body, &resp); err != nil {
-		return "", 0, 0
-	}
-
-	switch provider {
-	case "openai":
-		if usage, ok := resp["usage"].(map[string]interface{}); ok {
-			inputTokens = toInt64(usage["prompt_tokens"])
-			outputTokens = toInt64(usage["completion_tokens"])
-		}
-		if choices, ok := resp["choices"].([]interface{}); ok && len(choices) > 0 {
-			if choice, ok := choices[0].(map[string]interface{}); ok {
-				if msg, ok := choice["message"].(map[string]interface{}); ok {
-					content, _ = msg["content"].(string)
-				}
-			}
-		}
-	case "anthropic":
-		// Works for both direct Anthropic API and Vertex AI Anthropic.
-		if usage, ok := resp["usage"].(map[string]interface{}); ok {
-			inputTokens = toInt64(usage["input_tokens"])
-			outputTokens = toInt64(usage["output_tokens"])
-		}
-		if contentArr, ok := resp["content"].([]interface{}); ok && len(contentArr) > 0 {
-			if block, ok := contentArr[0].(map[string]interface{}); ok {
-				content, _ = block["text"].(string)
-			}
-		}
-	case "google":
-		if meta, ok := resp["usageMetadata"].(map[string]interface{}); ok {
-			inputTokens = toInt64(meta["promptTokenCount"])
-			outputTokens = toInt64(meta["candidatesTokenCount"])
-		}
-		if candidates, ok := resp["candidates"].([]interface{}); ok && len(candidates) > 0 {
-			if c, ok := candidates[0].(map[string]interface{}); ok {
-				if cont, ok := c["content"].(map[string]interface{}); ok {
-					if parts, ok := cont["parts"].([]interface{}); ok && len(parts) > 0 {
-						if part, ok := parts[0].(map[string]interface{}); ok {
-							content, _ = part["text"].(string)
-						}
-					}
-				}
-			}
-		}
-	}
-	return
+	return getParser(provider).ParseResponse(body)
 }
 
 func extractStreamingUsage(provider string, data []byte) (content string, inputTokens, outputTokens int64) {
-	// Parse SSE data lines to find the final usage chunk.
-	var contentBuilder strings.Builder
-
-	lines := strings.Split(string(data), "\n")
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if !strings.HasPrefix(line, "data: ") {
-			continue
-		}
-		payload := strings.TrimPrefix(line, "data: ")
-		if payload == "[DONE]" {
-			continue
-		}
-
-		var chunk map[string]interface{}
-		if err := json.Unmarshal([]byte(payload), &chunk); err != nil {
-			continue
-		}
-
-		switch provider {
-		case "openai":
-			if choices, ok := chunk["choices"].([]interface{}); ok && len(choices) > 0 {
-				if choice, ok := choices[0].(map[string]interface{}); ok {
-					if delta, ok := choice["delta"].(map[string]interface{}); ok {
-						if c, ok := delta["content"].(string); ok {
-							contentBuilder.WriteString(c)
-						}
-					}
-				}
-			}
-			if usage, ok := chunk["usage"].(map[string]interface{}); ok {
-				inputTokens = toInt64(usage["prompt_tokens"])
-				outputTokens = toInt64(usage["completion_tokens"])
-			}
-		case "anthropic":
-			if delta, ok := chunk["delta"].(map[string]interface{}); ok {
-				if text, ok := delta["text"].(string); ok {
-					contentBuilder.WriteString(text)
-				}
-			}
-			if usage, ok := chunk["usage"].(map[string]interface{}); ok {
-				if v := toInt64(usage["output_tokens"]); v > 0 {
-					outputTokens = v
-				}
-			}
-			if msg, ok := chunk["message"].(map[string]interface{}); ok {
-				if usage, ok := msg["usage"].(map[string]interface{}); ok {
-					inputTokens = toInt64(usage["input_tokens"])
-				}
-			}
-		}
-	}
-
-	content = contentBuilder.String()
-	return
+	return getParser(provider).ParseStreamingResponse(data)
 }
 
 // --- Helpers ---

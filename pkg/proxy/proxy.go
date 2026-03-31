@@ -287,6 +287,74 @@ func (p *Proxy) handleStreamingResponse(
 	}
 }
 
+// spanParams holds the parsed data needed to build an observability span.
+// Both standard and streaming responses produce the same struct; the only
+// difference is how they parse the upstream response.
+type spanParams struct {
+	provider      Provider
+	model         string
+	inputContent  string
+	outputContent string
+	inputTokens   int64
+	outputTokens  int64
+	startTime     time.Time
+	endTime       time.Time
+	status        storage.SpanStatus
+	ttfb          time.Duration
+	requestID     string
+	extraAttrs    map[string]string // streaming-specific, status code, etc.
+	namePrefix    string            // e.g. "openai.chat" or "openai.chat.stream"
+}
+
+// buildSpan constructs a storage.Span from parsed parameters and submits it.
+func (p *Proxy) buildSpan(params spanParams) {
+	totalTokens := params.inputTokens + params.outputTokens
+	cost := p.calc.Calculate(params.provider.Name, params.model, params.inputTokens, params.outputTokens)
+
+	attrs := map[string]string{
+		"proxy.upstream":  params.provider.UpstreamURL,
+		"http.ttfb_ms":    fmt.Sprintf("%d", params.ttfb.Milliseconds()),
+		"http.request_id": params.requestID,
+	}
+	for k, v := range params.extraAttrs {
+		attrs[k] = v
+	}
+
+	span := storage.Span{
+		SpanID:    generateSpanID(),
+		TraceID:   generateTraceID(),
+		Name:      params.namePrefix,
+		Kind:      storage.SpanKindLLM,
+		Status:    params.status,
+		StartTime: params.startTime,
+		EndTime:   params.endTime,
+		Duration:  params.endTime.Sub(params.startTime),
+		ProjectID: p.projectID,
+		GenAI: &storage.GenAIAttributes{
+			Model:         params.model,
+			Provider:      params.provider.Name,
+			InputTokens:   params.inputTokens,
+			OutputTokens:  params.outputTokens,
+			TotalTokens:   totalTokens,
+			CostUSD:       cost,
+			InputContent:  truncate(params.inputContent, 10000),
+			OutputContent: truncate(params.outputContent, 10000),
+		},
+		Attributes: attrs,
+	}
+
+	p.submitter.SubmitBatch([]storage.Span{span})
+	slog.Debug("proxied LLM call",
+		"provider", params.provider.Name,
+		"model", params.model,
+		"tokens", totalTokens,
+		"cost_usd", cost,
+		"latency", params.endTime.Sub(params.startTime),
+		"request_id", params.requestID,
+		"streaming", params.extraAttrs["proxy.streaming"] == "true",
+	)
+}
+
 func (p *Proxy) createSpan(
 	ctx context.Context, provider Provider,
 	reqBody, respBody []byte,
@@ -297,52 +365,29 @@ func (p *Proxy) createSpan(
 ) {
 	model, inputContent := extractRequestInfo(provider.Name, reqBody)
 	outputContent, inputTokens, outputTokens := extractResponseInfo(provider.Name, respBody)
-	totalTokens := inputTokens + outputTokens
-
-	cost := p.calc.Calculate(provider.Name, model, inputTokens, outputTokens)
 
 	status := storage.SpanStatusOK
 	if statusCode >= 400 {
 		status = storage.SpanStatusError
 	}
 
-	span := storage.Span{
-		SpanID:    generateSpanID(),
-		TraceID:   generateTraceID(),
-		Name:      fmt.Sprintf("%s.chat", provider.Name),
-		Kind:      storage.SpanKindLLM,
-		Status:    status,
-		StartTime: startTime,
-		EndTime:   endTime,
-		Duration:  endTime.Sub(startTime),
-		ProjectID: p.projectID,
-		GenAI: &storage.GenAIAttributes{
-			Model:         model,
-			Provider:      provider.Name,
-			InputTokens:   inputTokens,
-			OutputTokens:  outputTokens,
-			TotalTokens:   totalTokens,
-			CostUSD:       cost,
-			InputContent:  truncate(inputContent, 10000),
-			OutputContent: truncate(outputContent, 10000),
+	p.buildSpan(spanParams{
+		provider:      provider,
+		model:         model,
+		inputContent:  inputContent,
+		outputContent: outputContent,
+		inputTokens:   inputTokens,
+		outputTokens:  outputTokens,
+		startTime:     startTime,
+		endTime:       endTime,
+		status:        status,
+		ttfb:          ttfb,
+		requestID:     requestID,
+		namePrefix:    fmt.Sprintf("%s.chat", provider.Name),
+		extraAttrs: map[string]string{
+			"http.status": fmt.Sprintf("%d", statusCode),
 		},
-		Attributes: map[string]string{
-			"proxy.upstream":  provider.UpstreamURL,
-			"http.status":     fmt.Sprintf("%d", statusCode),
-			"http.ttfb_ms":    fmt.Sprintf("%d", ttfb.Milliseconds()),
-			"http.request_id": requestID,
-		},
-	}
-
-	p.submitter.SubmitBatch([]storage.Span{span})
-	slog.Debug("proxied LLM call",
-		"provider", provider.Name,
-		"model", model,
-		"tokens", totalTokens,
-		"cost_usd", cost,
-		"latency", endTime.Sub(startTime),
-		"request_id", requestID,
-	)
+	})
 }
 
 func (p *Proxy) createStreamingSpan(
@@ -355,48 +400,25 @@ func (p *Proxy) createStreamingSpan(
 ) {
 	model, inputContent := extractRequestInfo(provider.Name, reqBody)
 	outputContent, inputTokens, outputTokens := extractStreamingUsage(provider.Name, streamData)
-	totalTokens := inputTokens + outputTokens
 
-	cost := p.calc.Calculate(provider.Name, model, inputTokens, outputTokens)
-
-	span := storage.Span{
-		SpanID:    generateSpanID(),
-		TraceID:   generateTraceID(),
-		Name:      fmt.Sprintf("%s.chat.stream", provider.Name),
-		Kind:      storage.SpanKindLLM,
-		Status:    storage.SpanStatusOK,
-		StartTime: startTime,
-		EndTime:   endTime,
-		Duration:  endTime.Sub(startTime),
-		ProjectID: p.projectID,
-		GenAI: &storage.GenAIAttributes{
-			Model:         model,
-			Provider:      provider.Name,
-			InputTokens:   inputTokens,
-			OutputTokens:  outputTokens,
-			TotalTokens:   totalTokens,
-			CostUSD:       cost,
-			InputContent:  truncate(inputContent, 10000),
-			OutputContent: truncate(outputContent, 10000),
-		},
-		Attributes: map[string]string{
-			"proxy.upstream":  provider.UpstreamURL,
+	p.buildSpan(spanParams{
+		provider:      provider,
+		model:         model,
+		inputContent:  inputContent,
+		outputContent: outputContent,
+		inputTokens:   inputTokens,
+		outputTokens:  outputTokens,
+		startTime:     startTime,
+		endTime:       endTime,
+		status:        storage.SpanStatusOK,
+		ttfb:          ttfb,
+		requestID:     requestID,
+		namePrefix:    fmt.Sprintf("%s.chat.stream", provider.Name),
+		extraAttrs: map[string]string{
 			"proxy.streaming": "true",
-			"http.ttfb_ms":    fmt.Sprintf("%d", ttfb.Milliseconds()),
 			"llm.ttft_ms":     fmt.Sprintf("%d", ttft.Milliseconds()),
-			"http.request_id": requestID,
 		},
-	}
-
-	p.submitter.SubmitBatch([]storage.Span{span})
-	slog.Debug("proxied streaming LLM call",
-		"provider", provider.Name,
-		"model", model,
-		"tokens", totalTokens,
-		"cost_usd", cost,
-		"latency", endTime.Sub(startTime),
-		"request_id", requestID,
-	)
+	})
 }
 
 // --- Header forwarding ---

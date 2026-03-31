@@ -6,6 +6,7 @@
 
 Candela is a production-grade observatory for your LLM applications. It captures every trace, calculates every cent, and evaluates every output with deep integration into **OpenTelemetry**, **Google Cloud (Vertex AI)**, and the wider GenAI ecosystem.
 
+[![CI](https://github.com/candelahq/candela/actions/workflows/ci.yml/badge.svg)](https://github.com/candelahq/candela/actions/workflows/ci.yml)
 [![Go Reference](https://pkg.go.dev/badge/github.com/candelahq/candela.svg)](https://pkg.go.dev/github.com/candelahq/candela)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 
@@ -51,6 +52,9 @@ nix develop
 
 # Start the Candela server (defaults to DuckDB + Port 8080)
 go run ./cmd/candela-server
+
+# Start the UI (separate terminal)
+cd ui && npm install && npm run dev
 ```
 
 ### Option B: Docker Compose (Full Stack)
@@ -192,11 +196,28 @@ worker:
 
 ---
 
+## 🖥️ UI Development
+
+The web interface is a Next.js 16 app in `ui/` with a dark-themed dashboard.
+
+```bash
+cd ui
+npm install           # install deps
+npm run dev            # start dev server → http://localhost:3000
+npm run build          # production build (includes TypeScript type-check)
+npm run test:e2e       # run Playwright E2E tests (12 tests)
+npm run test:e2e:ui    # Playwright interactive UI mode
+```
+
+The UI communicates with the backend via **ConnectRPC v2** on `localhost:8080`. Pages gracefully handle offline backend state.
+
+---
+
 ## 🗺️ Roadmap
 
 - **Phase 1: Foundation** ✅ (Ingestion, Proxy, Cost Calc, Docs)
 - **Phase 2: Storage & Architecture** ✅ (DuckDB, CQRS, BigQuery, Pub/Sub, CORS)
-- **Phase 3: Visual Explorer** 🔜 (Next.js UI, Waterfall Traces, Cost Dashboards)
+- **Phase 3: Visual Explorer** 🟡 (Next.js UI, Dashboard, Traces, Projects — Waterfall & Cost Charts next)
 - **Phase 4: Platform & Evaluation** 📋 (Admin Panel, Token Metering, LLM-as-Judge)
 - **Phase 5: Ecosystem & Polish** 📋 (Agent DAGs, Multi-tenant, Alerting)
 
@@ -221,7 +242,13 @@ candela/
 │   └── ingestion/               # OTel span ingestion
 ├── collector/                   # Custom OTel Collector distro
 ├── docs/                        # Deep-dive documentation
-├── ui/                          # Next.js web interface (Phase 3)
+├── ui/                          # Next.js 16 web interface
+│   ├── src/app/                 # App Router pages (dashboard, traces, etc.)
+│   ├── src/gen/                 # Generated TS proto stubs
+│   ├── src/lib/                 # ConnectRPC transport config
+│   ├── e2e/                     # Playwright E2E tests
+│   └── playwright.config.ts     # Playwright config
+├── .github/workflows/ci.yml    # CI pipeline (Go + UI + Playwright)
 └── config.yaml                  # Server configuration
 ```
 ---

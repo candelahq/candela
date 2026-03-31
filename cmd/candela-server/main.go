@@ -46,6 +46,9 @@ type Config struct {
 		ProjectID string   `yaml:"project_id"`
 		Providers []string `yaml:"providers"` // e.g. ["openai", "google", "anthropic"]
 	} `yaml:"proxy"`
+	CORS struct {
+		AllowedOrigins []string `yaml:"allowed_origins"` // e.g. ["http://localhost:3000"]
+	} `yaml:"cors"`
 	Worker struct {
 		BatchSize    int    `yaml:"batch_size"`
 		FlushInterval string `yaml:"flush_interval"`
@@ -155,7 +158,7 @@ func main() {
 	addr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)
 	srv := &http.Server{
 		Addr:    addr,
-		Handler: h2c.NewHandler(corsMiddleware(mux), &http2.Server{}),
+		Handler: h2c.NewHandler(corsMiddleware(mux, cfg.CORS.AllowedOrigins), &http2.Server{}),
 	}
 
 	// Graceful shutdown.
@@ -241,18 +244,27 @@ func loadConfig() (*Config, error) {
 }
 
 // corsMiddleware wraps an http.Handler with CORS headers.
-// Allows the Next.js dev server (localhost:3000) and any configured origins.
-func corsMiddleware(next http.Handler) http.Handler {
+// Origins are configurable; defaults to localhost dev servers if none specified.
+func corsMiddleware(next http.Handler, origins []string) http.Handler {
+	// Build allowed set. Default to localhost dev servers.
+	if len(origins) == 0 {
+		origins = []string{"http://localhost:3000", "http://localhost:8080"}
+	}
+	allowed := make(map[string]bool, len(origins))
+	allowAll := false
+	for _, o := range origins {
+		if o == "*" {
+			allowAll = true
+		}
+		allowed[o] = true
+	}
+
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		origin := r.Header.Get("Origin")
 
-		// Allow localhost dev servers and same-origin.
-		allowedOrigins := map[string]bool{
-			"http://localhost:3000": true,
-			"http://localhost:8080": true,
-		}
-
-		if allowedOrigins[origin] {
+		if allowAll {
+			w.Header().Set("Access-Control-Allow-Origin", "*")
+		} else if allowed[origin] {
 			w.Header().Set("Access-Control-Allow-Origin", origin)
 		}
 

@@ -33,10 +33,10 @@ Candela uses a pluggable `TraceStore` interface:
 
 | Backend | Best For | Status |
 |---------|----------|--------|
-| **SQLite** | Local dev, small teams, easy setup | ✅ Implemented |
-| **ClickHouse** | High-volume production, deep analytics | ✅ Implemented |
-| **BigQuery** | Managed cloud infrastructure, GCP teams | 📋 Phase 4 |
-| **PostgreSQL** | General purpose, medium scale | 📋 Phase 4 |
+| **SQLite** | Local dev, small teams, easy setup | ✅ Default |
+| **BigQuery** | Production — serverless, GCP-native, scalable | 📋 Phase 2 |
+| **ClickHouse** | Self-hosted high-volume analytics | ✅ Community |
+| **PostgreSQL** | General purpose, medium scale | 📋 Future |
 
 ### SQLite Schema
 For local dev, SQLite is used with a JSONB-like approach to store span attributes, making it extremely flexible for evolving OTel standards.

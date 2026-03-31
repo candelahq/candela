@@ -31,7 +31,7 @@ For deep observability into agent frameworks (**ADK**, **LangChain**, **CrewAI**
 - **🕯️ OTel-Native**: OTLP is our native language. No proprietary SDKs.
 - **💰 Real-time Cost Tracking**: Automatic token extraction and USD calculation for OpenAI, Google, and Anthropic.
 - **🧪 LLM-as-Judge (Phase 3)**: Automated quality scoring and evaluation rubrics.
-- **🗄️ Pluggable Storage**: **SQLite** for instant local dev; **ClickHouse** or **BigQuery** for the firehose.
+- **🗄️ Pluggable Storage**: **SQLite** for instant local dev; **BigQuery** for serverless production scale.
 - **📡 SSE Streaming Support**: Captures full streaming responses without interfering with user latency.
 - **📦 Single-Binary Edge-Ready**: In-process queuing and processing for low-overhead deployments.
 

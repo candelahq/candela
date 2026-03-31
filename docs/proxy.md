@@ -31,11 +31,22 @@ Configuration is done via `config.yaml`:
 ```yaml
 proxy:
   enabled: true
-  project_id: "my-gcp-project" # Required for Anthropic (Vertex AI)
-  # Override default providers if needed
+  project_id: "my-gcp-project"
+
+  # Selective provider activation — only listed providers are registered.
+  # If omitted or empty, all providers are enabled.
+  # Valid values: openai, google, anthropic
   providers:
-    - name: "anthropic"
-      upstream: "https://europe-west1-aiplatform.googleapis.com"
+    - openai
+    - google
+```
+
+To enable all providers, either list them all or omit the `providers` key entirely:
+
+```yaml
+proxy:
+  enabled: true
+  # providers key omitted → all providers enabled
 ```
 
 ---

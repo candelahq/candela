@@ -46,8 +46,9 @@ type Config struct {
 		} `yaml:"clickhouse"`
 	} `yaml:"storage"`
 	Proxy struct {
-		Enabled   bool   `yaml:"enabled"`
-		ProjectID string `yaml:"project_id"`
+		Enabled   bool     `yaml:"enabled"`
+		ProjectID string   `yaml:"project_id"`
+		Providers []string `yaml:"providers"` // e.g. ["openai", "google", "anthropic"]
 	} `yaml:"proxy"`
 	Worker struct {
 		BatchSize    int `yaml:"batch_size"`
@@ -113,20 +114,48 @@ func main() {
 		Str("dashboard", dashboardPath).
 		Msg("ConnectRPC services registered")
 
-	// Register LLM proxy routes.
+	// Register LLM proxy routes (selective activation).
 	if cfg.Proxy.Enabled {
-		llmProxy := proxy.New(proxy.Config{
-			Providers: proxy.DefaultProviders(),
-			ProjectID: cfg.Proxy.ProjectID,
-		}, processor, calc)
-		llmProxy.RegisterRoutes(mux)
-		log.Info().Msg("🔀 LLM proxy enabled (/proxy/openai/, /proxy/google/, /proxy/anthropic/)")
+		allProviders := proxy.DefaultProviders()
+		var activeProviders []proxy.Provider
+
+		if len(cfg.Proxy.Providers) > 0 {
+			// Filter to only the configured providers.
+			enabled := make(map[string]bool)
+			for _, name := range cfg.Proxy.Providers {
+				enabled[name] = true
+			}
+			for _, p := range allProviders {
+				if enabled[p.Name] {
+					activeProviders = append(activeProviders, p)
+				}
+			}
+		} else {
+			// No filter — enable all providers.
+			activeProviders = allProviders
+		}
+
+		if len(activeProviders) > 0 {
+			llmProxy := proxy.New(proxy.Config{
+				Providers: activeProviders,
+				ProjectID: cfg.Proxy.ProjectID,
+			}, processor, calc)
+			llmProxy.RegisterRoutes(mux)
+
+			var names []string
+			for _, p := range activeProviders {
+				names = append(names, "/proxy/"+p.Name+"/")
+			}
+			log.Info().Strs("routes", names).Msg("🔀 LLM proxy enabled")
+		} else {
+			log.Warn().Msg("proxy enabled but no valid providers configured")
+		}
 	}
 
 	addr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)
 	srv := &http.Server{
 		Addr:    addr,
-		Handler: h2c.NewHandler(mux, &http2.Server{}),
+		Handler: h2c.NewHandler(corsMiddleware(mux), &http2.Server{}),
 	}
 
 	// Graceful shutdown.
@@ -204,4 +233,35 @@ func loadConfig() (*Config, error) {
 	}
 
 	return &cfg, nil
+}
+
+// corsMiddleware wraps an http.Handler with CORS headers.
+// Allows the Next.js dev server (localhost:3000) and any configured origins.
+func corsMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		origin := r.Header.Get("Origin")
+
+		// Allow localhost dev servers and same-origin.
+		allowedOrigins := map[string]bool{
+			"http://localhost:3000": true,
+			"http://localhost:8080": true,
+		}
+
+		if allowedOrigins[origin] {
+			w.Header().Set("Access-Control-Allow-Origin", origin)
+		}
+
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Accept, Authorization, Content-Type, Connect-Protocol-Version, Connect-Timeout-Ms")
+		w.Header().Set("Access-Control-Expose-Headers", "Connect-Content-Encoding")
+		w.Header().Set("Access-Control-Max-Age", "86400")
+
+		// Handle preflight.
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+
+		next.ServeHTTP(w, r)
+	})
 }

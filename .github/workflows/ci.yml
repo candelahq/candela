@@ -91,4 +91,6 @@ jobs:
 
       - name: buf breaking (PR only)
         if: github.event_name == 'pull_request'
-        run: buf breaking proto/ --against '.git#branch=main,subdir=proto'
+        run: |
+          git fetch origin main
+          buf breaking proto/ --against '.git#branch=origin/main,subdir=proto'

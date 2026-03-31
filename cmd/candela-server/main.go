@@ -23,6 +23,7 @@ import (
 	"github.com/candelahq/candela/pkg/proxy"
 	"github.com/candelahq/candela/pkg/storage"
 	duckdbstore "github.com/candelahq/candela/pkg/storage/duckdb"
+	pubsubsink "github.com/candelahq/candela/pkg/storage/pubsub"
 	sqlitestore "github.com/candelahq/candela/pkg/storage/sqlite"
 )
 
@@ -46,6 +47,13 @@ type Config struct {
 		ProjectID string   `yaml:"project_id"`
 		Providers []string `yaml:"providers"` // e.g. ["openai", "google", "anthropic"]
 	} `yaml:"proxy"`
+	Sinks struct {
+		PubSub struct {
+			Enabled   bool   `yaml:"enabled"`
+			ProjectID string `yaml:"project_id"`
+			Topic     string `yaml:"topic"`
+		} `yaml:"pubsub"`
+	} `yaml:"sinks"`
 	Worker struct {
 		BatchSize    int    `yaml:"batch_size"`
 		FlushInterval string `yaml:"flush_interval"`
@@ -72,6 +80,23 @@ func main() {
 		os.Exit(1)
 	}
 	defer closeFn()
+
+	// Add optional Pub/Sub sink to writers.
+	if cfg.Sinks.PubSub.Enabled {
+		ps, err := pubsubsink.New(context.Background(), pubsubsink.Config{
+			ProjectID: cfg.Sinks.PubSub.ProjectID,
+			TopicID:   cfg.Sinks.PubSub.Topic,
+		})
+		if err != nil {
+			slog.Error("failed to initialize pubsub sink", "error", err)
+			os.Exit(1)
+		}
+		writers = append(writers, ps)
+		origClose := closeFn
+		closeFn = func() { ps.Close(); origClose() }
+		slog.Info("pubsub sink added", "topic", cfg.Sinks.PubSub.Topic)
+	}
+
 	slog.Info("storage initialized", "backend", cfg.Storage.Backend, "sinks", len(writers))
 
 	// Initialize cost calculator.

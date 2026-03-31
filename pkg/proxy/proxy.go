@@ -19,7 +19,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/rs/zerolog/log"
+	"log/slog"
 
 	"github.com/candelahq/candela/pkg/costcalc"
 	"github.com/candelahq/candela/pkg/storage"
@@ -87,7 +87,7 @@ func (p *Proxy) RegisterRoutes(mux *http.ServeMux) {
 	for name := range p.providers {
 		prefix := "/proxy/" + name + "/"
 		mux.HandleFunc(prefix, p.handleProxy)
-		log.Info().Str("path", prefix).Msg("registered proxy route")
+		slog.Info("registered proxy route", "path", prefix)
 	}
 }
 
@@ -276,13 +276,13 @@ func (p *Proxy) createSpan(
 	}
 
 	p.submitter.SubmitBatch([]storage.Span{span})
-	log.Debug().
-		Str("provider", provider.Name).
-		Str("model", model).
-		Int64("tokens", totalTokens).
-		Float64("cost_usd", cost).
-		Dur("latency", endTime.Sub(startTime)).
-		Msg("proxied LLM call")
+	slog.Debug("proxied LLM call",
+		"provider", provider.Name,
+		"model", model,
+		"tokens", totalTokens,
+		"cost_usd", cost,
+		"latency", endTime.Sub(startTime),
+	)
 }
 
 func (p *Proxy) createStreamingSpan(
@@ -327,13 +327,13 @@ func (p *Proxy) createStreamingSpan(
 	}
 
 	p.submitter.SubmitBatch([]storage.Span{span})
-	log.Debug().
-		Str("provider", provider.Name).
-		Str("model", model).
-		Int64("tokens", totalTokens).
-		Float64("cost_usd", cost).
-		Dur("latency", endTime.Sub(startTime)).
-		Msg("proxied streaming LLM call")
+	slog.Debug("proxied streaming LLM call",
+		"provider", provider.Name,
+		"model", model,
+		"tokens", totalTokens,
+		"cost_usd", cost,
+		"latency", endTime.Sub(startTime),
+	)
 }
 
 // --- Header forwarding ---

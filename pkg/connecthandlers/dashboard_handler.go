@@ -11,11 +11,11 @@ import (
 
 // DashboardHandler implements the DashboardService ConnectRPC handler.
 type DashboardHandler struct {
-	store storage.TraceStore
+	store storage.SpanReader
 }
 
 // NewDashboardHandler creates a new DashboardHandler.
-func NewDashboardHandler(store storage.TraceStore) *DashboardHandler {
+func NewDashboardHandler(store storage.SpanReader) *DashboardHandler {
 	return &DashboardHandler{store: store}
 }
 

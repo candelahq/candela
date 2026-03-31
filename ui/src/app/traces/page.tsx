@@ -1,153 +1,47 @@
 "use client";
 
-import { useEffect, useState, useCallback, useRef } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { createClient } from "@connectrpc/connect";
-import { transport } from "@/lib/connect";
-import { TraceService } from "@/gen/v1/trace_service_pb";
+import { useTraces } from "@/hooks/useTraces";
+import type { TraceFilters } from "@/types/traces";
 
-interface TraceSummaryRow {
-  traceId: string;
-  rootSpanName: string;
-  primaryModel: string;
-  primaryProvider: string;
-  environment: string;
-  durationMs: number;
-  totalTokens: number;
-  totalCostUsd: number;
-  status: number;
-  startTime: string;
-  spanCount: number;
-  llmCallCount: number;
-}
+const sortOptions = [
+  { value: "start_time", label: "Time" },
+  { value: "duration", label: "Latency" },
+  { value: "total_cost", label: "Cost" },
+  { value: "total_tokens", label: "Tokens" },
+];
 
-interface Filters {
-  search: string;
-  model: string;
-  provider: string;
-  status: "" | "ok" | "error";
-  orderBy: string;
-  descending: boolean;
-}
-
-const DEFAULT_FILTERS: Filters = {
-  search: "",
-  model: "",
-  provider: "",
-  status: "",
-  orderBy: "start_time",
-  descending: true,
+const statusLabel = (s: number) => {
+  if (s === 2) return { text: "error", cls: "badge-error" };
+  return { text: "ok", cls: "badge-success" };
 };
 
 export default function TracesPage() {
-  const [traces, setTraces] = useState<TraceSummaryRow[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [filters, setFilters] = useState<Filters>(DEFAULT_FILTERS);
-  const [filtersOpen, setFiltersOpen] = useState(false);
   const router = useRouter();
-  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const {
+    traces,
+    loading,
+    error,
+    filters,
+    hasActiveFilters,
+    updateFilters,
+    clearFilters,
+    refresh,
+    fetchInitial,
+  } = useTraces();
 
-  const fetchTraces = useCallback(
-    (f: Filters) => {
-      setLoading(true);
-      setError(null);
-      const client = createClient(TraceService, transport);
-      client
-        .listTraces({
-          pagination: { pageSize: 100 },
-          search: f.search,
-          model: f.model,
-          provider: f.provider,
-          status: f.status === "ok" ? 1 : f.status === "error" ? 2 : 0,
-          orderBy: f.orderBy,
-          descending: f.descending,
-        })
-        .then((res) => {
-          const mapped = (res.traces || []).map((t) => {
-            const durSeconds = Number(t.duration?.seconds ?? 0);
-            const durNanos = Number(t.duration?.nanos ?? 0);
-            const durationMs = durSeconds * 1000 + durNanos / 1e6;
+  const [filtersOpen, setFiltersOpen] = useState(false);
 
-            return {
-              traceId: t.traceId,
-              rootSpanName: t.rootSpanName || "unknown",
-              primaryModel: t.primaryModel || "—",
-              primaryProvider: t.primaryProvider || "—",
-              environment: t.environment || "—",
-              durationMs,
-              totalTokens: Number(t.totalTokens) || 0,
-              totalCostUsd: t.totalCostUsd || 0,
-              status: t.status,
-              spanCount: t.spanCount || 0,
-              llmCallCount: t.llmCallCount || 0,
-              startTime: t.startTime
-                ? new Date(
-                    Number(t.startTime.seconds) * 1000 +
-                      Math.floor(Number(t.startTime.nanos) / 1e6)
-                  ).toLocaleString()
-                : "—",
-            };
-          });
-          setTraces(mapped);
-        })
-        .catch((err) => setError(err.message))
-        .finally(() => setLoading(false));
-    },
-    []
-  );
-
-  // Initial fetch
-  useEffect(() => {
-    fetchTraces(filters);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  // Debounced filter changes
-  const updateFilters = useCallback(
-    (patch: Partial<Filters>) => {
-      const next = { ...filters, ...patch };
-      setFilters(next);
-
-      // Debounce search input, immediate for dropdowns
-      const isSearch = "search" in patch;
-      if (debounceRef.current) clearTimeout(debounceRef.current);
-
-      if (isSearch) {
-        debounceRef.current = setTimeout(() => fetchTraces(next), 300);
-      } else {
-        fetchTraces(next);
-      }
-    },
-    [filters, fetchTraces]
-  );
-
-  const clearFilters = () => {
-    setFilters(DEFAULT_FILTERS);
-    fetchTraces(DEFAULT_FILTERS);
-  };
-
-  const hasActiveFilters =
-    filters.search || filters.model || filters.provider || filters.status;
-
-  const statusLabel = (s: number) => {
-    if (s === 2) return { text: "error", cls: "badge-error" };
-    return { text: "ok", cls: "badge-success" };
-  };
-
-  const sortOptions = [
-    { value: "start_time", label: "Time" },
-    { value: "duration", label: "Latency" },
-    { value: "total_cost", label: "Cost" },
-    { value: "total_tokens", label: "Tokens" },
-  ];
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { fetchInitial(); }, []);
 
   return (
     <>
       <header className="main-header">
         <h1>Traces</h1>
         <div style={{ display: "flex", gap: 8 }}>
-          <button className="btn" onClick={() => fetchTraces(filters)}>
+          <button className="btn" onClick={refresh}>
             🔄 Refresh
           </button>
         </div>
@@ -234,7 +128,7 @@ export default function TracesPage() {
                 value={filters.status}
                 onChange={(e) =>
                   updateFilters({
-                    status: e.target.value as Filters["status"],
+                    status: e.target.value as TraceFilters["status"],
                   })
                 }
                 className="filter-select"
@@ -292,9 +186,7 @@ export default function TracesPage() {
 
           {traces.length === 0 && !loading ? (
             <div className="empty-state">
-              <div className="empty-state-icon">
-                {hasActiveFilters ? "🔍" : "🔍"}
-              </div>
+              <div className="empty-state-icon">🔍</div>
               <div className="empty-state-title">
                 {hasActiveFilters
                   ? "No traces match filters"
@@ -365,9 +257,7 @@ export default function TracesPage() {
                       <td>
                         <span className={`badge ${st.cls}`}>{st.text}</span>
                       </td>
-                      <td
-                        style={{ color: "var(--text-muted)", fontSize: 12 }}
-                      >
+                      <td style={{ color: "var(--text-muted)", fontSize: 12 }}>
                         {t.startTime}
                       </td>
                     </tr>

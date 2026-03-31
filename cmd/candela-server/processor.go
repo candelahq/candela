@@ -12,9 +12,9 @@ import (
 )
 
 // SpanProcessor buffers incoming spans and flushes them to storage in batches.
-// This runs in-process, replacing the need for a separate worker + Redis queue.
+// Supports fan-out to multiple SpanWriter sinks (e.g. DuckDB + Pub/Sub).
 type SpanProcessor struct {
-	store     storage.TraceStore
+	writers   []storage.SpanWriter
 	calc      *costcalc.Calculator
 	batchSize int
 	spanCh    chan storage.Span
@@ -23,12 +23,13 @@ type SpanProcessor struct {
 }
 
 // NewSpanProcessor creates a new in-process span processor.
-func NewSpanProcessor(store storage.TraceStore, calc *costcalc.Calculator, batchSize int) *SpanProcessor {
+// All provided writers receive every batch on flush.
+func NewSpanProcessor(writers []storage.SpanWriter, calc *costcalc.Calculator, batchSize int) *SpanProcessor {
 	if batchSize == 0 {
 		batchSize = 100
 	}
 	return &SpanProcessor{
-		store:     store,
+		writers:   writers,
 		calc:      calc,
 		batchSize: batchSize,
 		spanCh:    make(chan storage.Span, batchSize*10),
@@ -76,11 +77,13 @@ func (p *SpanProcessor) Run(ctx context.Context) {
 			}
 		}
 
-		if err := p.store.IngestSpans(ctx, batch); err != nil {
-			slog.Error("failed to flush spans", "error", err, "count", len(batch))
-			return
+		// Fan-out: write to all sinks independently.
+		for _, w := range p.writers {
+			if err := w.IngestSpans(ctx, batch); err != nil {
+				slog.Error("failed to flush spans", "error", err, "count", len(batch))
+			}
 		}
-		slog.Debug("flushed spans to storage", "count", len(batch))
+		slog.Debug("flushed spans to storage", "count", len(batch), "sinks", len(p.writers))
 		batch = batch[:0]
 	}
 

@@ -170,11 +170,20 @@ type ModelUsage struct {
 	AvgLatencyMs float64
 }
 
-// TraceStore is the core storage interface. Every backend implements this.
-type TraceStore interface {
-	// IngestSpans writes a batch of spans to storage.
+// SpanWriter is a write-only destination for spans.
+// Any backend that can receive spans implements this — databases, Pub/Sub,
+// S3 archivers, webhook forwarders, etc.
+type SpanWriter interface {
+	// IngestSpans writes a batch of spans to the destination.
 	IngestSpans(ctx context.Context, spans []Span) error
 
+	// Close releases any resources held by the writer.
+	Close() error
+}
+
+// SpanReader serves the dashboard and API — it can query stored spans.
+// Only backends that support querying implement this (databases).
+type SpanReader interface {
 	// GetTrace retrieves a single trace with all its spans.
 	GetTrace(ctx context.Context, traceID string) (*Trace, error)
 
@@ -193,6 +202,15 @@ type TraceStore interface {
 	// Ping verifies that the storage backend is reachable.
 	Ping(ctx context.Context) error
 
-	// Close releases any resources held by the store.
+	// Close releases any resources held by the reader.
 	Close() error
+}
+
+// TraceStore combines read and write capabilities.
+// Embedded databases (DuckDB, SQLite) implement this. In production,
+// the write side (BigQuery Storage Write API) and read side (BigQuery SQL)
+// may be separate implementations wired to separate SpanWriter/SpanReader consumers.
+type TraceStore interface {
+	SpanWriter
+	SpanReader
 }

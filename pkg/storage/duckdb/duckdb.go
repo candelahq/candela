@@ -90,12 +90,6 @@ func (s *Store) migrate() error {
 	return nil
 }
 
-// attributeKV maps a single key-value pair into a DuckDB STRUCT(key, value).
-type attributeKV struct {
-	Key   string
-	Value string
-}
-
 func (s *Store) IngestSpans(ctx context.Context, spans []storage.Span) error {
 	conn, err := s.db.Conn(ctx)
 	if err != nil {
@@ -121,9 +115,10 @@ func (s *Store) IngestSpans(ctx context.Context, spans []storage.Span) error {
 				genAI = &storage.GenAIAttributes{}
 			}
 
-			var attrs []attributeKV
+			// DuckDB Appender requires []map[string]any for STRUCT columns.
+			var attrs []map[string]any
 			for k, v := range span.Attributes {
-				attrs = append(attrs, attributeKV{Key: k, Value: v})
+				attrs = append(attrs, map[string]any{"key": k, "value": v})
 			}
 
 			if err := appender.AppendRow(

@@ -48,6 +48,9 @@
           ];
 
           shellHook = ''
+            # Install pre-commit hooks (idempotent, silent).
+            pre-commit install --install-hooks > /dev/null 2>&1 || true
+
             echo "🕯️  Candela dev shell ready"
             echo "   Go:     $(go version | cut -d' ' -f3)"
             echo "   Buf:    $(buf --version 2>&1)"

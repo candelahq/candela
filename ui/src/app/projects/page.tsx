@@ -9,7 +9,7 @@ interface Project {
   id: string;
   name: string;
   description: string;
-  environment: string;
+  createdAt: string;
 }
 
 export default function ProjectsPage() {
@@ -26,7 +26,9 @@ export default function ProjectsPage() {
           id: p.id,
           name: p.name,
           description: p.description,
-          environment: p.environment || "dev",
+          createdAt: p.createdAt
+            ? new Date(Number(p.createdAt.seconds) * 1000).toLocaleDateString()
+            : "—",
         }));
         setProjects(mapped);
       })
@@ -82,7 +84,7 @@ export default function ProjectsPage() {
                 <tr>
                   <th>Name</th>
                   <th>Description</th>
-                  <th>Environment</th>
+                  <th>Created</th>
                   <th>ID</th>
                 </tr>
               </thead>
@@ -93,8 +95,8 @@ export default function ProjectsPage() {
                     <td style={{ color: "var(--text-secondary)" }}>
                       {p.description || "—"}
                     </td>
-                    <td>
-                      <span className="badge badge-info">{p.environment}</span>
+                    <td style={{ color: "var(--text-secondary)" }}>
+                      {p.createdAt}
                     </td>
                     <td>
                       <span className="mono">{p.id.slice(0, 12)}…</span>

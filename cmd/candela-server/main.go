@@ -22,6 +22,7 @@ import (
 	"github.com/candelahq/candela/pkg/costcalc"
 	"github.com/candelahq/candela/pkg/proxy"
 	"github.com/candelahq/candela/pkg/storage"
+	bqstore "github.com/candelahq/candela/pkg/storage/bigquery"
 	duckdbstore "github.com/candelahq/candela/pkg/storage/duckdb"
 	sqlitestore "github.com/candelahq/candela/pkg/storage/sqlite"
 )
@@ -40,6 +41,12 @@ type Config struct {
 		SQLite  struct {
 			Path string `yaml:"path"` // e.g. "candela.db" or ":memory:"
 		} `yaml:"sqlite"`
+		BigQuery struct {
+			ProjectID string `yaml:"project_id"`
+			Dataset   string `yaml:"dataset"`
+			Table     string `yaml:"table"`
+			Location  string `yaml:"location"`
+		} `yaml:"bigquery"`
 	} `yaml:"storage"`
 	Proxy struct {
 		Enabled   bool     `yaml:"enabled"`
@@ -203,6 +210,18 @@ func initStorage(cfg *Config) (storage.SpanReader, []storage.SpanWriter, func(),
 		if err != nil {
 			return nil, nil, nil, err
 		}
+		return store, []storage.SpanWriter{store}, func() { store.Close() }, nil
+	case "bigquery":
+		store, err := bqstore.New(context.Background(), bqstore.Config{
+			ProjectID: cfg.Storage.BigQuery.ProjectID,
+			Dataset:   cfg.Storage.BigQuery.Dataset,
+			Table:     cfg.Storage.BigQuery.Table,
+			Location:  cfg.Storage.BigQuery.Location,
+		})
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		// BigQuery implements both SpanReader and SpanWriter.
 		return store, []storage.SpanWriter{store}, func() { store.Close() }, nil
 	default:
 		return nil, nil, nil, fmt.Errorf("unknown storage backend: %s", cfg.Storage.Backend)

@@ -1,5 +1,5 @@
 // Package storage defines the TraceStore interface — the core storage abstraction
-// in Candela. Every storage backend (ClickHouse, BigQuery, PostgreSQL) implements
+// in Candela. Every storage backend (DuckDB, SQLite, BigQuery) implements
 // this interface.
 package storage
 

@@ -1,6 +1,6 @@
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v4.6.0
+    rev: v5.0.0
     hooks:
       - id: trailing-whitespace
       - id: end-of-file-fixer
@@ -10,21 +10,34 @@ repos:
       - id: detect-private-key
 
   - repo: https://github.com/golangci/golangci-lint
-    rev: v1.62.2
+    rev: v2.1.5
     hooks:
       - id: golangci-lint
         args: ["--timeout=5m"]
 
   - repo: https://github.com/bufbuild/buf
-    rev: v1.48.0
+    rev: v1.50.0
     hooks:
       - id: buf-lint
         args: ["--config", "proto/buf.yaml"]
       - id: buf-format
         args: ["-w", "--config", "proto/buf.yaml"]
+      - id: buf-breaking
+        args:
+          - "--config"
+          - "proto/buf.yaml"
+          - "--against"
+          - ".git#branch=main,subdir=proto"
 
   - repo: local
     hooks:
+      - id: go-vet
+        name: go vet
+        entry: go vet ./...
+        language: system
+        pass_filenames: false
+        files: '\.go$'
+
       - id: go-mod-tidy
         name: go mod tidy
         entry: go mod tidy
@@ -32,9 +45,16 @@ repos:
         pass_filenames: false
         files: '\.go$|go\.mod$|go\.sum$'
 
+      - id: gofmt
+        name: gofmt
+        entry: bash -c 'test -z "$(gofmt -l .)"'
+        language: system
+        pass_filenames: false
+        files: '\.go$'
+
       - id: go-test
         name: go test
-        entry: go test ./...
+        entry: go test ./... -count=1 -timeout 30s
         language: system
         pass_filenames: false
         files: '\.go$'

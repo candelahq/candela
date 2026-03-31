@@ -270,3 +270,193 @@ func TestGenerateIDs(t *testing.T) {
 		t.Error("trace IDs should be unique")
 	}
 }
+
+func TestRequestID_GeneratedWhenAbsent(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Verify upstream receives a request ID.
+		if r.Header.Get("X-Request-ID") == "" {
+			t.Error("expected X-Request-ID forwarded to upstream")
+		}
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"content":[{"type":"text","text":"ok"}],"usage":{"input_tokens":1,"output_tokens":1}}`)
+	}))
+	defer upstream.Close()
+
+	submitter := &mockSubmitter{}
+	calc := costcalc.New()
+
+	p := New(Config{
+		Providers: []Provider{{Name: "anthropic", UpstreamURL: upstream.URL}},
+		ProjectID: "test",
+	}, submitter, calc)
+
+	mux := http.NewServeMux()
+	p.RegisterRoutes(mux)
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	// No X-Request-ID in request.
+	req, _ := http.NewRequest("POST",
+		srv.URL+"/proxy/anthropic/v1/messages",
+		strings.NewReader(`{"model":"claude-sonnet-4-20250514","messages":[{"role":"user","content":"hi"}]}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer tok")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer resp.Body.Close()
+	io.ReadAll(resp.Body)
+
+	// Response should contain a generated X-Request-ID.
+	rid := resp.Header.Get("X-Request-ID")
+	if rid == "" {
+		t.Fatal("expected X-Request-ID in response")
+	}
+	if len(rid) != 32 {
+		t.Errorf("expected 32-char generated request ID, got %d chars: %q", len(rid), rid)
+	}
+
+	// Wait for async span.
+	for i := 0; i < 50; i++ {
+		if len(submitter.getSpans()) > 0 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	spans := submitter.getSpans()
+	if len(spans) == 0 {
+		t.Fatal("expected span")
+	}
+	if spans[0].Attributes["http.request_id"] != rid {
+		t.Errorf("span request_id = %q, want %q", spans[0].Attributes["http.request_id"], rid)
+	}
+}
+
+func TestRequestID_AcceptedWhenProvided(t *testing.T) {
+	const clientRequestID = "my-custom-request-id-12345678"
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Verify client's request ID is forwarded upstream.
+		if got := r.Header.Get("X-Request-ID"); got != clientRequestID {
+			t.Errorf("upstream X-Request-ID = %q, want %q", got, clientRequestID)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"content":[{"type":"text","text":"ok"}],"usage":{"input_tokens":1,"output_tokens":1}}`)
+	}))
+	defer upstream.Close()
+
+	submitter := &mockSubmitter{}
+	calc := costcalc.New()
+
+	p := New(Config{
+		Providers: []Provider{{Name: "anthropic", UpstreamURL: upstream.URL}},
+		ProjectID: "test",
+	}, submitter, calc)
+
+	mux := http.NewServeMux()
+	p.RegisterRoutes(mux)
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	// Provide X-Request-ID.
+	req, _ := http.NewRequest("POST",
+		srv.URL+"/proxy/anthropic/v1/messages",
+		strings.NewReader(`{"model":"claude-sonnet-4-20250514","messages":[{"role":"user","content":"hi"}]}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer tok")
+	req.Header.Set("X-Request-ID", clientRequestID)
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer resp.Body.Close()
+	io.ReadAll(resp.Body)
+
+	// Response should echo back the same ID.
+	if got := resp.Header.Get("X-Request-ID"); got != clientRequestID {
+		t.Errorf("response X-Request-ID = %q, want %q", got, clientRequestID)
+	}
+
+	// Wait for async span.
+	for i := 0; i < 50; i++ {
+		if len(submitter.getSpans()) > 0 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	spans := submitter.getSpans()
+	if len(spans) == 0 {
+		t.Fatal("expected span")
+	}
+	if spans[0].Attributes["http.request_id"] != clientRequestID {
+		t.Errorf("span request_id = %q, want %q", spans[0].Attributes["http.request_id"], clientRequestID)
+	}
+}
+
+func TestCircuitBreaker_SkipsSpanOnOpen(t *testing.T) {
+	callCount := 0
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		callCount++
+		w.WriteHeader(http.StatusInternalServerError)
+		fmt.Fprint(w, `{"error":"fail"}`)
+	}))
+	defer upstream.Close()
+
+	submitter := &mockSubmitter{}
+	calc := costcalc.New()
+
+	p := New(Config{
+		Providers: []Provider{{Name: "anthropic", UpstreamURL: upstream.URL}},
+		ProjectID: "test",
+	}, submitter, calc)
+
+	mux := http.NewServeMux()
+	p.RegisterRoutes(mux)
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	// Blast 6 requests to trip the circuit (threshold=5).
+	for i := 0; i < 6; i++ {
+		req, _ := http.NewRequest("POST",
+			srv.URL+"/proxy/anthropic/v1/messages",
+			strings.NewReader(`{"model":"claude-sonnet-4-20250514","messages":[{"role":"user","content":"hi"}]}`))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Authorization", "Bearer tok")
+
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("request %d failed: %v", i, err)
+		}
+		io.ReadAll(resp.Body)
+		resp.Body.Close()
+	}
+
+	// All 6 requests should have been forwarded upstream (fail-open).
+	if callCount != 6 {
+		t.Errorf("expected 6 upstream calls (fail-open), got %d", callCount)
+	}
+
+	// Circuit should be open now.
+	cb := p.breakers["anthropic"]
+	if cb.State() != CircuitOpen {
+		t.Errorf("expected circuit open, got %s", cb.State())
+	}
+
+	// Wait a bit for any async span submissions.
+	time.Sleep(100 * time.Millisecond)
+
+	// After circuit opens (at request 5), subsequent requests skip spans.
+	// Requests 1-5 had circuit closed (spans created), request 6 had circuit open (span skipped).
+	// But the circuit breaker AllowRequest() is also called — so the 6th request's span is skipped.
+	spans := submitter.getSpans()
+	// We should have fewer spans than requests since the circuit opened.
+	if len(spans) >= 6 {
+		t.Errorf("expected fewer than 6 spans (circuit should skip some), got %d", len(spans))
+	}
+}
+

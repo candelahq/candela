@@ -66,19 +66,19 @@ func main() {
 	}
 
 	// Initialize storage backend.
-	store, err := initStorage(cfg)
+	reader, writers, closeFn, err := initStorage(cfg)
 	if err != nil {
 		slog.Error("failed to initialize storage", "error", err)
 		os.Exit(1)
 	}
-	defer store.Close()
-	slog.Info("storage initialized", "backend", cfg.Storage.Backend)
+	defer closeFn()
+	slog.Info("storage initialized", "backend", cfg.Storage.Backend, "sinks", len(writers))
 
 	// Initialize cost calculator.
 	calc := costcalc.New()
 
-	// Start the in-process span processor (replaces the separate worker).
-	processor := NewSpanProcessor(store, calc, cfg.Worker.BatchSize)
+	// Start the in-process span processor (fan-out to all writers).
+	processor := NewSpanProcessor(writers, calc, cfg.Worker.BatchSize)
 	go processor.Run(context.Background())
 	defer processor.Stop()
 
@@ -87,7 +87,7 @@ func main() {
 
 	// Health check.
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
-		if err := store.Ping(r.Context()); err != nil {
+		if err := reader.Ping(r.Context()); err != nil {
 			w.WriteHeader(http.StatusServiceUnavailable)
 			fmt.Fprintf(w, `{"status": "error", "detail": %q}`, err.Error())
 			return
@@ -98,7 +98,7 @@ func main() {
 
 	// Register ConnectRPC service handlers.
 	tracePath, traceH := candelav1connect.NewTraceServiceHandler(
-		connecthandlers.NewTraceHandler(store))
+		connecthandlers.NewTraceHandler(reader))
 	mux.Handle(tracePath, traceH)
 
 	ingestionPath, ingestionH := candelav1connect.NewIngestionServiceHandler(
@@ -106,7 +106,7 @@ func main() {
 	mux.Handle(ingestionPath, ingestionH)
 
 	dashboardPath, dashboardH := candelav1connect.NewDashboardServiceHandler(
-		connecthandlers.NewDashboardHandler(store))
+		connecthandlers.NewDashboardHandler(reader))
 	mux.Handle(dashboardPath, dashboardH)
 
 	slog.Info("ConnectRPC services registered",
@@ -183,18 +183,29 @@ func main() {
 	slog.Info("server stopped")
 }
 
-func initStorage(cfg *Config) (storage.TraceStore, error) {
+// initStorage creates the storage backend and returns a reader (for queries)
+// and a slice of writers (for the processor fan-out). The closeFn handles cleanup.
+func initStorage(cfg *Config) (storage.SpanReader, []storage.SpanWriter, func(), error) {
 	switch cfg.Storage.Backend {
 	case "duckdb":
-		return duckdbstore.New(duckdbstore.Config{
+		store, err := duckdbstore.New(duckdbstore.Config{
 			Path: cfg.Storage.DuckDB.Path,
 		})
-	case "sqlite", "":
-		return sqlitestore.New(sqlitestore.Config{
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		// DuckDB implements both SpanReader and SpanWriter.
+		return store, []storage.SpanWriter{store}, func() { store.Close() }, nil
+	case "sqlite":
+		store, err := sqlitestore.New(sqlitestore.Config{
 			Path: cfg.Storage.SQLite.Path,
 		})
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		return store, []storage.SpanWriter{store}, func() { store.Close() }, nil
 	default:
-		return nil, fmt.Errorf("unknown storage backend: %s", cfg.Storage.Backend)
+		return nil, nil, nil, fmt.Errorf("unknown storage backend: %s", cfg.Storage.Backend)
 	}
 }
 

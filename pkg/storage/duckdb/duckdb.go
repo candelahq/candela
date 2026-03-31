@@ -18,7 +18,7 @@ type Store struct {
 	db *sql.DB
 }
 
-var _ storage.TraceStore = (*Store)(nil)
+var _ storage.TraceStore = (*Store)(nil) // satisfies both SpanWriter + SpanReader
 
 // Config holds DuckDB connection settings.
 type Config struct {

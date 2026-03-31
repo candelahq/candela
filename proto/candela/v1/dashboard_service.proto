@@ -2,9 +2,9 @@ syntax = "proto3";
 
 package candela.v1;
 
-option go_package = "github.com/candelahq/candela/gen/go/candela/v1";
-
 import "candela/types/common.proto";
+
+option go_package = "github.com/candelahq/candela/gen/go/candela/v1";
 
 // DashboardService provides aggregated metrics and usage data.
 // Exposed via ConnectRPC for the web UI dashboards.

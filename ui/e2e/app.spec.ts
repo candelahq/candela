@@ -1,20 +1,24 @@
 import { test, expect } from "@playwright/test";
-import { createMockRouter } from "@connectrpc/connect-playwright";
-import { DashboardService } from "../src/gen/v1/dashboard_service_pb";
-import { TraceService } from "../src/gen/v1/trace_service_pb";
-import { ProjectService } from "../src/gen/v1/project_service_pb";
-import { create } from "@bufbuild/protobuf";
-import {
-  GetUsageSummaryResponseSchema,
-} from "../src/gen/v1/dashboard_service_pb";
-import {
-  ListTracesResponseSchema,
-} from "../src/gen/v1/trace_service_pb";
-import {
-  ListProjectsResponseSchema,
-} from "../src/gen/v1/project_service_pb";
 
-const BASE_URL = "http://localhost:8080";
+const API_BASE = "http://localhost:8080";
+
+/**
+ * Mock a ConnectRPC unary call by intercepting the POST to the service method URL.
+ * ConnectRPC uses POST with JSON body to `baseUrl/package.ServiceName/MethodName`.
+ */
+async function mockConnectRPC(
+  page: import("@playwright/test").Page,
+  servicePath: string,
+  responseBody: Record<string, unknown>,
+) {
+  await page.route(`${API_BASE}${servicePath}`, async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify(responseBody),
+    });
+  });
+}
 
 // ──────────────────────────────────────────
 // Navigation & Layout
@@ -61,35 +65,36 @@ test.describe("App Shell", () => {
 
 test.describe("Dashboard", () => {
   test("shows stats when backend responds", async ({ page }) => {
-    const mock = createMockRouter(page, { baseUrl: BASE_URL });
-    await mock.service(DashboardService, {
-      getUsageSummary: () => {
-        return create(GetUsageSummaryResponseSchema, {
-          totalTraces: 42n,
-          totalSpans: 128n,
-          totalLlmCalls: 42n,
-          totalInputTokens: 10000n,
-          totalOutputTokens: 5000n,
-          totalCostUsd: 3.47,
-          avgLatencyMs: 234.5,
-          errorRate: 0.02,
-        });
-      },
-      getModelBreakdown: () => ({}),
-      getLatencyPercentiles: () => ({}),
+    await mockConnectRPC(page, "/candela.v1.DashboardService/GetUsageSummary", {
+      totalTraces: "42",
+      totalSpans: "128",
+      totalLlmCalls: "42",
+      totalInputTokens: "10000",
+      totalOutputTokens: "5000",
+      totalCostUsd: 3.47,
+      avgLatencyMs: 234.5,
+      errorRate: 0.02,
     });
 
     await page.goto("/");
     await expect(page.locator(".card-value").first()).toHaveText("42");
-    await expect(page.locator(".card").filter({ hasText: "Total Tokens" }).locator(".card-value")).toHaveText("15,000");
-    await expect(page.locator(".card").filter({ hasText: "Total Cost" }).locator(".card-value")).toHaveText("$3.47");
-    await expect(page.locator(".card").filter({ hasText: "Avg Latency" }).locator(".card-value")).toHaveText("235ms");
+    await expect(
+      page.locator(".card").filter({ hasText: "Total Tokens" }).locator(".card-value")
+    ).toHaveText("15,000");
+    await expect(
+      page.locator(".card").filter({ hasText: "Total Cost" }).locator(".card-value")
+    ).toHaveText("$3.47");
+    await expect(
+      page.locator(".card").filter({ hasText: "Avg Latency" }).locator(".card-value")
+    ).toHaveText("235ms");
   });
 
   test("shows error banner when backend is down", async ({ page }) => {
-    // No mock installed → fetch to :8080 will fail
+    // No mock → fetch to :8080 will fail with network error
     await page.goto("/");
-    await expect(page.locator(".card-title").filter({ hasText: "Backend Unavailable" })).toBeVisible();
+    await expect(
+      page.locator(".card-title").filter({ hasText: "Backend Unavailable" })
+    ).toBeVisible();
   });
 });
 
@@ -99,15 +104,8 @@ test.describe("Dashboard", () => {
 
 test.describe("Traces", () => {
   test("shows empty state when no traces", async ({ page }) => {
-    const mock = createMockRouter(page, { baseUrl: BASE_URL });
-    await mock.service(TraceService, {
-      listTraces: () => {
-        return create(ListTracesResponseSchema, {
-          traces: [],
-        });
-      },
-      getTrace: () => ({}),
-      searchSpans: () => ({}),
+    await mockConnectRPC(page, "/candela.v1.TraceService/ListTraces", {
+      traces: [],
     });
 
     await page.goto("/traces");
@@ -116,7 +114,9 @@ test.describe("Traces", () => {
 
   test("shows error when backend is down", async ({ page }) => {
     await page.goto("/traces");
-    await expect(page.locator(".card-title").filter({ hasText: "Could not load traces" })).toBeVisible();
+    await expect(
+      page.locator(".card-title").filter({ hasText: "Could not load traces" })
+    ).toBeVisible();
   });
 });
 
@@ -126,19 +126,8 @@ test.describe("Traces", () => {
 
 test.describe("Projects", () => {
   test("shows empty state when no projects", async ({ page }) => {
-    const mock = createMockRouter(page, { baseUrl: BASE_URL });
-    await mock.service(ProjectService, {
-      listProjects: () => {
-        return create(ListProjectsResponseSchema, {
-          projects: [],
-        });
-      },
-      createProject: () => ({}),
-      getProject: () => ({}),
-      deleteProject: () => ({}),
-      createAPIKey: () => ({}),
-      listAPIKeys: () => ({}),
-      revokeAPIKey: () => ({}),
+    await mockConnectRPC(page, "/candela.v1.ProjectService/ListProjects", {
+      projects: [],
     });
 
     await page.goto("/projects");

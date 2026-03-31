@@ -19,6 +19,16 @@ jobs:
         with:
           go-version: '1.26.1'
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+
+      - name: Install UI deps (protoc-gen-es)
+        run: npm ci
+        working-directory: ui
+
       - uses: bufbuild/buf-setup-action@v1
         with:
           github_token: ${{ github.token }}
@@ -54,6 +64,16 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: '1.26.1'
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+
+      - name: Install UI deps (protoc-gen-es)
+        run: npm ci
+        working-directory: ui
 
       - uses: bufbuild/buf-setup-action@v1
         with:

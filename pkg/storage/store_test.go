@@ -179,3 +179,23 @@ func TestTraceAggregation(t *testing.T) {
 		t.Errorf("span count = %d, want 4", len(trace.Spans))
 	}
 }
+
+func TestEscapeLike(t *testing.T) {
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{"hello", "hello"},
+		{"100%", `100\%`},
+		{"user_name", `user\_name`},
+		{`path\to`, `path\\to`},
+		{"100%_done", `100\%\_done`},
+		{"", ""},
+	}
+	for _, tt := range tests {
+		got := EscapeLike(tt.input)
+		if got != tt.want {
+			t.Errorf("EscapeLike(%q) = %q, want %q", tt.input, got, tt.want)
+		}
+	}
+}

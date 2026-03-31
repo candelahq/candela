@@ -15,11 +15,11 @@ import (
 
 // TraceHandler implements the TraceService ConnectRPC handler.
 type TraceHandler struct {
-	store storage.TraceStore
+	store storage.SpanReader
 }
 
 // NewTraceHandler creates a new TraceHandler.
-func NewTraceHandler(store storage.TraceStore) *TraceHandler {
+func NewTraceHandler(store storage.SpanReader) *TraceHandler {
 	return &TraceHandler{store: store}
 }
 

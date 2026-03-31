@@ -1,53 +1,39 @@
-// Package sqlite implements the storage.TraceStore interface using SQLite.
-// This is the default backend for local development — zero external dependencies.
-package sqlite
+package duckdb
 
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"fmt"
+	"log/slog"
 	"time"
 
-	_ "modernc.org/sqlite"
-
 	"github.com/candelahq/candela/pkg/storage"
+	"github.com/duckdb/duckdb-go/v2"
 )
 
-// Store implements storage.TraceStore for SQLite.
+// Store implements storage.TraceStore for DuckDB.
+// DuckDB is the default local development backend — zero external dependencies,
+// columnar analytical performance for aggregation queries.
 type Store struct {
 	db *sql.DB
 }
 
-var _ storage.TraceStore = (*Store)(nil)
+var _ storage.TraceStore = (*Store)(nil) // satisfies both SpanWriter + SpanReader
 
-// Config holds SQLite connection settings.
+// Config holds DuckDB connection settings.
 type Config struct {
-	Path string `yaml:"path" json:"path"` // e.g. "candela.db" or ":memory:"
+	Path string `yaml:"path" json:"path"` // e.g. "candela.duckdb"
 }
 
-// New creates a new SQLite-backed TraceStore.
+// New creates a new DuckDB-backed TraceStore.
 func New(cfg Config) (*Store, error) {
 	if cfg.Path == "" {
-		cfg.Path = "candela.db"
+		cfg.Path = "candela.duckdb"
 	}
 
-	db, err := sql.Open("sqlite", cfg.Path)
+	db, err := sql.Open("duckdb", cfg.Path)
 	if err != nil {
-		return nil, fmt.Errorf("opening sqlite: %w", err)
-	}
-
-	// SQLite performance tuning.
-	for _, pragma := range []string{
-		"PRAGMA journal_mode=WAL",
-		"PRAGMA synchronous=NORMAL",
-		"PRAGMA cache_size=-64000", // 64MB cache
-		"PRAGMA busy_timeout=5000",
-	} {
-		if _, err := db.Exec(pragma); err != nil {
-			db.Close()
-			return nil, fmt.Errorf("setting pragma: %w", err)
-		}
+		return nil, fmt.Errorf("opening duckdb: %w", err)
 	}
 
 	s := &Store{db: db}
@@ -56,40 +42,43 @@ func New(cfg Config) (*Store, error) {
 		return nil, fmt.Errorf("running migrations: %w", err)
 	}
 
+	slog.Info("DuckDB store initialized", "path", cfg.Path)
 	return s, nil
 }
 
 func (s *Store) migrate() error {
 	queries := []string{
 		`CREATE TABLE IF NOT EXISTS spans (
-			span_id        TEXT NOT NULL,
-			trace_id       TEXT NOT NULL,
-			parent_span_id TEXT DEFAULT '',
-			name           TEXT NOT NULL,
+			span_id        VARCHAR NOT NULL,
+			trace_id       VARCHAR NOT NULL,
+			parent_span_id VARCHAR DEFAULT '',
+			name           VARCHAR NOT NULL,
 			kind           INTEGER DEFAULT 0,
 			status         INTEGER DEFAULT 0,
-			status_message TEXT DEFAULT '',
-			start_time     TEXT NOT NULL,
-			end_time       TEXT NOT NULL,
-			duration_ns    INTEGER DEFAULT 0,
-			project_id     TEXT DEFAULT '',
-			environment    TEXT DEFAULT '',
-			service_name   TEXT DEFAULT '',
+			status_message VARCHAR DEFAULT '',
+			start_time     TIMESTAMP NOT NULL,
+			end_time       TIMESTAMP NOT NULL,
+			duration_ns    BIGINT DEFAULT 0,
+			project_id     VARCHAR DEFAULT '',
+			environment    VARCHAR DEFAULT '',
+			service_name   VARCHAR DEFAULT '',
 
-			gen_ai_model          TEXT DEFAULT '',
-			gen_ai_provider       TEXT DEFAULT '',
-			gen_ai_input_tokens   INTEGER DEFAULT 0,
-			gen_ai_output_tokens  INTEGER DEFAULT 0,
-			gen_ai_total_tokens   INTEGER DEFAULT 0,
-			gen_ai_cost_usd       REAL DEFAULT 0,
-			gen_ai_temperature    REAL DEFAULT 0,
-			gen_ai_max_tokens     INTEGER DEFAULT 0,
-			gen_ai_input_content  TEXT DEFAULT '',
-			gen_ai_output_content TEXT DEFAULT '',
+			gen_ai_model          VARCHAR DEFAULT '',
+			gen_ai_provider       VARCHAR DEFAULT '',
+			gen_ai_input_tokens   BIGINT DEFAULT 0,
+			gen_ai_output_tokens  BIGINT DEFAULT 0,
+			gen_ai_total_tokens   BIGINT DEFAULT 0,
+			gen_ai_cost_usd       DOUBLE DEFAULT 0,
+			gen_ai_temperature    DOUBLE DEFAULT 0,
+			gen_ai_max_tokens     BIGINT DEFAULT 0,
+			gen_ai_input_content  VARCHAR DEFAULT '',
+			gen_ai_output_content VARCHAR DEFAULT '',
 
-			attributes_json TEXT DEFAULT '{}',
+			attributes STRUCT(key VARCHAR, value VARCHAR)[]
 
-			PRIMARY KEY (trace_id, span_id)
+			-- No PRIMARY KEY: OLAP convention. Duplicates are rare and handled
+			-- at query time (or via periodic compaction). This keeps the Appender
+			-- API path fast and matches BigQuery behavior in production.
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_spans_project_time ON spans(project_id, start_time)`,
 		`CREATE INDEX IF NOT EXISTS idx_spans_trace ON spans(trace_id)`,
@@ -105,54 +94,58 @@ func (s *Store) migrate() error {
 }
 
 func (s *Store) IngestSpans(ctx context.Context, spans []storage.Span) error {
-	tx, err := s.db.BeginTx(ctx, nil)
+	conn, err := s.db.Conn(ctx)
 	if err != nil {
-		return fmt.Errorf("beginning tx: %w", err)
+		return fmt.Errorf("getting conn for ingest: %w", err)
 	}
-	defer tx.Rollback()
+	defer conn.Close()
 
-	stmt, err := tx.PrepareContext(ctx, `INSERT OR REPLACE INTO spans (
-		span_id, trace_id, parent_span_id, name, kind, status, status_message,
-		start_time, end_time, duration_ns, project_id, environment, service_name,
-		gen_ai_model, gen_ai_provider, gen_ai_input_tokens, gen_ai_output_tokens,
-		gen_ai_total_tokens, gen_ai_cost_usd, gen_ai_temperature, gen_ai_max_tokens,
-		gen_ai_input_content, gen_ai_output_content, attributes_json
-	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-	if err != nil {
-		return fmt.Errorf("preparing stmt: %w", err)
-	}
-	defer stmt.Close()
-
-	for _, span := range spans {
-		genAI := span.GenAI
-		if genAI == nil {
-			genAI = &storage.GenAIAttributes{}
+	return conn.Raw(func(driverConn any) error {
+		duckConn, ok := driverConn.(*duckdb.Conn)
+		if !ok {
+			return fmt.Errorf("driverConn is not *duckdb.Conn")
 		}
 
-		attrsJSON, err := json.Marshal(span.Attributes)
+		appender, err := duckdb.NewAppenderFromConn(duckConn, "", "spans")
 		if err != nil {
-			return fmt.Errorf("marshaling attributes for span %s: %w", span.SpanID, err)
+			return fmt.Errorf("creating appender: %w", err)
+		}
+		defer appender.Close()
+
+		for _, span := range spans {
+			genAI := span.GenAI
+			if genAI == nil {
+				genAI = &storage.GenAIAttributes{}
+			}
+
+			// DuckDB Appender requires []map[string]any for STRUCT columns.
+			var attrs []map[string]any
+			for k, v := range span.Attributes {
+				attrs = append(attrs, map[string]any{"key": k, "value": v})
+			}
+
+			if err := appender.AppendRow(
+				span.SpanID, span.TraceID, span.ParentSpanID,
+				span.Name, int32(span.Kind), int32(span.Status), span.StatusMessage,
+				span.StartTime,
+				span.EndTime,
+				span.Duration.Nanoseconds(),
+				span.ProjectID, span.Environment, span.ServiceName,
+				genAI.Model, genAI.Provider,
+				genAI.InputTokens, genAI.OutputTokens, genAI.TotalTokens,
+				genAI.CostUSD, genAI.Temperature, genAI.MaxTokens,
+				genAI.InputContent, genAI.OutputContent,
+				attrs,
+			); err != nil {
+				return fmt.Errorf("appending span %s: %w", span.SpanID, err)
+			}
 		}
 
-		_, err = stmt.ExecContext(ctx,
-			span.SpanID, span.TraceID, span.ParentSpanID,
-			span.Name, int(span.Kind), int(span.Status), span.StatusMessage,
-			span.StartTime.Format(time.RFC3339Nano),
-			span.EndTime.Format(time.RFC3339Nano),
-			span.Duration.Nanoseconds(),
-			span.ProjectID, span.Environment, span.ServiceName,
-			genAI.Model, genAI.Provider,
-			genAI.InputTokens, genAI.OutputTokens, genAI.TotalTokens,
-			genAI.CostUSD, genAI.Temperature, genAI.MaxTokens,
-			genAI.InputContent, genAI.OutputContent,
-			string(attrsJSON),
-		)
-		if err != nil {
-			return fmt.Errorf("inserting span: %w", err)
+		if err := appender.Flush(); err != nil {
+			return fmt.Errorf("flushing appender: %w", err)
 		}
-	}
-
-	return tx.Commit()
+		return nil
+	})
 }
 
 func (s *Store) GetTrace(ctx context.Context, traceID string) (*storage.Trace, error) {
@@ -161,7 +154,7 @@ func (s *Store) GetTrace(ctx context.Context, traceID string) (*storage.Trace, e
 			start_time, end_time, duration_ns, project_id, environment, service_name,
 			gen_ai_model, gen_ai_provider, gen_ai_input_tokens, gen_ai_output_tokens,
 			gen_ai_total_tokens, gen_ai_cost_usd, gen_ai_temperature, gen_ai_max_tokens,
-			gen_ai_input_content, gen_ai_output_content, attributes_json
+			gen_ai_input_content, gen_ai_output_content, attributes
 		FROM spans WHERE trace_id = ? ORDER BY start_time ASC
 	`, traceID)
 	if err != nil {
@@ -190,20 +183,20 @@ func (s *Store) QueryTraces(ctx context.Context, q storage.TraceQuery) (*storage
 			trace_id,
 			MIN(start_time) as start_time,
 			MAX(end_time) as end_time,
-			COUNT(*) as span_count,
-			SUM(CASE WHEN kind = 1 THEN 1 ELSE 0 END) as llm_count,
-			SUM(gen_ai_total_tokens) as total_tokens,
-			SUM(gen_ai_cost_usd) as total_cost,
+			COUNT(*)::INTEGER as span_count,
+			SUM(CASE WHEN kind = 1 THEN 1 ELSE 0 END)::INTEGER as llm_count,
+			COALESCE(SUM(gen_ai_total_tokens), 0)::BIGINT as total_tokens,
+			COALESCE(SUM(gen_ai_cost_usd), 0)::DOUBLE as total_cost,
 			MAX(CASE WHEN parent_span_id = '' THEN name ELSE '' END) as root_name,
 			MAX(gen_ai_model) as primary_model,
 			MAX(gen_ai_provider) as primary_provider,
-			MAX(status) as status
+			MAX(status)::INTEGER as status
 		FROM spans
 		WHERE project_id = ? AND start_time >= ? AND start_time <= ?
 		GROUP BY trace_id
 		ORDER BY MIN(start_time) DESC
 		LIMIT ?
-	`, q.ProjectID, q.StartTime.Format(time.RFC3339Nano), q.EndTime.Format(time.RFC3339Nano), q.PageSize)
+	`, q.ProjectID, q.StartTime, q.EndTime, q.PageSize)
 	if err != nil {
 		return nil, fmt.Errorf("querying traces: %w", err)
 	}
@@ -212,11 +205,11 @@ func (s *Store) QueryTraces(ctx context.Context, q storage.TraceQuery) (*storage
 	var traces []storage.TraceSummary
 	for rows.Next() {
 		var t storage.TraceSummary
-		var startStr, endStr string
 		var status int
+		var endTime time.Time
 
 		err := rows.Scan(
-			&t.TraceID, &startStr, &endStr, &t.SpanCount, &t.LLMCallCount,
+			&t.TraceID, &t.StartTime, &endTime, &t.SpanCount, &t.LLMCallCount,
 			&t.TotalTokens, &t.TotalCostUSD, &t.RootSpanName,
 			&t.PrimaryModel, &t.PrimaryProvider, &status,
 		)
@@ -224,9 +217,7 @@ func (s *Store) QueryTraces(ctx context.Context, q storage.TraceQuery) (*storage
 			return nil, fmt.Errorf("scanning trace: %w", err)
 		}
 
-		t.StartTime, _ = time.Parse(time.RFC3339Nano, startStr)
-		end, _ := time.Parse(time.RFC3339Nano, endStr)
-		t.Duration = end.Sub(t.StartTime)
+		t.Duration = endTime.Sub(t.StartTime)
 		t.Status = storage.SpanStatus(status)
 		t.ProjectID = q.ProjectID
 		traces = append(traces, t)
@@ -248,7 +239,7 @@ func (s *Store) SearchSpans(ctx context.Context, q storage.SpanQuery) (*storage.
 			start_time, end_time, duration_ns, project_id, environment, service_name,
 			gen_ai_model, gen_ai_provider, gen_ai_input_tokens, gen_ai_output_tokens,
 			gen_ai_total_tokens, gen_ai_cost_usd, gen_ai_temperature, gen_ai_max_tokens,
-			gen_ai_input_content, gen_ai_output_content, attributes_json
+			gen_ai_input_content, gen_ai_output_content, attributes
 		FROM spans
 		WHERE project_id = ? AND start_time >= ? AND start_time <= ?
 			AND (? = 0 OR kind = ?)
@@ -256,8 +247,7 @@ func (s *Store) SearchSpans(ctx context.Context, q storage.SpanQuery) (*storage.
 			AND (? = '' OR name LIKE '%' || ? || '%' ESCAPE '\')
 		ORDER BY start_time DESC
 		LIMIT ?
-	`, q.ProjectID,
-		q.StartTime.Format(time.RFC3339Nano), q.EndTime.Format(time.RFC3339Nano),
+	`, q.ProjectID, q.StartTime, q.EndTime,
 		int(q.Kind), int(q.Kind),
 		q.Model, q.Model,
 		q.NameContains, storage.EscapeLike(q.NameContains),
@@ -280,19 +270,19 @@ func (s *Store) GetUsageSummary(ctx context.Context, q storage.UsageQuery) (*sto
 	var summary storage.UsageSummary
 	err := s.db.QueryRowContext(ctx, `
 		SELECT
-			COUNT(DISTINCT trace_id),
-			COUNT(*),
-			SUM(CASE WHEN kind = 1 THEN 1 ELSE 0 END),
-			COALESCE(SUM(gen_ai_input_tokens), 0),
-			COALESCE(SUM(gen_ai_output_tokens), 0),
-			COALESCE(SUM(gen_ai_cost_usd), 0),
-			COALESCE(AVG(duration_ns), 0) / 1000000.0,
+			COUNT(DISTINCT trace_id)::BIGINT,
+			COUNT(*)::BIGINT,
+			COALESCE(SUM(CASE WHEN kind = 1 THEN 1 ELSE 0 END), 0)::BIGINT,
+			COALESCE(SUM(gen_ai_input_tokens), 0)::BIGINT,
+			COALESCE(SUM(gen_ai_output_tokens), 0)::BIGINT,
+			COALESCE(SUM(gen_ai_cost_usd), 0)::DOUBLE,
+			COALESCE(AVG(duration_ns), 0)::DOUBLE / 1000000.0,
 			CASE WHEN COUNT(*) > 0
-				THEN CAST(SUM(CASE WHEN status = 2 THEN 1 ELSE 0 END) AS REAL) / COUNT(*)
+				THEN CAST(SUM(CASE WHEN status = 2 THEN 1 ELSE 0 END) AS DOUBLE) / COUNT(*)
 				ELSE 0 END
 		FROM spans
 		WHERE project_id = ? AND start_time >= ? AND start_time <= ?
-	`, q.ProjectID, q.StartTime.Format(time.RFC3339Nano), q.EndTime.Format(time.RFC3339Nano)).Scan(
+	`, q.ProjectID, q.StartTime, q.EndTime).Scan(
 		&summary.TotalTraces, &summary.TotalSpans, &summary.TotalLLMCalls,
 		&summary.TotalInputTokens, &summary.TotalOutputTokens, &summary.TotalCostUSD,
 		&summary.AvgLatencyMs, &summary.ErrorRate,
@@ -306,14 +296,17 @@ func (s *Store) GetUsageSummary(ctx context.Context, q storage.UsageQuery) (*sto
 func (s *Store) GetModelBreakdown(ctx context.Context, q storage.UsageQuery) ([]storage.ModelUsage, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT gen_ai_model, gen_ai_provider,
-			COUNT(*), SUM(gen_ai_input_tokens), SUM(gen_ai_output_tokens),
-			SUM(gen_ai_cost_usd), AVG(duration_ns) / 1000000.0
+			COUNT(*)::BIGINT,
+			COALESCE(SUM(gen_ai_input_tokens), 0)::BIGINT,
+			COALESCE(SUM(gen_ai_output_tokens), 0)::BIGINT,
+			COALESCE(SUM(gen_ai_cost_usd), 0)::DOUBLE,
+			COALESCE(AVG(duration_ns), 0)::DOUBLE / 1000000.0
 		FROM spans
 		WHERE project_id = ? AND start_time >= ? AND start_time <= ?
 			AND gen_ai_model != ''
 		GROUP BY gen_ai_model, gen_ai_provider
 		ORDER BY SUM(gen_ai_cost_usd) DESC
-	`, q.ProjectID, q.StartTime.Format(time.RFC3339Nano), q.EndTime.Format(time.RFC3339Nano))
+	`, q.ProjectID, q.StartTime, q.EndTime)
 	if err != nil {
 		return nil, fmt.Errorf("querying model breakdown: %w", err)
 	}
@@ -352,19 +345,18 @@ func scanSpans(rows *sql.Rows) ([]storage.Span, error) {
 		var genAI storage.GenAIAttributes
 		var durationNs int64
 		var kind, status int
-		var startStr, endStr string
-		var attrsJSON string
+		var attrsAny any
 
 		err := rows.Scan(
 			&span.SpanID, &span.TraceID, &span.ParentSpanID,
 			&span.Name, &kind, &status, &span.StatusMessage,
-			&startStr, &endStr, &durationNs,
+			&span.StartTime, &span.EndTime, &durationNs,
 			&span.ProjectID, &span.Environment, &span.ServiceName,
 			&genAI.Model, &genAI.Provider,
 			&genAI.InputTokens, &genAI.OutputTokens, &genAI.TotalTokens,
 			&genAI.CostUSD, &genAI.Temperature, &genAI.MaxTokens,
 			&genAI.InputContent, &genAI.OutputContent,
-			&attrsJSON,
+			&attrsAny,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("scanning span: %w", err)
@@ -372,24 +364,25 @@ func scanSpans(rows *sql.Rows) ([]storage.Span, error) {
 
 		span.Kind = storage.SpanKind(kind)
 		span.Status = storage.SpanStatus(status)
-		span.StartTime, err = time.Parse(time.RFC3339Nano, startStr)
-		if err != nil {
-			return nil, fmt.Errorf("parsing start_time for span %s: %w", span.SpanID, err)
-		}
-		span.EndTime, err = time.Parse(time.RFC3339Nano, endStr)
-		if err != nil {
-			return nil, fmt.Errorf("parsing end_time for span %s: %w", span.SpanID, err)
-		}
 		span.Duration = time.Duration(durationNs)
 
 		if genAI.Model != "" {
 			span.GenAI = &genAI
 		}
 
-		if attrsJSON != "" && attrsJSON != "{}" {
-			span.Attributes = make(map[string]string)
-			if err := json.Unmarshal([]byte(attrsJSON), &span.Attributes); err != nil {
-				return nil, fmt.Errorf("unmarshaling attributes for span %s: %w", span.SpanID, err)
+		// DuckDB returns STRUCT(key, value)[] as []any containing map[string]any entries.
+		if attrsAny != nil {
+			if list, ok := attrsAny.([]any); ok && len(list) > 0 {
+				span.Attributes = make(map[string]string, len(list))
+				for _, item := range list {
+					if m, ok := item.(map[string]any); ok {
+						k, _ := m["key"].(string)
+						v, _ := m["value"].(string)
+						if k != "" {
+							span.Attributes[k] = v
+						}
+					}
+				}
 			}
 		}
 
@@ -403,13 +396,13 @@ func scanSpans(rows *sql.Rows) ([]storage.Span, error) {
 
 func buildTrace(traceID string, spans []storage.Span) *storage.Trace {
 	trace := &storage.Trace{
-		TraceID:   traceID,
-		StartTime: spans[0].StartTime,
-		EndTime:   spans[0].EndTime,
-		ProjectID: spans[0].ProjectID,
+		TraceID:     traceID,
+		StartTime:   spans[0].StartTime,
+		EndTime:     spans[0].EndTime,
+		ProjectID:   spans[0].ProjectID,
 		Environment: spans[0].Environment,
-		SpanCount: len(spans),
-		Spans:     spans,
+		SpanCount:   len(spans),
+		Spans:       spans,
 	}
 
 	for _, sp := range spans {

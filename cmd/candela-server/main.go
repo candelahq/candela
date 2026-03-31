@@ -1,5 +1,5 @@
 // Candela server — single-binary backend serving ConnectRPC (for the UI) and
-// handling span ingestion. SQLite by default for local dev, BigQuery/ClickHouse
+// handling span ingestion. DuckDB by default for local dev, BigQuery
 // for production.
 package main
 
@@ -12,8 +12,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/rs/zerolog"
-	"github.com/rs/zerolog/log"
+	"log/slog"
 	"golang.org/x/net/http2"
 	"golang.org/x/net/http2/h2c"
 	"gopkg.in/yaml.v3"
@@ -23,7 +22,7 @@ import (
 	"github.com/candelahq/candela/pkg/costcalc"
 	"github.com/candelahq/candela/pkg/proxy"
 	"github.com/candelahq/candela/pkg/storage"
-	chstore "github.com/candelahq/candela/pkg/storage/clickhouse"
+	duckdbstore "github.com/candelahq/candela/pkg/storage/duckdb"
 	sqlitestore "github.com/candelahq/candela/pkg/storage/sqlite"
 )
 
@@ -34,16 +33,13 @@ type Config struct {
 		Port int    `yaml:"port"`
 	} `yaml:"server"`
 	Storage struct {
-		Backend string `yaml:"backend"` // "sqlite" (default), "clickhouse", "bigquery"
+		Backend string `yaml:"backend"`
+		DuckDB  struct {
+			Path string `yaml:"path"` // e.g. "candela.duckdb"
+		} `yaml:"duckdb"`
 		SQLite  struct {
 			Path string `yaml:"path"` // e.g. "candela.db" or ":memory:"
 		} `yaml:"sqlite"`
-		ClickHouse struct {
-			Addr     string `yaml:"addr"`
-			Database string `yaml:"database"`
-			Username string `yaml:"username"`
-			Password string `yaml:"password"`
-		} `yaml:"clickhouse"`
 	} `yaml:"storage"`
 	Proxy struct {
 		Enabled   bool     `yaml:"enabled"`
@@ -51,33 +47,38 @@ type Config struct {
 		Providers []string `yaml:"providers"` // e.g. ["openai", "google", "anthropic"]
 	} `yaml:"proxy"`
 	Worker struct {
-		BatchSize    int `yaml:"batch_size"`
+		BatchSize    int    `yaml:"batch_size"`
 		FlushInterval string `yaml:"flush_interval"`
 	} `yaml:"worker"`
 }
 
 func main() {
-	zerolog.TimeFieldFormat = zerolog.TimeFormatUnix
-	log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr})
+	// Set up structured logging to stderr.
+	logger := slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{
+		Level: slog.LevelInfo,
+	}))
+	slog.SetDefault(logger)
 
 	cfg, err := loadConfig()
 	if err != nil {
-		log.Fatal().Err(err).Msg("failed to load config")
+		slog.Error("failed to load config", "error", err)
+		os.Exit(1)
 	}
 
 	// Initialize storage backend.
-	store, err := initStorage(cfg)
+	reader, writers, closeFn, err := initStorage(cfg)
 	if err != nil {
-		log.Fatal().Err(err).Msg("failed to initialize storage")
+		slog.Error("failed to initialize storage", "error", err)
+		os.Exit(1)
 	}
-	defer store.Close()
-	log.Info().Str("backend", cfg.Storage.Backend).Msg("storage initialized")
+	defer closeFn()
+	slog.Info("storage initialized", "backend", cfg.Storage.Backend, "sinks", len(writers))
 
 	// Initialize cost calculator.
 	calc := costcalc.New()
 
-	// Start the in-process span processor (replaces the separate worker).
-	processor := NewSpanProcessor(store, calc, cfg.Worker.BatchSize)
+	// Start the in-process span processor (fan-out to all writers).
+	processor := NewSpanProcessor(writers, calc, cfg.Worker.BatchSize)
 	go processor.Run(context.Background())
 	defer processor.Stop()
 
@@ -86,7 +87,7 @@ func main() {
 
 	// Health check.
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
-		if err := store.Ping(r.Context()); err != nil {
+		if err := reader.Ping(r.Context()); err != nil {
 			w.WriteHeader(http.StatusServiceUnavailable)
 			fmt.Fprintf(w, `{"status": "error", "detail": %q}`, err.Error())
 			return
@@ -97,7 +98,7 @@ func main() {
 
 	// Register ConnectRPC service handlers.
 	tracePath, traceH := candelav1connect.NewTraceServiceHandler(
-		connecthandlers.NewTraceHandler(store))
+		connecthandlers.NewTraceHandler(reader))
 	mux.Handle(tracePath, traceH)
 
 	ingestionPath, ingestionH := candelav1connect.NewIngestionServiceHandler(
@@ -105,14 +106,13 @@ func main() {
 	mux.Handle(ingestionPath, ingestionH)
 
 	dashboardPath, dashboardH := candelav1connect.NewDashboardServiceHandler(
-		connecthandlers.NewDashboardHandler(store))
+		connecthandlers.NewDashboardHandler(reader))
 	mux.Handle(dashboardPath, dashboardH)
 
-	log.Info().
-		Str("trace", tracePath).
-		Str("ingestion", ingestionPath).
-		Str("dashboard", dashboardPath).
-		Msg("ConnectRPC services registered")
+	slog.Info("ConnectRPC services registered",
+		"trace", tracePath,
+		"ingestion", ingestionPath,
+		"dashboard", dashboardPath)
 
 	// Register LLM proxy routes (selective activation).
 	if cfg.Proxy.Enabled {
@@ -146,9 +146,9 @@ func main() {
 			for _, p := range activeProviders {
 				names = append(names, "/proxy/"+p.Name+"/")
 			}
-			log.Info().Strs("routes", names).Msg("🔀 LLM proxy enabled")
+			slog.Info("🔀 LLM proxy enabled", "routes", names)
 		} else {
-			log.Warn().Msg("proxy enabled but no valid providers configured")
+			slog.Warn("proxy enabled but no valid providers configured")
 		}
 	}
 
@@ -163,44 +163,49 @@ func main() {
 	defer stop()
 
 	go func() {
-		log.Info().Str("addr", addr).Msg("🕯️ Candela server starting")
+		slog.Info("🕯️ Candela server starting", "addr", addr)
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Fatal().Err(err).Msg("server error")
+			slog.Error("server error", "error", err)
+			os.Exit(1)
 		}
 	}()
 
 	<-ctx.Done()
-	log.Info().Msg("shutting down...")
+	slog.Info("shutting down...")
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
 	processor.Stop()
 	if err := srv.Shutdown(shutdownCtx); err != nil {
-		log.Error().Err(err).Msg("shutdown error")
+		slog.Error("shutdown error", "error", err)
 	}
-	log.Info().Msg("server stopped")
+	slog.Info("server stopped")
 }
 
-func initStorage(cfg *Config) (storage.TraceStore, error) {
+// initStorage creates the storage backend and returns a reader (for queries)
+// and a slice of writers (for the processor fan-out). The closeFn handles cleanup.
+func initStorage(cfg *Config) (storage.SpanReader, []storage.SpanWriter, func(), error) {
 	switch cfg.Storage.Backend {
-	case "sqlite", "":
-		return sqlitestore.New(sqlitestore.Config{
-			Path: cfg.Storage.SQLite.Path,
-		})
-	case "clickhouse":
-		s, err := chstore.New(chstore.Config{
-			Addr:     cfg.Storage.ClickHouse.Addr,
-			Database: cfg.Storage.ClickHouse.Database,
-			Username: cfg.Storage.ClickHouse.Username,
-			Password: cfg.Storage.ClickHouse.Password,
+	case "duckdb":
+		store, err := duckdbstore.New(duckdbstore.Config{
+			Path: cfg.Storage.DuckDB.Path,
 		})
 		if err != nil {
-			return nil, err
+			return nil, nil, nil, err
 		}
-		return s, s.Migrate(context.Background())
+		// DuckDB implements both SpanReader and SpanWriter.
+		return store, []storage.SpanWriter{store}, func() { store.Close() }, nil
+	case "sqlite":
+		store, err := sqlitestore.New(sqlitestore.Config{
+			Path: cfg.Storage.SQLite.Path,
+		})
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		return store, []storage.SpanWriter{store}, func() { store.Close() }, nil
 	default:
-		return nil, fmt.Errorf("unknown storage backend: %s", cfg.Storage.Backend)
+		return nil, nil, nil, fmt.Errorf("unknown storage backend: %s", cfg.Storage.Backend)
 	}
 }
 
@@ -212,11 +217,11 @@ func loadConfig() (*Config, error) {
 
 	data, err := os.ReadFile(cfgPath)
 	if err != nil {
-		// No config file — use defaults (SQLite, port 8080).
-		log.Warn().Str("path", cfgPath).Msg("config file not found, using defaults")
+		// No config file — use defaults (DuckDB, port 8080).
+		slog.Warn("config file not found, using defaults", "path", cfgPath)
 		cfg := &Config{}
 		cfg.Server.Port = 8080
-		cfg.Storage.Backend = "sqlite"
+		cfg.Storage.Backend = "duckdb"
 		return cfg, nil
 	}
 
@@ -229,7 +234,7 @@ func loadConfig() (*Config, error) {
 		cfg.Server.Port = 8080
 	}
 	if cfg.Storage.Backend == "" {
-		cfg.Storage.Backend = "sqlite"
+		cfg.Storage.Backend = "duckdb"
 	}
 
 	return &cfg, nil

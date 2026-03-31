@@ -121,6 +121,158 @@ test.describe("Traces", () => {
 });
 
 // ──────────────────────────────────────────
+// Trace Detail (Waterfall)
+// ──────────────────────────────────────────
+
+test.describe("Trace Waterfall", () => {
+  const mockTrace = {
+    trace: {
+      traceId: "abc123def456",
+      startTime: "2024-03-31T00:00:00Z",
+      endTime: "2024-03-31T00:00:01.500Z",
+      duration: "1.5s",
+      projectId: "proj-1",
+      environment: "production",
+      spanCount: 3,
+      totalTokens: "2500",
+      totalCostUsd: 0.0125,
+      rootSpanName: "chat_completion",
+      spans: [
+        {
+          spanId: "span-root",
+          traceId: "abc123def456",
+          parentSpanId: "",
+          name: "chat_completion",
+          kind: "SPAN_KIND_AGENT",
+          status: "SPAN_STATUS_OK",
+          statusMessage: "",
+          startTime: "2024-03-31T00:00:00Z",
+          endTime: "2024-03-31T00:00:01.500Z",
+          duration: "1.5s",
+          attributes: [],
+          events: [],
+          projectId: "proj-1",
+          environment: "production",
+          serviceName: "my-app",
+        },
+        {
+          spanId: "span-llm",
+          traceId: "abc123def456",
+          parentSpanId: "span-root",
+          name: "gpt-4o-mini",
+          kind: "SPAN_KIND_LLM",
+          status: "SPAN_STATUS_OK",
+          statusMessage: "",
+          startTime: "2024-03-31T00:00:00.100Z",
+          endTime: "2024-03-31T00:00:01.200Z",
+          duration: "1.1s",
+          genAi: {
+            model: "gpt-4o-mini",
+            provider: "openai",
+            inputTokens: "1500",
+            outputTokens: "1000",
+            totalTokens: "2500",
+            costUsd: 0.0125,
+            temperature: 0.7,
+            inputContent: "Hello, how are you?",
+            outputContent: "I'm doing great, thanks for asking!",
+          },
+          attributes: [
+            { key: "gen_ai.system", stringValue: "openai" },
+          ],
+          events: [],
+          projectId: "proj-1",
+          environment: "production",
+          serviceName: "my-app",
+        },
+        {
+          spanId: "span-tool",
+          traceId: "abc123def456",
+          parentSpanId: "span-root",
+          name: "search_web",
+          kind: "SPAN_KIND_TOOL",
+          status: "SPAN_STATUS_OK",
+          statusMessage: "",
+          startTime: "2024-03-31T00:00:00.050Z",
+          endTime: "2024-03-31T00:00:00.090Z",
+          duration: "0.040s",
+          tool: {
+            toolName: "search_web",
+            toolInput: '{"query": "weather today"}',
+            toolOutput: '{"result": "sunny, 72°F"}',
+          },
+          attributes: [],
+          events: [],
+          projectId: "proj-1",
+          environment: "production",
+          serviceName: "my-app",
+        },
+      ],
+    },
+  };
+
+  test("renders waterfall with span tree", async ({ page }) => {
+    await mockConnectRPC(page, "/candela.v1.TraceService/GetTrace", mockTrace);
+    await page.goto("/traces/abc123def456");
+
+    // Summary bar
+    await expect(page.locator(".trace-summary-value").first()).toBeVisible();
+    await expect(page.locator(".trace-summary-item").filter({ hasText: "Duration" }).locator(".trace-summary-value")).toHaveText("1500ms");
+    await expect(page.locator("text=$0.0125")).toBeVisible();
+
+    // Waterfall rows
+    await expect(page.locator(".waterfall-row")).toHaveCount(3);
+
+    // Span kind badges
+    await expect(page.locator(".waterfall-kind").filter({ hasText: "AGENT" })).toBeVisible();
+    await expect(page.locator(".waterfall-kind").filter({ hasText: "LLM" })).toBeVisible();
+    await expect(page.locator(".waterfall-kind").filter({ hasText: "TOOL" })).toBeVisible();
+  });
+
+  test("shows span detail on click", async ({ page }) => {
+    await mockConnectRPC(page, "/candela.v1.TraceService/GetTrace", mockTrace);
+    await page.goto("/traces/abc123def456");
+
+    // Click the LLM span
+    await page.locator(".waterfall-row").nth(2).click();
+
+    // Detail panel should appear
+    await expect(page.locator(".span-detail")).toBeVisible();
+    await expect(page.locator(".span-detail h3")).toContainText("gpt-4o-mini");
+
+    // GenAI section
+    await expect(page.locator(".span-meta-value").filter({ hasText: "openai" })).toBeVisible();
+    await expect(page.locator("text=1,500")).toBeVisible(); // input tokens
+  });
+
+  test("shows prompt and completion content", async ({ page }) => {
+    await mockConnectRPC(page, "/candela.v1.TraceService/GetTrace", mockTrace);
+    await page.goto("/traces/abc123def456");
+
+    // Click the LLM span
+    await page.locator(".waterfall-row").nth(2).click();
+
+    // Prompt & completion
+    await expect(page.locator("text=Hello, how are you?")).toBeVisible();
+    await expect(page.locator("text=I'm doing great, thanks for asking!")).toBeVisible();
+  });
+
+  test("shows back button that navigates to traces list", async ({ page }) => {
+    await mockConnectRPC(page, "/candela.v1.TraceService/GetTrace", mockTrace);
+    await page.goto("/traces/abc123def456");
+
+    await expect(page.locator("text=← Back")).toBeVisible();
+  });
+
+  test("shows error when backend is down", async ({ page }) => {
+    await page.goto("/traces/nonexistent");
+    await expect(
+      page.locator(".card-title").filter({ hasText: /unavailable|error/i })
+    ).toBeVisible();
+  });
+});
+
+// ──────────────────────────────────────────
 // Projects — with mocked ConnectRPC
 // ──────────────────────────────────────────
 

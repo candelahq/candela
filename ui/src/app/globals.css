@@ -435,3 +435,311 @@ tr:hover td {
   font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
   font-size: 12px;
 }
+
+/* ──────────────────────────────────────────
+   Trace Waterfall
+   ────────────────────────────────────────── */
+
+/* Summary bar */
+.trace-summary-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 24px;
+  padding: 16px 20px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  margin-bottom: 16px;
+}
+
+.trace-summary-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.trace-summary-label {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+}
+
+.trace-summary-value {
+  font-size: 16px;
+  font-weight: 600;
+}
+
+/* Split layout */
+.waterfall-split {
+  display: flex;
+  gap: 16px;
+  min-height: 400px;
+}
+
+.waterfall-panel {
+  flex: 1;
+  min-width: 0;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.detail-panel {
+  width: 420px;
+  flex-shrink: 0;
+  overflow-y: auto;
+  max-height: calc(100vh - 200px);
+}
+
+/* Waterfall header */
+.waterfall-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+/* Time ruler */
+.waterfall-ruler {
+  position: relative;
+  height: 24px;
+  border-bottom: 1px solid var(--border-subtle);
+  margin-left: 260px;
+  margin-right: 16px;
+  background: repeating-linear-gradient(
+    90deg,
+    var(--border-subtle) 0px,
+    var(--border-subtle) 1px,
+    transparent 1px,
+    transparent 25%
+  );
+}
+
+.waterfall-ruler-label {
+  position: absolute;
+  top: 4px;
+  font-size: 10px;
+  color: var(--text-muted);
+  font-family: 'SF Mono', monospace;
+}
+
+/* Waterfall body */
+.waterfall-body {
+  flex: 1;
+  overflow-y: auto;
+}
+
+/* Span row */
+.waterfall-row {
+  display: flex;
+  height: 36px;
+  border-bottom: 1px solid var(--border-subtle);
+  cursor: pointer;
+  transition: background 0.1s ease;
+}
+
+.waterfall-row:hover {
+  background: var(--bg-hover);
+}
+
+.waterfall-row-selected {
+  background: var(--accent-dim) !important;
+  border-left: 2px solid var(--accent);
+}
+
+.waterfall-row:last-child {
+  border-bottom: none;
+}
+
+/* Span label (left side) */
+.waterfall-label {
+  width: 260px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  overflow: hidden;
+  border-right: 1px solid var(--border-subtle);
+}
+
+.waterfall-connector {
+  width: 8px;
+  height: 1px;
+  background: var(--border);
+  flex-shrink: 0;
+}
+
+.waterfall-kind {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 1px 5px;
+  border: 1px solid;
+  border-radius: 3px;
+  flex-shrink: 0;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.waterfall-name {
+  font-size: 12px;
+  font-weight: 450;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--text-primary);
+}
+
+/* Waterfall bar (right side) */
+.waterfall-bar-container {
+  flex: 1;
+  position: relative;
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  padding: 0 16px;
+}
+
+.waterfall-bar {
+  position: absolute;
+  height: 14px;
+  border-radius: 3px;
+  opacity: 0.7;
+  min-width: 2px;
+  transition: opacity 0.15s ease;
+}
+
+.waterfall-row:hover .waterfall-bar {
+  opacity: 1;
+}
+
+.waterfall-duration {
+  position: absolute;
+  font-size: 10px;
+  color: var(--text-muted);
+  font-family: 'SF Mono', monospace;
+  white-space: nowrap;
+}
+
+/* ──────────────────────────────────────────
+   Span Detail Panel
+   ────────────────────────────────────────── */
+
+.span-detail {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  padding: 20px;
+}
+
+.span-detail-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 16px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.span-detail-header h3 {
+  font-size: 15px;
+  font-weight: 600;
+  word-break: break-all;
+}
+
+.span-meta-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.span-meta-item {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.span-meta-label {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+}
+
+.span-meta-value {
+  font-size: 13px;
+  color: var(--text-primary);
+}
+
+.span-section {
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.span-section h4 {
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 12px;
+}
+
+/* Content blocks (prompt/completion) */
+.span-content-block {
+  margin-top: 12px;
+}
+
+.span-content-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  margin-bottom: 6px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.span-content-pre {
+  background: var(--bg-primary);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  padding: 12px;
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 300px;
+  overflow-y: auto;
+  color: var(--text-secondary);
+}
+
+/* Attribute table */
+.span-attr-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.span-attr-table td {
+  padding: 6px 8px;
+  font-size: 12px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.span-attr-key {
+  color: var(--accent);
+  width: 40%;
+  word-break: break-all;
+}
+
+.span-attr-val {
+  color: var(--text-secondary);
+  word-break: break-all;
+}
+

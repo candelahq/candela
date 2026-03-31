@@ -225,3 +225,58 @@ type TraceStore interface {
 	SpanWriter
 	SpanReader
 }
+
+// --- Project & API Key Management ---
+
+// Project is a top-level organizational unit in Candela.
+type Project struct {
+	ID          string    `json:"id"`
+	Name        string    `json:"name"`
+	Description string    `json:"description,omitempty"`
+	Environment string    `json:"environment,omitempty"` // default env for all spans in the project
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
+}
+
+// APIKey authenticates ingestion and queries for a project.
+type APIKey struct {
+	ID        string    `json:"id"`
+	ProjectID string    `json:"project_id"`
+	Name      string    `json:"name"`
+	KeyHash   string    `json:"-"`         // bcrypt hash (never exposed)
+	KeyPrefix string    `json:"key_prefix"` // first 8 chars for identification
+	Active    bool      `json:"active"`
+	CreatedAt time.Time `json:"created_at"`
+	ExpiresAt time.Time `json:"expires_at,omitempty"`
+}
+
+// ProjectStore manages projects and API keys.
+type ProjectStore interface {
+	// CreateProject creates a new project.
+	CreateProject(ctx context.Context, p Project) (*Project, error)
+
+	// GetProject retrieves a project by ID.
+	GetProject(ctx context.Context, id string) (*Project, error)
+
+	// ListProjects returns all projects.
+	ListProjects(ctx context.Context, limit, offset int) ([]Project, int, error)
+
+	// UpdateProject updates a project's mutable fields (name, description, environment).
+	UpdateProject(ctx context.Context, p Project) (*Project, error)
+
+	// DeleteProject removes a project and its API keys.
+	DeleteProject(ctx context.Context, id string) error
+
+	// CreateAPIKey creates a new API key for a project.
+	// Returns the full key only at creation time.
+	CreateAPIKey(ctx context.Context, key APIKey, fullKey string) (*APIKey, error)
+
+	// ListAPIKeys returns all keys for a project.
+	ListAPIKeys(ctx context.Context, projectID string) ([]APIKey, error)
+
+	// RevokeAPIKey deactivates an API key.
+	RevokeAPIKey(ctx context.Context, id string) error
+
+	// ValidateAPIKey checks a raw key against stored hashes. Returns the key record if valid.
+	ValidateAPIKey(ctx context.Context, rawKey string) (*APIKey, error)
+}

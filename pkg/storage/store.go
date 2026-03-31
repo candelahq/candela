@@ -44,53 +44,53 @@ const (
 
 // GenAIAttributes holds LLM-specific attributes.
 type GenAIAttributes struct {
-	Model        string  `json:"model,omitempty"`
-	Provider     string  `json:"provider,omitempty"`
-	InputTokens  int64   `json:"input_tokens,omitempty"`
-	OutputTokens int64   `json:"output_tokens,omitempty"`
-	TotalTokens  int64   `json:"total_tokens,omitempty"`
-	CostUSD      float64 `json:"cost_usd,omitempty"`
-	Temperature  float64 `json:"temperature,omitempty"`
-	MaxTokens    int64   `json:"max_tokens,omitempty"`
-	TopP         float64 `json:"top_p,omitempty"`
-	InputContent string  `json:"input_content,omitempty"`
-	OutputContent string `json:"output_content,omitempty"`
+	Model         string  `json:"model,omitempty"`
+	Provider      string  `json:"provider,omitempty"`
+	InputTokens   int64   `json:"input_tokens,omitempty"`
+	OutputTokens  int64   `json:"output_tokens,omitempty"`
+	TotalTokens   int64   `json:"total_tokens,omitempty"`
+	CostUSD       float64 `json:"cost_usd,omitempty"`
+	Temperature   float64 `json:"temperature,omitempty"`
+	MaxTokens     int64   `json:"max_tokens,omitempty"`
+	TopP          float64 `json:"top_p,omitempty"`
+	InputContent  string  `json:"input_content,omitempty"`
+	OutputContent string  `json:"output_content,omitempty"`
 }
 
 // Span represents a single span in the storage layer.
 type Span struct {
-	SpanID       string            `json:"span_id"`
-	TraceID      string            `json:"trace_id"`
-	ParentSpanID string            `json:"parent_span_id,omitempty"`
-	Name         string            `json:"name"`
-	Kind         SpanKind          `json:"kind"`
-	Status       SpanStatus        `json:"status"`
-	StatusMessage string           `json:"status_message,omitempty"`
-	StartTime    time.Time         `json:"start_time"`
-	EndTime      time.Time         `json:"end_time"`
-	Duration     time.Duration     `json:"duration"`
-	GenAI        *GenAIAttributes  `json:"gen_ai,omitempty"`
-	Attributes   map[string]string `json:"attributes,omitempty"`
-	ProjectID    string            `json:"project_id"`
-	Environment  string            `json:"environment,omitempty"`
-	ServiceName  string            `json:"service_name,omitempty"`
+	SpanID        string            `json:"span_id"`
+	TraceID       string            `json:"trace_id"`
+	ParentSpanID  string            `json:"parent_span_id,omitempty"`
+	Name          string            `json:"name"`
+	Kind          SpanKind          `json:"kind"`
+	Status        SpanStatus        `json:"status"`
+	StatusMessage string            `json:"status_message,omitempty"`
+	StartTime     time.Time         `json:"start_time"`
+	EndTime       time.Time         `json:"end_time"`
+	Duration      time.Duration     `json:"duration"`
+	GenAI         *GenAIAttributes  `json:"gen_ai,omitempty"`
+	Attributes    map[string]string `json:"attributes,omitempty"`
+	ProjectID     string            `json:"project_id"`
+	Environment   string            `json:"environment,omitempty"`
+	ServiceName   string            `json:"service_name,omitempty"`
 }
 
 // TraceSummary is a lightweight summary for list views.
 type TraceSummary struct {
-	TraceID         string     `json:"trace_id"`
-	StartTime       time.Time  `json:"start_time"`
+	TraceID         string        `json:"trace_id"`
+	StartTime       time.Time     `json:"start_time"`
 	Duration        time.Duration `json:"duration"`
-	RootSpanName    string     `json:"root_span_name"`
-	ProjectID       string     `json:"project_id"`
-	Environment     string     `json:"environment"`
-	SpanCount       int        `json:"span_count"`
-	LLMCallCount    int        `json:"llm_call_count"`
-	TotalTokens     int64      `json:"total_tokens"`
-	TotalCostUSD    float64    `json:"total_cost_usd"`
-	Status          SpanStatus `json:"status"`
-	PrimaryModel    string     `json:"primary_model"`
-	PrimaryProvider string     `json:"primary_provider"`
+	RootSpanName    string        `json:"root_span_name"`
+	ProjectID       string        `json:"project_id"`
+	Environment     string        `json:"environment"`
+	SpanCount       int           `json:"span_count"`
+	LLMCallCount    int           `json:"llm_call_count"`
+	TotalTokens     int64         `json:"total_tokens"`
+	TotalCostUSD    float64       `json:"total_cost_usd"`
+	Status          SpanStatus    `json:"status"`
+	PrimaryModel    string        `json:"primary_model"`
+	PrimaryProvider string        `json:"primary_provider"`
 }
 
 // Trace is a complete trace with all spans.
@@ -152,14 +152,14 @@ type SpanResult struct {
 
 // UsageSummary holds aggregated usage metrics.
 type UsageSummary struct {
-	TotalTraces      int64
-	TotalSpans       int64
-	TotalLLMCalls    int64
-	TotalInputTokens int64
+	TotalTraces       int64
+	TotalSpans        int64
+	TotalLLMCalls     int64
+	TotalInputTokens  int64
 	TotalOutputTokens int64
-	TotalCostUSD     float64
-	AvgLatencyMs     float64
-	ErrorRate        float64
+	TotalCostUSD      float64
+	AvgLatencyMs      float64
+	ErrorRate         float64
 }
 
 // UsageQuery defines filters for usage summary queries.
@@ -243,7 +243,7 @@ type APIKey struct {
 	ID        string    `json:"id"`
 	ProjectID string    `json:"project_id"`
 	Name      string    `json:"name"`
-	KeyHash   string    `json:"-"`         // bcrypt hash (never exposed)
+	KeyHash   string    `json:"-"`          // bcrypt hash (never exposed)
 	KeyPrefix string    `json:"key_prefix"` // first 8 chars for identification
 	Active    bool      `json:"active"`
 	CreatedAt time.Time `json:"created_at"`

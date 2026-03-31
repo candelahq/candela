@@ -6,8 +6,8 @@ import (
 	"time"
 
 	connect "connectrpc.com/connect"
-	v1 "github.com/candelahq/candela/gen/go/candela/v1"
 	typespb "github.com/candelahq/candela/gen/go/candela/types"
+	v1 "github.com/candelahq/candela/gen/go/candela/v1"
 	"github.com/candelahq/candela/pkg/storage"
 	"google.golang.org/protobuf/types/known/durationpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
@@ -102,9 +102,9 @@ func (h *TraceHandler) SearchSpans(
 	msg := req.Msg
 
 	q := storage.SpanQuery{
-		ProjectID: msg.ProjectId,
-		Kind:      storage.SpanKind(msg.Kind),
-		Model:     msg.Model,
+		ProjectID:    msg.ProjectId,
+		Kind:         storage.SpanKind(msg.Kind),
+		Model:        msg.Model,
 		NameContains: msg.NameContains,
 	}
 
@@ -183,16 +183,16 @@ func spanToProto(s *storage.Span) *typespb.Span {
 
 	if s.GenAI != nil {
 		ps.GenAi = &typespb.GenAIAttributes{
-			Model:          s.GenAI.Model,
-			Provider:       s.GenAI.Provider,
-			InputTokens:    s.GenAI.InputTokens,
-			OutputTokens:   s.GenAI.OutputTokens,
-			TotalTokens:    s.GenAI.TotalTokens,
-			CostUsd:        s.GenAI.CostUSD,
-			Temperature:    s.GenAI.Temperature,
-			MaxTokens:      s.GenAI.MaxTokens,
-			InputContent:   s.GenAI.InputContent,
-			OutputContent:  s.GenAI.OutputContent,
+			Model:         s.GenAI.Model,
+			Provider:      s.GenAI.Provider,
+			InputTokens:   s.GenAI.InputTokens,
+			OutputTokens:  s.GenAI.OutputTokens,
+			TotalTokens:   s.GenAI.TotalTokens,
+			CostUsd:       s.GenAI.CostUSD,
+			Temperature:   s.GenAI.Temperature,
+			MaxTokens:     s.GenAI.MaxTokens,
+			InputContent:  s.GenAI.InputContent,
+			OutputContent: s.GenAI.OutputContent,
 		}
 	}
 

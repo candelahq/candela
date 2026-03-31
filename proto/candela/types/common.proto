@@ -2,9 +2,9 @@ syntax = "proto3";
 
 package candela.types;
 
-option go_package = "github.com/candelahq/candela/gen/go/candela/types";
-
 import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/candelahq/candela/gen/go/candela/types";
 
 // Pagination request parameters.
 message PaginationRequest {

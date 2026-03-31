@@ -80,9 +80,9 @@ func TestSetPricing(t *testing.T) {
 	calc := New()
 
 	calc.SetPricing(ModelPricing{
-		Provider:        "custom",
-		Model:           "my-model",
-		InputPerMillion: 1.0,
+		Provider:         "custom",
+		Model:            "my-model",
+		InputPerMillion:  1.0,
 		OutputPerMillion: 2.0,
 	})
 

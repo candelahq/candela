@@ -459,4 +459,3 @@ func TestCircuitBreaker_SkipsSpanOnOpen(t *testing.T) {
 		t.Errorf("expected fewer than 6 spans (circuit should skip some), got %d", len(spans))
 	}
 }
-

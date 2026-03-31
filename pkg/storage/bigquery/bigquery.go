@@ -80,30 +80,30 @@ type AttributeKV struct {
 
 // spanRow is the BigQuery row schema for a span.
 type spanRow struct {
-	SpanID        string         `bigquery:"span_id"`
-	TraceID       string         `bigquery:"trace_id"`
-	ParentSpanID  string         `bigquery:"parent_span_id"`
-	Name          string         `bigquery:"name"`
-	Kind          int            `bigquery:"kind"`
-	Status        int            `bigquery:"status"`
-	StatusMessage string         `bigquery:"status_message"`
-	StartTime     time.Time      `bigquery:"start_time"`
-	EndTime       time.Time      `bigquery:"end_time"`
-	DurationNs    int64          `bigquery:"duration_ns"`
-	ProjectID     string         `bigquery:"project_id"`
-	Environment   string         `bigquery:"environment"`
-	ServiceName   string         `bigquery:"service_name"`
-	GenAIModel    string         `bigquery:"gen_ai_model"`
-	GenAIProvider string         `bigquery:"gen_ai_provider"`
-	InputTokens   int64          `bigquery:"gen_ai_input_tokens"`
-	OutputTokens  int64          `bigquery:"gen_ai_output_tokens"`
-	TotalTokens   int64          `bigquery:"gen_ai_total_tokens"`
-	CostUSD       float64        `bigquery:"gen_ai_cost_usd"`
-	Temperature   float64        `bigquery:"gen_ai_temperature"`
-	MaxTokens     int64          `bigquery:"gen_ai_max_tokens"`
-	InputContent  string         `bigquery:"gen_ai_input_content"`
-	OutputContent string         `bigquery:"gen_ai_output_content"`
-	Attributes    []AttributeKV  `bigquery:"attributes"`
+	SpanID        string        `bigquery:"span_id"`
+	TraceID       string        `bigquery:"trace_id"`
+	ParentSpanID  string        `bigquery:"parent_span_id"`
+	Name          string        `bigquery:"name"`
+	Kind          int           `bigquery:"kind"`
+	Status        int           `bigquery:"status"`
+	StatusMessage string        `bigquery:"status_message"`
+	StartTime     time.Time     `bigquery:"start_time"`
+	EndTime       time.Time     `bigquery:"end_time"`
+	DurationNs    int64         `bigquery:"duration_ns"`
+	ProjectID     string        `bigquery:"project_id"`
+	Environment   string        `bigquery:"environment"`
+	ServiceName   string        `bigquery:"service_name"`
+	GenAIModel    string        `bigquery:"gen_ai_model"`
+	GenAIProvider string        `bigquery:"gen_ai_provider"`
+	InputTokens   int64         `bigquery:"gen_ai_input_tokens"`
+	OutputTokens  int64         `bigquery:"gen_ai_output_tokens"`
+	TotalTokens   int64         `bigquery:"gen_ai_total_tokens"`
+	CostUSD       float64       `bigquery:"gen_ai_cost_usd"`
+	Temperature   float64       `bigquery:"gen_ai_temperature"`
+	MaxTokens     int64         `bigquery:"gen_ai_max_tokens"`
+	InputContent  string        `bigquery:"gen_ai_input_content"`
+	OutputContent string        `bigquery:"gen_ai_output_content"`
+	Attributes    []AttributeKV `bigquery:"attributes"`
 }
 
 func spanToRow(span storage.Span) spanRow {
@@ -438,14 +438,14 @@ func (s *Store) GetUsageSummary(ctx context.Context, uq storage.UsageQuery) (*st
 
 	var summary storage.UsageSummary
 	var row struct {
-		TotalTraces      int64   `bigquery:"total_traces"`
-		TotalSpans       int64   `bigquery:"total_spans"`
-		TotalLLMCalls    int64   `bigquery:"total_llm_calls"`
-		TotalInputTokens int64   `bigquery:"total_input_tokens"`
-		TotalOutputTokens int64  `bigquery:"total_output_tokens"`
-		TotalTokens      int64   `bigquery:"total_tokens"`
-		TotalCostUSD     float64 `bigquery:"total_cost_usd"`
-		AvgDurationNs    float64 `bigquery:"avg_duration_ns"`
+		TotalTraces       int64   `bigquery:"total_traces"`
+		TotalSpans        int64   `bigquery:"total_spans"`
+		TotalLLMCalls     int64   `bigquery:"total_llm_calls"`
+		TotalInputTokens  int64   `bigquery:"total_input_tokens"`
+		TotalOutputTokens int64   `bigquery:"total_output_tokens"`
+		TotalTokens       int64   `bigquery:"total_tokens"`
+		TotalCostUSD      float64 `bigquery:"total_cost_usd"`
+		AvgDurationNs     float64 `bigquery:"avg_duration_ns"`
 	}
 	if err := it.Next(&row); err != nil && err != iterator.Done {
 		return nil, fmt.Errorf("reading usage: %w", err)

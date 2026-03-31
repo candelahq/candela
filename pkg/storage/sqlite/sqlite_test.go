@@ -278,7 +278,7 @@ func TestSearchSpans(t *testing.T) {
 			Kind: storage.SpanKindLLM, Status: storage.SpanStatusOK,
 			StartTime: now, EndTime: now.Add(time.Second), Duration: time.Second,
 			ProjectID: "proj-1",
-			GenAI: &storage.GenAIAttributes{Model: "gpt-4o", Provider: "openai"},
+			GenAI:     &storage.GenAIAttributes{Model: "gpt-4o", Provider: "openai"},
 		},
 		{
 			SpanID: "s2", TraceID: "t1", Name: "tool.search",

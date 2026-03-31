@@ -2,8 +2,9 @@
 // and creates observability spans. Supports OpenAI, Google Gemini, and Anthropic (via Vertex AI).
 //
 // Usage:
-//   client = OpenAI(base_url="http://localhost:8080/proxy/openai/v1")
-//   client = anthropic.Anthropic(base_url="http://localhost:8080/proxy/anthropic")
+//
+//	client = OpenAI(base_url="http://localhost:8080/proxy/openai/v1")
+//	client = anthropic.Anthropic(base_url="http://localhost:8080/proxy/anthropic")
 //
 // The proxy forwards requests transparently, captures the full exchange,
 // extracts token usage, calculates cost, and stores as a trace.
@@ -32,7 +33,7 @@ type SpanSubmitter interface {
 
 // Provider defines an LLM API provider configuration.
 type Provider struct {
-	Name      string `yaml:"name"`      // "openai", "google", "anthropic"
+	Name        string `yaml:"name"`     // "openai", "google", "anthropic"
 	UpstreamURL string `yaml:"upstream"` // e.g. "https://api.openai.com"
 }
 
@@ -326,10 +327,10 @@ func (p *Proxy) createSpan(
 			OutputContent: truncate(outputContent, 10000),
 		},
 		Attributes: map[string]string{
-			"proxy.upstream":   provider.UpstreamURL,
-			"http.status":      fmt.Sprintf("%d", statusCode),
-			"http.ttfb_ms":     fmt.Sprintf("%d", ttfb.Milliseconds()),
-			"http.request_id":  requestID,
+			"proxy.upstream":  provider.UpstreamURL,
+			"http.status":     fmt.Sprintf("%d", statusCode),
+			"http.ttfb_ms":    fmt.Sprintf("%d", ttfb.Milliseconds()),
+			"http.request_id": requestID,
 		},
 	}
 
@@ -379,11 +380,11 @@ func (p *Proxy) createStreamingSpan(
 			OutputContent: truncate(outputContent, 10000),
 		},
 		Attributes: map[string]string{
-			"proxy.upstream":   provider.UpstreamURL,
-			"proxy.streaming":  "true",
-			"http.ttfb_ms":     fmt.Sprintf("%d", ttfb.Milliseconds()),
-			"llm.ttft_ms":      fmt.Sprintf("%d", ttft.Milliseconds()),
-			"http.request_id":  requestID,
+			"proxy.upstream":  provider.UpstreamURL,
+			"proxy.streaming": "true",
+			"http.ttfb_ms":    fmt.Sprintf("%d", ttfb.Milliseconds()),
+			"llm.ttft_ms":     fmt.Sprintf("%d", ttft.Milliseconds()),
+			"http.request_id": requestID,
 		},
 	}
 

@@ -2,10 +2,10 @@ syntax = "proto3";
 
 package candela.v1;
 
-option go_package = "github.com/candelahq/candela/gen/go/candela/v1";
-
 import "candela/types/common.proto";
 import "candela/types/trace.proto";
+
+option go_package = "github.com/candelahq/candela/gen/go/candela/v1";
 
 // TraceService provides APIs for querying and retrieving traces.
 // Exposed via ConnectRPC for the web UI.
@@ -35,16 +35,16 @@ message ListTracesRequest {
   candela.types.TimeRange time_range = 3;
 
   // Optional filters
-  string model = 10;             // Filter by model name
-  string provider = 11;          // Filter by provider
-  candela.types.SpanStatus status = 12;  // Filter by status
-  string search = 13;            // Free-text search in span names
+  string model = 10; // Filter by model name
+  string provider = 11; // Filter by provider
+  candela.types.SpanStatus status = 12; // Filter by status
+  string search = 13; // Free-text search in span names
 
   // Pagination
   candela.types.PaginationRequest pagination = 20;
 
   // Sort
-  string order_by = 30;          // "start_time", "duration", "total_cost", "total_tokens"
+  string order_by = 30; // "start_time", "duration", "total_cost", "total_tokens"
   bool descending = 31;
 }
 

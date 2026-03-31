@@ -10,9 +10,9 @@ import (
 
 // ModelPricing defines the per-token pricing for a model.
 type ModelPricing struct {
-	Model           string  `yaml:"model" json:"model"`
-	Provider        string  `yaml:"provider" json:"provider"`
-	InputPerMillion float64 `yaml:"input_per_million" json:"input_per_million"`   // USD per 1M input tokens
+	Model            string  `yaml:"model" json:"model"`
+	Provider         string  `yaml:"provider" json:"provider"`
+	InputPerMillion  float64 `yaml:"input_per_million" json:"input_per_million"`   // USD per 1M input tokens
 	OutputPerMillion float64 `yaml:"output_per_million" json:"output_per_million"` // USD per 1M output tokens
 }
 

@@ -118,6 +118,79 @@ test.describe("Traces", () => {
       page.locator(".card-title").filter({ hasText: "Could not load traces" })
     ).toBeVisible();
   });
+
+  test("renders search bar and filter controls", async ({ page }) => {
+    await mockConnectRPC(page, "/candela.v1.TraceService/ListTraces", {
+      traces: [],
+    });
+
+    await page.goto("/traces");
+    await expect(page.locator(".filter-search-input")).toBeVisible();
+    await expect(page.locator(".filter-search-input")).toHaveAttribute(
+      "placeholder",
+      "Search traces by name..."
+    );
+    // Sort dropdown
+    await expect(page.locator(".filter-select")).toBeVisible();
+    // Sort direction button
+    await expect(page.locator(".filter-dir-btn")).toBeVisible();
+  });
+
+  test("opens filter panel on click", async ({ page }) => {
+    await mockConnectRPC(page, "/candela.v1.TraceService/ListTraces", {
+      traces: [],
+    });
+
+    await page.goto("/traces");
+    // Panel should be hidden initially
+    await expect(page.locator(".filter-panel")).not.toBeVisible();
+
+    // Click filters button
+    await page.locator(".btn").filter({ hasText: "Filters" }).click();
+    await expect(page.locator(".filter-panel")).toBeVisible();
+
+    // Should show Model, Provider, Status filters
+    await expect(page.locator(".filter-label").filter({ hasText: "Model" })).toBeVisible();
+    await expect(page.locator(".filter-label").filter({ hasText: "Provider" })).toBeVisible();
+    await expect(page.locator(".filter-label").filter({ hasText: "Status" })).toBeVisible();
+  });
+
+  test("shows filtered empty state", async ({ page }) => {
+    await mockConnectRPC(page, "/candela.v1.TraceService/ListTraces", {
+      traces: [],
+    });
+
+    await page.goto("/traces");
+    // Type in search
+    await page.locator(".filter-search-input").fill("nonexistent-trace");
+    await page.waitForTimeout(400); // wait for debounce
+
+    await expect(page.locator(".empty-state-title")).toHaveText("No traces match filters");
+  });
+
+  test("shows trace count in table header", async ({ page }) => {
+    await mockConnectRPC(page, "/candela.v1.TraceService/ListTraces", {
+      traces: [
+        {
+          traceId: "trace-1",
+          rootSpanName: "chat",
+          primaryModel: "gpt-4o",
+          primaryProvider: "openai",
+          environment: "prod",
+          duration: "0.5s",
+          totalTokens: "100",
+          totalCostUsd: 0.001,
+          status: 1,
+          startTime: "2024-03-31T00:00:00Z",
+          spanCount: 2,
+          llmCallCount: 1,
+        },
+      ],
+    });
+
+    await page.goto("/traces");
+    await expect(page.locator(".table-title")).toHaveText("1 trace");
+  });
 });
 
 // ──────────────────────────────────────────

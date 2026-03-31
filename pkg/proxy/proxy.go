@@ -141,12 +141,13 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, fmt.Sprintf("upstream error: %v", err), http.StatusBadGateway)
 		return
 	}
+	ttfb := time.Since(startTime)
 	defer resp.Body.Close()
 
 	if isStreaming && resp.StatusCode == http.StatusOK {
-		p.handleStreamingResponse(w, r, resp, provider, reqBody, startTime)
+		p.handleStreamingResponse(w, r, resp, provider, reqBody, startTime, ttfb)
 	} else {
-		p.handleStandardResponse(w, r, resp, provider, reqBody, startTime)
+		p.handleStandardResponse(w, r, resp, provider, reqBody, startTime, ttfb)
 	}
 }
 
@@ -154,6 +155,7 @@ func (p *Proxy) handleStandardResponse(
 	w http.ResponseWriter, r *http.Request,
 	resp *http.Response, provider Provider,
 	reqBody []byte, startTime time.Time,
+	ttfb time.Duration,
 ) {
 	// Read the full response.
 	respBody, err := io.ReadAll(resp.Body)
@@ -174,13 +176,14 @@ func (p *Proxy) handleStandardResponse(
 	w.Write(respBody)
 
 	// Create observability span (async — don't block the response).
-	go p.createSpan(r.Context(), provider, reqBody, respBody, startTime, endTime, resp.StatusCode)
+	go p.createSpan(r.Context(), provider, reqBody, respBody, startTime, endTime, resp.StatusCode, ttfb)
 }
 
 func (p *Proxy) handleStreamingResponse(
 	w http.ResponseWriter, r *http.Request,
 	resp *http.Response, provider Provider,
 	reqBody []byte, startTime time.Time,
+	ttfb time.Duration,
 ) {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
@@ -199,10 +202,16 @@ func (p *Proxy) handleStreamingResponse(
 	// Tee the stream: forward to client AND buffer for observability.
 	var streamBuffer bytes.Buffer
 	buf := make([]byte, 4096)
+	var ttft time.Duration
+	isFirstChunk := true
 
 	for {
 		n, err := resp.Body.Read(buf)
 		if n > 0 {
+			if isFirstChunk {
+				ttft = time.Since(startTime)
+				isFirstChunk = false
+			}
 			// Forward to client.
 			w.Write(buf[:n])
 			flusher.Flush()
@@ -218,7 +227,7 @@ func (p *Proxy) handleStreamingResponse(
 	endTime := time.Now()
 
 	// Parse the accumulated stream to extract usage data.
-	go p.createStreamingSpan(r.Context(), provider, reqBody, streamBuffer.Bytes(), startTime, endTime)
+	go p.createStreamingSpan(r.Context(), provider, reqBody, streamBuffer.Bytes(), startTime, endTime, ttfb, ttft)
 }
 
 func (p *Proxy) createSpan(
@@ -226,6 +235,7 @@ func (p *Proxy) createSpan(
 	reqBody, respBody []byte,
 	startTime, endTime time.Time,
 	statusCode int,
+	ttfb time.Duration,
 ) {
 	model, inputContent := extractRequestInfo(provider.Name, reqBody)
 	outputContent, inputTokens, outputTokens := extractResponseInfo(provider.Name, respBody)
@@ -261,6 +271,7 @@ func (p *Proxy) createSpan(
 		Attributes: map[string]string{
 			"proxy.upstream": provider.UpstreamURL,
 			"http.status":    fmt.Sprintf("%d", statusCode),
+			"http.ttfb_ms":   fmt.Sprintf("%d", ttfb.Milliseconds()),
 		},
 	}
 
@@ -278,6 +289,8 @@ func (p *Proxy) createStreamingSpan(
 	ctx context.Context, provider Provider,
 	reqBody, streamData []byte,
 	startTime, endTime time.Time,
+	ttfb time.Duration,
+	ttft time.Duration,
 ) {
 	model, inputContent := extractRequestInfo(provider.Name, reqBody)
 	outputContent, inputTokens, outputTokens := extractStreamingUsage(provider.Name, streamData)
@@ -306,8 +319,10 @@ func (p *Proxy) createStreamingSpan(
 			OutputContent: truncate(outputContent, 10000),
 		},
 		Attributes: map[string]string{
-			"proxy.upstream": provider.UpstreamURL,
+			"proxy.upstream":  provider.UpstreamURL,
 			"proxy.streaming": "true",
+			"http.ttfb_ms":    fmt.Sprintf("%d", ttfb.Milliseconds()),
+			"llm.ttft_ms":     fmt.Sprintf("%d", ttft.Milliseconds()),
 		},
 	}
 

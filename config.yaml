@@ -7,22 +7,27 @@ server:
   port: 8080
 
 storage:
-  backend: "sqlite"  # Options: sqlite (default), clickhouse, bigquery
+  backend: "sqlite"  # Options: sqlite (default), bigquery
   sqlite:
     path: "candela.db"  # Use ":memory:" for ephemeral
-  # clickhouse:
-  #   addr: "localhost:9000"
-  #   database: "candela"
-  #   username: "default"
-  #   password: ""
+  # bigquery:
+  #   project_id: "my-gcp-project"
+  #   dataset: "candela"
+  #   location: "US"
 
 proxy:
   enabled: true
   project_id: "default"
-  # Routes registered:
+  # Specify which providers to enable. If omitted, all providers are enabled.
+  # Valid values: openai, google, anthropic
+  providers:
+    - openai
+    - google
+    - anthropic
+  # Routes registered (only for enabled providers):
   #   /proxy/openai/    → https://api.openai.com
   #   /proxy/google/    → https://generativelanguage.googleapis.com
-  #   /proxy/anthropic/ → https://api.anthropic.com
+  #   /proxy/anthropic/ → Vertex AI (us-central1)
   #
   # Usage:
   #   client = OpenAI(base_url="http://localhost:8080/proxy/openai/v1")

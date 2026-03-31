@@ -1,52 +1,188 @@
-# 🏗️ Architecture Architecture
+# Candela Storage Architecture
 
-Candela is designed to be an **OTel-native LLM observability platform**. This means every piece of data captured internally is stored as an OpenTelemetry-compatible span, even if it comes from the LLM Proxy.
+## Overview
 
-## 1. Dual-Mode Ingestion
+Candela uses a **CQRS (Command Query Responsibility Segregation)** storage architecture. This separates write and read concerns into distinct interfaces, enabling flexible multi-sink configurations.
 
-### A. LLM API Proxy (Zero-Code)
-The proxy is the fastest way to get visibility. It acts as a transparent middleman between your app and the provider.
-- **How it works**: Your app sends requests to `candela:8080/proxy/{provider}` instead of the direct provider URL.
-- **Observability**: Candela captures the request/response, extracts tokens, calculates cost, and creates a "span" in the background before forwarding the response.
-- **Streaming**: For SSE streaming (`stream: true`), Candela uses a tee-like buffer to forward chunks immediately to keep latency low while still capturing the full completion.
+## Interface Design
 
-### B. OTel Agent Mode (Production-Grade)
-For complex apps using frameworks like **ADK** or **LangChain**, you want to see the *entire* trace (e.g., retrieval → embedding → LLM call → tool execution).
-- **How it works**: Use standard OpenTelemetry instrumentation libraries (like `openinference`). Point them to the Candela OTel Collector.
-- **GenAI Processor**: Candela includes a custom OTel Collector distro that enriches generic spans with token-to-USD pricing in real-time.
+```go
+// SpanWriter is a write-only destination for spans.
+type SpanWriter interface {
+    IngestSpans(ctx context.Context, spans []Span) error
+    Ping(ctx context.Context) error
+}
 
----
+// SpanReader is a read-only source for querying spans and traces.
+type SpanReader interface {
+    GetTrace(ctx context.Context, traceID string) (*Trace, error)
+    QueryTraces(ctx context.Context, query TraceQuery) (*TraceResult, error)
+    SearchSpans(ctx context.Context, query SpanQuery) (*SpanResult, error)
+    GetUsageSummary(ctx context.Context, query UsageQuery) (*UsageSummary, error)
+    GetModelBreakdown(ctx context.Context, query UsageQuery) ([]ModelUsage, error)
+    Ping(ctx context.Context) error
+}
 
-## 2. Server Internals
+// TraceStore combines both for backends that support full read/write.
+type TraceStore interface {
+    SpanWriter
+    SpanReader
+}
+```
 
-### Single-Binary Backend
-To simplify self-hosting, Candela merges the ingestion worker and the query API into one Go process.
-- **Span Processor**: Incoming spans (from the Proxy or Collector) go into a high-speed memory channel.
-- **Batching**: Spans are batched by count or time before being flushed to the permanent `TraceStore`.
-- **ConnectRPC**: The API layer uses ConnectRPC, which supports gRPC, gRPC-Web, and a pure JSON/HTTP protocol on a single port.
+## Data Flow
 
----
+```
+                    ┌─────────────┐
+                    │  Proxy /    │
+                    │  ConnectRPC │
+                    └──────┬──────┘
+                           │
+                    ┌──────▼──────┐
+                    │    Span     │
+                    │  Processor  │  ← batches spans, applies cost calc
+                    └──────┬──────┘
+                           │
+              ┌────────────┼────────────┐
+              ▼            ▼            ▼
+        ┌──────────┐ ┌──────────┐ ┌──────────┐
+        │  DuckDB  │ │ BigQuery │ │  Pub/Sub │
+        │ (Writer  │ │ (Writer  │ │ (Writer  │
+        │ + Reader)│ │ + Reader)│ │  Only)   │
+        └──────────┘ └──────────┘ └──────────┘
+              │            │
+              ▼            ▼
+        ┌──────────────────────┐
+        │   Dashboard / API    │  ← reads from one SpanReader
+        │  (ConnectRPC + REST) │
+        └──────────────────────┘
+```
 
-## 3. Storage Backends
+## Storage Backends
 
-Candela uses a pluggable `TraceStore` interface:
+### DuckDB (Default)
 
-| Backend | Best For | Status |
-|---------|----------|--------|
-| **SQLite** | Local dev, small teams, easy setup | ✅ Default |
-| **BigQuery** | Production — serverless, GCP-native, scalable | 📋 Phase 2 |
-| **ClickHouse** | Self-hosted high-volume analytics | ✅ Community |
-| **PostgreSQL** | General purpose, medium scale | 📋 Future |
+**Best for**: Local dev, edge deployments, single-server production.
 
-### SQLite Schema
-For local dev, SQLite is used with a JSONB-like approach to store span attributes, making it extremely flexible for evolving OTel standards.
+- **Driver**: `github.com/duckdb/duckdb-go/v2` (official)
+- **Write API**: DuckDB `Appender` (columnar batch insert, not SQL INSERT)
+- **Schema**: OLAP-optimized — no `PRIMARY KEY` (duplicates rare, handled at query time)
+- **Attributes**: `ARRAY<STRUCT<key VARCHAR, value VARCHAR>>`
+- **File**: Single `.duckdb` file, supports concurrent reads
 
----
+```yaml
+storage:
+  backend: "duckdb"
+  duckdb:
+    path: "candela.duckdb"
+```
 
-## 4. OTel Collector Distro
+### SQLite
 
-Candela provides a custom OTel Collector distribution (`candela-collector`). It includes the **`genai` processor** which:
-1. Detects LLM-specific spans.
-2. Extracts model names and token counts.
-3. Injects `candela.cost_usd` attribute using a built-in pricing table.
-4. Forwards the enriched spans to the Candela backend.
+**Best for**: Lightweight development, embedded testing.
+
+- **Driver**: `modernc.org/sqlite` (pure Go, CGO-free)
+- **Write API**: Batched SQL INSERT with transaction wrapping
+- **Schema**: Standard relational with `PRIMARY KEY`
+- **Attributes**: JSON-serialized `TEXT` column
+
+```yaml
+storage:
+  backend: "sqlite"
+  sqlite:
+    path: "candela.db"  # or ":memory:" for ephemeral
+```
+
+### BigQuery
+
+**Best for**: Production at scale, serverless analytics.
+
+- **Driver**: `cloud.google.com/go/bigquery`
+- **Write API**: BigQuery streaming insert with dedup keys (`trace_id-span_id`)
+- **Schema**: Auto-provisioned with time partitioning (`start_time`, DAY) and clustering (`project_id`, `trace_id`)
+- **Attributes**: `ARRAY<STRUCT<key STRING, value STRING>>`
+- **Auth**: Application Default Credentials (ADC)
+
+```yaml
+storage:
+  backend: "bigquery"
+  bigquery:
+    project_id: "my-gcp-project"
+    dataset: "candela"
+    table: "spans"       # default
+    location: "US"       # default
+```
+
+### Pub/Sub (Sink Only)
+
+**Best for**: Event-driven fan-out to downstream consumers (analytics pipelines, alerting, data lakes).
+
+- **Driver**: `cloud.google.com/go/pubsub`
+- **Format**: JSON serialization with `trace_id`, `span_id`, `project_id` as message attributes
+- **Batching**: 100 messages or 1MB threshold
+- **Ordering**: Not guaranteed (Pub/Sub semantics)
+- **Auth**: Application Default Credentials (ADC)
+- **Note**: Write-only `SpanWriter` — does NOT implement `SpanReader`
+
+```yaml
+sinks:
+  pubsub:
+    enabled: true
+    project_id: "my-gcp-project"
+    topic: "candela-spans"
+```
+
+## Schema Design
+
+All backends share the same logical schema:
+
+| Column | DuckDB | BigQuery | SQLite |
+|--------|--------|----------|--------|
+| span_id | VARCHAR | STRING | TEXT |
+| trace_id | VARCHAR | STRING | TEXT |
+| parent_span_id | VARCHAR | STRING | TEXT |
+| name | VARCHAR | STRING | TEXT |
+| kind | INTEGER | INTEGER | INTEGER |
+| status | INTEGER | INTEGER | INTEGER |
+| status_message | VARCHAR | STRING | TEXT |
+| start_time | TIMESTAMP | TIMESTAMP | TEXT (RFC3339) |
+| end_time | TIMESTAMP | TIMESTAMP | TEXT (RFC3339) |
+| duration_ns | BIGINT | INT64 | INTEGER |
+| project_id | VARCHAR | STRING | TEXT |
+| environment | VARCHAR | STRING | TEXT |
+| service_name | VARCHAR | STRING | TEXT |
+| gen_ai_model | VARCHAR | STRING | TEXT |
+| gen_ai_provider | VARCHAR | STRING | TEXT |
+| gen_ai_input_tokens | BIGINT | INT64 | INTEGER |
+| gen_ai_output_tokens | BIGINT | INT64 | INTEGER |
+| gen_ai_total_tokens | BIGINT | INT64 | INTEGER |
+| gen_ai_cost_usd | DOUBLE | FLOAT64 | REAL |
+| attributes | STRUCT[] | STRUCT[] | TEXT (JSON) |
+
+### Key Design Decisions
+
+1. **No PRIMARY KEY** (DuckDB/BigQuery): OLAP convention. Duplicates are rare in tracing and handled at query time. This enables high-throughput batch ingestion.
+2. **Structured attributes** (DuckDB/BigQuery): `ARRAY<STRUCT<key, value>>` instead of JSON enables efficient per-key filtering with standard SQL.
+3. **Time partitioning** (BigQuery): `start_time` partitioned by DAY reduces scan costs for time-scoped queries.
+4. **Clustering** (BigQuery): `(project_id, trace_id)` optimizes the two most common access patterns.
+
+## CORS Configuration
+
+CORS origins are configurable for frontend development:
+
+```yaml
+cors:
+  allowed_origins:
+    - "http://localhost:3000"   # Next.js dev server
+    - "http://localhost:8080"   # Same-origin
+    # - "*"                     # Allow all (not for production)
+```
+
+Defaults to `localhost:3000` + `localhost:8080` if omitted.
+
+## Adding a New Backend
+
+1. Create `pkg/storage/mybackend/mybackend.go`
+2. Implement `storage.SpanWriter` (minimum) or `storage.TraceStore` (full)
+3. Add config struct and `initStorage` case in `cmd/candela-server/main.go`
+4. For write-only sinks, add to the `sinks` config section instead

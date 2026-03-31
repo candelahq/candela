@@ -1,41 +1,14 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import Link from "next/link";
-import { createClient } from "@connectrpc/connect";
-import { transport } from "@/lib/connect";
-import { DashboardService } from "@/gen/v1/dashboard_service_pb";
-
-interface Stats {
-  totalTraces: string;
-  totalTokens: string;
-  totalCost: string;
-  avgLatency: string;
-  errorRate: string;
-}
+import { useDashboard } from "@/hooks/useDashboard";
 
 export default function DashboardPage() {
-  const [stats, setStats] = useState<Stats | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const { summary, error } = useDashboard();
 
-  useEffect(() => {
-    const client = createClient(DashboardService, transport);
-    client
-      .getUsageSummary({})
-      .then((res) => {
-        const totalTokens = Number(res.totalInputTokens) + Number(res.totalOutputTokens);
-        setStats({
-          totalTraces: Number(res.totalTraces).toLocaleString(),
-          totalTokens: totalTokens.toLocaleString(),
-          totalCost: `$${(res.totalCostUsd || 0).toFixed(2)}`,
-          avgLatency: `${(res.avgLatencyMs || 0).toFixed(0)}ms`,
-          errorRate: `${((res.errorRate || 0) * 100).toFixed(1)}%`,
-        });
-      })
-      .catch((err) => {
-        setError(err.message);
-      });
-  }, []);
+  const totalTokens = summary
+    ? (summary.totalInputTokens + summary.totalOutputTokens).toLocaleString()
+    : "—";
 
   return (
     <>
@@ -70,22 +43,28 @@ export default function DashboardPage() {
         <div className="stats-grid animate-in">
           <div className="card">
             <div className="card-title">Total Traces</div>
-            <div className="card-value">{stats?.totalTraces ?? "—"}</div>
+            <div className="card-value">
+              {summary ? Number(summary.totalTraces).toLocaleString() : "—"}
+            </div>
             <div className="card-subtitle">All time</div>
           </div>
           <div className="card">
             <div className="card-title">Total Tokens</div>
-            <div className="card-value">{stats?.totalTokens ?? "—"}</div>
+            <div className="card-value">{totalTokens}</div>
             <div className="card-subtitle">Input + Output</div>
           </div>
           <div className="card">
             <div className="card-title">Total Cost</div>
-            <div className="card-value">{stats?.totalCost ?? "—"}</div>
+            <div className="card-value">
+              {summary ? `$${(summary.totalCostUsd || 0).toFixed(2)}` : "—"}
+            </div>
             <div className="card-subtitle">Estimated USD</div>
           </div>
           <div className="card">
             <div className="card-title">Avg Latency</div>
-            <div className="card-value">{stats?.avgLatency ?? "—"}</div>
+            <div className="card-value">
+              {summary ? `${(summary.avgLatencyMs || 0).toFixed(0)}ms` : "—"}
+            </div>
             <div className="card-subtitle">Across all models</div>
           </div>
         </div>

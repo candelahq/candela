@@ -31,9 +31,10 @@ For deep observability into agent frameworks (**ADK**, **LangChain**, **CrewAI**
 - **🕯️ OTel-Native**: OTLP is our native language. No proprietary SDKs.
 - **💰 Real-time Cost Tracking**: Automatic token extraction and USD calculation for OpenAI, Google, and Anthropic.
 - **🧪 LLM-as-Judge (Phase 3)**: Automated quality scoring and evaluation rubrics.
-- **🗄️ Pluggable Storage**: **SQLite** for instant local dev; **BigQuery** for serverless production scale.
+- **🗄️ Pluggable Storage**: **DuckDB** for high-performance local/edge; **BigQuery** for serverless production scale; **SQLite** for lightweight dev.
 - **📡 SSE Streaming Support**: Captures full streaming responses without interfering with user latency.
 - **📦 Single-Binary Edge-Ready**: In-process queuing and processing for low-overhead deployments.
+- **🔀 Fan-out Architecture**: CQRS-based design allows writing to multiple sinks simultaneously (e.g., DuckDB + Pub/Sub).
 
 ---
 
@@ -42,21 +43,21 @@ For deep observability into agent frameworks (**ADK**, **LangChain**, **CrewAI**
 You can get Candela running in less than 60 seconds using either a local binary or Docker.
 
 ### Option A: Local Binary (Fastest)
-Ideal for local development. Uses **SQLite** by default.
+Ideal for local development. Uses **DuckDB** by default.
 
 ```bash
 # Clone and enter the nix shell (or ensure Go 1.26 is installed)
 nix develop
 
-# Start the Candela server (defaults to SQLite + Port 8080)
+# Start the Candela server (defaults to DuckDB + Port 8080)
 go run ./cmd/candela-server
 ```
 
 ### Option B: Docker Compose (Full Stack)
-Ideal for testing the full multi-service experience with **ClickHouse**.
+Ideal for testing the full multi-service experience.
 
 ```bash
-# Start all services (server + collector + clickhouse)
+# Start all services (server + collector)
 docker compose -f deploy/docker-compose.yml up
 ```
 
@@ -105,7 +106,10 @@ graph TD
     subgraph "Candela Platform"
         Proxy[LLM API Proxy]
         Server[Go Backend Server]
-        Store[(Trace Store: SQLite/CH/BQ)]
+        Processor[Span Processor<br/>Fan-out to Writers]
+        DuckDB[(DuckDB<br/>SpanWriter + SpanReader)]
+        BQ[(BigQuery<br/>SpanWriter + SpanReader)]
+        PubSub[Pub/Sub<br/>SpanWriter Only]
     end
 
     subgraph "Upstream LLMs"
@@ -120,7 +124,70 @@ graph TD
     Proxy -->|Forward| ANT
     Proxy -->|Forward| OAI
     Proxy -.->|Capture| Server
-    Server -->|Store| Store
+    Server --> Processor
+    Processor -->|Write| DuckDB
+    Processor -.->|Write| BQ
+    Processor -.->|Write| PubSub
+    DuckDB -->|Read| Server
+```
+
+### Storage Architecture (CQRS)
+
+Candela uses a **Command Query Responsibility Segregation** pattern:
+
+| Interface | Purpose | Implementations |
+|-----------|---------|-----------------|
+| `SpanWriter` | Write-only ingestion | DuckDB, SQLite, BigQuery, Pub/Sub |
+| `SpanReader` | Read-only queries | DuckDB, SQLite, BigQuery |
+| `TraceStore` | Convenience (both) | DuckDB, SQLite, BigQuery |
+
+The processor fans out writes to **all configured writers** concurrently. Only one reader is active (the primary backend).
+
+---
+
+## ⚙️ Configuration
+
+Candela is configured via `config.yaml` (or `$CANDELA_CONFIG`):
+
+```yaml
+server:
+  host: "0.0.0.0"
+  port: 8080
+
+storage:
+  backend: "duckdb"  # duckdb | sqlite | bigquery
+  duckdb:
+    path: "candela.duckdb"
+  sqlite:
+    path: "candela.db"
+  bigquery:
+    project_id: "my-gcp-project"
+    dataset: "candela"
+    table: "spans"         # default: "spans"
+    location: "US"         # default: "US"
+
+cors:
+  allowed_origins:
+    - "http://localhost:3000"
+    - "http://localhost:8080"
+
+sinks:
+  pubsub:
+    enabled: false
+    project_id: "my-gcp-project"
+    topic: "candela-spans"
+
+proxy:
+  enabled: true
+  project_id: "default"
+  providers:
+    - openai
+    - google
+    - anthropic
+
+worker:
+  batch_size: 100
+  flush_interval: "2s"
 ```
 
 ---
@@ -128,9 +195,10 @@ graph TD
 ## 🗺️ Roadmap
 
 - **Phase 1: Foundation** ✅ (Ingestion, Proxy, Cost Calc, Docs)
-- **Phase 2: Visual Explorer** 🔜 (Waterfall traces, Cost Dashboards)
-- **Phase 3: Platform & Evaluation** 📋 (Admin Panel, Token Metering, LLM-as-Judge)
-- **Phase 4: Ecosystem & Polish** 📋 (Agent DAGs, Multi-tenant, BigQuery backend)
+- **Phase 2: Storage & Architecture** ✅ (DuckDB, CQRS, BigQuery, Pub/Sub, CORS)
+- **Phase 3: Visual Explorer** 🔜 (Next.js UI, Waterfall Traces, Cost Dashboards)
+- **Phase 4: Platform & Evaluation** 📋 (Admin Panel, Token Metering, LLM-as-Judge)
+- **Phase 5: Ecosystem & Polish** 📋 (Agent DAGs, Multi-tenant, Alerting)
 
 ---
 
@@ -138,13 +206,23 @@ graph TD
 
 ```
 candela/
-├── proto/           # Protobuf definitions (Source of Truth)
-├── gen/             # Generated code (Go, TypeScript, Python)
-├── cmd/             # Binary entry points (Server, CLI)
-├── pkg/             # Core library logic (Proxy, Storage, Cost)
-├── docs/            # Deep-dive documentation
-├── collector/       # Custom OTel Collector distro
-├── ui/              # Next.js web interface (Coming in Phase 2)
+├── proto/                       # Protobuf definitions (Source of Truth)
+├── gen/                         # Generated code (Go, TypeScript, Python)
+├── cmd/candela-server/          # Server entry point
+├── pkg/
+│   ├── storage/                 # Storage interfaces (SpanWriter, SpanReader)
+│   │   ├── duckdb/              # DuckDB driver (default, OLAP-optimized)
+│   │   ├── sqlite/              # SQLite driver (lightweight)
+│   │   ├── bigquery/            # BigQuery driver (production scale)
+│   │   └── pubsub/              # Pub/Sub sink (write-only fan-out)
+│   ├── proxy/                   # LLM API reverse proxy
+│   ├── costcalc/                # Token cost calculation engine
+│   ├── connecthandlers/         # ConnectRPC service handlers
+│   └── ingestion/               # OTel span ingestion
+├── collector/                   # Custom OTel Collector distro
+├── docs/                        # Deep-dive documentation
+├── ui/                          # Next.js web interface (Phase 3)
+└── config.yaml                  # Server configuration
 ```
 ---
 

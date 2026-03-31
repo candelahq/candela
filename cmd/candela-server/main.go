@@ -24,6 +24,7 @@ import (
 	"github.com/candelahq/candela/pkg/storage"
 	bqstore "github.com/candelahq/candela/pkg/storage/bigquery"
 	duckdbstore "github.com/candelahq/candela/pkg/storage/duckdb"
+	"github.com/candelahq/candela/pkg/storage/projectdb"
 	sqlitestore "github.com/candelahq/candela/pkg/storage/sqlite"
 )
 
@@ -119,10 +120,23 @@ func main() {
 		connecthandlers.NewDashboardHandler(reader))
 	mux.Handle(dashboardPath, dashboardH)
 
+	// Initialize project store (separate SQLite DB for relational metadata).
+	projectStore, err := projectdb.New("candela-projects.db")
+	if err != nil {
+		slog.Error("failed to initialize project store", "error", err)
+		os.Exit(1)
+	}
+	defer projectStore.Close()
+
+	projectPath, projectH := candelav1connect.NewProjectServiceHandler(
+		connecthandlers.NewProjectHandler(projectStore))
+	mux.Handle(projectPath, projectH)
+
 	slog.Info("ConnectRPC services registered",
 		"trace", tracePath,
 		"ingestion", ingestionPath,
-		"dashboard", dashboardPath)
+		"dashboard", dashboardPath,
+		"project", projectPath)
 
 	// Register LLM proxy routes (selective activation).
 	if cfg.Proxy.Enabled {

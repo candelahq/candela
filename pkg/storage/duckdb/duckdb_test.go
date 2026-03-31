@@ -392,3 +392,152 @@ func TestBuildTrace_Aggregation(t *testing.T) {
 		t.Errorf("Duration = %v, want 2s", trace.Duration)
 	}
 }
+
+func TestIngestSpans_EmptyAttributes(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+
+	span := storage.Span{
+		SpanID:     "span-empty-attrs",
+		TraceID:    "trace-empty-attrs",
+		Name:       "test.empty",
+		Kind:       storage.SpanKindLLM,
+		Status:     storage.SpanStatusOK,
+		StartTime:  time.Now().Truncate(time.Microsecond),
+		EndTime:    time.Now().Add(50 * time.Millisecond).Truncate(time.Microsecond),
+		Duration:   50 * time.Millisecond,
+		ProjectID:  "proj-test",
+		Attributes: map[string]string{}, // empty, not nil
+	}
+
+	if err := store.IngestSpans(ctx, []storage.Span{span}); err != nil {
+		t.Fatalf("ingest: %v", err)
+	}
+
+	trace, err := store.GetTrace(ctx, "trace-empty-attrs")
+	if err != nil {
+		t.Fatalf("get trace: %v", err)
+	}
+
+	got := trace.Spans[0]
+	// Empty attributes should round-trip as nil or empty map — not cause errors.
+	if len(got.Attributes) != 0 {
+		t.Errorf("Attributes = %v, want nil or empty", got.Attributes)
+	}
+}
+
+func TestIngestSpans_DuplicateAllowed(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+
+	span := testSpan("dup-1", "trace-dup", storage.SpanKindLLM, "gpt-4o")
+
+	// Ingest same span twice — should not error (Option C: no PK constraint).
+	if err := store.IngestSpans(ctx, []storage.Span{span}); err != nil {
+		t.Fatalf("first ingest: %v", err)
+	}
+	if err := store.IngestSpans(ctx, []storage.Span{span}); err != nil {
+		t.Fatalf("second ingest (duplicate): %v", err)
+	}
+
+	// Both rows exist — OLAP convention, dedup at query time.
+	trace, err := store.GetTrace(ctx, "trace-dup")
+	if err != nil {
+		t.Fatalf("get trace: %v", err)
+	}
+	if len(trace.Spans) != 2 {
+		t.Errorf("span count = %d, want 2 (duplicates allowed)", len(trace.Spans))
+	}
+}
+
+func TestSearchSpans_NameSubstring(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+
+	now := time.Now().Truncate(time.Microsecond)
+
+	spans := []storage.Span{
+		{
+			SpanID: "s1", TraceID: "t1", Name: "llm.chat.completion",
+			Kind: storage.SpanKindLLM, Status: storage.SpanStatusOK,
+			StartTime: now, EndTime: now.Add(50 * time.Millisecond),
+			Duration: 50 * time.Millisecond, ProjectID: "proj-test",
+		},
+		{
+			SpanID: "s2", TraceID: "t2", Name: "tool.search",
+			Kind: storage.SpanKindTool, Status: storage.SpanStatusOK,
+			StartTime: now, EndTime: now.Add(50 * time.Millisecond),
+			Duration: 50 * time.Millisecond, ProjectID: "proj-test",
+		},
+		{
+			SpanID: "s3", TraceID: "t3", Name: "agent.chat.orchestrator",
+			Kind: storage.SpanKindAgent, Status: storage.SpanStatusOK,
+			StartTime: now, EndTime: now.Add(50 * time.Millisecond),
+			Duration: 50 * time.Millisecond, ProjectID: "proj-test",
+		},
+	}
+
+	if err := store.IngestSpans(ctx, spans); err != nil {
+		t.Fatalf("ingest: %v", err)
+	}
+
+	// Search for "chat" — should match s1 and s3.
+	result, err := store.SearchSpans(ctx, storage.SpanQuery{
+		ProjectID:    "proj-test",
+		StartTime:    now.Add(-10 * time.Second),
+		EndTime:      now.Add(10 * time.Second),
+		NameContains: "chat",
+	})
+	if err != nil {
+		t.Fatalf("search: %v", err)
+	}
+
+	if len(result.Spans) != 2 {
+		t.Fatalf("span count = %d, want 2 (matching 'chat')", len(result.Spans))
+	}
+}
+
+func TestSearchSpans_NameWildcardEscape(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+
+	now := time.Now().Truncate(time.Microsecond)
+
+	spans := []storage.Span{
+		{
+			SpanID: "s1", TraceID: "t1", Name: "tokens_100%_used",
+			Kind: storage.SpanKindLLM, Status: storage.SpanStatusOK,
+			StartTime: now, EndTime: now.Add(50 * time.Millisecond),
+			Duration: 50 * time.Millisecond, ProjectID: "proj-test",
+		},
+		{
+			SpanID: "s2", TraceID: "t2", Name: "tokens_50_used",
+			Kind: storage.SpanKindLLM, Status: storage.SpanStatusOK,
+			StartTime: now, EndTime: now.Add(50 * time.Millisecond),
+			Duration: 50 * time.Millisecond, ProjectID: "proj-test",
+		},
+	}
+
+	if err := store.IngestSpans(ctx, spans); err != nil {
+		t.Fatalf("ingest: %v", err)
+	}
+
+	// Search for "100%" — should match only s1, not s2.
+	// Without ESCAPE, the % would act as wildcard and match both.
+	result, err := store.SearchSpans(ctx, storage.SpanQuery{
+		ProjectID:    "proj-test",
+		StartTime:    now.Add(-10 * time.Second),
+		EndTime:      now.Add(10 * time.Second),
+		NameContains: "100%",
+	})
+	if err != nil {
+		t.Fatalf("search: %v", err)
+	}
+
+	if len(result.Spans) != 1 {
+		t.Fatalf("span count = %d, want 1 (only exact '100%%' match)", len(result.Spans))
+	}
+	if result.Spans[0].SpanID != "s1" {
+		t.Errorf("SpanID = %q, want s1", result.Spans[0].SpanID)
+	}
+}

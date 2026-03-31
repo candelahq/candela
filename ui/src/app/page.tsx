@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { createClient } from "@connectrpc/connect";
 import { transport } from "@/lib/connect";
 import { DashboardService } from "@/gen/v1/dashboard_service_pb";
@@ -92,9 +93,9 @@ export default function DashboardPage() {
         <div className="table-container animate-in" style={{ animationDelay: "0.1s" }}>
           <div className="table-header">
             <span className="table-title">Recent Traces</span>
-            <a href="/traces" className="btn">
+            <Link href="/traces" className="btn">
               View all →
-            </a>
+            </Link>
           </div>
           <div className="empty-state">
             <div className="empty-state-icon">🕯️</div>

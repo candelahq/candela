@@ -5,7 +5,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/rs/zerolog/log"
+	"log/slog"
 
 	"github.com/candelahq/candela/pkg/costcalc"
 	"github.com/candelahq/candela/pkg/storage"
@@ -41,7 +41,7 @@ func (p *SpanProcessor) Submit(span storage.Span) {
 	select {
 	case p.spanCh <- span:
 	default:
-		log.Warn().Msg("span processor buffer full, dropping span")
+		slog.Warn("span processor buffer full, dropping span")
 	}
 }
 
@@ -77,10 +77,10 @@ func (p *SpanProcessor) Run(ctx context.Context) {
 		}
 
 		if err := p.store.IngestSpans(ctx, batch); err != nil {
-			log.Error().Err(err).Int("count", len(batch)).Msg("failed to flush spans")
+			slog.Error("failed to flush spans", "error", err, "count", len(batch))
 			return
 		}
-		log.Debug().Int("count", len(batch)).Msg("flushed spans to storage")
+		slog.Debug("flushed spans to storage", "count", len(batch))
 		batch = batch[:0]
 	}
 

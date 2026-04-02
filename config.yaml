@@ -19,24 +19,35 @@ storage:
 proxy:
   enabled: true
   project_id: "default"
+
+  # Vertex AI configuration (required for Anthropic proxy).
+  # Set your GCP project and region. Auth is automatic via ADC
+  # (run: gcloud auth application-default login).
+  vertex_ai:
+    project_id: ""          # Your GCP project ID (e.g. "my-gcp-project")
+    region: "us-central1"   # Vertex AI region
+
   # Specify which providers to enable. If omitted, all providers are enabled.
-  # Valid values: openai, google, anthropic
+  # Valid values: openai, google, anthropic, gemini-oai
+  #
+  # Routes registered (only for enabled providers):
+  #   /proxy/openai/      → https://api.openai.com
+  #   /proxy/google/      → https://generativelanguage.googleapis.com
+  #   /proxy/gemini-oai/  → https://generativelanguage.googleapis.com/v1beta/openai (OpenAI-compat)
+  #   /proxy/anthropic/   → Vertex AI (with format translation + ADC auth)
+  #
+  # Cursor integration:
+  #   OpenAI:     Base URL = http://localhost:8080/proxy/openai/v1
+  #   Gemini:     Base URL = http://localhost:8080/proxy/gemini-oai/v1
+  #   Anthropic:  Base URL = http://localhost:8080/proxy/anthropic/v1
   providers:
     - openai
     - google
     - anthropic
-  # Routes registered (only for enabled providers):
-  #   /proxy/openai/    → https://api.openai.com
-  #   /proxy/google/    → https://generativelanguage.googleapis.com
-  #   /proxy/anthropic/ → Vertex AI (us-central1)
-  #
-  # Usage:
-  #   client = OpenAI(base_url="http://localhost:8080/proxy/openai/v1")
+    - gemini-oai
 
 cors:
   # Origins allowed to make cross-origin requests.
-  # Defaults to localhost:3000 + localhost:8080 if omitted.
-  # Use ["*"] to allow all origins (not recommended for production).
   allowed_origins:
     - "http://localhost:3000"
     - "http://localhost:8080"

@@ -56,7 +56,7 @@ export function Sidebar() {
           <span className="env-dot" />
           <span>Development</span>
           <span className="mono" style={{ marginLeft: "auto", color: "var(--text-muted)" }}>
-            localhost:8080
+            localhost:8181
           </span>
         </div>
       </div>

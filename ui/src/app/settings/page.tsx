@@ -11,7 +11,7 @@ export default function SettingsPage() {
           <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 12 }}>
             <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13 }}>
               <span style={{ color: "var(--text-secondary)" }}>API URL</span>
-              <span className="mono">http://localhost:8080</span>
+              <span className="mono">http://localhost:8181</span>
             </div>
             <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13 }}>
               <span style={{ color: "var(--text-secondary)" }}>Protocol</span>

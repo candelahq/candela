@@ -5,7 +5,6 @@ package genaiprocessor
 
 import (
 	"context"
-	"strings"
 
 	"github.com/candelahq/candela/pkg/costcalc"
 	"go.opentelemetry.io/collector/component"
@@ -99,11 +98,8 @@ func (p *genaiProcessor) enrichSpan(span ptrace.Span) {
 	modelVal, hasModel := attrs.Get(attrGenAIRequestModel)
 
 	if !hasSystem && !hasModel {
-		// Not a GenAI span — check if it's a tool/retrieval span by name.
-		name := strings.ToLower(span.Name())
-		if strings.Contains(name, "tool") || strings.Contains(name, "function") {
-			// Could classify as tool span, but skip enrichment.
-		}
+		// Not a GenAI span — skip enrichment.
+		// Tool/function spans could be classified by name in the future.
 		return
 	}
 

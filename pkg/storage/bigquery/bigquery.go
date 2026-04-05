@@ -65,7 +65,7 @@ func New(ctx context.Context, cfg Config) (*Store, error) {
 	}
 
 	if err := s.ensureSchema(ctx); err != nil {
-		client.Close()
+		_ = client.Close()
 		return nil, fmt.Errorf("bigquery: ensuring schema: %w", err)
 	}
 

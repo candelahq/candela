@@ -59,7 +59,8 @@ func (t *AnthropicFormatTranslator) TranslateRequest(body []byte) ([]byte, strin
 	}
 
 	anthReq := anthropicRequest{
-		Model:            oaiReq.Model,
+		// Note: Model is NOT included in the body for Vertex AI.
+		// Vertex AI identifies the model from the URL path.
 		MaxTokens:        oaiReq.MaxTokens,
 		Stream:           oaiReq.Stream,
 		AnthropicVersion: "vertex-2023-10-16",
@@ -312,7 +313,7 @@ type openAIDelta struct {
 // --- Anthropic types ---
 
 type anthropicRequest struct {
-	Model            string             `json:"model"`
+	Model            string             `json:"model,omitempty"`
 	Messages         []anthropicMessage `json:"messages"`
 	System           string             `json:"system,omitempty"`
 	MaxTokens        int                `json:"max_tokens"`

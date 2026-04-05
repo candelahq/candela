@@ -100,8 +100,9 @@ func TestTranslateRequest_Basic(t *testing.T) {
 		t.Fatalf("failed to parse translated body: %v", err)
 	}
 
-	if result.Model != "claude-sonnet-4-20250514" {
-		t.Errorf("anthropic model = %q", result.Model)
+	// Model should NOT be in the body — Vertex AI gets it from the URL path.
+	if result.Model != "" {
+		t.Errorf("anthropic model should be empty (Vertex AI uses URL), got %q", result.Model)
 	}
 	if result.MaxTokens != 1024 {
 		t.Errorf("max_tokens = %d, want 1024", result.MaxTokens)

@@ -158,6 +158,14 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Handle GET /v1/models — return synthetic model list for OpenAI-compatible clients.
+	if r.Method == http.MethodGet && strings.HasSuffix(upstreamPath, "/models") {
+		w.Header().Set("Content-Type", "application/json")
+		modelsResp := `{"object":"list","data":[{"id":"claude-sonnet-4-20250514","object":"model","created":1700000000,"owned_by":"anthropic"}]}`
+		_, _ = w.Write([]byte(modelsResp))
+		return
+	}
+
 	// Read the request body.
 	reqBody, err := io.ReadAll(r.Body)
 	if err != nil {

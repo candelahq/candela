@@ -78,13 +78,85 @@ func (t *AnthropicFormatTranslator) TranslateRequest(body []byte) ([]byte, strin
 		anthReq.TopP = oaiReq.TopP
 	}
 
-	// Separate system messages from user/assistant messages.
+	// Translate tools if present (OpenAI → Anthropic format).
+	if len(oaiReq.Tools) > 0 {
+		for _, tool := range oaiReq.Tools {
+			if tool.Type == "function" && tool.Function != nil {
+				anthTool := anthropicTool{
+					Name:        tool.Function.Name,
+					Description: tool.Function.Description,
+					InputSchema: tool.Function.Parameters,
+				}
+				anthReq.Tools = append(anthReq.Tools, anthTool)
+			}
+		}
+	}
+
+	// Translate messages: system, user, assistant (with tool_calls), tool results.
 	for _, msg := range oaiReq.Messages {
-		if msg.Role == "system" {
+		switch msg.Role {
+		case "system":
 			content, _ := msg.Content.(string)
 			anthReq.System = content
-		} else {
-			anthReq.Messages = append(anthReq.Messages, anthropicMessage(msg))
+
+		case "assistant":
+			if len(msg.ToolCalls) > 0 {
+				// Assistant message with tool_calls → content blocks with tool_use.
+				var contentBlocks []interface{}
+				// Include any text content first.
+				if textContent, ok := msg.Content.(string); ok && textContent != "" {
+					contentBlocks = append(contentBlocks, map[string]interface{}{
+						"type": "text",
+						"text": textContent,
+					})
+				}
+				for _, tc := range msg.ToolCalls {
+					// Parse the arguments string into a raw object.
+					var inputObj interface{}
+					if err := json.Unmarshal([]byte(tc.Function.Arguments), &inputObj); err != nil {
+						inputObj = map[string]interface{}{}
+					}
+					contentBlocks = append(contentBlocks, map[string]interface{}{
+						"type":  "tool_use",
+						"id":    tc.ID,
+						"name":  tc.Function.Name,
+						"input": inputObj,
+					})
+				}
+				anthReq.Messages = append(anthReq.Messages, anthropicMessage{
+					Role:    "assistant",
+					Content: contentBlocks,
+				})
+			} else {
+				anthReq.Messages = append(anthReq.Messages, anthropicMessage(msg.toAnthropicMessage()))
+			}
+
+		case "tool":
+			// OpenAI tool result → Anthropic user message with tool_result content.
+			toolContent, _ := msg.Content.(string)
+			contentBlock := map[string]interface{}{
+				"type":        "tool_result",
+				"tool_use_id": msg.ToolCallID,
+				"content":     toolContent,
+			}
+			// Merge consecutive tool results into one user message if the last
+			// message is already a user message with tool_result content.
+			if len(anthReq.Messages) > 0 {
+				last := &anthReq.Messages[len(anthReq.Messages)-1]
+				if last.Role == "user" {
+					if blocks, ok := last.Content.([]interface{}); ok {
+						last.Content = append(blocks, contentBlock)
+						continue
+					}
+				}
+			}
+			anthReq.Messages = append(anthReq.Messages, anthropicMessage{
+				Role:    "user",
+				Content: []interface{}{contentBlock},
+			})
+
+		default:
+			anthReq.Messages = append(anthReq.Messages, anthropicMessage(msg.toAnthropicMessage()))
 		}
 	}
 
@@ -140,22 +212,25 @@ func (t *AnthropicFormatTranslator) TranslateStreamChunk(data []byte, model stri
 	for _, line := range strings.Split(string(data), "\n") {
 		line = strings.TrimSpace(line)
 
-		// Pass through non-data lines (event:, empty lines).
+		// Drop "event:" lines and empty lines — OpenAI SSE doesn't use them.
+		if strings.HasPrefix(line, "event:") || line == "" {
+			continue
+		}
+
+		// Only process "data: " lines.
 		if !strings.HasPrefix(line, "data: ") {
-			result.WriteString(line + "\n")
 			continue
 		}
 
 		payload := strings.TrimPrefix(line, "data: ")
 		if payload == "[DONE]" {
-			result.WriteString("data: [DONE]\n")
+			result.WriteString("data: [DONE]\n\n")
 			continue
 		}
 
 		var chunk map[string]interface{}
 		if err := json.Unmarshal([]byte(payload), &chunk); err != nil {
-			result.WriteString(line + "\n")
-			continue
+			continue // Skip unparseable chunks.
 		}
 
 		chunkType, _ := chunk["type"].(string)
@@ -171,22 +246,86 @@ func (t *AnthropicFormatTranslator) TranslateStreamChunk(data []byte, model stri
 				},
 			}
 			b, _ := json.Marshal(oaiChunk)
-			result.WriteString("data: " + string(b) + "\n")
+			result.WriteString("data: " + string(b) + "\n\n")
 
 		case "content_block_delta":
 			delta, _ := chunk["delta"].(map[string]interface{})
-			text, _ := delta["text"].(string)
-			if text != "" {
-				oaiChunk := openAIStreamChunk{
-					Object:  "chat.completion.chunk",
-					Created: time.Now().Unix(),
-					Model:   info.Display,
-					Choices: []openAIStreamChoice{
-						{Index: 0, Delta: openAIDelta{Content: text}},
+			deltaType, _ := delta["type"].(string)
+			switch deltaType {
+			case "text_delta":
+				text, _ := delta["text"].(string)
+				if text != "" {
+					oaiChunk := openAIStreamChunk{
+						Object:  "chat.completion.chunk",
+						Created: time.Now().Unix(),
+						Model:   info.Display,
+						Choices: []openAIStreamChoice{
+							{Index: 0, Delta: openAIDelta{Content: text}},
+						},
+					}
+					b, _ := json.Marshal(oaiChunk)
+					result.WriteString("data: " + string(b) + "\n\n")
+				}
+			case "input_json_delta":
+				// Stream tool call arguments as they arrive.
+				partialJSON, _ := delta["partial_json"].(string)
+				if partialJSON != "" {
+					oaiChunk := map[string]interface{}{
+						"object":  "chat.completion.chunk",
+						"created": time.Now().Unix(),
+						"model":   info.Display,
+						"choices": []map[string]interface{}{
+							{
+								"index": 0,
+								"delta": map[string]interface{}{
+									"tool_calls": []map[string]interface{}{
+										{
+											"index": 0,
+											"function": map[string]interface{}{
+												"arguments": partialJSON,
+											},
+										},
+									},
+								},
+							},
+						},
+					}
+					b, _ := json.Marshal(oaiChunk)
+					result.WriteString("data: " + string(b) + "\n\n")
+				}
+			}
+
+		case "content_block_start":
+			cb, _ := chunk["content_block"].(map[string]interface{})
+			cbType, _ := cb["type"].(string)
+			if cbType == "tool_use" {
+				toolID, _ := cb["id"].(string)
+				toolName, _ := cb["name"].(string)
+				oaiChunk := map[string]interface{}{
+					"object":  "chat.completion.chunk",
+					"created": time.Now().Unix(),
+					"model":   info.Display,
+					"choices": []map[string]interface{}{
+						{
+							"index": 0,
+							"delta": map[string]interface{}{
+								"tool_calls": []map[string]interface{}{
+									{
+										"index": 0,
+										"id":    toolID,
+										"type":  "function",
+										"function": map[string]interface{}{
+											"name":      toolName,
+											"arguments": "",
+										},
+									},
+								},
+							},
+						},
 					},
 				}
 				b, _ := json.Marshal(oaiChunk)
-				result.WriteString("data: " + string(b) + "\n")
+				result.WriteString("data: " + string(b) + "\n\n")
 			}
 
 		case "message_delta":
@@ -210,13 +349,16 @@ func (t *AnthropicFormatTranslator) TranslateStreamChunk(data []byte, model stri
 				}
 			}
 			b, _ := json.Marshal(oaiChunk)
-			result.WriteString("data: " + string(b) + "\n")
+			result.WriteString("data: " + string(b) + "\n\n")
 
 		case "message_stop":
-			result.WriteString("data: [DONE]\n")
+			result.WriteString("data: [DONE]\n\n")
+
+		case "ping", "content_block_stop":
+			// No OpenAI equivalent — skip silently.
 
 		default:
-			result.WriteString(line + "\n")
+			// Unknown event — skip to avoid breaking clients.
 		}
 	}
 
@@ -257,11 +399,41 @@ type openAIRequest struct {
 	Temperature *float64       `json:"temperature,omitempty"`
 	TopP        *float64       `json:"top_p,omitempty"`
 	Stream      bool           `json:"stream,omitempty"`
+	Tools       []openAITool   `json:"tools,omitempty"`
+}
+
+type openAITool struct {
+	Type     string          `json:"type"` // "function"
+	Function *openAIToolFunc `json:"function,omitempty"`
+}
+
+type openAIToolFunc struct {
+	Name        string      `json:"name"`
+	Description string      `json:"description,omitempty"`
+	Parameters  interface{} `json:"parameters,omitempty"` // JSON Schema object
+}
+
+type openAIToolCall struct {
+	ID       string           `json:"id"`
+	Type     string           `json:"type"` // "function"
+	Function openAIToolCallFn `json:"function"`
+}
+
+type openAIToolCallFn struct {
+	Name      string `json:"name"`
+	Arguments string `json:"arguments"` // JSON string
 }
 
 type openAIReqMsg struct {
-	Role    string      `json:"role"`
-	Content interface{} `json:"content"` // string or []content_part
+	Role       string           `json:"role"`
+	Content    interface{}      `json:"content"`                // string or []content_part
+	ToolCalls  []openAIToolCall `json:"tool_calls,omitempty"`   // assistant tool invocations
+	ToolCallID string           `json:"tool_call_id,omitempty"` // for role=tool responses
+}
+
+// toAnthropicMessage converts a simple (non-tool) OpenAI message to Anthropic format.
+func (m openAIReqMsg) toAnthropicMessage() anthropicMessage {
+	return anthropicMessage{Role: m.Role, Content: m.Content}
 }
 
 type openAIResponse struct {
@@ -321,6 +493,13 @@ type anthropicRequest struct {
 	TopP             *float64           `json:"top_p,omitempty"`
 	Stream           bool               `json:"stream,omitempty"`
 	AnthropicVersion string             `json:"anthropic_version,omitempty"`
+	Tools            []anthropicTool    `json:"tools,omitempty"`
+}
+
+type anthropicTool struct {
+	Name        string      `json:"name"`
+	Description string      `json:"description,omitempty"`
+	InputSchema interface{} `json:"input_schema"` // JSON Schema
 }
 
 type anthropicMessage struct {
@@ -367,6 +546,8 @@ func mapStopReason(reason string) string {
 		return "length"
 	case "stop_sequence":
 		return "stop"
+	case "tool_use":
+		return "tool_calls"
 	default:
 		if reason == "" {
 			return "stop"

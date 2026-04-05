@@ -105,11 +105,11 @@ func main() {
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		if err := reader.Ping(r.Context()); err != nil {
 			w.WriteHeader(http.StatusServiceUnavailable)
-			fmt.Fprintf(w, `{"status": "error", "detail": %q}`, err.Error())
+			_, _ = fmt.Fprintf(w, `{"status": "error", "detail": %q}`, err.Error())
 			return
 		}
 		w.WriteHeader(http.StatusOK)
-		fmt.Fprintln(w, `{"status": "ok"}`)
+		_, _ = fmt.Fprintln(w, `{"status": "ok"}`)
 	})
 
 	// Register ConnectRPC service handlers.
@@ -131,7 +131,7 @@ func main() {
 		slog.Error("failed to initialize project store", "error", err)
 		os.Exit(1)
 	}
-	defer projectStore.Close()
+	defer func() { _ = projectStore.Close() }()
 
 	projectPath, projectH := candelav1connect.NewProjectServiceHandler(
 		connecthandlers.NewProjectHandler(projectStore))
@@ -262,7 +262,7 @@ func initStorage(cfg *Config) (storage.SpanReader, []storage.SpanWriter, func(),
 			return nil, nil, nil, err
 		}
 		// DuckDB implements both SpanReader and SpanWriter.
-		return store, []storage.SpanWriter{store}, func() { store.Close() }, nil
+		return store, []storage.SpanWriter{store}, func() { _ = store.Close() }, nil
 	case "sqlite":
 		store, err := sqlitestore.New(sqlitestore.Config{
 			Path: cfg.Storage.SQLite.Path,
@@ -270,7 +270,7 @@ func initStorage(cfg *Config) (storage.SpanReader, []storage.SpanWriter, func(),
 		if err != nil {
 			return nil, nil, nil, err
 		}
-		return store, []storage.SpanWriter{store}, func() { store.Close() }, nil
+		return store, []storage.SpanWriter{store}, func() { _ = store.Close() }, nil
 	case "bigquery":
 		store, err := bqstore.New(context.Background(), bqstore.Config{
 			ProjectID: cfg.Storage.BigQuery.ProjectID,
@@ -282,7 +282,7 @@ func initStorage(cfg *Config) (storage.SpanReader, []storage.SpanWriter, func(),
 			return nil, nil, nil, err
 		}
 		// BigQuery implements both SpanReader and SpanWriter.
-		return store, []storage.SpanWriter{store}, func() { store.Close() }, nil
+		return store, []storage.SpanWriter{store}, func() { _ = store.Close() }, nil
 	default:
 		return nil, nil, nil, fmt.Errorf("unknown storage backend: %s", cfg.Storage.Backend)
 	}

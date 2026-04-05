@@ -172,7 +172,7 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "failed to read request body", http.StatusBadRequest)
 		return
 	}
-	r.Body.Close()
+	_ = r.Body.Close()
 
 	// Check if this is a streaming request (check BEFORE translation).
 	isStreaming := isStreamingRequest(providerName, reqBody)
@@ -243,7 +243,7 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ttfb := time.Since(startTime)
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	// Record circuit breaker state based on upstream response.
 	p.recordCircuitBreaker(providerName, resp.StatusCode >= 500)

@@ -152,7 +152,7 @@ func TestProjectHandler_ListProjects_Pagination(t *testing.T) {
 
 	// Create 3 projects.
 	for i := 0; i < 3; i++ {
-		store.CreateProject(context.Background(), storage.Project{
+		_, _ = store.CreateProject(context.Background(), storage.Project{
 			Name: fmt.Sprintf("Project %d", i),
 		})
 	}

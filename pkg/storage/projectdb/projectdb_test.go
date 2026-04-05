@@ -16,8 +16,8 @@ func setupTestStore(t *testing.T) *Store {
 		t.Fatalf("failed to create store: %v", err)
 	}
 	t.Cleanup(func() {
-		store.Close()
-		os.Remove(path)
+		_ = store.Close()
+		_ = os.Remove(path)
 	})
 	return store
 }
@@ -161,7 +161,7 @@ func TestCascadeDelete(t *testing.T) {
 
 	p, _ := store.CreateProject(ctx, storage.Project{Name: "Cascade Test"})
 	fullKey := GenerateAPIKey()
-	store.CreateAPIKey(ctx, storage.APIKey{ProjectID: p.ID, Name: "k1"}, fullKey)
+	_, _ = store.CreateAPIKey(ctx, storage.APIKey{ProjectID: p.ID, Name: "k1"}, fullKey)
 
 	// Delete project — should cascade to keys.
 	if err := store.DeleteProject(ctx, p.ID); err != nil {

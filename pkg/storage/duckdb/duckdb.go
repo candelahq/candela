@@ -38,7 +38,7 @@ func New(cfg Config) (*Store, error) {
 
 	s := &Store{db: db}
 	if err := s.migrate(); err != nil {
-		db.Close()
+		_ = db.Close()
 		return nil, fmt.Errorf("running migrations: %w", err)
 	}
 
@@ -98,7 +98,7 @@ func (s *Store) IngestSpans(ctx context.Context, spans []storage.Span) error {
 	if err != nil {
 		return fmt.Errorf("getting conn for ingest: %w", err)
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	return conn.Raw(func(driverConn any) error {
 		duckConn, ok := driverConn.(*duckdb.Conn)
@@ -110,7 +110,7 @@ func (s *Store) IngestSpans(ctx context.Context, spans []storage.Span) error {
 		if err != nil {
 			return fmt.Errorf("creating appender: %w", err)
 		}
-		defer appender.Close()
+		defer func() { _ = appender.Close() }()
 
 		for _, span := range spans {
 			genAI := span.GenAI
@@ -160,7 +160,7 @@ func (s *Store) GetTrace(ctx context.Context, traceID string) (*storage.Trace, e
 	if err != nil {
 		return nil, fmt.Errorf("querying spans: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	spans, err := scanSpans(rows)
 	if err != nil {
@@ -200,7 +200,7 @@ func (s *Store) QueryTraces(ctx context.Context, q storage.TraceQuery) (*storage
 	if err != nil {
 		return nil, fmt.Errorf("querying traces: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var traces []storage.TraceSummary
 	for rows.Next() {
@@ -256,7 +256,7 @@ func (s *Store) SearchSpans(ctx context.Context, q storage.SpanQuery) (*storage.
 	if err != nil {
 		return nil, fmt.Errorf("searching spans: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	spans, err := scanSpans(rows)
 	if err != nil {
@@ -310,7 +310,7 @@ func (s *Store) GetModelBreakdown(ctx context.Context, q storage.UsageQuery) ([]
 	if err != nil {
 		return nil, fmt.Errorf("querying model breakdown: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var models []storage.ModelUsage
 	for rows.Next() {

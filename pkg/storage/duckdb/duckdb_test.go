@@ -23,7 +23,7 @@ func newTestStore(t *testing.T) *Store {
 	if err := s.migrate(); err != nil {
 		t.Fatalf("migrating: %v", err)
 	}
-	t.Cleanup(func() { s.Close() })
+	t.Cleanup(func() { _ = s.Close() })
 	return s
 }
 

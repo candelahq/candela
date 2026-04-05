@@ -23,9 +23,10 @@ type ProviderParser interface {
 
 // parserRegistry maps provider names to their parsers.
 var parserRegistry = map[string]ProviderParser{
-	"openai":    &openaiParser{},
-	"anthropic": &anthropicParser{},
-	"google":    &googleParser{},
+	"openai":     &openaiParser{},
+	"gemini-oai": &openaiParser{}, // Gemini OpenAI-compat returns standard OpenAI format.
+	"anthropic":  &anthropicParser{},
+	"google":     &googleParser{},
 }
 
 // getParser returns the parser for a provider, or a no-op fallback.

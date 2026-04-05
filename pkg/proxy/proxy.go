@@ -22,6 +22,8 @@ import (
 
 	"log/slog"
 
+	"golang.org/x/oauth2"
+
 	"github.com/candelahq/candela/pkg/costcalc"
 	"github.com/candelahq/candela/pkg/storage"
 )
@@ -31,10 +33,43 @@ type SpanSubmitter interface {
 	SubmitBatch(spans []storage.Span)
 }
 
+// FormatTranslator handles request/response format translation between the client
+// format (e.g. OpenAI Chat Completions) and the upstream provider format.
+// A nil FormatTranslator means transparent passthrough.
+type FormatTranslator interface {
+	// TranslateRequest converts the client request body to the upstream format.
+	// Returns the translated body, extracted model name, and any error.
+	TranslateRequest(body []byte) (translated []byte, model string, err error)
+
+	// TranslateResponse converts the upstream response body to the client format.
+	TranslateResponse(body []byte, model string) ([]byte, error)
+
+	// TranslateStreamChunk converts a single upstream SSE data payload to client format.
+	TranslateStreamChunk(chunk []byte, model string) ([]byte, error)
+}
+
+// PathRewriter rewrites the upstream URL path for provider-specific routing
+// (e.g. Vertex AI's project-scoped model endpoints). A nil PathRewriter
+// means the path from the client request is forwarded as-is.
+type PathRewriter interface {
+	// RewritePath returns the upstream URL path for the given model.
+	// streaming indicates whether this is a streaming request.
+	RewritePath(model string, streaming bool) string
+}
+
 // Provider defines an LLM API provider configuration.
 type Provider struct {
-	Name        string `yaml:"name"`     // "openai", "google", "anthropic"
+	Name        string `yaml:"name"`     // "openai", "google", "anthropic", "gemini-oai"
 	UpstreamURL string `yaml:"upstream"` // e.g. "https://api.openai.com"
+
+	// FormatTranslator handles format translation (nil = transparent passthrough).
+	FormatTranslator FormatTranslator `yaml:"-"`
+
+	// PathRewriter rewrites upstream URL paths (nil = forward client path).
+	PathRewriter PathRewriter `yaml:"-"`
+
+	// TokenSource provides auto-refreshing auth tokens (e.g. GCP ADC). Nil = forward client auth.
+	TokenSource oauth2.TokenSource `yaml:"-"`
 }
 
 // Proxy handles LLM API proxying with observability.
@@ -59,6 +94,8 @@ func DefaultProviders() []Provider {
 	return []Provider{
 		{Name: "openai", UpstreamURL: "https://api.openai.com"},
 		{Name: "google", UpstreamURL: "https://generativelanguage.googleapis.com"},
+		// Gemini via OpenAI-compatible API. Use this with Cursor and other OpenAI-compat clients.
+		{Name: "gemini-oai", UpstreamURL: "https://generativelanguage.googleapis.com/v1beta/openai"},
 		// Anthropic via Vertex AI. Override upstream via config for your region/project:
 		// https://{REGION}-aiplatform.googleapis.com/v1/projects/{PROJECT}/locations/{REGION}/publishers/anthropic/models
 		{Name: "anthropic", UpstreamURL: "https://us-central1-aiplatform.googleapis.com"},
@@ -121,16 +158,52 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Handle GET /v1/models — return synthetic model list for OpenAI-compatible clients.
+	if r.Method == http.MethodGet && strings.HasSuffix(upstreamPath, "/models") {
+		w.Header().Set("Content-Type", "application/json")
+		modelsResp := `{"object":"list","data":[{"id":"claude-sonnet-4-20250514","object":"model","created":1700000000,"owned_by":"anthropic"}]}`
+		_, _ = w.Write([]byte(modelsResp))
+		return
+	}
+
 	// Read the request body.
 	reqBody, err := io.ReadAll(r.Body)
 	if err != nil {
 		http.Error(w, "failed to read request body", http.StatusBadRequest)
 		return
 	}
-	r.Body.Close()
+	_ = r.Body.Close()
 
-	// Check if this is a streaming request.
+	// Check if this is a streaming request (check BEFORE translation).
 	isStreaming := isStreamingRequest(providerName, reqBody)
+
+	// --- Translation layer ---
+	// If the provider has a FormatTranslator, convert the request format
+	// (e.g. OpenAI Chat Completions → Anthropic Messages).
+	var translatedModel string
+	upstreamBody := reqBody
+	if provider.FormatTranslator != nil {
+		upstreamBody, translatedModel, err = provider.FormatTranslator.TranslateRequest(reqBody)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("request translation error: %v", err), http.StatusBadRequest)
+			return
+		}
+
+		// For translated providers, also check streaming against the translated body.
+		isStreaming = isStreamingRequest(providerName, upstreamBody)
+
+		slog.Debug("translated request",
+			"provider", providerName,
+			"model", translatedModel,
+			"streaming", isStreaming)
+	}
+
+	// --- Path rewriting ---
+	// If the provider has a PathRewriter, rewrite the upstream URL path
+	// (e.g. Vertex AI project-scoped model endpoints).
+	if provider.PathRewriter != nil && translatedModel != "" {
+		upstreamPath = provider.PathRewriter.RewritePath(translatedModel, isStreaming)
+	}
 
 	// Build the upstream request.
 	upstreamURL := provider.UpstreamURL + upstreamPath
@@ -138,7 +211,7 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 		upstreamURL += "?" + r.URL.RawQuery
 	}
 
-	upstreamReq, err := http.NewRequestWithContext(r.Context(), r.Method, upstreamURL, bytes.NewReader(reqBody))
+	upstreamReq, err := http.NewRequestWithContext(r.Context(), r.Method, upstreamURL, bytes.NewReader(upstreamBody))
 	if err != nil {
 		http.Error(w, "failed to create upstream request", http.StatusInternalServerError)
 		return
@@ -146,6 +219,18 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 
 	// Forward headers (auth, content-type, etc).
 	forwardHeaders(r, upstreamReq, providerName)
+
+	// --- ADC token injection ---
+	// If the provider has a TokenSource, replace the auth header with a fresh token.
+	if provider.TokenSource != nil {
+		token, tokenErr := provider.TokenSource.Token()
+		if tokenErr != nil {
+			slog.Error("failed to get ADC token", "provider", providerName, "error", tokenErr)
+			http.Error(w, "failed to obtain GCP credentials", http.StatusInternalServerError)
+			return
+		}
+		upstreamReq.Header.Set("Authorization", "Bearer "+token.AccessToken)
+	}
 
 	// Propagate request ID to upstream.
 	upstreamReq.Header.Set("X-Request-ID", requestID)
@@ -158,7 +243,7 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ttfb := time.Since(startTime)
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	// Record circuit breaker state based on upstream response.
 	p.recordCircuitBreaker(providerName, resp.StatusCode >= 500)
@@ -211,14 +296,32 @@ func (p *Proxy) handleStandardResponse(
 
 	endTime := time.Now()
 
+	// --- Response translation ---
+	// Translate response back to client format if provider has a FormatTranslator.
+	clientBody := respBody
+	if provider.FormatTranslator != nil && resp.StatusCode == http.StatusOK {
+		model, _ := extractRequestInfo(provider.Name, reqBody)
+		translated, transErr := provider.FormatTranslator.TranslateResponse(respBody, model)
+		if transErr != nil {
+			slog.Error("response translation failed", "provider", provider.Name, "error", transErr)
+			// Fall through with untranslated body rather than failing.
+		} else {
+			clientBody = translated
+		}
+	}
+
 	// Forward response headers.
 	for k, vv := range resp.Header {
 		for _, v := range vv {
 			w.Header().Add(k, v)
 		}
 	}
+	// Fix content-length if we translated.
+	if provider.FormatTranslator != nil && resp.StatusCode == http.StatusOK {
+		w.Header().Set("Content-Length", fmt.Sprintf("%d", len(clientBody)))
+	}
 	w.WriteHeader(resp.StatusCode)
-	w.Write(respBody)
+	_, _ = w.Write(clientBody)
 
 	// Create observability span (async — don't block the response).
 	if cbAllow {
@@ -250,6 +353,12 @@ func (p *Proxy) handleStreamingResponse(
 	}
 	w.WriteHeader(resp.StatusCode)
 
+	// Determine model name for stream chunk translation.
+	var streamModel string
+	if provider.FormatTranslator != nil {
+		streamModel, _ = extractRequestInfo(provider.Name, reqBody)
+	}
+
 	// Tee the stream: forward to client AND buffer for observability.
 	var streamBuffer bytes.Buffer
 	buf := make([]byte, 4096)
@@ -263,14 +372,28 @@ func (p *Proxy) handleStreamingResponse(
 				ttft = time.Since(startTime)
 				isFirstChunk = false
 			}
-			// Forward to client.
-			w.Write(buf[:n])
-			flusher.Flush()
 
-			// Buffer for span creation (only if circuit allows).
+			chunk := buf[:n]
+
+			// Buffer raw upstream data for observability (before translation).
 			if cbAllow {
-				streamBuffer.Write(buf[:n])
+				streamBuffer.Write(chunk)
 			}
+
+			// Translate chunk if provider has a FormatTranslator.
+			if provider.FormatTranslator != nil {
+				translated, transErr := provider.FormatTranslator.TranslateStreamChunk(chunk, streamModel)
+				if transErr != nil {
+					slog.Debug("stream chunk translation failed", "error", transErr)
+					// Forward raw chunk on error.
+					_, _ = w.Write(chunk)
+				} else {
+					_, _ = w.Write(translated)
+				}
+			} else {
+				_, _ = w.Write(chunk)
+			}
+			flusher.Flush()
 		}
 		if err != nil {
 			break

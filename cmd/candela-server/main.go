@@ -14,6 +14,7 @@ import (
 
 	"golang.org/x/net/http2"
 	"golang.org/x/net/http2/h2c"
+	"golang.org/x/oauth2/google"
 	"gopkg.in/yaml.v3"
 	"log/slog"
 
@@ -52,7 +53,11 @@ type Config struct {
 	Proxy struct {
 		Enabled   bool     `yaml:"enabled"`
 		ProjectID string   `yaml:"project_id"`
-		Providers []string `yaml:"providers"` // e.g. ["openai", "google", "anthropic"]
+		Providers []string `yaml:"providers"` // e.g. ["openai", "google", "anthropic", "gemini-oai"]
+		VertexAI  struct {
+			ProjectID string `yaml:"project_id"` // GCP project for Vertex AI
+			Region    string `yaml:"region"`     // e.g. "us-central1"
+		} `yaml:"vertex_ai"`
 	} `yaml:"proxy"`
 	CORS struct {
 		AllowedOrigins []string `yaml:"allowed_origins"` // e.g. ["http://localhost:3000"]
@@ -100,11 +105,11 @@ func main() {
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		if err := reader.Ping(r.Context()); err != nil {
 			w.WriteHeader(http.StatusServiceUnavailable)
-			fmt.Fprintf(w, `{"status": "error", "detail": %q}`, err.Error())
+			_, _ = fmt.Fprintf(w, `{"status": "error", "detail": %q}`, err.Error())
 			return
 		}
 		w.WriteHeader(http.StatusOK)
-		fmt.Fprintln(w, `{"status": "ok"}`)
+		_, _ = fmt.Fprintln(w, `{"status": "ok"}`)
 	})
 
 	// Register ConnectRPC service handlers.
@@ -126,7 +131,7 @@ func main() {
 		slog.Error("failed to initialize project store", "error", err)
 		os.Exit(1)
 	}
-	defer projectStore.Close()
+	defer func() { _ = projectStore.Close() }()
 
 	projectPath, projectH := candelav1connect.NewProjectServiceHandler(
 		connecthandlers.NewProjectHandler(projectStore))
@@ -141,6 +146,44 @@ func main() {
 	// Register LLM proxy routes (selective activation).
 	if cfg.Proxy.Enabled {
 		allProviders := proxy.DefaultProviders()
+
+		// Attach FormatTranslator + PathRewriter + ADC to the Anthropic provider
+		// if Vertex AI is configured.
+		if cfg.Proxy.VertexAI.ProjectID != "" {
+			region := cfg.Proxy.VertexAI.Region
+			if region == "" {
+				region = "us-central1"
+			}
+
+			// Get ADC token source for automatic GCP auth.
+			tokenSource, adcErr := google.DefaultTokenSource(context.Background(),
+				"https://www.googleapis.com/auth/cloud-platform")
+			if adcErr != nil {
+				slog.Warn("failed to get GCP ADC — Anthropic proxy will require manual auth",
+					"error", adcErr)
+			}
+
+			for i, p := range allProviders {
+				if p.Name == "anthropic" {
+					allProviders[i].UpstreamURL = fmt.Sprintf(
+						"https://%s-aiplatform.googleapis.com", region)
+					allProviders[i].FormatTranslator = &proxy.AnthropicFormatTranslator{}
+					allProviders[i].PathRewriter = &proxy.VertexAIPathRewriter{
+						ProjectID: cfg.Proxy.VertexAI.ProjectID,
+						Region:    region,
+					}
+					if tokenSource != nil {
+						allProviders[i].TokenSource = tokenSource
+					}
+					slog.Info("🔐 Anthropic via Vertex AI configured",
+						"project", cfg.Proxy.VertexAI.ProjectID,
+						"region", region,
+						"adc", tokenSource != nil)
+					break
+				}
+			}
+		}
+
 		var activeProviders []proxy.Provider
 
 		if len(cfg.Proxy.Providers) > 0 {
@@ -219,7 +262,7 @@ func initStorage(cfg *Config) (storage.SpanReader, []storage.SpanWriter, func(),
 			return nil, nil, nil, err
 		}
 		// DuckDB implements both SpanReader and SpanWriter.
-		return store, []storage.SpanWriter{store}, func() { store.Close() }, nil
+		return store, []storage.SpanWriter{store}, func() { _ = store.Close() }, nil
 	case "sqlite":
 		store, err := sqlitestore.New(sqlitestore.Config{
 			Path: cfg.Storage.SQLite.Path,
@@ -227,7 +270,7 @@ func initStorage(cfg *Config) (storage.SpanReader, []storage.SpanWriter, func(),
 		if err != nil {
 			return nil, nil, nil, err
 		}
-		return store, []storage.SpanWriter{store}, func() { store.Close() }, nil
+		return store, []storage.SpanWriter{store}, func() { _ = store.Close() }, nil
 	case "bigquery":
 		store, err := bqstore.New(context.Background(), bqstore.Config{
 			ProjectID: cfg.Storage.BigQuery.ProjectID,
@@ -239,7 +282,7 @@ func initStorage(cfg *Config) (storage.SpanReader, []storage.SpanWriter, func(),
 			return nil, nil, nil, err
 		}
 		// BigQuery implements both SpanReader and SpanWriter.
-		return store, []storage.SpanWriter{store}, func() { store.Close() }, nil
+		return store, []storage.SpanWriter{store}, func() { _ = store.Close() }, nil
 	default:
 		return nil, nil, nil, fmt.Errorf("unknown storage backend: %s", cfg.Storage.Backend)
 	}

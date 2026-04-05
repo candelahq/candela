@@ -151,7 +151,7 @@ func TestProxyEndToEndAnthropic(t *testing.T) {
 		}
 
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
 			"content": []map[string]interface{}{
 				{"type": "text", "text": "I'm Claude via Vertex AI"},
 			},
@@ -189,7 +189,7 @@ func TestProxyEndToEndAnthropic(t *testing.T) {
 	if err != nil {
 		t.Fatalf("proxy request failed: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != 200 {
 		respBody, _ := io.ReadAll(resp.Body)
@@ -197,7 +197,7 @@ func TestProxyEndToEndAnthropic(t *testing.T) {
 	}
 
 	var result map[string]interface{}
-	json.NewDecoder(resp.Body).Decode(&result)
+	_ = json.NewDecoder(resp.Body).Decode(&result)
 
 	contentArr, ok := result["content"].([]interface{})
 	if !ok || len(contentArr) == 0 {
@@ -278,7 +278,7 @@ func TestRequestID_GeneratedWhenAbsent(t *testing.T) {
 			t.Error("expected X-Request-ID forwarded to upstream")
 		}
 		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprint(w, `{"content":[{"type":"text","text":"ok"}],"usage":{"input_tokens":1,"output_tokens":1}}`)
+		_, _ = fmt.Fprint(w, `{"content":[{"type":"text","text":"ok"}],"usage":{"input_tokens":1,"output_tokens":1}}`)
 	}))
 	defer upstream.Close()
 
@@ -306,8 +306,8 @@ func TestRequestID_GeneratedWhenAbsent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("request failed: %v", err)
 	}
-	defer resp.Body.Close()
-	io.ReadAll(resp.Body)
+	defer func() { _ = resp.Body.Close() }()
+	_, _ = io.ReadAll(resp.Body)
 
 	// Response should contain a generated X-Request-ID.
 	rid := resp.Header.Get("X-Request-ID")
@@ -344,7 +344,7 @@ func TestRequestID_AcceptedWhenProvided(t *testing.T) {
 			t.Errorf("upstream X-Request-ID = %q, want %q", got, clientRequestID)
 		}
 		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprint(w, `{"content":[{"type":"text","text":"ok"}],"usage":{"input_tokens":1,"output_tokens":1}}`)
+		_, _ = fmt.Fprint(w, `{"content":[{"type":"text","text":"ok"}],"usage":{"input_tokens":1,"output_tokens":1}}`)
 	}))
 	defer upstream.Close()
 
@@ -373,8 +373,8 @@ func TestRequestID_AcceptedWhenProvided(t *testing.T) {
 	if err != nil {
 		t.Fatalf("request failed: %v", err)
 	}
-	defer resp.Body.Close()
-	io.ReadAll(resp.Body)
+	defer func() { _ = resp.Body.Close() }()
+	_, _ = io.ReadAll(resp.Body)
 
 	// Response should echo back the same ID.
 	if got := resp.Header.Get("X-Request-ID"); got != clientRequestID {
@@ -403,7 +403,7 @@ func TestCircuitBreaker_SkipsSpanOnOpen(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		callCount++
 		w.WriteHeader(http.StatusInternalServerError)
-		fmt.Fprint(w, `{"error":"fail"}`)
+		_, _ = fmt.Fprint(w, `{"error":"fail"}`)
 	}))
 	defer upstream.Close()
 
@@ -432,8 +432,8 @@ func TestCircuitBreaker_SkipsSpanOnOpen(t *testing.T) {
 		if err != nil {
 			t.Fatalf("request %d failed: %v", i, err)
 		}
-		io.ReadAll(resp.Body)
-		resp.Body.Close()
+		_, _ = io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
 	}
 
 	// All 6 requests should have been forwarded upstream (fail-open).

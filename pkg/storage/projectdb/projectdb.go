@@ -34,18 +34,18 @@ func New(path string) (*Store, error) {
 
 	// Enable WAL mode for concurrent reads.
 	if _, err := db.Exec("PRAGMA journal_mode=WAL"); err != nil {
-		db.Close()
+		_ = db.Close()
 		return nil, fmt.Errorf("projectdb: WAL mode: %w", err)
 	}
 
 	// Enable foreign key enforcement (required for CASCADE).
 	if _, err := db.Exec("PRAGMA foreign_keys = ON"); err != nil {
-		db.Close()
+		_ = db.Close()
 		return nil, fmt.Errorf("projectdb: foreign keys: %w", err)
 	}
 
 	if err := migrate(db); err != nil {
-		db.Close()
+		_ = db.Close()
 		return nil, fmt.Errorf("projectdb: migrate: %w", err)
 	}
 
@@ -137,7 +137,7 @@ func (s *Store) ListProjects(ctx context.Context, limit, offset int) ([]storage.
 	if err != nil {
 		return nil, 0, fmt.Errorf("projectdb: list projects: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var projects []storage.Project
 	for rows.Next() {
@@ -223,7 +223,7 @@ func (s *Store) ListAPIKeys(ctx context.Context, projectID string) ([]storage.AP
 	if err != nil {
 		return nil, fmt.Errorf("projectdb: list api keys: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var keys []storage.APIKey
 	for rows.Next() {
@@ -267,7 +267,7 @@ func (s *Store) ValidateAPIKey(ctx context.Context, rawKey string) (*storage.API
 	if err != nil {
 		return nil, fmt.Errorf("projectdb: validate key: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	for rows.Next() {
 		var k storage.APIKey
@@ -304,12 +304,12 @@ func (s *Store) Close() error {
 // Format: cdla_<32 hex chars> (40 chars total).
 func GenerateAPIKey() string {
 	b := make([]byte, 16)
-	rand.Read(b)
+	_, _ = rand.Read(b)
 	return "cdla_" + hex.EncodeToString(b)
 }
 
 func generateID() string {
 	b := make([]byte, 12)
-	rand.Read(b)
+	_, _ = rand.Read(b)
 	return hex.EncodeToString(b)
 }

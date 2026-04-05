@@ -34,7 +34,7 @@ export default function DashboardPage() {
             </div>
             <div style={{ fontSize: 13, color: "var(--text-secondary)" }}>
               Could not connect to Candela backend at{" "}
-              <code className="mono">localhost:8080</code>. Start the server
+              <code className="mono">localhost:8181</code>. Start the server
               with <code className="mono">go run ./cmd/candela-server</code>.
             </div>
           </div>
@@ -82,7 +82,7 @@ export default function DashboardPage() {
             <div className="empty-state-desc">
               Send your first LLM request through the Candela proxy to see traces
               appear here. Configure a provider in your candela.yaml and point your
-              SDK to <code className="mono">http://localhost:8080/proxy/</code>.
+              SDK to <code className="mono">http://localhost:8181/proxy/</code>.
             </div>
           </div>
         </div>

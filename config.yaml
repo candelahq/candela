@@ -3,7 +3,7 @@
 
 server:
   host: "0.0.0.0"
-  port: 8080
+  port: 8181
 
 storage:
   backend: "duckdb"  # Options: duckdb (default), sqlite, bigquery
@@ -24,8 +24,8 @@ proxy:
   # Set your GCP project and region. Auth is automatic via ADC
   # (run: gcloud auth application-default login).
   vertex_ai:
-    project_id: ""          # Your GCP project ID (e.g. "my-gcp-project")
-    region: "us-central1"   # Vertex AI region
+    project_id: "austin-azra-sandbox-project"  # Your GCP project ID
+    region: "us-east5"      # Vertex AI region (Claude available here)
 
   # Specify which providers to enable. If omitted, all providers are enabled.
   # Valid values: openai, google, anthropic, gemini-oai

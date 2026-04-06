@@ -17,7 +17,7 @@ To use the proxy, update your LLM client's `base_url` (or `api_base`).
 - **Auth**: API Key (usually in query param `?key=...`).
 
 ### 3. Gemini via OpenAI-Compatible API
-For clients that only speak OpenAI format (like **Cursor**).
+For clients that speak OpenAI format (like **Zed**).
 - **Endpoint**: `http://localhost:8181/proxy/gemini-oai/v1`
 - **Upstream**: `https://generativelanguage.googleapis.com/v1beta/openai`
 - **Auth**: API Key via `Authorization: Bearer YOUR_GEMINI_KEY` header.
@@ -34,99 +34,105 @@ Candela routes Anthropic through **Google Cloud Vertex AI** with automatic forma
 
 ---
 
-## 🖱️ Cursor 3 Integration
+## 🖥️ Zed Integration
 
-Cursor 3 routes API requests through their cloud infrastructure, which means it
-**cannot connect to `localhost` directly** (SSRF protection). You must expose
-Candela via a public tunnel.
+Zed connects directly to `localhost` — no tunnel needed.
 
 ### Prerequisites
 
 1. **Candela running locally**: `nix develop -c go run ./cmd/candela-server`
-2. **Cloudflare tunnel** (included in the nix dev shell):
+2. **GCP ADC** (for Anthropic/Claude): `gcloud auth application-default login`
+
+### Setup
+
+Add the following to your Zed settings (`~/.config/zed/settings.json`):
+
+#### Anthropic (Claude via Vertex AI)
+
+```json
+{
+  "language_models": {
+    "openai": {
+      "api_url": "http://localhost:8181/proxy/anthropic/v1",
+      "available_models": [
+        {
+          "name": "claude-sonnet-4-20250514",
+          "display_name": "Claude Sonnet 4 (via Candela)",
+          "max_tokens": 64000
+        },
+        {
+          "name": "claude-opus-4-20250514",
+          "display_name": "Claude Opus 4 (via Candela)",
+          "max_tokens": 32000
+        }
+      ]
+    }
+  },
+  "agent": {
+    "default_model": {
+      "provider": "openai",
+      "model": "claude-sonnet-4-20250514"
+    }
+  }
+}
+```
+
+#### Gemini
+
+```json
+{
+  "language_models": {
+    "openai": {
+      "api_url": "http://localhost:8181/proxy/gemini-oai/v1",
+      "available_models": [
+        {
+          "name": "gemini-2.5-pro",
+          "display_name": "Gemini 2.5 Pro (via Candela)",
+          "max_tokens": 65536
+        },
+        {
+          "name": "gemini-2.5-flash",
+          "display_name": "Gemini 2.5 Flash (via Candela)",
+          "max_tokens": 65536
+        }
+      ]
+    }
+  },
+  "agent": {
+    "default_model": {
+      "provider": "openai",
+      "model": "gemini-2.5-pro"
+    }
+  }
+}
+```
+
+### Setting the API Key
+
+Launch Zed with the API key environment variable:
 
 ```bash
-# Open a second terminal — this creates a temporary public URL
-nix develop -c cloudflared tunnel --url http://localhost:8181
+# For Anthropic (via Candela — key is a placeholder, ADC handles real auth):
+OPENAI_API_KEY=candela open -a Zed
+
+# For Gemini:
+OPENAI_API_KEY=your-gemini-api-key open -a Zed
+
+# For OpenAI:
+OPENAI_API_KEY=sk-... open -a Zed
 ```
 
-Cloudflared will print a URL like:
-```
-https://random-words-here.trycloudflare.com
-```
+### Anthropic Prerequisites
 
-Copy that URL — you'll use it as the base for Cursor's model settings below.
-
-> **⚠️ Security**: This exposes your Candela proxy to the public internet.
-> Since API keys are forwarded from the client (not stored), your keys aren't
-> at risk. But anyone who discovers the URL could route traffic through your
-> proxy. For daily-driver use, consider a [named Cloudflare tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/)
-> with access policies, or deploy Candela to **Cloud Run** for a stable endpoint.
-
-### Cursor Settings
-
-Open **Cursor Settings → Models** and configure your providers:
-
-#### OpenAI Models
-| Setting | Value |
-|---------|-------|
-| Override OpenAI Base URL | `https://<tunnel-url>/proxy/openai/v1` |
-| API Key | Your OpenAI `sk-...` key |
-| Models | `gpt-4o`, `gpt-4.1`, `o3-mini`, etc. |
-
-#### Gemini Models
-| Setting | Value |
-|---------|-------|
-| Override OpenAI Base URL | `https://<tunnel-url>/proxy/gemini-oai/v1` |
-| API Key | Your Gemini API key (from AI Studio) |
-| Models | `gemini-2.5-pro`, `gemini-2.5-flash`, etc. |
-
-#### Anthropic (Claude) Models
-| Setting | Value |
-|---------|-------|
-| Override OpenAI Base URL | `https://<tunnel-url>/proxy/anthropic/v1` |
-| API Key | `candela` (placeholder — ADC is auto-injected by Candela) |
-| Models | `claude-sonnet-4-20250514`, `claude-opus-4-20250514`, etc. |
-
-**Anthropic prerequisites**:
 1. Run `gcloud auth application-default login`
 2. Set `vertex_ai.project_id` in `config.yaml` to your GCP project
 3. Enable the Vertex AI API and request Claude model access in Model Garden
 
-### Network Settings
+### Verify
 
-In **Cursor Settings → Network**, set **HTTP Compatibility Mode** to **HTTP/1.1**
-for reliable streaming through the tunnel.
-
-### Known Limitations
-
-- **Agent Mode**: Cursor 3's Agent Mode sends requests in OpenAI's **Responses
-  API** format (`input` field instead of `messages`), which differs from the
-  standard Chat Completions format. Candela does not yet translate this format.
-  Use **Ask** or **Plan** mode for full observability. Agent Mode support is on
-  the roadmap.
-- **Override is global**: Cursor's "Override OpenAI Base URL" applies globally —
-  you can only point one provider route at a time unless you use separate Cursor
-  profiles.
-- **Tunnel URL changes on restart**: The Cloudflare quick tunnel URL is
-  temporary. You'll need to update Cursor settings each time you restart the
-  tunnel. Use a named tunnel or Cloud Run deployment for a stable URL.
-
-### Alternative: Cloud Run Deployment
-
-For a stable, always-on proxy without tunnels, deploy Candela to Google Cloud Run:
-
-```bash
-# Build and deploy (uses deploy/Dockerfile.server)
-gcloud run deploy candela \
-  --source . \
-  --dockerfile deploy/Dockerfile.server \
-  --region us-central1 \
-  --allow-unauthenticated
-```
-
-This gives you a permanent `https://candela-<hash>.run.app` URL. Cloud Run's
-service account handles Vertex AI auth automatically — no ADC setup needed.
+Send a message in Zed's Agent Panel (`Cmd+Shift+A`). You should see:
+- The response from the model in Zed
+- A trace in the Candela dashboard at `http://localhost:3000`
 
 ---
 

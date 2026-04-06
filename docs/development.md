@@ -16,7 +16,7 @@ This will automatically install:
 - **Buf** (Protobuf management)
 - **Node.js 22** & **pnpm**
 - **Python 3.12** & **uv**
-- **gh** (GitHub CLI)
+- **cloudflared** (Cloudflare tunnel for Cursor 3 integration)
 - **docker-compose**
 
 ---
@@ -31,18 +31,27 @@ Candela is proto-first. All service boundaries are defined in `proto/`.
 cd proto && buf generate
 ```
 
-This will populate `gen/go/` and `gen/ts/` (for the upcoming UI).
+This will populate `gen/go/` and `gen/ts/` (for the UI).
 
 ### 2. Running the Backend (Local Dev)
-The server defaults to **SQLite** and **Port 8080**.
+The server defaults to **DuckDB** and uses the port from `config.yaml` (default **8080**).
 
 ```bash
 go run ./cmd/candela-server
 ```
 
-You can point your browser at `http://localhost:8080/healthz` to verify it's running.
+You can point your browser at `http://localhost:8181/healthz` to verify it's running.
 
-### 3. Testing
+### 3. Running the UI
+The web interface is a Next.js 16 app in `ui/`.
+
+```bash
+cd ui && npm install && npm run dev
+```
+
+The UI will be available at `http://localhost:3000`.
+
+### 4. Testing
 We use standard Go testing. Candela includes integration tests for the Proxy and Storage backends.
 
 ```bash
@@ -55,25 +64,47 @@ go test ./pkg/proxy -v
 
 ---
 
-## 🗄️ Storage Backends
+## 🖥️ Zed Quick Start
 
-### SQLite (Default)
-No setup required. The database will be created as `candela.db` in your current directory.
-
-### ClickHouse
-For production-like testing, use the included Docker Compose file.
+To use Candela as the LLM proxy for Zed's AI features:
 
 ```bash
-docker compose -f deploy/docker-compose.yml up clickhouse
+# Terminal 1: Start Candela
+nix develop -c go run ./cmd/candela-server
+
+# Then launch Zed with the API key set
+OPENAI_API_KEY=candela open -a Zed
 ```
 
-Then update `config.yaml`:
+Configure your Zed settings to point at Candela's proxy routes. See [docs/proxy.md](proxy.md) for full setup instructions.
+
+---
+
+## 🗄️ Storage Backends
+
+### DuckDB (Default)
+No setup required. The database will be created as `candela.duckdb` in your current directory. DuckDB is OLAP-optimized for high-throughput analytics queries.
+
+### SQLite
+Lightweight alternative for minimal setups. Set in `config.yaml`:
+
 ```yaml
 storage:
-  backend: "clickhouse"
-  clickhouse:
-    addr: "localhost:9000"
-    database: "candela"
+  backend: "sqlite"
+  sqlite:
+    path: "candela.db"  # or ":memory:" for ephemeral
+```
+
+### BigQuery
+For production-scale analytics. Requires a GCP project with BigQuery enabled:
+
+```yaml
+storage:
+  backend: "bigquery"
+  bigquery:
+    project_id: "my-gcp-project"
+    dataset: "candela"
+    location: "US"
 ```
 
 ---
@@ -87,10 +118,10 @@ Since we use **ConnectRPC**, you can interact with the API using `curl` (Connect
 curl -X POST \
   -H "Content-Type: application/json" \
   -d '{}' \
-  http://localhost:8080/candela.v1.TraceService/ListTraces
+  http://localhost:8181/candela.v1.TraceService/ListTraces
 ```
 
 **List Traces via `grpcurl`:**
 ```bash
-grpcurl -plaintext localhost:8080 candela.v1.TraceService/ListTraces
+grpcurl -plaintext localhost:8181 candela.v1.TraceService/ListTraces
 ```

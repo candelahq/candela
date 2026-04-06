@@ -38,6 +38,7 @@
 
             # Infrastructure tools
             docker-compose
+            cloudflared  # Cloudflare tunnel (expose Candela to Cursor 3)
             grpcurl
             jq
             yq-go

@@ -64,21 +64,19 @@ go test ./pkg/proxy -v
 
 ---
 
-## 🖱️ Cursor 3 Quick Start
+## 🖥️ Zed Quick Start
 
-Cursor 3 cannot connect to `localhost` (SSRF protection). Use a Cloudflare tunnel:
+To use Candela as the LLM proxy for Zed's AI features:
 
 ```bash
 # Terminal 1: Start Candela
 nix develop -c go run ./cmd/candela-server
 
-# Terminal 2: Start the tunnel
-nix develop -c cloudflared tunnel --url http://localhost:8181
+# Then launch Zed with the API key set
+OPENAI_API_KEY=candela open -a Zed
 ```
 
-Copy the tunnel URL and paste it into **Cursor Settings → Models → Override OpenAI Base URL**.
-
-See [docs/proxy.md](proxy.md) for full Cursor 3 setup instructions.
+Configure your Zed settings to point at Candela's proxy routes. See [docs/proxy.md](proxy.md) for full setup instructions.
 
 ---
 

@@ -136,6 +136,112 @@ Send a message in Zed's Agent Panel (`Cmd+Shift+A`). You should see:
 
 ---
 
+## 💻 OpenCode Integration
+
+[OpenCode](https://opencode.ai/) is an open-source terminal AI coding agent. It connects directly
+to `localhost` — no tunnel needed.
+
+### Prerequisites
+
+1. **Candela running locally**: `nix develop -c go run ./cmd/candela-server`
+2. **OpenCode installed**: `npm install -g opencode-ai` (or use `npx -y opencode-ai`)
+3. **GCP ADC** (for Anthropic/Claude): `gcloud auth application-default login`
+
+### Step 1: Create `opencode.json`
+
+Create `opencode.json` in your project root (not `.opencode.json`):
+
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "provider": {
+    "candela-anthropic": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "Claude via Candela (Vertex AI)",
+      "options": {
+        "baseURL": "http://localhost:8181/proxy/anthropic/v1"
+      },
+      "models": {
+        "claude-sonnet-4-20250514": {
+          "name": "Claude Sonnet 4"
+        },
+        "claude-opus-4-20250514": {
+          "name": "Claude Opus 4"
+        }
+      }
+    },
+    "candela-gemini": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "Gemini via Candela",
+      "options": {
+        "baseURL": "http://localhost:8181/proxy/gemini-oai/v1"
+      },
+      "models": {
+        "gemini-2.5-pro": {
+          "name": "Gemini 2.5 Pro"
+        },
+        "gemini-2.5-flash": {
+          "name": "Gemini 2.5 Flash"
+        }
+      }
+    },
+    "candela-openai": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "OpenAI via Candela",
+      "options": {
+        "baseURL": "http://localhost:8181/proxy/openai/v1"
+      },
+      "models": {
+        "gpt-4o": {
+          "name": "GPT-4o"
+        },
+        "o3-mini": {
+          "name": "o3-mini"
+        }
+      }
+    }
+  }
+}
+```
+
+### Step 2: Register credentials via `/connect`
+
+Launch OpenCode and register each provider:
+
+```bash
+npx -y opencode-ai
+```
+
+Inside the TUI:
+
+1. Type `/connect`
+2. Scroll to **"Other"** and select it
+3. Enter provider ID: `candela-anthropic`
+4. Enter API key: `candela` (placeholder — Candela injects ADC for Vertex AI)
+
+Repeat for other providers if needed:
+- Provider ID: `candela-gemini`, API key: your Gemini API key
+- Provider ID: `candela-openai`, API key: your OpenAI `sk-...` key
+
+### Step 3: Select a model
+
+Type `/models` in the TUI and select a model under **"Claude via Candela (Vertex AI)"**,
+**"Gemini via Candela"**, or **"OpenAI via Candela"**.
+
+### Verify
+
+Send a message in the OpenCode TUI. You should see:
+- The response from the model in OpenCode
+- A trace in the Candela dashboard at `http://localhost:3000`
+
+### Anthropic Prerequisites
+
+1. Run `gcloud auth application-default login`
+2. Set `vertex_ai.project_id` in `config.yaml` to your GCP project
+3. Enable the Vertex AI API and request Claude model access in Model Garden
+
+---
+
 ## 🛠️ Advanced Proxy Config
 
 Configuration is done via `config.yaml`:

@@ -64,9 +64,9 @@ go test ./pkg/proxy -v
 
 ---
 
-## 🖥️ Zed Quick Start
+## 🖥️ Editor Quick Start
 
-To use Candela as the LLM proxy for Zed's AI features:
+### Zed
 
 ```bash
 # Terminal 1: Start Candela
@@ -76,7 +76,21 @@ nix develop -c go run ./cmd/candela-server
 OPENAI_API_KEY=candela open -a Zed
 ```
 
-Configure your Zed settings to point at Candela's proxy routes. See [docs/proxy.md](proxy.md) for full setup instructions.
+Configure Zed settings to point at Candela's proxy routes.
+
+### OpenCode
+
+```bash
+# Terminal 1: Start Candela
+nix develop -c go run ./cmd/candela-server
+
+# Terminal 2: Launch OpenCode (picks up opencode.json from project root)
+npx -y opencode-ai
+```
+
+Use `/connect` → Other → `candela-anthropic` → key `candela`, then `/models` to select a model.
+
+See [docs/proxy.md](proxy.md) for full setup instructions for both editors.
 
 ---
 

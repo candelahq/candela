@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState, useCallback, useMemo } from "react";
+import { useRef, useState, useCallback, useMemo, useEffect } from "react";
 
 // ──────────────────────────────────────────
 // Types
@@ -82,9 +82,11 @@ export function AreaChart({
     point: DataPoint;
   } | null>(null);
   const [containerWidth, setContainerWidth] = useState(0);
+  const containerRef = useRef<HTMLDivElement>(null);
 
-  // Measure container width
-  const containerRef = useCallback((node: HTMLDivElement | null) => {
+  // Measure container width via ResizeObserver with proper cleanup
+  useEffect(() => {
+    const node = containerRef.current;
     if (!node) return;
     const observer = new ResizeObserver((entries) => {
       for (const entry of entries) {
@@ -272,7 +274,7 @@ export function AreaChart({
         <div
           className="chart-tooltip"
           style={{
-            left: Math.min(tooltip.x, containerWidth - 120),
+            left: Math.max(60, Math.min(tooltip.x, containerWidth - 60)),
             top: tooltip.y - 40,
           }}
         >

@@ -167,7 +167,7 @@ export default function CostsPage() {
                 </tr>
               </thead>
               <tbody>
-                {models
+                {[...models]
                   .sort((a, b) => b.costUsd - a.costUsd)
                   .map((m) => (
                     <tr key={`${m.model}-${m.provider}`}>

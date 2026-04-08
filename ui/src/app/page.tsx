@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useDashboard } from "@/hooks/useDashboard";
 import { AreaChart } from "@/components/chart";
+import { SpanStatus } from "@/gen/types/trace_pb";
 import type { TimeRange } from "@/hooks/useDashboard";
 
 // ──────────────────────────────────────────
@@ -42,7 +43,7 @@ function TimeRangeSelector({
 // ──────────────────────────────────────────
 
 const statusLabel = (s: number) => {
-  if (s === 2) return { text: "error", cls: "badge-error" };
+  if (s === SpanStatus.ERROR) return { text: "error", cls: "badge-error" };
   return { text: "ok", cls: "badge-success" };
 };
 

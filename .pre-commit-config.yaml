@@ -58,3 +58,10 @@ repos:
         language: system
         pass_filenames: false
         files: '\.go$'
+
+      - id: playwright-e2e
+        name: playwright e2e
+        entry: bash -c 'cd ui && npx playwright test'
+        language: system
+        pass_filenames: false
+        files: '^ui/'

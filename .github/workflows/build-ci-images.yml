@@ -30,12 +30,27 @@ jobs:
       - name: Build image
         run: nix build .#${{ matrix.image }} -o result
 
+      - name: Debug - verify token
+        run: |
+          echo "=== Token diagnostics ==="
+          echo "CR_PAT length: ${#CR_PAT}"
+          echo "CR_PAT prefix: ${CR_PAT:0:4}..."
+          echo "CR_PAT suffix: ...${CR_PAT: -4}"
+          echo "github.actor: ${{ github.actor }}"
+
+          echo "=== Test GHCR auth with curl ==="
+          TOKEN=$(echo -n "${{ github.actor }}:${CR_PAT}" | base64)
+          curl -sf -H "Authorization: Basic ${TOKEN}" \
+            "https://ghcr.io/v2/" && echo "Auth OK" || echo "Auth FAILED"
+
+          echo "=== Test token scopes ==="
+          curl -sI -H "Authorization: Bearer ${CR_PAT}" \
+            "https://ghcr.io/v2/" 2>&1 | grep -i 'www-authenticate\|x-github'
+        env:
+          CR_PAT: ${{ secrets.CR_PAT }}
+
       - name: Log in to GHCR
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+        run: echo "${{ secrets.CR_PAT }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
 
       - name: Load and push image
         run: |
@@ -44,7 +59,14 @@ jobs:
           IMAGE_INFO=$(docker images --format '{{.Repository}}:{{.Tag}}' | head -1)
           echo "Loaded image: $IMAGE_INFO"
 
-          docker push "$IMAGE_INFO"
+          docker push "$IMAGE_INFO" 2>&1 || {
+            echo "=== Docker push failed, trying skopeo ==="
+            nix shell nixpkgs#skopeo -c skopeo copy \
+              --debug \
+              --dest-creds="${{ github.actor }}:${{ secrets.CR_PAT }}" \
+              "docker-daemon:${IMAGE_INFO}" \
+              "docker://${IMAGE_INFO}" 2>&1
+          }
 
           IMAGE_NAME=$(echo "$IMAGE_INFO" | cut -d: -f1)
           docker tag "$IMAGE_INFO" "$IMAGE_NAME:latest"

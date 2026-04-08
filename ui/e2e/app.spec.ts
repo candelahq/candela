@@ -74,6 +74,13 @@ test.describe("Dashboard", () => {
       totalCostUsd: 3.47,
       avgLatencyMs: 234.5,
       errorRate: 0.02,
+      tracesOverTime: [],
+      costOverTime: [],
+      tokensOverTime: [],
+    });
+    await mockConnectRPC(page, "/candela.v1.TraceService/ListTraces", {
+      traces: [],
+      pagination: { totalCount: 0, nextPageToken: "" },
     });
 
     await page.goto("/");
@@ -383,10 +390,25 @@ test.describe("Settings", () => {
 // ──────────────────────────────────────────
 
 test.describe("Costs", () => {
-  test("renders cost page with placeholder stats", async ({ page }) => {
+  test("renders cost page with model breakdown", async ({ page }) => {
+    await mockConnectRPC(page, "/candela.v1.DashboardService/GetUsageSummary", {
+      totalTraces: "0",
+      totalSpans: "0",
+      totalLlmCalls: "0",
+      totalInputTokens: "0",
+      totalOutputTokens: "0",
+      totalCostUsd: 0,
+      avgLatencyMs: 0,
+      errorRate: 0,
+      costOverTime: [],
+    });
+    await mockConnectRPC(page, "/candela.v1.DashboardService/GetModelBreakdown", {
+      models: [],
+    });
+
     await page.goto("/costs");
     await expect(page.locator(".main-header h1")).toHaveText("Costs");
-    await expect(page.locator(".card").filter({ hasText: "Today" })).toBeVisible();
+    await expect(page.locator(".card").filter({ hasText: "Total Cost" })).toBeVisible();
     await expect(page.locator(".empty-state-title")).toHaveText("No cost data yet");
   });
 });

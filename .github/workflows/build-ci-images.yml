@@ -12,6 +12,9 @@ permissions:
   contents: read
   packages: write
 
+env:
+  REGISTRY: ghcr.io
+
 jobs:
   build-and-push:
     runs-on: ubuntu-latest
@@ -27,19 +30,24 @@ jobs:
       - name: Build image
         run: nix build .#${{ matrix.image }} -o result
 
-      - name: Push image
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: brucearctor
+          password: ${{ secrets.CR_PAT }}
+
+      - name: Load and push image
         run: |
-          skopeo copy \
-            --dest-creds "${{ github.actor }}:${{ secrets.GITHUB_TOKEN }}" \
-            "docker-archive:result" \
-            "docker://$(docker load < result | grep -oP 'Loaded image: \K.*')"
+          docker load < result
 
-          # Also push as :latest
           IMAGE_INFO=$(docker images --format '{{.Repository}}:{{.Tag}}' | head -1)
-          IMAGE_NAME=$(echo "$IMAGE_INFO" | cut -d: -f1)
-          skopeo copy \
-            --dest-creds "${{ github.actor }}:${{ secrets.GITHUB_TOKEN }}" \
-            "docker-archive:result" \
-            "docker://${IMAGE_NAME}:latest"
+          echo "Loaded image: $IMAGE_INFO"
 
-          echo "✅ Pushed $IMAGE_INFO and $IMAGE_NAME:latest"
+          docker push "$IMAGE_INFO"
+
+          IMAGE_NAME=$(echo "$IMAGE_INFO" | cut -d: -f1)
+          docker tag "$IMAGE_INFO" "$IMAGE_NAME:latest"
+          docker push "$IMAGE_NAME:latest"
+
+          echo "Pushed $IMAGE_INFO and $IMAGE_NAME:latest"

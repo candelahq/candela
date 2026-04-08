@@ -95,6 +95,9 @@
               "GOFLAGS=-buildvcs=false"
               "SSL_CERT_FILE=${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt"
             ];
+            Labels = {
+              "org.opencontainers.image.source" = "https://github.com/candelahq/candela";
+            };
             WorkingDir = "/workspace";
           };
         };
@@ -118,6 +121,9 @@
               "SSL_CERT_FILE=${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt"
               "FONTCONFIG_FILE=${pkgs.fontconfig.out}/etc/fonts/fonts.conf"
             ];
+            Labels = {
+              "org.opencontainers.image.source" = "https://github.com/candelahq/candela";
+            };
             WorkingDir = "/workspace";
           };
         };

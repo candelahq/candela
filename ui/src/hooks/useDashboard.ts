@@ -81,8 +81,8 @@ function formatTimeLabel(ts: string, range: TimeRange): string {
   return d.toLocaleDateString([], { month: "short", day: "numeric" });
 }
 
-function toDataPoints(pts: Array<{ timestamp: string; value: number }>, range: TimeRange): DataPoint[] {
-  return pts.map((p) => ({
+function toDataPoints(pts: Array<{ timestamp: string; value: number }> | undefined, range: TimeRange): DataPoint[] {
+  return (pts || []).map((p) => ({
     label: formatTimeLabel(p.timestamp, range),
     value: p.value,
   }));

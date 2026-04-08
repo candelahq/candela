@@ -1,6 +1,6 @@
 import { test, expect } from "@playwright/test";
 
-const API_BASE = "http://localhost:8080";
+const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8181";
 
 /**
  * Mock a ConnectRPC unary call by intercepting the POST to the service method URL.
@@ -55,7 +55,7 @@ test.describe("App Shell", () => {
   test("shows environment indicator in sidebar footer", async ({ page }) => {
     await page.goto("/");
     await expect(page.locator(".sidebar-env")).toContainText("Development");
-    await expect(page.locator(".sidebar-env")).toContainText("localhost:8080");
+    await expect(page.locator(".sidebar-env")).toContainText("localhost:8181");
   });
 });
 
@@ -373,7 +373,7 @@ test.describe("Settings", () => {
   test("shows backend connection info", async ({ page }) => {
     await page.goto("/settings");
     await expect(page.locator(".main-header h1")).toHaveText("Settings");
-    await expect(page.locator("text=http://localhost:8080")).toBeVisible();
+    await expect(page.locator("text=http://localhost:8181")).toBeVisible();
     await expect(page.locator("text=ConnectRPC")).toBeVisible();
   });
 });

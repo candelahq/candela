@@ -1,0 +1,58 @@
+name: Build CI Images
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'flake.nix'
+      - 'flake.lock'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  REGISTRY: ghcr.io
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        image: [ci-go, ci-ui]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: DeterminateSystems/nix-installer-action@main
+
+      - uses: DeterminateSystems/magic-nix-cache-action@main
+
+      - name: Build image
+        run: nix build .#${{ matrix.image }} -o result
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Load and push image
+        run: |
+          # Load the Nix-built image tarball into Docker
+          docker load < result
+
+          # Get the image name:tag that was loaded
+          IMAGE_INFO=$(docker images --format '{{.Repository}}:{{.Tag}}' | head -1)
+          echo "Loaded image: $IMAGE_INFO"
+
+          # Push with the nixpkgs rev tag
+          docker push "$IMAGE_INFO"
+
+          # Also tag and push as :latest
+          IMAGE_NAME=$(echo "$IMAGE_INFO" | cut -d: -f1)
+          docker tag "$IMAGE_INFO" "$IMAGE_NAME:latest"
+          docker push "$IMAGE_NAME:latest"
+
+          echo "Pushed $IMAGE_INFO and $IMAGE_NAME:latest"

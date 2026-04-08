@@ -10,6 +10,16 @@
     flake-utils.lib.eachDefaultSystem (system:
       let
         pkgs = nixpkgs.legacyPackages.${system};
+        isLinux = pkgs.stdenv.isLinux;
+
+        # Short rev from flake lock for deterministic image tagging.
+        nixpkgsRev = builtins.substring 0 8 nixpkgs.rev;
+
+        # Shared base utilities for CI containers.
+        baseContents = with pkgs; [
+          coreutils bash gnugrep gawk findutils gnused
+          git cacert
+        ];
       in
       {
         devShells.default = pkgs.mkShell {
@@ -38,7 +48,7 @@
 
             # Infrastructure tools
             docker-compose
-            cloudflared  # Cloudflare tunnel (expose Candela to Cursor 3)
+            cloudflared
             grpcurl
             jq
             yq-go
@@ -58,6 +68,57 @@
             echo "   Node:   $(node --version)"
             echo "   Python: $(python3 --version | cut -d' ' -f2)"
           '';
+        };
+
+        # ── CI container images (Linux only) ───────────────────────────
+        # Built in CI via `nix build .#ci-go` / `nix build .#ci-ui`
+        # and pushed to GHCR. Tagged with the nixpkgs rev for lockstep.
+      } // pkgs.lib.optionalAttrs isLinux {
+        packages.ci-go = pkgs.dockerTools.buildLayeredImage {
+          name = "ghcr.io/candelahq/ci-go";
+          tag = nixpkgsRev;
+
+          contents = baseContents ++ (with pkgs; [
+            go_1_26
+            golangci-lint
+            buf
+            protobuf
+            protoc-gen-go
+            protoc-gen-go-grpc
+          ]);
+
+          config = {
+            Env = [
+              "PATH=/bin:/usr/bin:/sbin:/usr/sbin"
+              "GOPATH=/tmp/go"
+              "GOFLAGS=-buildvcs=false"
+              "SSL_CERT_FILE=${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt"
+            ];
+            WorkingDir = "/workspace";
+          };
+        };
+
+        packages.ci-ui = pkgs.dockerTools.buildLayeredImage {
+          name = "ghcr.io/candelahq/ci-ui";
+          tag = nixpkgsRev;
+
+          contents = baseContents ++ (with pkgs; [
+            nodejs_22
+            buf
+            protobuf
+            chromium
+          ]);
+
+          config = {
+            Env = [
+              "PATH=/bin:/usr/bin:/sbin:/usr/sbin"
+              "PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1"
+              "PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=${pkgs.chromium}/bin/chromium"
+              "SSL_CERT_FILE=${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt"
+              "FONTCONFIG_FILE=${pkgs.fontconfig.out}/etc/fonts/fonts.conf"
+            ];
+            WorkingDir = "/workspace";
+          };
         };
       }
     );

@@ -54,7 +54,6 @@ jobs:
         run: |
           go install golang.org/x/vuln/cmd/govulncheck@latest
           govulncheck ./...
-        continue-on-error: true  # advisory — stdlib vulns shouldn't block CI
 
   lint:
     runs-on: ubuntu-latest
@@ -195,4 +194,3 @@ jobs:
           name: playwright-report
           path: ui/playwright-report/
           retention-days: 7
-

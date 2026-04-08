@@ -29,6 +29,7 @@
             gopls
             golangci-lint
             gotools
+            govulncheck
 
             # Protobuf / Buf
             buf

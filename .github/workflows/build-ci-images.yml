@@ -30,46 +30,30 @@ jobs:
       - name: Build image
         run: nix build .#${{ matrix.image }} -o result
 
-      - name: Debug - verify token
-        run: |
-          echo "=== Token diagnostics ==="
-          echo "CR_PAT length: ${#CR_PAT}"
-          echo "CR_PAT prefix: ${CR_PAT:0:4}..."
-          echo "CR_PAT suffix: ...${CR_PAT: -4}"
-          echo "github.actor: ${{ github.actor }}"
-
-          echo "=== Test GHCR auth with curl ==="
-          TOKEN=$(echo -n "${{ github.actor }}:${CR_PAT}" | base64)
-          curl -sf -H "Authorization: Basic ${TOKEN}" \
-            "https://ghcr.io/v2/" && echo "Auth OK" || echo "Auth FAILED"
-
-          echo "=== Test token scopes ==="
-          curl -sI -H "Authorization: Bearer ${CR_PAT}" \
-            "https://ghcr.io/v2/" 2>&1 | grep -i 'www-authenticate\|x-github'
-        env:
-          CR_PAT: ${{ secrets.CR_PAT }}
-
       - name: Log in to GHCR
         run: echo "${{ secrets.CR_PAT }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
 
       - name: Load and push image
         run: |
-          docker load < result
+          # Capture output of docker load to find the EXACT image name built by Nix
+          LOAD_OUTPUT=$(docker load < result)
+          echo "$LOAD_OUTPUT"
 
-          IMAGE_INFO=$(docker images --format '{{.Repository}}:{{.Tag}}' | head -1)
-          echo "Loaded image: $IMAGE_INFO"
+          # Extract the image name correctly, avoiding system images like gh-aw-mcpg
+          IMAGE_INFO=$(echo "$LOAD_OUTPUT" | grep -oP 'Loaded image: \K.*')
+          echo "Identified Nix image: $IMAGE_INFO"
 
-          docker push "$IMAGE_INFO" 2>&1 || {
-            echo "=== Docker push failed, trying skopeo ==="
-            nix shell nixpkgs#skopeo -c skopeo copy \
-              --debug \
-              --dest-creds="${{ github.actor }}:${{ secrets.CR_PAT }}" \
-              "docker-daemon:${IMAGE_INFO}" \
-              "docker://${IMAGE_INFO}" 2>&1
-          }
+          if [[ -z "$IMAGE_INFO" ]]; then
+            echo "Error: Could not identify loaded image"
+            exit 1
+          fi
 
+          # Push the specific tag built by Nix (contains nixpkgs rev)
+          docker push "$IMAGE_INFO"
+
+          # Tag and push as :latest
           IMAGE_NAME=$(echo "$IMAGE_INFO" | cut -d: -f1)
           docker tag "$IMAGE_INFO" "$IMAGE_NAME:latest"
           docker push "$IMAGE_NAME:latest"
 
-          echo "Pushed $IMAGE_INFO and $IMAGE_NAME:latest"
+          echo "Successfully pushed $IMAGE_INFO and $IMAGE_NAME:latest"

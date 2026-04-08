@@ -38,7 +38,7 @@
 
             # Node.js (for web UI)
             nodejs_22
-            nodePackages.pnpm
+            pnpm
 
             # Python (for eval engine)
             python312

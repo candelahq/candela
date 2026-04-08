@@ -36,10 +36,10 @@ proxy:
   #   /proxy/gemini-oai/  → https://generativelanguage.googleapis.com/v1beta/openai (OpenAI-compat)
   #   /proxy/anthropic/   → Vertex AI (with format translation + ADC auth)
   #
-  # Cursor integration:
-  #   OpenAI:     Base URL = http://localhost:8080/proxy/openai/v1
-  #   Gemini:     Base URL = http://localhost:8080/proxy/gemini-oai/v1
-  #   Anthropic:  Base URL = http://localhost:8080/proxy/anthropic/v1
+  # Editor integration (Zed, OpenCode, etc.):
+  #   OpenAI:     Base URL = http://localhost:8181/proxy/openai/v1
+  #   Gemini:     Base URL = http://localhost:8181/proxy/gemini-oai/v1
+  #   Anthropic:  Base URL = http://localhost:8181/proxy/anthropic/v1
   providers:
     - openai
     - google

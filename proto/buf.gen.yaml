@@ -13,8 +13,7 @@ plugins:
   - remote: buf.build/connectrpc/go
     out: ../gen/go
     opt: paths=source_relative
-  # TypeScript (ES) protobuf v2 — from environment PATH
-  # connect-es v2 derives service clients from protobuf schema
-  - local: protoc-gen-es
+  # TypeScript (ES) — Remote Generation
+  - remote: buf.build/connectrpc/es
     out: ../gen/ts
     opt: target=ts

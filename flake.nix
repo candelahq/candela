@@ -33,9 +33,6 @@
             # Protobuf / Buf
             buf
             protobuf
-            protoc-gen-go
-            protoc-gen-go-grpc
-            protoc-gen-es
 
             # Node.js (for web UI)
             nodejs_22
@@ -85,9 +82,6 @@
             golangci-lint
             buf
             protobuf
-            protoc-gen-go
-            protoc-gen-go-grpc
-            protoc-gen-es
             nodejs_22  # needed for path resolution in some JS tools
           ]);
 
@@ -113,7 +107,6 @@
             nodejs_22
             buf
             protobuf
-            protoc-gen-es
             chromium
           ]);
 

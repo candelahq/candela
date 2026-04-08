@@ -27,6 +27,8 @@ jobs:
       - uses: DeterminateSystems/nix-installer-action@main
 
       - uses: DeterminateSystems/magic-nix-cache-action@main
+        with:
+          use-flakehub: false
 
       - name: Build image
         run: nix build .#${{ matrix.image }} -o result

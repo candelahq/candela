@@ -54,7 +54,7 @@ nix develop
 go run ./cmd/candela-server
 
 # Start the UI (separate terminal)
-cd ui && npm install && npm run dev
+cd ui && pnpm install && pnpm run dev
 ```
 
 ### Option B: Docker Compose (Full Stack)
@@ -202,14 +202,17 @@ The web interface is a Next.js 16 app in `ui/` with a dark-themed dashboard.
 
 ```bash
 cd ui
-npm install           # install deps
-npm run dev            # start dev server → http://localhost:3000
-npm run build          # production build (includes TypeScript type-check)
-npm run test:e2e       # run Playwright E2E tests (12 tests)
-npm run test:e2e:ui    # Playwright interactive UI mode
+pnpm install          # install deps (included in nix shell)
+pnpm run dev           # start dev server → http://localhost:3000
+pnpm run build         # production build (includes TypeScript type-check)
+pnpm run test:e2e      # run Playwright E2E tests (12 tests)
+pnpm run test:e2e:ui   # Playwright interactive UI mode
 ```
 
 The UI communicates with the backend via **ConnectRPC v2** on `localhost:8080`. Pages gracefully handle offline backend state.
+
+> [!TIP]
+> **Proto Generation**: We use **Buf Remote Generation**. Just run `buf generate` in the `proto/` directory—no local plugins required!
 
 ---
 

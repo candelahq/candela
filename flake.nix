@@ -75,7 +75,7 @@
         # and pushed to GHCR. Tagged with the nixpkgs rev for lockstep.
       } // pkgs.lib.optionalAttrs isLinux {
         packages.ci-go = pkgs.dockerTools.buildLayeredImage {
-          name = "ghcr.io/candelahq/candela-ci-go";
+          name = "ghcr.io/brucearctor/candela-ci-go";
           tag = nixpkgsRev;
 
           contents = baseContents ++ (with pkgs; [
@@ -103,7 +103,7 @@
         };
 
         packages.ci-ui = pkgs.dockerTools.buildLayeredImage {
-          name = "ghcr.io/candelahq/candela-ci-ui";
+          name = "ghcr.io/brucearctor/candela-ci-ui";
           tag = nixpkgsRev;
 
           contents = baseContents ++ (with pkgs; [

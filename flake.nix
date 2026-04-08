@@ -85,6 +85,7 @@
             protobuf
             protoc-gen-go
             protoc-gen-go-grpc
+            nodejs_22  # needed for protoc-gen-es during buf generate
           ]);
 
           config = {

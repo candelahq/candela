@@ -8,30 +8,18 @@ on:
 
 permissions:
   contents: read
+  packages: read
 
 jobs:
   build-and-test:
     runs-on: ubuntu-latest
+    container: ghcr.io/candelahq/ci-go:latest
     steps:
       - uses: actions/checkout@v4
-
-      - uses: actions/setup-go@v5
-        with:
-          go-version: '1.26.2'
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-          cache: npm
-          cache-dependency-path: ui/package-lock.json
 
       - name: Install UI deps (protoc-gen-es)
         run: npm ci
         working-directory: ui
-
-      - uses: bufbuild/buf-setup-action@v1
-        with:
-          github_token: ${{ github.token }}
 
       - name: Generate proto (gen/ is gitignored)
         run: |
@@ -58,26 +46,13 @@ jobs:
 
   lint:
     runs-on: ubuntu-latest
+    container: ghcr.io/candelahq/ci-go:latest
     steps:
       - uses: actions/checkout@v4
-
-      - uses: actions/setup-go@v5
-        with:
-          go-version: '1.26.2'
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-          cache: npm
-          cache-dependency-path: ui/package-lock.json
 
       - name: Install UI deps (protoc-gen-es)
         run: npm ci
         working-directory: ui
-
-      - uses: bufbuild/buf-setup-action@v1
-        with:
-          github_token: ${{ github.token }}
 
       - name: Generate proto
         run: |
@@ -97,14 +72,11 @@ jobs:
 
   proto:
     runs-on: ubuntu-latest
+    container: ghcr.io/candelahq/ci-go:latest
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # buf breaking needs main ref
-
-      - uses: bufbuild/buf-setup-action@v1
-        with:
-          github_token: ${{ github.token }}
+          fetch-depth: 0
 
       - name: buf format check
         run: buf format --diff --exit-code proto/
@@ -112,23 +84,15 @@ jobs:
       - name: buf breaking (PR only)
         if: github.event_name == 'pull_request'
         run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
           git fetch origin main
           buf breaking proto/ --against '.git#branch=origin/main,subdir=proto'
 
   ui-build-and-lint:
     runs-on: ubuntu-latest
+    container: ghcr.io/candelahq/ci-ui:latest
     steps:
       - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-          cache: npm
-          cache-dependency-path: ui/package-lock.json
-
-      - uses: bufbuild/buf-setup-action@v1
-        with:
-          github_token: ${{ github.token }}
 
       - name: Install dependencies
         run: npm ci
@@ -152,19 +116,10 @@ jobs:
 
   ui-e2e:
     runs-on: ubuntu-latest
+    container: ghcr.io/candelahq/ci-ui:latest
     needs: [ui-build-and-lint]
     steps:
       - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-          cache: npm
-          cache-dependency-path: ui/package-lock.json
-
-      - uses: bufbuild/buf-setup-action@v1
-        with:
-          github_token: ${{ github.token }}
 
       - name: Install dependencies
         run: npm ci
@@ -177,10 +132,6 @@ jobs:
 
       - name: Copy generated types
         run: cp -r gen/ts/candela ui/src/gen
-
-      - name: Install Playwright browsers
-        run: npx playwright install --with-deps chromium
-        working-directory: ui
 
       - name: Run Playwright tests
         run: npx playwright test

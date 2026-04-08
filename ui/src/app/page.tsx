@@ -2,9 +2,64 @@
 
 import Link from "next/link";
 import { useDashboard } from "@/hooks/useDashboard";
+import { AreaChart } from "@/components/chart";
+import { SpanStatus } from "@/gen/types/trace_pb";
+import type { TimeRange } from "@/hooks/useDashboard";
+
+// ──────────────────────────────────────────
+// Time Range Selector
+// ──────────────────────────────────────────
+
+const ranges: { value: TimeRange; label: string }[] = [
+  { value: "24h", label: "24h" },
+  { value: "7d", label: "7d" },
+  { value: "30d", label: "30d" },
+];
+
+function TimeRangeSelector({
+  value,
+  onChange,
+}: {
+  value: TimeRange;
+  onChange: (r: TimeRange) => void;
+}) {
+  return (
+    <div className="time-range-selector">
+      {ranges.map((r) => (
+        <button
+          key={r.value}
+          className={`time-range-btn ${value === r.value ? "active" : ""}`}
+          onClick={() => onChange(r.value)}
+        >
+          {r.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+// ──────────────────────────────────────────
+// Status helpers
+// ──────────────────────────────────────────
+
+const statusLabel = (s: number) => {
+  if (s === SpanStatus.ERROR) return { text: "error", cls: "badge-error" };
+  return { text: "ok", cls: "badge-success" };
+};
+
+// ──────────────────────────────────────────
+// Page
+// ──────────────────────────────────────────
 
 export default function DashboardPage() {
-  const { summary, error } = useDashboard();
+  const {
+    summary,
+    recentTraces,
+    error,
+    timeRange,
+    setTimeRange,
+    refresh,
+  } = useDashboard();
 
   const totalTokens = summary
     ? (summary.totalInputTokens + summary.totalOutputTokens).toLocaleString()
@@ -14,9 +69,12 @@ export default function DashboardPage() {
     <>
       <header className="main-header">
         <h1>Dashboard</h1>
-        <span className="mono" style={{ color: "var(--text-muted)" }}>
-          Overview
-        </span>
+        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          <TimeRangeSelector value={timeRange} onChange={setTimeRange} />
+          <button className="btn" onClick={refresh}>
+            🔄
+          </button>
+        </div>
       </header>
 
       <div className="main-body">
@@ -40,13 +98,16 @@ export default function DashboardPage() {
           </div>
         )}
 
+        {/* Summary cards */}
         <div className="stats-grid animate-in">
           <div className="card">
             <div className="card-title">Total Traces</div>
             <div className="card-value">
               {summary ? Number(summary.totalTraces).toLocaleString() : "—"}
             </div>
-            <div className="card-subtitle">All time</div>
+            <div className="card-subtitle">
+              {timeRange === "24h" ? "Last 24 hours" : timeRange === "7d" ? "Last 7 days" : "Last 30 days"}
+            </div>
           </div>
           <div className="card">
             <div className="card-title">Total Tokens</div>
@@ -69,6 +130,46 @@ export default function DashboardPage() {
           </div>
         </div>
 
+        {/* Charts */}
+        <div className="chart-grid animate-in" style={{ animationDelay: "0.05s" }}>
+          <div className="chart-card">
+            <div className="chart-card-header">
+              <span className="chart-card-title">Traces</span>
+            </div>
+            <AreaChart
+              data={summary?.tracesOverTime ?? []}
+              color="var(--accent)"
+              formatValue={(v) => Math.round(v).toString()}
+              emptyMessage="No trace data for this period"
+            />
+          </div>
+
+          <div className="chart-card">
+            <div className="chart-card-header">
+              <span className="chart-card-title">Cost (USD)</span>
+            </div>
+            <AreaChart
+              data={summary?.costOverTime ?? []}
+              color="var(--success)"
+              formatValue={(v) => `$${v.toFixed(4)}`}
+              emptyMessage="No cost data for this period"
+            />
+          </div>
+
+          <div className="chart-card">
+            <div className="chart-card-header">
+              <span className="chart-card-title">Tokens</span>
+            </div>
+            <AreaChart
+              data={summary?.tokensOverTime ?? []}
+              color="var(--info)"
+              formatValue={(v) => v >= 1000 ? `${(v / 1000).toFixed(1)}k` : Math.round(v).toString()}
+              emptyMessage="No token data for this period"
+            />
+          </div>
+        </div>
+
+        {/* Recent Traces */}
         <div className="table-container animate-in" style={{ animationDelay: "0.1s" }}>
           <div className="table-header">
             <span className="table-title">Recent Traces</span>
@@ -76,15 +177,61 @@ export default function DashboardPage() {
               View all →
             </Link>
           </div>
-          <div className="empty-state">
-            <div className="empty-state-icon">🕯️</div>
-            <div className="empty-state-title">No traces yet</div>
-            <div className="empty-state-desc">
-              Send your first LLM request through the Candela proxy to see traces
-              appear here. Configure a provider in your candela.yaml and point your
-              SDK to <code className="mono">http://localhost:8181/proxy/</code>.
+          {recentTraces.length === 0 ? (
+            <div className="empty-state">
+              <div className="empty-state-icon">🕯️</div>
+              <div className="empty-state-title">No traces yet</div>
+              <div className="empty-state-desc">
+                Send your first LLM request through the Candela proxy to see traces
+                appear here. Configure a provider in your candela.yaml and point your
+                SDK to <code className="mono">http://localhost:8181/proxy/</code>.
+              </div>
             </div>
-          </div>
+          ) : (
+            <table>
+              <thead>
+                <tr>
+                  <th>Trace ID</th>
+                  <th>Operation</th>
+                  <th>Model</th>
+                  <th>Tokens</th>
+                  <th>Cost</th>
+                  <th>Latency</th>
+                  <th>Status</th>
+                  <th>Time</th>
+                </tr>
+              </thead>
+              <tbody>
+                {recentTraces.map((t) => {
+                  const st = statusLabel(t.status);
+                  return (
+                    <tr key={t.traceId}>
+                      <td>
+                        <Link href={`/traces/${t.traceId}`} className="mono">
+                          {t.traceId.slice(0, 12)}…
+                        </Link>
+                      </td>
+                      <td>{t.rootSpanName}</td>
+                      <td>
+                        <span className="mono" style={{ fontSize: 12 }}>
+                          {t.primaryModel}
+                        </span>
+                      </td>
+                      <td>{t.totalTokens.toLocaleString()}</td>
+                      <td>${t.totalCostUsd.toFixed(4)}</td>
+                      <td>{t.durationMs.toFixed(0)}ms</td>
+                      <td>
+                        <span className={`badge ${st.cls}`}>{st.text}</span>
+                      </td>
+                      <td style={{ color: "var(--text-muted)", fontSize: 12 }}>
+                        {t.startTime}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          )}
         </div>
       </div>
     </>

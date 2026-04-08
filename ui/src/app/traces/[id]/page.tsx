@@ -3,6 +3,7 @@
 import { useParams, useRouter } from "next/navigation";
 import { useTrace, kindLabel, kindColor } from "@/hooks/useTrace";
 import type { SpanNode } from "@/hooks/useTrace";
+import { ErrorBanner } from "@/components/ErrorBanner";
 import { SpanStatus } from "@/gen/types/trace_pb";
 
 // ──────────────────────────────────────────
@@ -258,21 +259,9 @@ export default function TraceDetailPage() {
 
       <div className="main-body">
         {error && (
-          <div
-            className="card animate-in"
-            style={{
-              borderColor: "var(--error)",
-              marginBottom: 24,
-              background: "rgba(248,113,113,0.05)",
-            }}
-          >
-            <div className="card-title" style={{ color: "var(--error)" }}>
-              {error.includes("fetch") ? "Backend Unavailable" : "Error"}
-            </div>
-            <div style={{ fontSize: 13, color: "var(--text-secondary)" }}>
-              {error}
-            </div>
-          </div>
+          <ErrorBanner title={error.includes("fetch") ? "Backend Unavailable" : "Error"}>
+            {error}
+          </ErrorBanner>
         )}
 
         {trace && (

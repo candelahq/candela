@@ -80,6 +80,7 @@
 
           contents = baseContents ++ (with pkgs; [
             go_1_26
+            govulncheck
             golangci-lint
             buf
             protobuf

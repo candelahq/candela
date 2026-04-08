@@ -18,9 +18,11 @@
 /vendor/
 node_modules/
 
-# IDE
+# IDE / AI tools
 .idea/
 .vscode/
+.opencode.json
+opencode.json
 *.swp
 *.swo
 *~

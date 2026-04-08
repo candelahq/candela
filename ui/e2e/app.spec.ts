@@ -97,7 +97,8 @@ test.describe("Dashboard", () => {
   });
 
   test("shows error banner when backend is down", async ({ page }) => {
-    // No mock → fetch to :8080 will fail with network error
+    // Abort all backend requests to simulate offline
+    await page.route(`${API_BASE}/**`, (route) => route.abort());
     await page.goto("/");
     await expect(
       page.locator(".card-title").filter({ hasText: "Backend Unavailable" })
@@ -120,6 +121,8 @@ test.describe("Traces", () => {
   });
 
   test("shows error when backend is down", async ({ page }) => {
+    // Abort all backend requests to simulate offline
+    await page.route(`${API_BASE}/**`, (route) => route.abort());
     await page.goto("/traces");
     await expect(
       page.locator(".card-title").filter({ hasText: "Could not load traces" })
@@ -345,6 +348,7 @@ test.describe("Trace Waterfall", () => {
   });
 
   test("shows error when backend is down", async ({ page }) => {
+    await page.route(`${API_BASE}/**`, (route) => route.abort());
     await page.goto("/traces/nonexistent");
     await expect(
       page.locator(".card-title").filter({ hasText: /unavailable|error/i })
@@ -381,7 +385,45 @@ test.describe("Settings", () => {
     await page.goto("/settings");
     await expect(page.locator(".main-header h1")).toHaveText("Settings");
     await expect(page.locator("text=http://localhost:8181")).toBeVisible();
-    await expect(page.locator("text=ConnectRPC")).toBeVisible();
+    await expect(page.locator("text=ConnectRPC v2")).toBeVisible();
+  });
+
+  test("shows connected status when backend responds", async ({ page }) => {
+    await mockConnectRPC(page, "/candela.v1.DashboardService/GetUsageSummary", {
+      totalTraces: "100",
+      totalSpans: "500",
+      totalLlmCalls: "100",
+      totalInputTokens: "0",
+      totalOutputTokens: "0",
+      totalCostUsd: 0,
+      avgLatencyMs: 0,
+      errorRate: 0,
+      costOverTime: [],
+      tokensOverTime: [],
+    });
+
+    await page.goto("/settings");
+    await expect(page.locator("text=Connected")).toBeVisible();
+    await expect(page.locator(".health-dot")).toBeVisible();
+  });
+
+  test("shows offline status when backend is down", async ({ page }) => {
+    // Abort all backend requests to simulate offline
+    await page.route(`${API_BASE}/**`, (route) => route.abort());
+    await page.goto("/settings");
+    await expect(page.locator("text=Offline")).toBeVisible({ timeout: 10000 });
+  });
+
+  test("shows configured providers", async ({ page }) => {
+    await page.goto("/settings");
+    await expect(page.locator(".settings-provider-chip").filter({ hasText: "OpenAI" })).toBeVisible();
+    await expect(page.locator(".settings-provider-chip").filter({ hasText: "Google (Gemini)" })).toBeVisible();
+    await expect(page.locator(".settings-provider-chip").filter({ hasText: "Anthropic" })).toBeVisible();
+  });
+
+  test("shows storage backend", async ({ page }) => {
+    await page.goto("/settings");
+    await expect(page.locator(".badge-info").filter({ hasText: "DuckDB" })).toBeVisible();
   });
 });
 
@@ -390,7 +432,7 @@ test.describe("Settings", () => {
 // ──────────────────────────────────────────
 
 test.describe("Costs", () => {
-  test("renders cost page with model breakdown", async ({ page }) => {
+  test("renders cost page with empty model breakdown", async ({ page }) => {
     await mockConnectRPC(page, "/candela.v1.DashboardService/GetUsageSummary", {
       totalTraces: "0",
       totalSpans: "0",
@@ -401,6 +443,7 @@ test.describe("Costs", () => {
       avgLatencyMs: 0,
       errorRate: 0,
       costOverTime: [],
+      tokensOverTime: [],
     });
     await mockConnectRPC(page, "/candela.v1.DashboardService/GetModelBreakdown", {
       models: [],
@@ -410,5 +453,181 @@ test.describe("Costs", () => {
     await expect(page.locator(".main-header h1")).toHaveText("Costs");
     await expect(page.locator(".card").filter({ hasText: "Total Cost" })).toBeVisible();
     await expect(page.locator(".empty-state-title")).toHaveText("No cost data yet");
+  });
+
+  test("renders model breakdown table with data", async ({ page }) => {
+    await mockConnectRPC(page, "/candela.v1.DashboardService/GetUsageSummary", {
+      totalTraces: "50",
+      totalSpans: "150",
+      totalLlmCalls: "50",
+      totalInputTokens: "8000",
+      totalOutputTokens: "4000",
+      totalCostUsd: 2.75,
+      avgLatencyMs: 200,
+      errorRate: 0,
+      costOverTime: [],
+      tokensOverTime: [],
+    });
+    await mockConnectRPC(page, "/candela.v1.DashboardService/GetModelBreakdown", {
+      models: [
+        { model: "gpt-4o", provider: "openai", callCount: 30, inputTokens: 5000, outputTokens: 2500, costUsd: 2.0, avgLatencyMs: 250 },
+        { model: "gemini-2.5-pro", provider: "google", callCount: 20, inputTokens: 3000, outputTokens: 1500, costUsd: 0.75, avgLatencyMs: 150 },
+      ],
+    });
+
+    await page.goto("/costs");
+    // Summary card
+    await expect(
+      page.locator(".card").filter({ hasText: "Total Cost" }).locator(".card-value")
+    ).toHaveText("$2.7500");
+    // Model table — sorted by cost, gpt-4o first
+    const rows = page.locator("tbody tr");
+    await expect(rows).toHaveCount(2);
+    await expect(rows.first().locator("td").first()).toContainText("gpt-4o");
+    await expect(rows.nth(1).locator("td").first()).toContainText("gemini-2.5-pro");
+  });
+
+  test("time range selector switches period", async ({ page }) => {
+    await mockConnectRPC(page, "/candela.v1.DashboardService/GetUsageSummary", {
+      totalTraces: "10",
+      totalSpans: "30",
+      totalLlmCalls: "10",
+      totalInputTokens: "1000",
+      totalOutputTokens: "500",
+      totalCostUsd: 0.5,
+      avgLatencyMs: 100,
+      errorRate: 0,
+      costOverTime: [],
+      tokensOverTime: [],
+    });
+    await mockConnectRPC(page, "/candela.v1.DashboardService/GetModelBreakdown", {
+      models: [],
+    });
+
+    await page.goto("/costs");
+    // Default is 7d
+    await expect(
+      page.locator(".card").filter({ hasText: "Total Cost" }).locator(".card-subtitle")
+    ).toHaveText("Last 7 days");
+
+    // Switch to 24h
+    await page.locator(".time-range-btn").filter({ hasText: "24h" }).click();
+    await expect(
+      page.locator(".card").filter({ hasText: "Total Cost" }).locator(".card-subtitle")
+    ).toHaveText("Last 24 hours");
+  });
+});
+
+// ──────────────────────────────────────────
+// Dashboard — time range
+// ──────────────────────────────────────────
+
+test.describe("Dashboard time range", () => {
+  test("time range selector switches period label", async ({ page }) => {
+    await mockConnectRPC(page, "/candela.v1.DashboardService/GetUsageSummary", {
+      totalTraces: "5",
+      totalSpans: "15",
+      totalLlmCalls: "5",
+      totalInputTokens: "500",
+      totalOutputTokens: "250",
+      totalCostUsd: 0.1,
+      avgLatencyMs: 50,
+      errorRate: 0,
+      tracesOverTime: [],
+      costOverTime: [],
+      tokensOverTime: [],
+    });
+    await mockConnectRPC(page, "/candela.v1.TraceService/ListTraces", {
+      traces: [],
+      pagination: { totalCount: 0, nextPageToken: "" },
+    });
+
+    await page.goto("/");
+    // Default is 24h
+    await expect(
+      page.locator(".card").filter({ hasText: "Total Traces" }).locator(".card-subtitle")
+    ).toHaveText("Last 24 hours");
+
+    // Switch to 30d
+    await page.locator(".time-range-btn").filter({ hasText: "30d" }).click();
+    await expect(
+      page.locator(".card").filter({ hasText: "Total Traces" }).locator(".card-subtitle")
+    ).toHaveText("Last 30 days");
+  });
+});
+
+// ──────────────────────────────────────────
+// Trace Detail — toggle deselect
+// ──────────────────────────────────────────
+
+test.describe("Trace detail interactions", () => {
+  const mockTrace = {
+    trace: {
+      traceId: "toggle-test-123",
+      startTime: "2024-03-31T00:00:00Z",
+      endTime: "2024-03-31T00:00:01Z",
+      duration: "1s",
+      projectId: "proj-1",
+      environment: "dev",
+      spanCount: 1,
+      totalTokens: "100",
+      totalCostUsd: 0.001,
+      rootSpanName: "test_op",
+      spans: [
+        {
+          spanId: "span-only",
+          traceId: "toggle-test-123",
+          parentSpanId: "",
+          name: "test_op",
+          kind: "SPAN_KIND_LLM",
+          status: "SPAN_STATUS_OK",
+          statusMessage: "",
+          startTime: "2024-03-31T00:00:00Z",
+          endTime: "2024-03-31T00:00:01Z",
+          duration: "1s",
+          genAi: { model: "gpt-4o", provider: "openai", inputTokens: "50", outputTokens: "50", totalTokens: "100", costUsd: 0.001, temperature: 0 },
+          attributes: [],
+          events: [],
+          projectId: "proj-1",
+          environment: "dev",
+          serviceName: "test",
+        },
+      ],
+    },
+  };
+
+  test("clicking a span then clicking again deselects it", async ({ page }) => {
+    await mockConnectRPC(page, "/candela.v1.TraceService/GetTrace", mockTrace);
+    await page.goto("/traces/toggle-test-123");
+
+    // Click to select
+    await page.locator(".waterfall-row").first().click();
+    await expect(page.locator(".span-detail")).toBeVisible();
+
+    // Click again to deselect
+    await page.locator(".waterfall-row").first().click();
+    await expect(page.locator(".span-detail")).not.toBeVisible();
+  });
+});
+
+// ──────────────────────────────────────────
+// Responsive sidebar
+// ──────────────────────────────────────────
+
+test.describe("Responsive sidebar", () => {
+  test("sidebar collapses on narrow viewport", async ({ page }) => {
+    await page.setViewportSize({ width: 600, height: 800 });
+    await page.goto("/");
+
+    // Sidebar text should be hidden
+    const sidebar = page.locator(".sidebar");
+    await expect(sidebar).toBeVisible();
+
+    // Logo text should be hidden at narrow widths
+    const logoText = page.locator(".sidebar-logo");
+    await expect(logoText).not.toBeVisible();
+
+    // Nav items should still be clickable
+    await page.locator(".nav-item").filter({ hasText: "" }).first().click();
   });
 });

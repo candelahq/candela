@@ -1107,7 +1107,11 @@ tr:hover .model-bar {
    Table Row Click Affordance
    ────────────────────────────────────────── */
 
-tr[style*="cursor: pointer"]:hover td:first-child,
+.clickable-row {
+  cursor: pointer;
+}
+
+.clickable-row:hover td:first-child,
 .table-container tbody tr:hover td:first-child {
   box-shadow: inset 3px 0 0 var(--accent);
 }

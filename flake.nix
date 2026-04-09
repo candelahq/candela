@@ -10,6 +10,19 @@
     flake-utils.lib.eachDefaultSystem (system:
       let
         pkgs = nixpkgs.legacyPackages.${system};
+
+        # BigQuery schema generator for protobuf (not in nixpkgs).
+        protoc-gen-bq-schema = pkgs.buildGoModule rec {
+          pname = "protoc-gen-bq-schema";
+          version = "3.1.0";
+          src = pkgs.fetchFromGitHub {
+            owner = "GoogleCloudPlatform";
+            repo = "protoc-gen-bq-schema";
+            rev = "v${version}";
+            sha256 = "sha256-fsnCGv9C5S+/VcBr88IXZTvgcMacQ2x4fnV3NyHrwSk=";
+          };
+          vendorHash = "sha256-nGAX1r6JgjZ0w9McpICd8nP+oWqu9PY6hSqTztm3s70=";
+        };
       in
       {
         devShells.default = pkgs.mkShell {
@@ -24,6 +37,7 @@
             # Protobuf / Buf
             buf
             protobuf
+            protoc-gen-bq-schema
 
             # Node.js (for web UI)
             nodejs_22

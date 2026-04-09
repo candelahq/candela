@@ -220,9 +220,14 @@ The UI communicates with the backend via **ConnectRPC v2** on `localhost:8080`. 
 
 - **Phase 1: Foundation** ✅ (Ingestion, Proxy, Cost Calc, Docs)
 - **Phase 2: Storage & Architecture** ✅ (DuckDB, CQRS, BigQuery, Pub/Sub, CORS)
-- **Phase 3: Visual Explorer** 🟡 (Next.js UI, Dashboard, Traces, Projects — Waterfall & Cost Charts next)
-- **Phase 4: Platform & Evaluation** 📋 (Admin Panel, Token Metering, LLM-as-Judge)
-- **Phase 5: Ecosystem & Polish** 📋 (Agent DAGs, Multi-tenant, Alerting)
+- **Phase 3: Visual Explorer** ✅ (Next.js UI, Dashboard, Traces, Costs, Settings, E2E Tests)
+- **Phase 4: Multi-User Platform** 🟡 (IAP Auth, Token Budgets, Admin Panel, Per-User Views)
+  - Terraform infrastructure (Cloud Run, BigQuery, Firestore, IAP)
+  - Proto-first user/budget/grant schemas
+  - `candela-local` auth-injecting proxy for developer machines
+  - Budget enforcement with grant-first waterfall
+  - Admin panel for user/budget management
+- **Phase 5: Ecosystem & Polish** 📋 (Agent DAGs, Multi-region, Alerting, OpenCode Plugin)
 
 ---
 
@@ -243,6 +248,11 @@ candela/
 │   ├── costcalc/                # Token cost calculation engine
 │   ├── connecthandlers/         # ConnectRPC service handlers
 │   └── ingestion/               # OTel span ingestion
+├── terraform/                   # GCP infrastructure (OpenTofu/Terraform)
+│   ├── cloud_run.tf             # Cloud Run + IAP
+│   ├── bigquery.tf              # Spans storage
+│   ├── firestore.tf             # Users, budgets, grants
+│   └── iam.tf                   # Service accounts + roles
 ├── collector/                   # Custom OTel Collector distro
 ├── docs/                        # Deep-dive documentation
 ├── ui/                          # Next.js 16 web interface

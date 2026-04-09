@@ -1,0 +1,94 @@
+syntax = "proto3";
+
+package candela.types;
+
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/candelahq/candela/gen/go/candela/types";
+
+// UserRole defines the access level of a user.
+enum UserRole {
+  USER_ROLE_UNSPECIFIED = 0;
+  USER_ROLE_DEVELOPER = 1; // Can use proxy, view own data
+  USER_ROLE_ADMIN = 2; // Can manage users, budgets, view all data
+}
+
+// UserStatus tracks the lifecycle of a user account.
+enum UserStatus {
+  USER_STATUS_UNSPECIFIED = 0;
+  USER_STATUS_PROVISIONED = 1; // Pre-provisioned by admin, awaiting first login
+  USER_STATUS_ACTIVE = 2; // Has authenticated at least once
+  USER_STATUS_INACTIVE = 3; // Deactivated by admin
+}
+
+// BudgetPeriod defines the recurrence interval for a budget.
+enum BudgetPeriod {
+  BUDGET_PERIOD_UNSPECIFIED = 0;
+  BUDGET_PERIOD_MONTHLY = 1; // Resets 1st of each month
+  BUDGET_PERIOD_WEEKLY = 2; // Resets every Monday
+  BUDGET_PERIOD_QUARTERLY = 3; // Resets Jan/Apr/Jul/Oct
+  BUDGET_PERIOD_CUSTOM = 4; // Admin sets explicit start/end dates
+}
+
+// User represents a developer or admin in the Candela platform.
+// Firestore path: users/{id}
+message User {
+  string id = 1; // UUID
+  string email = 2; // From IAP JWT claims
+  string display_name = 3;
+  UserRole role = 4;
+  UserStatus status = 5;
+  google.protobuf.Timestamp created_at = 6;
+  google.protobuf.Timestamp last_seen_at = 7;
+  int32 rate_limit = 8; // Max requests/minute (0 = default)
+}
+
+// UserBudget tracks a user's recurring spend for a budget period.
+// Firestore path: users/{user_id}/budgets/{period_key}
+message UserBudget {
+  string user_id = 1;
+  double limit_usd = 2; // Budget cap; 0 = no budget (denied)
+  double spent_usd = 3; // Accumulated spend this period
+  int64 tokens_used = 4; // Accumulated tokens this period
+  BudgetPeriod period_type = 5;
+  string period_key = 6; // "2026-04", "2026-W15", "2026-Q2"
+  google.protobuf.Timestamp period_start = 7;
+  google.protobuf.Timestamp period_end = 8;
+}
+
+// BudgetGrant is a one-time bonus budget with an expiry window.
+// Consumed BEFORE the recurring budget (grants-first waterfall).
+// Firestore path: users/{user_id}/grants/{id}
+message BudgetGrant {
+  string id = 1; // UUID
+  string user_id = 2;
+  double amount_usd = 3; // Total grant amount
+  double spent_usd = 4; // How much has been used
+  string reason = 5; // e.g. "Hackathon weekend"
+  string granted_by = 6; // Admin email who issued it
+  google.protobuf.Timestamp starts_at = 7;
+  google.protobuf.Timestamp expires_at = 8;
+  google.protobuf.Timestamp created_at = 9;
+}
+
+// AuditEntry records an admin action for accountability.
+// Firestore path: users/{user_id}/audit/{id}
+message AuditEntry {
+  string id = 1; // UUID
+  string user_id = 2; // Target user
+  string actor_email = 3; // Admin who performed the action
+  string action = 4; // "set_budget", "create_grant", "deactivate"
+  string details = 5; // JSON with old/new values
+  google.protobuf.Timestamp timestamp = 6;
+}
+
+// RateWindow tracks per-minute request counts for rate limiting.
+// Firestore path: rate_limit/{user_id}:{window_key}
+// TTL: auto-expires after 2 minutes.
+message RateWindow {
+  string user_id = 1;
+  int32 request_count = 2;
+  int32 limit = 3; // Per-user, admin-configurable
+  string window_key = 4; // "2026-04-08T18:24"
+  google.protobuf.Timestamp expire_at = 5; // Firestore TTL field
+}

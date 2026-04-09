@@ -36,6 +36,7 @@
             uv
 
             # Infrastructure tools
+            opentofu    # Open-source Terraform fork (BSL-free, same CLI as `tofu`)
             docker-compose
             cloudflared
             grpcurl

@@ -88,6 +88,7 @@ message Span {
   string project_id = 40;
   string environment = 41;
   string service_name = 42;
+  string user_id = 43; // Developer who triggered this span
 
   // Events (OTel span events)
   repeated SpanEvent events = 50;
@@ -114,6 +115,7 @@ message Trace {
   int64 total_tokens = 8;
   double total_cost_usd = 9;
   string root_span_name = 10;
+  string user_id = 11; // Developer who owns this trace
 
   // All spans in the trace
   repeated Span spans = 20;
@@ -137,4 +139,5 @@ message TraceSummary {
   SpanStatus status = 14;
   string primary_model = 15; // Most-used model in the trace
   string primary_provider = 16;
+  string user_id = 17; // Developer who owns this trace
 }

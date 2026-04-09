@@ -17,3 +17,7 @@ plugins:
   - remote: buf.build/connectrpc/es
     out: ../gen/ts
     opt: target=ts
+  # BigQuery schema generation from proto (local plugin)
+  # Install: go install github.com/GoogleCloudPlatform/protoc-gen-bq-schema/v3@latest
+  - local: protoc-gen-bq-schema
+    out: ../gen/bq

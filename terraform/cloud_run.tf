@@ -11,8 +11,8 @@ resource "google_cloud_run_v2_service" "candela" {
   name     = var.service_name
   location = var.region
 
-  # Delete protection for production.
-  deletion_protection = false
+  # Prevent accidental deletion in production.
+  deletion_protection = true
 
   template {
     service_account = google_service_account.candela.email

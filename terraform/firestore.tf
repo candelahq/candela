@@ -8,10 +8,8 @@ resource "google_firestore_database" "candela" {
   location_id = var.firestore_location
   type        = "FIRESTORE_NATIVE"
 
-  # Prevent accidental deletion.
-  deletion_policy = "DELETE"
-  # Use "ABANDON" in production to prevent data loss:
-  # deletion_policy = "ABANDON"
+  # Prevent accidental data loss on terraform destroy.
+  deletion_policy = "ABANDON"
 
   depends_on = [google_project_service.apis]
 }

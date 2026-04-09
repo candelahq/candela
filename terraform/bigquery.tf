@@ -32,7 +32,8 @@ resource "google_bigquery_table" "spans" {
 
   # Schema is generated from proto/candela/types/bq_span.proto
   # via protoc-gen-bq-schema. Do NOT hand-edit — update the proto instead.
-  schema = file("${path.module}/../gen/bq/candela/types/spans.schema")
+  description = "Flattened OpenTelemetry span data for LLM observability and cost analysis."
+  schema      = file("${path.module}/../gen/bq/candela/types/spans.schema")
 
   deletion_protection = true
 }

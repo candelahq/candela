@@ -16,37 +16,58 @@ option go_package = "github.com/candelahq/candela/gen/go/candela/types";
 message BqSpanRow {
   option (gen_bq_schema.bigquery_opts).table_name = "spans";
 
+  // Unique identifier for the span.
   string span_id = 1 [(gen_bq_schema.bigquery) = {require: true}];
+  // Unique identifier for the trace this span belongs to.
   string trace_id = 2 [(gen_bq_schema.bigquery) = {require: true}];
+  // Identifier of the parent span, if this is a child span.
   string parent_span_id = 3;
+  // A human-readable name for the span.
   string name = 4 [(gen_bq_schema.bigquery) = {require: true}];
+  // The kind of span (LLM, agent, tool, etc.), as a SpanKind enum int.
   int32 kind = 5 [(gen_bq_schema.bigquery) = {require: true}];
+  // The status of the span (ok, error), as a SpanStatus enum int.
   int32 status = 6 [(gen_bq_schema.bigquery) = {require: true}];
+  // A description of the status, present if status is error.
   string status_message = 7;
 
+  // The time the span started, in UTC.
   google.protobuf.Timestamp start_time = 10 [(gen_bq_schema.bigquery) = {require: true}];
+  // The time the span ended, in UTC.
   google.protobuf.Timestamp end_time = 11 [(gen_bq_schema.bigquery) = {require: true}];
+  // The duration of the span in nanoseconds.
   int64 duration_ns = 12 [(gen_bq_schema.bigquery) = {require: true}];
 
+  // The ID of the project this span belongs to.
   string project_id = 20;
+  // The deployment environment (e.g., production, staging).
   string environment = 21;
+  // The name of the service that generated this span.
   string service_name = 22;
+  // The developer who triggered this span.
   string user_id = 23;
 
-  // GenAI attributes (flattened from GenAIAttributes message)
+  // GenAI model identifier (e.g., gpt-4o, gemini-2.5-pro).
   string gen_ai_model = 30;
+  // GenAI provider (e.g., openai, google_ai, anthropic).
   string gen_ai_provider = 31;
+  // Number of input/prompt tokens.
   int64 gen_ai_input_tokens = 32;
+  // Number of output/completion tokens.
   int64 gen_ai_output_tokens = 33;
+  // Total tokens (input + output).
   int64 gen_ai_total_tokens = 34;
+  // Estimated cost in USD, calculated by Candela.
   double gen_ai_cost_usd = 35;
 
-  // Structured attributes (OTel key-value pairs)
+  // Structured attributes from OpenTelemetry key-value pairs.
   repeated BqAttribute attributes = 40;
 }
 
 // BqAttribute is a key-value pair stored as a RECORD in BigQuery.
 message BqAttribute {
+  // The attribute key.
   string key = 1 [(gen_bq_schema.bigquery) = {require: true}];
+  // The attribute value (stringified).
   string value = 2 [(gen_bq_schema.bigquery) = {require: true}];
 }

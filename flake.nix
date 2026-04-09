@@ -45,6 +45,7 @@
 
             # Git
             git
+            gh
             pre-commit
           ];
 

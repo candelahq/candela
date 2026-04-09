@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useTraces } from "@/hooks/useTraces";
+import { ErrorBanner } from "@/components/ErrorBanner";
 import type { TraceFilters } from "@/types/traces";
 
 const sortOptions = [
@@ -148,21 +149,9 @@ export default function TracesPage() {
 
         {/* Error banner */}
         {error && (
-          <div
-            className="card animate-in"
-            style={{
-              borderColor: "var(--error)",
-              marginBottom: 24,
-              background: "rgba(248,113,113,0.05)",
-            }}
-          >
-            <div className="card-title" style={{ color: "var(--error)" }}>
-              Could not load traces
-            </div>
-            <div style={{ fontSize: 13, color: "var(--text-secondary)" }}>
-              {error}
-            </div>
-          </div>
+          <ErrorBanner title="Could not load traces">
+            {error}
+          </ErrorBanner>
         )}
 
         {/* Results */}
@@ -238,7 +227,7 @@ export default function TracesPage() {
                   return (
                     <tr
                       key={t.traceId}
-                      style={{ cursor: "pointer" }}
+                      className="clickable-row"
                       onClick={() => router.push(`/traces/${t.traceId}`)}
                     >
                       <td>

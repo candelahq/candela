@@ -2,46 +2,17 @@
 
 import { useCosts } from "@/hooks/useCosts";
 import { AreaChart } from "@/components/chart";
-import type { TimeRange } from "@/hooks/useDashboard";
+import { TimeRangeSelector } from "@/components/TimeRangeSelector";
+import { ErrorBanner } from "@/components/ErrorBanner";
+import { SkeletonCard } from "@/components/SkeletonCard";
 
-// ──────────────────────────────────────────
-// Time Range Selector
-// ──────────────────────────────────────────
-
-const ranges: { value: TimeRange; label: string }[] = [
-  { value: "24h", label: "24h" },
-  { value: "7d", label: "7d" },
-  { value: "30d", label: "30d" },
-];
-
-function TimeRangeSelector({
-  value,
-  onChange,
-}: {
-  value: TimeRange;
-  onChange: (r: TimeRange) => void;
-}) {
-  return (
-    <div className="time-range-selector">
-      {ranges.map((r) => (
-        <button
-          key={r.value}
-          className={`time-range-btn ${value === r.value ? "active" : ""}`}
-          onClick={() => onChange(r.value)}
-        >
-          {r.label}
-        </button>
-      ))}
-    </div>
-  );
-}
 
 // ──────────────────────────────────────────
 // Page
 // ──────────────────────────────────────────
 
 export default function CostsPage() {
-  const { summary, models, error, timeRange, setTimeRange, refresh } =
+  const { summary, models, loading, error, timeRange, setTimeRange, refresh } =
     useCosts();
 
   const maxCost = Math.max(...models.map((m) => m.costUsd), 0.001);
@@ -65,74 +36,91 @@ export default function CostsPage() {
 
       <div className="main-body">
         {error && (
-          <div
-            className="card animate-in"
-            style={{
-              borderColor: "var(--error)",
-              marginBottom: 24,
-              background: "rgba(248,113,113,0.05)",
-            }}
-          >
-            <div className="card-title" style={{ color: "var(--error)" }}>
-              Could not load cost data
+          <ErrorBanner title="Could not load cost data">
+            {error}
+          </ErrorBanner>
+        )}
+
+        {/* Summary cards */}
+        {loading && !summary ? (
+          <div className="stats-grid animate-in">
+            <SkeletonCard />
+            <SkeletonCard />
+            <SkeletonCard />
+            <SkeletonCard />
+          </div>
+        ) : (
+          <div className="stats-grid animate-in">
+            <div className="card">
+              <div className="card-title">Total Cost</div>
+              <div className="card-value">
+                {summary ? `$${summary.totalCostUsd.toFixed(4)}` : "—"}
+              </div>
+              <div className="card-subtitle">
+                {timeRange === "24h" ? "Last 24 hours" : timeRange === "7d" ? "Last 7 days" : "Last 30 days"}
+              </div>
             </div>
-            <div style={{ fontSize: 13, color: "var(--text-secondary)" }}>
-              {error}
+            <div className="card">
+              <div className="card-title">Total Requests</div>
+              <div className="card-value">
+                {summary ? Number(summary.totalTraces).toLocaleString() : "—"}
+              </div>
+              <div className="card-subtitle">LLM calls</div>
+            </div>
+            <div className="card">
+              <div className="card-title">Input Tokens</div>
+              <div className="card-value">
+                {summary ? summary.totalInputTokens.toLocaleString() : "—"}
+              </div>
+              <div className="card-subtitle">Prompt tokens</div>
+            </div>
+            <div className="card">
+              <div className="card-title">Output Tokens</div>
+              <div className="card-value">
+                {summary ? summary.totalOutputTokens.toLocaleString() : "—"}
+              </div>
+              <div className="card-subtitle">Completion tokens</div>
             </div>
           </div>
         )}
 
-        {/* Summary cards */}
-        <div className="stats-grid animate-in">
-          <div className="card">
-            <div className="card-title">Total Cost</div>
-            <div className="card-value">
-              {summary ? `$${summary.totalCostUsd.toFixed(4)}` : "—"}
+        {/* Charts */}
+        <div className="chart-grid animate-in" style={{ animationDelay: "0.05s" }}>
+          <div className="chart-card">
+            <div className="chart-card-header">
+              <span className="chart-card-title">Cost Over Time</span>
+              {summary && (
+                <span className="mono" style={{ fontSize: 12, color: "var(--text-muted)" }}>
+                  ${summary.totalCostUsd.toFixed(4)} total
+                </span>
+              )}
             </div>
-            <div className="card-subtitle">
-              {timeRange === "24h" ? "Last 24 hours" : timeRange === "7d" ? "Last 7 days" : "Last 30 days"}
-            </div>
+            <AreaChart
+              data={summary?.costOverTime ?? []}
+              height={220}
+              color="var(--success)"
+              formatValue={(v) => `$${v.toFixed(4)}`}
+              emptyMessage="No cost data for this period"
+            />
           </div>
-          <div className="card">
-            <div className="card-title">Total Requests</div>
-            <div className="card-value">
-              {summary ? Number(summary.totalTraces).toLocaleString() : "—"}
-            </div>
-            <div className="card-subtitle">LLM calls</div>
-          </div>
-          <div className="card">
-            <div className="card-title">Input Tokens</div>
-            <div className="card-value">
-              {summary ? summary.totalInputTokens.toLocaleString() : "—"}
-            </div>
-            <div className="card-subtitle">Prompt tokens</div>
-          </div>
-          <div className="card">
-            <div className="card-title">Output Tokens</div>
-            <div className="card-value">
-              {summary ? summary.totalOutputTokens.toLocaleString() : "—"}
-            </div>
-            <div className="card-subtitle">Completion tokens</div>
-          </div>
-        </div>
 
-        {/* Cost over time chart */}
-        <div className="chart-card animate-in" style={{ marginBottom: 24, animationDelay: "0.05s" }}>
-          <div className="chart-card-header">
-            <span className="chart-card-title">Cost Over Time</span>
-            {summary && (
-              <span className="mono" style={{ fontSize: 12, color: "var(--text-muted)" }}>
-                ${summary.totalCostUsd.toFixed(4)} total
-              </span>
-            )}
+          <div className="chart-card">
+            <div className="chart-card-header">
+              <span className="chart-card-title">Tokens Over Time</span>
+              {summary && (
+                <span className="mono" style={{ fontSize: 12, color: "var(--text-muted)" }}>
+                  {(summary.totalInputTokens + summary.totalOutputTokens).toLocaleString()} total
+                </span>
+              )}
+            </div>
+            <AreaChart
+              data={summary?.tokensOverTime ?? []}
+              height={220}
+              color="var(--info)"
+              formatValue={(v) => v >= 1000 ? `${(v / 1000).toFixed(1)}k` : Math.round(v).toString()}
+              emptyMessage="No token data for this period"
+            />
           </div>
-          <AreaChart
-            data={summary?.costOverTime ?? []}
-            height={220}
-            color="var(--success)"
-            formatValue={(v) => `$${v.toFixed(4)}`}
-            emptyMessage="No cost data for this period"
-          />
         </div>
 
         {/* Model breakdown */}

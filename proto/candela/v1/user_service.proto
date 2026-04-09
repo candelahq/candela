@@ -107,7 +107,7 @@ message UpdateUserRequest {
   string id = 1;
   string display_name = 2;
   candela.types.UserRole role = 3;
-  google.protobuf.FieldMask update_mask = 4;  // Which fields to update
+  google.protobuf.FieldMask update_mask = 4; // Which fields to update
 }
 
 message UpdateUserResponse {

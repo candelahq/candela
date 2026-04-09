@@ -15,22 +15,29 @@ repos:
       - id: golangci-lint
         args: ["--timeout=5m"]
 
-  - repo: https://github.com/bufbuild/buf
-    rev: v1.50.0
-    hooks:
-      - id: buf-lint
-        args: ["--config", "proto/buf.yaml"]
-      - id: buf-format
-        args: ["-w", "--config", "proto/buf.yaml"]
-      - id: buf-breaking
-        args:
-          - "--config"
-          - "proto/buf.yaml"
-          - "--against"
-          - ".git#branch=main,subdir=proto"
-
   - repo: local
     hooks:
+      - id: buf-lint
+        name: buf lint
+        entry: buf lint proto
+        language: system
+        pass_filenames: false
+        files: '\.proto$'
+
+      - id: buf-format
+        name: buf format
+        entry: buf format -w proto
+        language: system
+        pass_filenames: false
+        files: '\.proto$'
+
+      - id: buf-breaking
+        name: buf breaking
+        entry: buf breaking proto --against '.git#branch=main,subdir=proto'
+        language: system
+        pass_filenames: false
+        files: '\.proto$'
+
       - id: go-vet
         name: go vet
         entry: go vet ./...

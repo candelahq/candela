@@ -227,7 +227,7 @@ export default function TracesPage() {
                   return (
                     <tr
                       key={t.traceId}
-                      style={{ cursor: "pointer" }}
+                      className="clickable-row"
                       onClick={() => router.push(`/traces/${t.traceId}`)}
                     >
                       <td>

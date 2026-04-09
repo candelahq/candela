@@ -79,7 +79,7 @@ export default function ProjectsPage() {
               </thead>
               <tbody>
                 {projects.map((p) => (
-                  <tr key={p.id} style={{ cursor: "pointer" }}>
+                  <tr key={p.id} className="clickable-row">
                     <td style={{ fontWeight: 500 }}>{p.name}</td>
                     <td style={{ color: "var(--text-secondary)" }}>
                       {p.description || "—"}

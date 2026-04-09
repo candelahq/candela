@@ -3,6 +3,7 @@
 import { useEffect, useReducer } from "react";
 import { dashboardClient } from "@/lib/api";
 import { timestampFromDate } from "@bufbuild/protobuf/wkt";
+import { API_BASE_URL } from "@/lib/constants";
 
 // ──────────────────────────────────────────
 // State
@@ -41,7 +42,7 @@ function reducer(state: SettingsState, action: Action): SettingsState {
 export default function SettingsPage() {
   const [state, dispatch] = useReducer(reducer, {
     health: "checking",
-    backendVersion: "v0.1.0",
+    backendVersion: process.env.NEXT_PUBLIC_APP_VERSION ?? "v0.1.0-dev",
     traceCount: null,
     storageBackend: "DuckDB",
     providers: ["OpenAI", "Google (Gemini)", "Anthropic"],
@@ -105,7 +106,7 @@ export default function SettingsPage() {
             </div>
             <div className="settings-row">
               <span className="settings-label">API URL</span>
-              <span className="settings-value mono">http://localhost:8181</span>
+              <span className="settings-value mono">{API_BASE_URL}</span>
             </div>
             <div className="settings-row">
               <span className="settings-label">Protocol</span>

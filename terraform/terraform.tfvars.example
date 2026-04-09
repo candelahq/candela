@@ -1,0 +1,22 @@
+# ──────────────────────────────────────────────────
+# Example tfvars — Copy to terraform.tfvars and fill in
+# ──────────────────────────────────────────────────
+
+project_id       = "your-gcp-project-id"
+region           = "us-central1"
+iap_google_group = "devs@company.com"
+
+# Optional overrides:
+# service_name       = "candela"
+# image_tag          = "latest"
+# min_instances      = 0
+# max_instances      = 10
+# cpu                = "1"
+# memory             = "512Mi"
+# bigquery_dataset   = "candela"
+# bigquery_location  = "US"
+# firestore_location = "nam5"
+# vertex_ai_region   = "us-east5"
+
+# NOTE: IAP is enabled post-deploy via:
+#   gcloud run services update candela --region=us-central1 --iap

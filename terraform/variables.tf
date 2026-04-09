@@ -64,11 +64,7 @@ variable "iap_google_group" {
   type        = string
 }
 
-variable "iap_oauth_client_id" {
-  description = "OAuth 2.0 Client ID for IAP (created manually in Cloud Console)"
-  type        = string
-  default     = ""
-}
+
 
 # ── BigQuery ──
 

@@ -101,12 +101,15 @@ resource "google_iap_web_iam_member" "group_access" {
   member  = "group:${var.iap_google_group}"
 }
 
-# NOTE: The google_iap_brand Terraform resource is deprecated (July 2025+).
-# Create the OAuth consent screen and client manually in the Google Cloud Console:
-#   1. Go to APIs & Services → OAuth consent screen → configure
-#   2. Go to APIs & Services → Credentials → Create OAuth 2.0 Client ID
-#   3. Set the client ID in terraform.tfvars as iap_oauth_client_id
-# Variable defined in variables.tf
+# ── IAP Enablement ──
+# IAP is enabled via gcloud (not Terraform — the Terraform resources are deprecated).
+# Run once after initial deploy:
+#
+#   gcloud run services update candela --region=REGION --iap
+#   gcloud run services describe candela --region=REGION \
+#     --format='value(metadata.annotations."run.googleapis.com/iap-client-id")'
+#
+# The client ID from above is the `audience` value for candela-local (~/.candela.yaml).
 
 # ── Data Sources ──
 

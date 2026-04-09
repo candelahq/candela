@@ -7,13 +7,6 @@ output "cloud_run_url" {
   value       = google_cloud_run_v2_service.candela.uri
 }
 
-output "iap_client_id" {
-  description = "IAP OAuth Client ID — used as audience for candela-local identity tokens"
-  value       = var.iap_oauth_client_id
-}
-
-
-
 output "artifact_registry_repo" {
   description = "Docker image repository for pushing Candela images"
   value       = "${var.region}-docker.pkg.dev/${var.project_id}/${google_artifact_registry_repository.candela.repository_id}"
@@ -30,11 +23,12 @@ output "service_account_email" {
 }
 
 output "candela_local_config" {
-  description = "Paste into ~/.candela.yaml for local proxy setup"
+  description = "Template for ~/.candela.yaml — fill in audience after enabling IAP"
   value       = <<-EOT
     # ~/.candela.yaml
     remote: ${google_cloud_run_v2_service.candela.uri}
-    audience: ${var.iap_oauth_client_id}
+    audience: <run: gcloud run services describe ${var.service_name} --region=${var.region} --format='value(metadata.annotations."run.googleapis.com/iap-client-id")'>
     port: 8181
   EOT
 }
+

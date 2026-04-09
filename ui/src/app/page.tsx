@@ -3,40 +3,10 @@
 import Link from "next/link";
 import { useDashboard } from "@/hooks/useDashboard";
 import { AreaChart } from "@/components/chart";
+import { TimeRangeSelector } from "@/components/TimeRangeSelector";
+import { ErrorBanner } from "@/components/ErrorBanner";
+import { SkeletonCard } from "@/components/SkeletonCard";
 import { SpanStatus } from "@/gen/types/trace_pb";
-import type { TimeRange } from "@/hooks/useDashboard";
-
-// ──────────────────────────────────────────
-// Time Range Selector
-// ──────────────────────────────────────────
-
-const ranges: { value: TimeRange; label: string }[] = [
-  { value: "24h", label: "24h" },
-  { value: "7d", label: "7d" },
-  { value: "30d", label: "30d" },
-];
-
-function TimeRangeSelector({
-  value,
-  onChange,
-}: {
-  value: TimeRange;
-  onChange: (r: TimeRange) => void;
-}) {
-  return (
-    <div className="time-range-selector">
-      {ranges.map((r) => (
-        <button
-          key={r.value}
-          className={`time-range-btn ${value === r.value ? "active" : ""}`}
-          onClick={() => onChange(r.value)}
-        >
-          {r.label}
-        </button>
-      ))}
-    </div>
-  );
-}
 
 // ──────────────────────────────────────────
 // Status helpers
@@ -55,6 +25,7 @@ export default function DashboardPage() {
   const {
     summary,
     recentTraces,
+    loading,
     error,
     timeRange,
     setTimeRange,
@@ -79,56 +50,53 @@ export default function DashboardPage() {
 
       <div className="main-body">
         {error && (
-          <div
-            className="card animate-in"
-            style={{
-              borderColor: "var(--error)",
-              marginBottom: 24,
-              background: "rgba(248,113,113,0.05)",
-            }}
-          >
-            <div className="card-title" style={{ color: "var(--error)" }}>
-              Backend Unavailable
-            </div>
-            <div style={{ fontSize: 13, color: "var(--text-secondary)" }}>
-              Could not connect to Candela backend at{" "}
-              <code className="mono">localhost:8181</code>. Start the server
-              with <code className="mono">go run ./cmd/candela-server</code>.
-            </div>
-          </div>
+          <ErrorBanner title="Backend Unavailable">
+            Could not connect to Candela backend at{" "}
+            <code className="mono">localhost:8181</code>. Start the server
+            with <code className="mono">go run ./cmd/candela-server</code>.
+          </ErrorBanner>
         )}
 
         {/* Summary cards */}
-        <div className="stats-grid animate-in">
-          <div className="card">
-            <div className="card-title">Total Traces</div>
-            <div className="card-value">
-              {summary ? Number(summary.totalTraces).toLocaleString() : "—"}
+        {loading && !summary ? (
+          <div className="stats-grid animate-in">
+            <SkeletonCard />
+            <SkeletonCard />
+            <SkeletonCard />
+            <SkeletonCard />
+          </div>
+        ) : (
+          <div className="stats-grid animate-in">
+            <div className="card">
+              <div className="card-title">Total Traces</div>
+              <div className="card-value">
+                {summary ? Number(summary.totalTraces).toLocaleString() : "—"}
+              </div>
+              <div className="card-subtitle">
+                {timeRange === "24h" ? "Last 24 hours" : timeRange === "7d" ? "Last 7 days" : "Last 30 days"}
+              </div>
             </div>
-            <div className="card-subtitle">
-              {timeRange === "24h" ? "Last 24 hours" : timeRange === "7d" ? "Last 7 days" : "Last 30 days"}
+            <div className="card">
+              <div className="card-title">Total Tokens</div>
+              <div className="card-value">{totalTokens}</div>
+              <div className="card-subtitle">Input + Output</div>
+            </div>
+            <div className="card">
+              <div className="card-title">Total Cost</div>
+              <div className="card-value">
+                {summary ? `$${(summary.totalCostUsd || 0).toFixed(2)}` : "—"}
+              </div>
+              <div className="card-subtitle">Estimated USD</div>
+            </div>
+            <div className="card">
+              <div className="card-title">Avg Latency</div>
+              <div className="card-value">
+                {summary ? `${(summary.avgLatencyMs || 0).toFixed(0)}ms` : "—"}
+              </div>
+              <div className="card-subtitle">Across all models</div>
             </div>
           </div>
-          <div className="card">
-            <div className="card-title">Total Tokens</div>
-            <div className="card-value">{totalTokens}</div>
-            <div className="card-subtitle">Input + Output</div>
-          </div>
-          <div className="card">
-            <div className="card-title">Total Cost</div>
-            <div className="card-value">
-              {summary ? `$${(summary.totalCostUsd || 0).toFixed(2)}` : "—"}
-            </div>
-            <div className="card-subtitle">Estimated USD</div>
-          </div>
-          <div className="card">
-            <div className="card-title">Avg Latency</div>
-            <div className="card-value">
-              {summary ? `${(summary.avgLatencyMs || 0).toFixed(0)}ms` : "—"}
-            </div>
-            <div className="card-subtitle">Across all models</div>
-          </div>
-        </div>
+        )}
 
         {/* Charts */}
         <div className="chart-grid animate-in" style={{ animationDelay: "0.05s" }}>

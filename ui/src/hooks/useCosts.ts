@@ -12,6 +12,7 @@ export interface CostSummary {
   totalOutputTokens: number;
   totalTraces: number;
   costOverTime: DataPoint[];
+  tokensOverTime: DataPoint[];
 }
 
 export interface ModelBreakdown {
@@ -110,6 +111,10 @@ export function useCosts() {
             totalOutputTokens: Number(summaryRes.totalOutputTokens),
             totalTraces: Number(summaryRes.totalTraces),
             costOverTime: (summaryRes.costOverTime || []).map((p) => ({
+              label: formatTimeLabel(p.timestamp, state.timeRange),
+              value: p.value,
+            })),
+            tokensOverTime: (summaryRes.tokensOverTime || []).map((p) => ({
               label: formatTimeLabel(p.timestamp, state.timeRange),
               value: p.value,
             })),

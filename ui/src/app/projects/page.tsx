@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { createClient } from "@connectrpc/connect";
 import { transport } from "@/lib/connect";
+import { ErrorBanner } from "@/components/ErrorBanner";
 import { ProjectService } from "@/gen/v1/project_service_pb";
 
 interface Project {
@@ -45,21 +46,9 @@ export default function ProjectsPage() {
 
       <div className="main-body">
         {error && (
-          <div
-            className="card animate-in"
-            style={{
-              borderColor: "var(--error)",
-              marginBottom: 24,
-              background: "rgba(248,113,113,0.05)",
-            }}
-          >
-            <div className="card-title" style={{ color: "var(--error)" }}>
-              Could not load projects
-            </div>
-            <div style={{ fontSize: 13, color: "var(--text-secondary)" }}>
-              {error}
-            </div>
-          </div>
+          <ErrorBanner title="Could not load projects">
+            {error}
+          </ErrorBanner>
         )}
 
         <div className="table-container animate-in">
@@ -90,7 +79,7 @@ export default function ProjectsPage() {
               </thead>
               <tbody>
                 {projects.map((p) => (
-                  <tr key={p.id} style={{ cursor: "pointer" }}>
+                  <tr key={p.id} className="clickable-row">
                     <td style={{ fontWeight: 500 }}>{p.name}</td>
                     <td style={{ color: "var(--text-secondary)" }}>
                       {p.description || "—"}

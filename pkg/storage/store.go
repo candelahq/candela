@@ -74,6 +74,7 @@ type Span struct {
 	ProjectID     string            `json:"project_id"`
 	Environment   string            `json:"environment,omitempty"`
 	ServiceName   string            `json:"service_name,omitempty"`
+	UserID        string            `json:"user_id,omitempty"`
 }
 
 // TraceSummary is a lightweight summary for list views.
@@ -91,6 +92,7 @@ type TraceSummary struct {
 	Status          SpanStatus    `json:"status"`
 	PrimaryModel    string        `json:"primary_model"`
 	PrimaryProvider string        `json:"primary_provider"`
+	UserID          string        `json:"user_id,omitempty"`
 }
 
 // Trace is a complete trace with all spans.
@@ -106,6 +108,7 @@ type Trace struct {
 	TotalCostUSD float64       `json:"total_cost_usd"`
 	RootSpanName string        `json:"root_span_name"`
 	Spans        []Span        `json:"spans"`
+	UserID       string        `json:"user_id,omitempty"`
 }
 
 // TraceQuery defines filters for listing traces.
@@ -122,6 +125,7 @@ type TraceQuery struct {
 	Descending  bool
 	PageSize    int
 	PageToken   string
+	UserID      string // Filter by user (empty = all, for admins)
 }
 
 // TraceResult is the paginated result of a trace query.
@@ -168,6 +172,7 @@ type UsageQuery struct {
 	Environment string
 	StartTime   time.Time
 	EndTime     time.Time
+	UserID      string // Filter by user (empty = all, for admins)
 }
 
 // ModelUsage holds per-model aggregated metrics.

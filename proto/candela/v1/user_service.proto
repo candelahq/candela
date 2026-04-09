@@ -1,0 +1,223 @@
+syntax = "proto3";
+
+package candela.v1;
+
+import "candela/types/common.proto";
+import "candela/types/user.proto";
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/candelahq/candela/gen/go/candela/v1";
+
+// UserService manages users, budgets, and grants.
+service UserService {
+  // ── Admin endpoints ──
+
+  // CreateUser pre-provisions a user by email (optionally with an initial budget).
+  rpc CreateUser(CreateUserRequest) returns (CreateUserResponse);
+
+  // ListUsers returns all users with pagination.
+  rpc ListUsers(ListUsersRequest) returns (ListUsersResponse);
+
+  // GetUser returns a user with their budget and active grants.
+  rpc GetUser(GetUserRequest) returns (GetUserResponse);
+
+  // UpdateUser modifies a user's display name or role.
+  rpc UpdateUser(UpdateUserRequest) returns (UpdateUserResponse);
+
+  // DeactivateUser disables a user's access (sets status to INACTIVE).
+  rpc DeactivateUser(DeactivateUserRequest) returns (DeactivateUserResponse);
+
+  // ReactivateUser re-enables a previously deactivated user.
+  rpc ReactivateUser(ReactivateUserRequest) returns (ReactivateUserResponse);
+
+  // ── Budget management (admin) ──
+
+  // SetBudget configures a user's recurring budget.
+  rpc SetBudget(SetBudgetRequest) returns (SetBudgetResponse);
+
+  // GetBudget returns a user's current budget for the active period.
+  rpc GetBudget(GetBudgetRequest) returns (GetBudgetResponse);
+
+  // ResetSpend zeroes a user's current-period spend (emergency override).
+  rpc ResetSpend(ResetSpendRequest) returns (ResetSpendResponse);
+
+  // ── Grants (admin) ──
+
+  // CreateGrant issues a one-time bonus budget with an expiry window.
+  rpc CreateGrant(CreateGrantRequest) returns (CreateGrantResponse);
+
+  // ListGrants returns all grants for a user (active and expired).
+  rpc ListGrants(ListGrantsRequest) returns (ListGrantsResponse);
+
+  // RevokeGrant cancels an active grant.
+  rpc RevokeGrant(RevokeGrantRequest) returns (RevokeGrantResponse);
+
+  // ── Audit (admin) ──
+
+  // ListAuditLog returns the audit trail for a user.
+  rpc ListAuditLog(ListAuditLogRequest) returns (ListAuditLogResponse);
+
+  // ── Self-service (current authenticated user) ──
+
+  // GetCurrentUser returns the authenticated user's profile, budget, and grants.
+  rpc GetCurrentUser(GetCurrentUserRequest) returns (GetCurrentUserResponse);
+
+  // GetMyBudget returns just the budget summary for the authenticated user.
+  rpc GetMyBudget(GetMyBudgetRequest) returns (GetMyBudgetResponse);
+}
+
+// ──────────────────────────────────────────────────
+// Admin — User CRUD
+// ──────────────────────────────────────────────────
+
+message CreateUserRequest {
+  string email = 1;
+  string display_name = 2;
+  candela.types.UserRole role = 3;
+  double monthly_budget_usd = 4; // Optional: set budget at creation
+}
+
+message CreateUserResponse {
+  candela.types.User user = 1;
+  candela.types.UserBudget budget = 2; // Present if monthly_budget_usd > 0
+}
+
+message ListUsersRequest {
+  candela.types.PaginationRequest pagination = 1;
+  candela.types.UserStatus status_filter = 2; // Optional: filter by status
+}
+
+message ListUsersResponse {
+  repeated candela.types.User users = 1;
+  candela.types.PaginationResponse pagination = 2;
+}
+
+message GetUserRequest {
+  string id = 1;
+}
+
+message GetUserResponse {
+  candela.types.User user = 1;
+  candela.types.UserBudget budget = 2;
+  repeated candela.types.BudgetGrant active_grants = 3;
+}
+
+message UpdateUserRequest {
+  string id = 1;
+  string display_name = 2;
+  candela.types.UserRole role = 3;
+}
+
+message UpdateUserResponse {
+  candela.types.User user = 1;
+}
+
+message DeactivateUserRequest {
+  string id = 1;
+}
+
+message DeactivateUserResponse {}
+
+message ReactivateUserRequest {
+  string id = 1;
+}
+
+message ReactivateUserResponse {
+  candela.types.User user = 1;
+}
+
+// ──────────────────────────────────────────────────
+// Admin — Budget management
+// ──────────────────────────────────────────────────
+
+message SetBudgetRequest {
+  string user_id = 1;
+  double limit_usd = 2;
+  candela.types.BudgetPeriod period_type = 3;
+}
+
+message SetBudgetResponse {
+  candela.types.UserBudget budget = 1;
+}
+
+message GetBudgetRequest {
+  string user_id = 1;
+}
+
+message GetBudgetResponse {
+  candela.types.UserBudget budget = 1;
+}
+
+message ResetSpendRequest {
+  string user_id = 1;
+}
+
+message ResetSpendResponse {
+  candela.types.UserBudget budget = 1;
+}
+
+// ──────────────────────────────────────────────────
+// Admin — Grants
+// ──────────────────────────────────────────────────
+
+message CreateGrantRequest {
+  string user_id = 1;
+  double amount_usd = 2;
+  string reason = 3;
+  google.protobuf.Timestamp starts_at = 4;
+  google.protobuf.Timestamp expires_at = 5;
+}
+
+message CreateGrantResponse {
+  candela.types.BudgetGrant grant = 1;
+}
+
+message ListGrantsRequest {
+  string user_id = 1;
+  bool active_only = 2; // If true, only return non-expired grants
+}
+
+message ListGrantsResponse {
+  repeated candela.types.BudgetGrant grants = 1;
+}
+
+message RevokeGrantRequest {
+  string user_id = 1;
+  string grant_id = 2;
+}
+
+message RevokeGrantResponse {}
+
+// ──────────────────────────────────────────────────
+// Admin — Audit
+// ──────────────────────────────────────────────────
+
+message ListAuditLogRequest {
+  string user_id = 1;
+  int32 limit = 2; // Max entries to return (default 50)
+}
+
+message ListAuditLogResponse {
+  repeated candela.types.AuditEntry entries = 1;
+}
+
+// ──────────────────────────────────────────────────
+// Self-service — Current user
+// ──────────────────────────────────────────────────
+
+message GetCurrentUserRequest {}
+
+message GetCurrentUserResponse {
+  candela.types.User user = 1;
+  candela.types.UserBudget budget = 2;
+  repeated candela.types.BudgetGrant active_grants = 3;
+  double total_remaining_usd = 4; // Combined: grants + budget remaining
+}
+
+message GetMyBudgetRequest {}
+
+message GetMyBudgetResponse {
+  candela.types.UserBudget budget = 1;
+  repeated candela.types.BudgetGrant active_grants = 2;
+  double total_remaining_usd = 3;
+}

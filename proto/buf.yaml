@@ -5,6 +5,12 @@ modules:
 lint:
   use:
     - STANDARD
+  except:
+    # Vendored bq_field.proto / bq_table.proto use package gen_bq_schema
+    # which doesn't match our directory layout — that's expected.
+    - PACKAGE_DIRECTORY_MATCH
+    # Our types package uses candela.types without a version suffix.
+    - PACKAGE_VERSION_SUFFIX
 breaking:
   use:
     - FILE

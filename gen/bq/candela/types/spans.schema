@@ -1,0 +1,142 @@
+[
+ {
+  "name": "span_id",
+  "type": "STRING",
+  "mode": "REQUIRED",
+  "description": "Unique identifier for the span."
+ },
+ {
+  "name": "trace_id",
+  "type": "STRING",
+  "mode": "REQUIRED",
+  "description": "Unique identifier for the trace this span belongs to."
+ },
+ {
+  "name": "parent_span_id",
+  "type": "STRING",
+  "mode": "NULLABLE",
+  "description": "Identifier of the parent span, if this is a child span."
+ },
+ {
+  "name": "name",
+  "type": "STRING",
+  "mode": "REQUIRED",
+  "description": "A human-readable name for the span."
+ },
+ {
+  "name": "kind",
+  "type": "INTEGER",
+  "mode": "REQUIRED",
+  "description": "The kind of span (LLM, agent, tool, etc.), as a SpanKind enum int."
+ },
+ {
+  "name": "status",
+  "type": "INTEGER",
+  "mode": "REQUIRED",
+  "description": "The status of the span (ok, error), as a SpanStatus enum int."
+ },
+ {
+  "name": "status_message",
+  "type": "STRING",
+  "mode": "NULLABLE",
+  "description": "A description of the status, present if status is error."
+ },
+ {
+  "name": "start_time",
+  "type": "TIMESTAMP",
+  "mode": "REQUIRED",
+  "description": "The time the span started, in UTC."
+ },
+ {
+  "name": "end_time",
+  "type": "TIMESTAMP",
+  "mode": "REQUIRED",
+  "description": "The time the span ended, in UTC."
+ },
+ {
+  "name": "duration_ns",
+  "type": "INTEGER",
+  "mode": "REQUIRED",
+  "description": "The duration of the span in nanoseconds."
+ },
+ {
+  "name": "project_id",
+  "type": "STRING",
+  "mode": "NULLABLE",
+  "description": "The ID of the project this span belongs to."
+ },
+ {
+  "name": "environment",
+  "type": "STRING",
+  "mode": "NULLABLE",
+  "description": "The deployment environment (e.g., production, staging)."
+ },
+ {
+  "name": "service_name",
+  "type": "STRING",
+  "mode": "NULLABLE",
+  "description": "The name of the service that generated this span."
+ },
+ {
+  "name": "user_id",
+  "type": "STRING",
+  "mode": "NULLABLE",
+  "description": "The developer who triggered this span."
+ },
+ {
+  "name": "gen_ai_model",
+  "type": "STRING",
+  "mode": "NULLABLE",
+  "description": "GenAI model identifier (e.g., gpt-4o, gemini-2.5-pro)."
+ },
+ {
+  "name": "gen_ai_provider",
+  "type": "STRING",
+  "mode": "NULLABLE",
+  "description": "GenAI provider (e.g., openai, google_ai, anthropic)."
+ },
+ {
+  "name": "gen_ai_input_tokens",
+  "type": "INTEGER",
+  "mode": "NULLABLE",
+  "description": "Number of input/prompt tokens."
+ },
+ {
+  "name": "gen_ai_output_tokens",
+  "type": "INTEGER",
+  "mode": "NULLABLE",
+  "description": "Number of output/completion tokens."
+ },
+ {
+  "name": "gen_ai_total_tokens",
+  "type": "INTEGER",
+  "mode": "NULLABLE",
+  "description": "Total tokens (input + output)."
+ },
+ {
+  "name": "gen_ai_cost_usd",
+  "type": "FLOAT",
+  "mode": "NULLABLE",
+  "description": "Estimated cost in USD, calculated by Candela."
+ },
+ {
+  "name": "attributes",
+  "type": "RECORD",
+  "mode": "REPEATED",
+  "description": "Structured attributes from OpenTelemetry key-value pairs.",
+  "fields": [
+   {
+    "name": "key",
+    "type": "STRING",
+    "mode": "REQUIRED",
+    "description": "The attribute key."
+   },
+   {
+    "name": "value",
+    "type": "STRING",
+    "mode": "REQUIRED",
+    "description": "The attribute value (stringified)."
+   }
+  ]
+ }
+]

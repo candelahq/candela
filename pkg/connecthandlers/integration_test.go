@@ -121,7 +121,18 @@ func (s *integrationStore) CreateGrant(_ context.Context, g *storage.GrantRecord
 }
 
 func (s *integrationStore) ListGrants(_ context.Context, userID string, activeOnly bool) ([]*storage.GrantRecord, error) {
-	return s.grants[userID], nil
+	grants := s.grants[userID]
+	if !activeOnly {
+		return grants, nil
+	}
+	now := time.Now().UTC()
+	var active []*storage.GrantRecord
+	for _, g := range grants {
+		if g.ExpiresAt.IsZero() || g.ExpiresAt.After(now) {
+			active = append(active, g)
+		}
+	}
+	return active, nil
 }
 
 func (s *integrationStore) RevokeGrant(_ context.Context, userID, grantID string) error {

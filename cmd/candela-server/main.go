@@ -155,7 +155,6 @@ func main() {
 		"project", projectPath)
 
 	// Initialize Firestore-backed UserStore and UserService (if enabled).
-	var userStore storage.UserStore
 	if cfg.Firestore.Enabled {
 		fStore, err := firestorestore.New(context.Background(),
 			cfg.Firestore.ProjectID, cfg.Firestore.DatabaseID)
@@ -164,10 +163,9 @@ func main() {
 			os.Exit(1)
 		}
 		defer func() { _ = fStore.Close() }()
-		userStore = fStore
 
 		userPath, userH := candelav1connect.NewUserServiceHandler(
-			connecthandlers.NewUserHandler(userStore))
+			connecthandlers.NewUserHandler(fStore))
 		mux.Handle(userPath, userH)
 		slog.Info("UserService registered", "path", userPath)
 	} else {

@@ -51,7 +51,7 @@ func (m *mockUserStore) CreateUser(_ context.Context, u *storage.UserRecord) err
 func (m *mockUserStore) GetUser(_ context.Context, id string) (*storage.UserRecord, error) {
 	u, ok := m.users[id]
 	if !ok {
-		return nil, fmt.Errorf("not found: %s", id)
+		return nil, fmt.Errorf("user %s: %w", id, storage.ErrNotFound)
 	}
 	return u, nil
 }
@@ -62,7 +62,7 @@ func (m *mockUserStore) GetUserByEmail(_ context.Context, email string) (*storag
 			return u, nil
 		}
 	}
-	return nil, fmt.Errorf("not found by email: %s", email)
+	return nil, fmt.Errorf("user email %s: %w", email, storage.ErrNotFound)
 }
 
 func (m *mockUserStore) ListUsers(_ context.Context, statusFilter string, limit, offset int) ([]*storage.UserRecord, int, error) {
@@ -143,7 +143,7 @@ func (m *mockUserStore) ListGrants(_ context.Context, userID string, activeOnly 
 func (m *mockUserStore) RevokeGrant(_ context.Context, userID, grantID string) error {
 	for _, g := range m.grants[userID] {
 		if g.ID == grantID {
-			g.ExpiresAt = time.Now().UTC()
+			g.ExpiresAt = time.Now().UTC().Add(-time.Second)
 			return nil
 		}
 	}
@@ -310,8 +310,8 @@ func TestUserHandler_DeactivateAndReactivate(t *testing.T) {
 		t.Fatalf("DeactivateUser: %v", err)
 	}
 	u, _ := store.GetUser(ctx, userID)
-	if u.Status != "inactive" {
-		t.Errorf("status after deactivate = %q, want inactive", u.Status)
+	if u.Status != storage.StatusInactive {
+		t.Errorf("status after deactivate = %q, want %s", u.Status, storage.StatusInactive)
 	}
 
 	// Reactivate.
@@ -527,6 +527,37 @@ func TestUserHandler_ListUsers(t *testing.T) {
 	}
 	if resp.Msg.Pagination.TotalCount != 3 {
 		t.Errorf("total = %d, want 3", resp.Msg.Pagination.TotalCount)
+	}
+
+	// Test pagination with page_size=2.
+	resp2, err := handler.ListUsers(ctx, connect.NewRequest(&v1.ListUsersRequest{
+		Pagination: &typespb.PaginationRequest{PageSize: 2},
+	}))
+	if err != nil {
+		t.Fatalf("ListUsers page 1: %v", err)
+	}
+	if len(resp2.Msg.Users) != 2 {
+		t.Errorf("expected 2 users on page 1, got %d", len(resp2.Msg.Users))
+	}
+	if resp2.Msg.Pagination.NextPageToken == "" {
+		t.Error("expected next_page_token for page 1")
+	}
+
+	// Page 2 using next_page_token.
+	resp3, err := handler.ListUsers(ctx, connect.NewRequest(&v1.ListUsersRequest{
+		Pagination: &typespb.PaginationRequest{
+			PageSize:  2,
+			PageToken: resp2.Msg.Pagination.NextPageToken,
+		},
+	}))
+	if err != nil {
+		t.Fatalf("ListUsers page 2: %v", err)
+	}
+	if len(resp3.Msg.Users) != 1 {
+		t.Errorf("expected 1 user on page 2, got %d", len(resp3.Msg.Users))
+	}
+	if resp3.Msg.Pagination.NextPageToken != "" {
+		t.Errorf("expected empty next_page_token on last page, got %q", resp3.Msg.Pagination.NextPageToken)
 	}
 }
 

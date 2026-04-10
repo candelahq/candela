@@ -2,9 +2,11 @@ package connecthandlers
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"log/slog"
+	"strconv"
 	"strings"
-	"time"
 
 	connect "connectrpc.com/connect"
 	typespb "github.com/candelahq/candela/gen/go/candela/types"
@@ -25,6 +27,16 @@ type UserHandler struct {
 // NewUserHandler creates a new UserHandler.
 func NewUserHandler(store storage.UserStore) *UserHandler {
 	return &UserHandler{store: store}
+}
+
+// logAudit writes an audit entry and logs a warning if it fails.
+func (h *UserHandler) logAudit(ctx context.Context, entry *storage.AuditRecord) {
+	if err := h.store.LogAction(ctx, entry); err != nil {
+		slog.WarnContext(ctx, "failed to write audit log",
+			"error", err,
+			"user_id", entry.UserID,
+			"action", entry.Action)
+	}
 }
 
 // ──────────────────────────────────────────
@@ -65,8 +77,7 @@ func (h *UserHandler) CreateUser(
 		resp.Budget = budgetToProto(budget)
 	}
 
-	// Audit log.
-	_ = h.store.LogAction(ctx, &storage.AuditRecord{
+	h.logAudit(ctx, &storage.AuditRecord{
 		UserID:     user.ID,
 		ActorEmail: auth.EmailFromContext(ctx),
 		Action:     "create_user",
@@ -81,8 +92,16 @@ func (h *UserHandler) ListUsers(
 	req *connect.Request[v1.ListUsersRequest],
 ) (*connect.Response[v1.ListUsersResponse], error) {
 	limit, offset := 50, 0
-	if req.Msg.Pagination != nil && req.Msg.Pagination.PageSize > 0 {
-		limit = int(req.Msg.Pagination.PageSize)
+	if req.Msg.Pagination != nil {
+		if req.Msg.Pagination.PageSize > 0 {
+			limit = int(req.Msg.Pagination.PageSize)
+		}
+		if req.Msg.Pagination.PageToken != "" {
+			// Page token encodes the offset as a decimal string.
+			if parsed, err := strconv.Atoi(req.Msg.Pagination.PageToken); err == nil && parsed > 0 {
+				offset = parsed
+			}
+		}
 	}
 
 	statusFilter := ""
@@ -100,10 +119,17 @@ func (h *UserHandler) ListUsers(
 		pbUsers[i] = userToProto(u)
 	}
 
+	// Build next page token if there are more results.
+	var nextPageToken string
+	if offset+limit < total {
+		nextPageToken = strconv.Itoa(offset + limit)
+	}
+
 	return connect.NewResponse(&v1.ListUsersResponse{
 		Users: pbUsers,
 		Pagination: &typespb.PaginationResponse{
-			TotalCount: int32(total),
+			TotalCount:    int32(total),
+			NextPageToken: nextPageToken,
 		},
 	}), nil
 }
@@ -117,8 +143,14 @@ func (h *UserHandler) GetUser(
 		return nil, connect.NewError(connect.CodeNotFound, err)
 	}
 
-	budget, _ := h.store.GetBudget(ctx, user.ID)
-	grants, _ := h.store.ListGrants(ctx, user.ID, true)
+	budget, err := h.store.GetBudget(ctx, user.ID)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to get budget: %w", err))
+	}
+	grants, err := h.store.ListGrants(ctx, user.ID, true)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to list grants: %w", err))
+	}
 
 	pbGrants := make([]*typespb.BudgetGrant, len(grants))
 	for i, g := range grants {
@@ -173,12 +205,12 @@ func (h *UserHandler) DeactivateUser(
 	if err != nil {
 		return nil, connect.NewError(connect.CodeNotFound, err)
 	}
-	user.Status = "inactive"
+	user.Status = storage.StatusInactive
 	if err := h.store.UpdateUser(ctx, user); err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
 
-	_ = h.store.LogAction(ctx, &storage.AuditRecord{
+	h.logAudit(ctx, &storage.AuditRecord{
 		UserID:     user.ID,
 		ActorEmail: auth.EmailFromContext(ctx),
 		Action:     "deactivate_user",
@@ -195,12 +227,12 @@ func (h *UserHandler) ReactivateUser(
 	if err != nil {
 		return nil, connect.NewError(connect.CodeNotFound, err)
 	}
-	user.Status = "active"
+	user.Status = storage.StatusActive
 	if err := h.store.UpdateUser(ctx, user); err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
 
-	_ = h.store.LogAction(ctx, &storage.AuditRecord{
+	h.logAudit(ctx, &storage.AuditRecord{
 		UserID:     user.ID,
 		ActorEmail: auth.EmailFromContext(ctx),
 		Action:     "reactivate_user",
@@ -228,7 +260,7 @@ func (h *UserHandler) SetBudget(
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
 
-	_ = h.store.LogAction(ctx, &storage.AuditRecord{
+	h.logAudit(ctx, &storage.AuditRecord{
 		UserID:     req.Msg.UserId,
 		ActorEmail: auth.EmailFromContext(ctx),
 		Action:     "set_budget",
@@ -261,13 +293,16 @@ func (h *UserHandler) ResetSpend(
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
 
-	_ = h.store.LogAction(ctx, &storage.AuditRecord{
+	h.logAudit(ctx, &storage.AuditRecord{
 		UserID:     req.Msg.UserId,
 		ActorEmail: auth.EmailFromContext(ctx),
 		Action:     "reset_spend",
 	})
 
-	budget, _ := h.store.GetBudget(ctx, req.Msg.UserId)
+	budget, err := h.store.GetBudget(ctx, req.Msg.UserId)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to get budget after reset: %w", err))
+	}
 	return connect.NewResponse(&v1.ResetSpendResponse{
 		Budget: budgetToProto(budget),
 	}), nil
@@ -293,7 +328,7 @@ func (h *UserHandler) CreateGrant(
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
 
-	_ = h.store.LogAction(ctx, &storage.AuditRecord{
+	h.logAudit(ctx, &storage.AuditRecord{
 		UserID:     req.Msg.UserId,
 		ActorEmail: auth.EmailFromContext(ctx),
 		Action:     "create_grant",
@@ -332,7 +367,7 @@ func (h *UserHandler) RevokeGrant(
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
 
-	_ = h.store.LogAction(ctx, &storage.AuditRecord{
+	h.logAudit(ctx, &storage.AuditRecord{
 		UserID:     req.Msg.UserId,
 		ActorEmail: auth.EmailFromContext(ctx),
 		Action:     "revoke_grant",
@@ -381,11 +416,17 @@ func (h *UserHandler) GetCurrentUser(
 	// Look up or auto-provision the user.
 	user, err := h.store.GetUserByEmail(ctx, authUser.Email)
 	if err != nil {
+		// Only auto-provision if the error is specifically "not found".
+		// Other errors (e.g., transient DB issues) should propagate.
+		if !errors.Is(err, storage.ErrNotFound) {
+			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to look up user: %w", err))
+		}
+
 		// Auto-provision on first login.
 		user = &storage.UserRecord{
 			Email:  authUser.Email,
 			Role:   "developer",
-			Status: "active",
+			Status: storage.StatusActive,
 		}
 		if createErr := h.store.CreateUser(ctx, user); createErr != nil {
 			return nil, connect.NewError(connect.CodeInternal, createErr)
@@ -393,11 +434,22 @@ func (h *UserHandler) GetCurrentUser(
 	}
 
 	// Update last seen.
-	_ = h.store.TouchLastSeen(ctx, user.ID)
+	if err := h.store.TouchLastSeen(ctx, user.ID); err != nil {
+		slog.WarnContext(ctx, "failed to update last_seen", "error", err, "user_id", user.ID)
+	}
 
-	budget, _ := h.store.GetBudget(ctx, user.ID)
-	grants, _ := h.store.ListGrants(ctx, user.ID, true)
-	check, _ := h.store.CheckBudget(ctx, user.ID, 0)
+	budget, err := h.store.GetBudget(ctx, user.ID)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to get budget: %w", err))
+	}
+	grants, err := h.store.ListGrants(ctx, user.ID, true)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to list grants: %w", err))
+	}
+	check, err := h.store.CheckBudget(ctx, user.ID, 0)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to check budget: %w", err))
+	}
 
 	pbGrants := make([]*typespb.BudgetGrant, len(grants))
 	for i, g := range grants {
@@ -431,9 +483,18 @@ func (h *UserHandler) GetMyBudget(
 		return nil, connect.NewError(connect.CodeNotFound, err)
 	}
 
-	budget, _ := h.store.GetBudget(ctx, user.ID)
-	grants, _ := h.store.ListGrants(ctx, user.ID, true)
-	check, _ := h.store.CheckBudget(ctx, user.ID, 0)
+	budget, err := h.store.GetBudget(ctx, user.ID)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to get budget: %w", err))
+	}
+	grants, err := h.store.ListGrants(ctx, user.ID, true)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to list grants: %w", err))
+	}
+	check, err := h.store.CheckBudget(ctx, user.ID, 0)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to check budget: %w", err))
+	}
 
 	pbGrants := make([]*typespb.BudgetGrant, len(grants))
 	for i, g := range grants {
@@ -545,11 +606,11 @@ func stringToRole(s string) typespb.UserRole {
 func statusToString(s typespb.UserStatus) string {
 	switch s {
 	case typespb.UserStatus_USER_STATUS_PROVISIONED:
-		return "provisioned"
+		return storage.StatusProvisioned
 	case typespb.UserStatus_USER_STATUS_ACTIVE:
-		return "active"
+		return storage.StatusActive
 	case typespb.UserStatus_USER_STATUS_INACTIVE:
-		return "inactive"
+		return storage.StatusInactive
 	default:
 		return ""
 	}
@@ -557,11 +618,11 @@ func statusToString(s typespb.UserStatus) string {
 
 func stringToStatus(s string) typespb.UserStatus {
 	switch s {
-	case "provisioned":
+	case storage.StatusProvisioned:
 		return typespb.UserStatus_USER_STATUS_PROVISIONED
-	case "active":
+	case storage.StatusActive:
 		return typespb.UserStatus_USER_STATUS_ACTIVE
-	case "inactive":
+	case storage.StatusInactive:
 		return typespb.UserStatus_USER_STATUS_INACTIVE
 	default:
 		return typespb.UserStatus_USER_STATUS_UNSPECIFIED
@@ -591,6 +652,3 @@ func stringToPeriod(s string) typespb.BudgetPeriod {
 		return typespb.BudgetPeriod_BUDGET_PERIOD_UNSPECIFIED
 	}
 }
-
-// Ensure compile-time check avoids import of unused time — timestamppb handles it.
-var _ = time.Now

@@ -133,4 +133,3 @@ export type Attribute = Message<"candela.types.Attribute"> & {
  */
 export const AttributeSchema: GenMessage<Attribute> = /*@__PURE__*/
   messageDesc(file_candela_types_common, 3);
-

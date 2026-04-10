@@ -103,4 +103,3 @@ export type APIKey = Message<"candela.types.APIKey"> & {
  */
 export const APIKeySchema: GenMessage<APIKey> = /*@__PURE__*/
   messageDesc(file_candela_types_project, 1);
-

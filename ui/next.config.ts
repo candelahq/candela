@@ -8,23 +8,26 @@ const nextConfig: NextConfig = {
   // Proxy API calls to the Go backend (runs as a sidecar in the same container).
   async rewrites() {
     const backendUrl = process.env.BACKEND_URL || "http://localhost:8181";
-    return [
-      // ConnectRPC services
-      {
-        source: "/candela.v1.:path*",
-        destination: `${backendUrl}/candela.v1.:path*`,
-      },
-      // LLM proxy routes
-      {
-        source: "/proxy/:path*",
-        destination: `${backendUrl}/proxy/:path*`,
-      },
-      // Health check
-      {
-        source: "/healthz",
-        destination: `${backendUrl}/healthz`,
-      },
-    ];
+    return {
+      // "beforeFiles" rewrites are checked before pages/public files.
+      beforeFiles: [
+        // ConnectRPC services (paths containing dots like candela.v1.*)
+        {
+          source: "/:path(candela\\.v1\\..+)",
+          destination: `${backendUrl}/:path`,
+        },
+        // LLM proxy routes
+        {
+          source: "/proxy/:path*",
+          destination: `${backendUrl}/proxy/:path*`,
+        },
+        // Health check
+        {
+          source: "/healthz",
+          destination: `${backendUrl}/healthz`,
+        },
+      ],
+    };
   },
 };
 

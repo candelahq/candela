@@ -116,7 +116,8 @@ test.describe("Admin Users Page", () => {
 
     await page.goto("/admin/users");
     await expect(page.locator("#users-table")).toBeVisible();
-    await expect(page.locator("tbody tr")).toHaveCount(2);
+    // Wait for the table to fully render with mock data
+    await expect(page.locator("#users-table tbody tr")).toHaveCount(2, { timeout: 10000 });
     await expect(page.locator("text=alice@test.com")).toBeVisible();
     await expect(page.locator("text=bob@test.com")).toBeVisible();
   });
@@ -200,7 +201,7 @@ test.describe("Admin Audit Page", () => {
   test("renders audit page for admin", async ({ page }) => {
     await mockAdminUser(page);
     await page.goto("/admin/audit");
-    await expect(page.locator("text=Audit Log")).toBeVisible();
+    await expect(page.locator(".admin-page-title").filter({ hasText: "Audit Log" })).toBeVisible();
   });
 });
 

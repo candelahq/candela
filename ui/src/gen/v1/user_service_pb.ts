@@ -812,4 +812,3 @@ export const UserService: GenService<{
   },
 }> = /*@__PURE__*/
   serviceDesc(file_candela_v1_user_service, 0);
-

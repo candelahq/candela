@@ -427,4 +427,3 @@ export enum BudgetPeriod {
  */
 export const BudgetPeriodSchema: GenEnum<BudgetPeriod> = /*@__PURE__*/
   enumDesc(file_candela_types_user, 2);
-

@@ -335,4 +335,3 @@ export const ProjectService: GenService<{
   },
 }> = /*@__PURE__*/
   serviceDesc(file_candela_v1_project_service, 0);
-

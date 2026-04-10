@@ -202,7 +202,10 @@ message RevokeGrantResponse {}
 
 message ListAuditLogRequest {
   string user_id = 1 [(buf.validate.field).string.min_len = 1];
-  int32 limit = 2 [(buf.validate.field).int32 = {gte: 0, lte: 500}]; // Max entries to return (default 50)
+  int32 limit = 2 [(buf.validate.field).int32 = {
+    gte: 0
+    lte: 500
+  }]; // Max entries to return (default 50)
 }
 
 message ListAuditLogResponse {

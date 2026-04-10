@@ -569,4 +569,3 @@ export enum SpanStatus {
  */
 export const SpanStatusSchema: GenEnum<SpanStatus> = /*@__PURE__*/
   enumDesc(file_candela_types_trace, 1);
-

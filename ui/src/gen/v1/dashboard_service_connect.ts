@@ -50,4 +50,3 @@ export const DashboardService = {
     },
   }
 } as const;
-

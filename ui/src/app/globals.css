@@ -1766,6 +1766,13 @@ tr:hover .model-bar {
   margin-top: 8px;
 }
 
+.form-field-error {
+  color: var(--error);
+  font-size: 0.75rem;
+  margin-top: 4px;
+  padding-left: 2px;
+}
+
 /* ──────────────────────────────────────────
    Admin — Cards & Explainer
    ────────────────────────────────────────── */

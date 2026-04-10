@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useReducer, useState } from "react";
 import { userClient } from "@/lib/api";
 import { HelpTip } from "@/components/Tooltip";
+import { useCreateUserValidation } from "@/hooks/useProtoValidation";
 import type { User } from "@/gen/types/user_pb";
 
 interface UsersState {
@@ -53,6 +54,7 @@ export default function AdminUsersPage() {
   const [createForm, setCreateForm] = useState({ email: "", displayName: "", role: 2, budget: 0 });
   const [createError, setCreateError] = useState<string | null>(null);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
+  const { validate, getError, clearErrors } = useCreateUserValidation();
 
   const fetchUsers = useCallback(async () => {
     dispatch({ type: "loading" });
@@ -69,6 +71,16 @@ export default function AdminUsersPage() {
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
     setCreateError(null);
+
+    // Client-side protovalidate check (instant feedback).
+    const valid = await validate({
+      email: createForm.email,
+      displayName: createForm.displayName,
+      role: createForm.role,
+      monthlyBudgetUsd: createForm.budget,
+    });
+    if (!valid) return;
+
     try {
       await userClient.createUser({
         email: createForm.email,
@@ -78,6 +90,7 @@ export default function AdminUsersPage() {
       });
       setShowCreateModal(false);
       setCreateForm({ email: "", displayName: "", role: 2, budget: 0 });
+      clearErrors();
       fetchUsers();
     } catch (err: unknown) {
       setCreateError(err instanceof Error ? err.message : "Failed to create user");
@@ -219,6 +232,7 @@ export default function AdminUsersPage() {
                   placeholder="user@company.com"
                   className="form-input"
                 />
+                {getError("email") && <div className="form-field-error">{getError("email")}</div>}
               </div>
               <div className="form-group">
                 <label htmlFor="create-name">Display Name</label>
@@ -257,6 +271,7 @@ export default function AdminUsersPage() {
                   onChange={(e) => setCreateForm({ ...createForm, budget: Number(e.target.value) })}
                   className="form-input"
                 />
+                {getError("monthly_budget_usd") && <div className="form-field-error">{getError("monthly_budget_usd")}</div>}
               </div>
               {createError && <div className="form-error">{createError}</div>}
               <div className="modal-actions">

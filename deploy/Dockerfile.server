@@ -33,6 +33,9 @@ COPY ui/ ./
 COPY gen/ts/ ../gen/ts/
 
 # Build standalone output.
+# NEXT_PUBLIC_API_URL="" makes the client use relative URLs (same origin).
+# Next.js rewrites proxy these to the Go backend sidecar.
+ENV NEXT_PUBLIC_API_URL=""
 RUN pnpm run build
 
 # ── Stage 3: Runtime ──

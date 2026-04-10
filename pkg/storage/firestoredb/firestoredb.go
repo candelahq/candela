@@ -94,7 +94,7 @@ func (s *Store) GetUser(ctx context.Context, id string) (*storage.UserRecord, er
 	snap, err := s.client.Collection(usersCol).Doc(id).Get(ctx)
 	if err != nil {
 		if status.Code(err) == codes.NotFound {
-			return nil, fmt.Errorf("firestoredb: user not found: %s", id)
+			return nil, fmt.Errorf("firestoredb: user %s: %w", id, storage.ErrNotFound)
 		}
 		return nil, fmt.Errorf("firestoredb: getting user: %w", err)
 	}
@@ -110,7 +110,7 @@ func (s *Store) GetUserByEmail(ctx context.Context, email string) (*storage.User
 
 	snap, err := iter.Next()
 	if err == iterator.Done {
-		return nil, fmt.Errorf("firestoredb: user not found by email: %s", email)
+		return nil, fmt.Errorf("firestoredb: user email %s: %w", email, storage.ErrNotFound)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("firestoredb: querying user by email: %w", err)

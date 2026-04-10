@@ -54,6 +54,7 @@
             docker-compose
             cloudflared
             grpcurl
+            google-cloud-sdk  # Includes Firestore emulator (gcloud emulators firestore start)
             jq
             yq-go
 

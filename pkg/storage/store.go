@@ -5,8 +5,20 @@ package storage
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"time"
+)
+
+// ErrNotFound indicates that the requested resource does not exist.
+// Store implementations should return this (or wrap it) for "not found" cases.
+var ErrNotFound = errors.New("not found")
+
+// User status constants.
+const (
+	StatusProvisioned = "provisioned"
+	StatusActive      = "active"
+	StatusInactive    = "inactive"
 )
 
 // EscapeLike escapes SQL LIKE wildcard characters (% and _) in user input.

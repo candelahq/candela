@@ -2,6 +2,7 @@ package connecthandlers
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"testing"
 	"time"
@@ -271,6 +272,35 @@ func TestUserHandler_CreateUser_MissingEmail(t *testing.T) {
 	}
 	if connectErr.Code() != connect.CodeInvalidArgument {
 		t.Errorf("code = %v, want InvalidArgument", connectErr.Code())
+	}
+}
+
+func TestUserHandler_CreateUser_DuplicateEmail(t *testing.T) {
+	store := newMockUserStore()
+	handler := NewUserHandler(store)
+	ctx := authedCtx("admin@example.com")
+
+	// First creation succeeds.
+	_, err := handler.CreateUser(ctx, connect.NewRequest(&v1.CreateUserRequest{
+		Email: "dupe@example.com",
+	}))
+	if err != nil {
+		t.Fatalf("first CreateUser: %v", err)
+	}
+
+	// Second creation with same email should fail.
+	_, err = handler.CreateUser(ctx, connect.NewRequest(&v1.CreateUserRequest{
+		Email: "dupe@example.com",
+	}))
+	if err == nil {
+		t.Fatal("expected error for duplicate email")
+	}
+	var connectErr *connect.Error
+	if !errors.As(err, &connectErr) {
+		t.Fatalf("expected *connect.Error, got %T", err)
+	}
+	if connectErr.Code() != connect.CodeAlreadyExists {
+		t.Errorf("code = %v, want AlreadyExists", connectErr.Code())
 	}
 }
 

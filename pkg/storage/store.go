@@ -21,6 +21,12 @@ const (
 	StatusInactive    = "inactive"
 )
 
+// User role constants.
+const (
+	RoleAdmin     = "admin"
+	RoleDeveloper = "developer"
+)
+
 // EscapeLike escapes SQL LIKE wildcard characters (% and _) in user input.
 // Without this, a search for "100%" would match "100", "1000", etc.
 // Both DuckDB and SQLite use backslash as the ESCAPE character.

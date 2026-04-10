@@ -17,9 +17,8 @@ jobs:
 
       - name: Install Nix
         uses: DeterminateSystems/nix-installer-action@main
-
-      - name: Magic Nix Cache
-        uses: DeterminateSystems/magic-nix-cache-action@main
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Generate proto (Remote)
         env:
@@ -50,9 +49,8 @@ jobs:
 
       - name: Install Nix
         uses: DeterminateSystems/nix-installer-action@main
-
-      - name: Magic Nix Cache
-        uses: DeterminateSystems/magic-nix-cache-action@main
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Install dependencies
         run: nix develop -c pnpm install
@@ -65,7 +63,9 @@ jobs:
           nix develop -c bash -c "cd proto && buf generate"
 
       - name: Copy generated types
-        run: cp -r gen/ts/candela ui/src/gen
+        run: |
+          cp -r gen/ts/candela/* ui/src/gen/
+          rm -f ui/src/gen/types/bq_span_pb.ts
 
       - name: Lint
         run: nix develop -c pnpm run lint
@@ -83,9 +83,8 @@ jobs:
 
       - name: Install Nix
         uses: DeterminateSystems/nix-installer-action@main
-
-      - name: Magic Nix Cache
-        uses: DeterminateSystems/magic-nix-cache-action@main
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Install dependencies
         run: nix develop -c pnpm install
@@ -98,7 +97,9 @@ jobs:
           nix develop -c bash -c "cd proto && buf generate"
 
       - name: Copy generated types
-        run: cp -r gen/ts/candela ui/src/gen
+        run: |
+          cp -r gen/ts/candela/* ui/src/gen/
+          rm -f ui/src/gen/types/bq_span_pb.ts
 
       - name: Install Playwright browsers (Using Nix)
         run: nix develop -c pnpm exec playwright install --with-deps chromium

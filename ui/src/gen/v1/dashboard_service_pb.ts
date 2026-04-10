@@ -325,4 +325,3 @@ export const DashboardService: GenService<{
   },
 }> = /*@__PURE__*/
   serviceDesc(file_candela_v1_dashboard_service, 0);
-

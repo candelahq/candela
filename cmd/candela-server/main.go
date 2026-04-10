@@ -18,6 +18,8 @@ import (
 	"gopkg.in/yaml.v3"
 	"log/slog"
 
+	connect "connectrpc.com/connect"
+	"connectrpc.com/validate"
 	"github.com/candelahq/candela/gen/go/candela/v1/candelav1connect"
 	"github.com/candelahq/candela/pkg/auth"
 	"github.com/candelahq/candela/pkg/connecthandlers"
@@ -164,10 +166,14 @@ func main() {
 		}
 		defer func() { _ = fStore.Close() }()
 
+		// Create protovalidate interceptor (validates request fields before handler).
+		validateInterceptor := validate.NewInterceptor()
+
 		userPath, userH := candelav1connect.NewUserServiceHandler(
-			connecthandlers.NewUserHandler(fStore))
+			connecthandlers.NewUserHandler(fStore),
+			connect.WithInterceptors(validateInterceptor, auth.AdminInterceptor(fStore)))
 		mux.Handle(userPath, userH)
-		slog.Info("UserService registered", "path", userPath)
+		slog.Info("UserService registered", "path", userPath, "admin_guard", true, "validation", true)
 	} else {
 		slog.Info("Firestore disabled — UserService not available")
 	}

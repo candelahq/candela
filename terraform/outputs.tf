@@ -31,4 +31,3 @@ output "candela_local_config" {
     port: 8181
   EOT
 }
-

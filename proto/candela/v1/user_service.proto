@@ -2,6 +2,7 @@ syntax = "proto3";
 
 package candela.v1;
 
+import "buf/validate/validate.proto";
 import "candela/types/common.proto";
 import "candela/types/user.proto";
 import "google/protobuf/field_mask.proto";
@@ -72,10 +73,10 @@ service UserService {
 // ──────────────────────────────────────────────────
 
 message CreateUserRequest {
-  string email = 1;
+  string email = 1 [(buf.validate.field).string.email = true];
   string display_name = 2;
   candela.types.UserRole role = 3;
-  double monthly_budget_usd = 4; // Optional: set budget at creation
+  double monthly_budget_usd = 4 [(buf.validate.field).double.gte = 0]; // Optional: set budget at creation
 }
 
 message CreateUserResponse {
@@ -94,7 +95,7 @@ message ListUsersResponse {
 }
 
 message GetUserRequest {
-  string id = 1;
+  string id = 1 [(buf.validate.field).string.min_len = 1];
 }
 
 message GetUserResponse {
@@ -104,7 +105,7 @@ message GetUserResponse {
 }
 
 message UpdateUserRequest {
-  string id = 1;
+  string id = 1 [(buf.validate.field).string.min_len = 1];
   string display_name = 2;
   candela.types.UserRole role = 3;
   google.protobuf.FieldMask update_mask = 4; // Which fields to update
@@ -115,13 +116,13 @@ message UpdateUserResponse {
 }
 
 message DeactivateUserRequest {
-  string id = 1;
+  string id = 1 [(buf.validate.field).string.min_len = 1];
 }
 
 message DeactivateUserResponse {}
 
 message ReactivateUserRequest {
-  string id = 1;
+  string id = 1 [(buf.validate.field).string.min_len = 1];
 }
 
 message ReactivateUserResponse {
@@ -133,8 +134,8 @@ message ReactivateUserResponse {
 // ──────────────────────────────────────────────────
 
 message SetBudgetRequest {
-  string user_id = 1;
-  double limit_usd = 2;
+  string user_id = 1 [(buf.validate.field).string.min_len = 1];
+  double limit_usd = 2 [(buf.validate.field).double.gt = 0];
   candela.types.BudgetPeriod period_type = 3;
 }
 
@@ -143,7 +144,7 @@ message SetBudgetResponse {
 }
 
 message GetBudgetRequest {
-  string user_id = 1;
+  string user_id = 1 [(buf.validate.field).string.min_len = 1];
 }
 
 message GetBudgetResponse {
@@ -151,7 +152,7 @@ message GetBudgetResponse {
 }
 
 message ResetSpendRequest {
-  string user_id = 1;
+  string user_id = 1 [(buf.validate.field).string.min_len = 1];
 }
 
 message ResetSpendResponse {
@@ -163,9 +164,14 @@ message ResetSpendResponse {
 // ──────────────────────────────────────────────────
 
 message CreateGrantRequest {
-  string user_id = 1;
-  double amount_usd = 2;
-  string reason = 3;
+  option (buf.validate.message).cel = {
+    id: "grant.expires_after_starts"
+    message: "expires_at must be after starts_at"
+    expression: "!has(this.starts_at) || !has(this.expires_at) || this.expires_at > this.starts_at"
+  };
+  string user_id = 1 [(buf.validate.field).string.min_len = 1];
+  double amount_usd = 2 [(buf.validate.field).double.gt = 0];
+  string reason = 3 [(buf.validate.field).string.min_len = 1];
   google.protobuf.Timestamp starts_at = 4;
   google.protobuf.Timestamp expires_at = 5;
 }
@@ -175,7 +181,7 @@ message CreateGrantResponse {
 }
 
 message ListGrantsRequest {
-  string user_id = 1;
+  string user_id = 1 [(buf.validate.field).string.min_len = 1];
   bool active_only = 2; // If true, only return non-expired grants
 }
 
@@ -184,8 +190,8 @@ message ListGrantsResponse {
 }
 
 message RevokeGrantRequest {
-  string user_id = 1;
-  string grant_id = 2;
+  string user_id = 1 [(buf.validate.field).string.min_len = 1];
+  string grant_id = 2 [(buf.validate.field).string.min_len = 1];
 }
 
 message RevokeGrantResponse {}
@@ -195,8 +201,11 @@ message RevokeGrantResponse {}
 // ──────────────────────────────────────────────────
 
 message ListAuditLogRequest {
-  string user_id = 1;
-  int32 limit = 2; // Max entries to return (default 50)
+  string user_id = 1 [(buf.validate.field).string.min_len = 1];
+  int32 limit = 2 [(buf.validate.field).int32 = {
+    gte: 0
+    lte: 500
+  }]; // Max entries to return (default 50)
 }
 
 message ListAuditLogResponse {

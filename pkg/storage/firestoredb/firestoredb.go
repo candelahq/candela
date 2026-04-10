@@ -16,7 +16,6 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"sort"
 	"time"
 
 	"cloud.google.com/go/firestore"
@@ -125,25 +124,34 @@ func (s *Store) ListUsers(ctx context.Context, statusFilter string, limit, offse
 		q = q.Where("status", "==", statusFilter)
 	}
 
-	// Get total count (needed for pagination UI).
-	allSnaps, err := q.Documents(ctx).GetAll()
+	// Efficient count via Firestore aggregation query.
+	countQ := q.NewAggregationQuery().WithCount("total")
+	results, err := countQ.Get(ctx)
+	if err != nil {
+		return nil, 0, fmt.Errorf("firestoredb: counting users: %w", err)
+	}
+	total := 0
+	if countVal, ok := results["total"]; ok {
+		// The SDK returns the count as an interface{} — handle both
+		// int64 (production) and *firestorepb.Value (emulator) cases.
+		switch v := countVal.(type) {
+		case int64:
+			total = int(v)
+		default:
+			// Attempt fmt.Sprint fallback for any other wrapper type.
+			_, _ = fmt.Sscanf(fmt.Sprint(v), "%d", &total)
+		}
+	}
+
+	// Use native Offset + Limit for efficient pagination.
+	pageQ := q.Offset(offset).Limit(limit)
+	snaps, err := pageQ.Documents(ctx).GetAll()
 	if err != nil {
 		return nil, 0, fmt.Errorf("firestoredb: listing users: %w", err)
 	}
-	total := len(allSnaps)
 
-	// Apply offset/limit manually (Firestore doesn't have OFFSET).
-	end := offset + limit
-	if offset >= len(allSnaps) {
-		return []*storage.UserRecord{}, total, nil
-	}
-	if end > len(allSnaps) {
-		end = len(allSnaps)
-	}
-	pageSnaps := allSnaps[offset:end]
-
-	users := make([]*storage.UserRecord, 0, len(pageSnaps))
-	for _, snap := range pageSnaps {
+	users := make([]*storage.UserRecord, 0, len(snaps))
+	for _, snap := range snaps {
 		u, err := snapToUser(snap)
 		if err != nil {
 			slog.Warn("skipping malformed user doc", "id", snap.Ref.ID, "error", err)
@@ -321,9 +329,9 @@ func (s *Store) CheckBudget(ctx context.Context, userID string, estimatedCostUSD
 
 func (s *Store) DeductSpend(ctx context.Context, userID string, costUSD float64, tokens int64) error {
 	return s.client.RunTransaction(ctx, func(ctx context.Context, tx *firestore.Transaction) error {
-		remaining := costUSD
+		// ── ALL READS FIRST (Firestore requirement) ──
 
-		// Step 1: Load active grants (earliest-expiring first).
+		// Read 1: Load active grants (earliest-expiring first).
 		grantsRef := s.client.Collection(usersCol).Doc(userID).
 			Collection(grantsCol)
 		grantsSnaps, err := tx.Documents(grantsRef.
@@ -333,7 +341,20 @@ func (s *Store) DeductSpend(ctx context.Context, userID string, costUSD float64,
 			return fmt.Errorf("firestoredb: loading grants in tx: %w", err)
 		}
 
-		// Deduct from grants first (waterfall).
+		// Read 2: Load monthly budget.
+		periodKey := currentPeriodKey("monthly")
+		budgetRef := s.client.Collection(usersCol).Doc(userID).
+			Collection(budgetsCol).Doc(periodKey)
+		budgetSnap, err := tx.Get(budgetRef)
+		if err != nil && status.Code(err) != codes.NotFound {
+			return fmt.Errorf("firestoredb: getting budget in tx: %w", err)
+		}
+
+		// ── ALL WRITES AFTER READS ──
+
+		remaining := costUSD
+
+		// Write 1: Deduct from grants first (waterfall).
 		for _, snap := range grantsSnaps {
 			if remaining <= 0 {
 				break
@@ -355,26 +376,17 @@ func (s *Store) DeductSpend(ctx context.Context, userID string, costUSD float64,
 			remaining -= deduct
 		}
 
-		// Step 2: Deduct remainder from monthly budget.
-		if remaining > 0 {
-			periodKey := currentPeriodKey("monthly")
-			budgetRef := s.client.Collection(usersCol).Doc(userID).
-				Collection(budgetsCol).Doc(periodKey)
-			budgetSnap, err := tx.Get(budgetRef)
-			if err != nil && status.Code(err) != codes.NotFound {
-				return fmt.Errorf("firestoredb: getting budget in tx: %w", err)
+		// Write 2: Deduct remainder from monthly budget.
+		if remaining > 0 && budgetSnap != nil && budgetSnap.Exists() {
+			b, err := snapToBudget(budgetSnap)
+			if err != nil {
+				return err
 			}
-			if budgetSnap != nil && budgetSnap.Exists() {
-				b, err := snapToBudget(budgetSnap)
-				if err != nil {
-					return err
-				}
-				if err := tx.Update(budgetRef, []firestore.Update{
-					{Path: "spent_usd", Value: b.SpentUSD + remaining},
-					{Path: "tokens_used", Value: b.TokensUsed + tokens},
-				}); err != nil {
-					return fmt.Errorf("firestoredb: deducting from budget: %w", err)
-				}
+			if err := tx.Update(budgetRef, []firestore.Update{
+				{Path: "spent_usd", Value: b.SpentUSD + remaining},
+				{Path: "tokens_used", Value: b.TokensUsed + tokens},
+			}); err != nil {
+				return fmt.Errorf("firestoredb: deducting from budget: %w", err)
 			}
 		}
 		return nil
@@ -534,7 +546,3 @@ func currentPeriodKey(periodType string) string {
 
 // Ensure Store implements UserStore at compile time.
 var _ storage.UserStore = (*Store)(nil)
-
-// min returns the smaller of two float64 values.
-// (sort is imported for grant ordering.)
-var _ = sort.Slice

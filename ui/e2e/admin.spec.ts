@@ -101,7 +101,7 @@ test.describe("Admin Users Page", () => {
           displayName: "Alice",
           role: 1,
           status: 2,
-          lastSeenAt: { seconds: "1712000000" },
+          lastSeenAt: "2024-04-02T00:53:20Z",
         },
         {
           id: "u2",
@@ -116,9 +116,9 @@ test.describe("Admin Users Page", () => {
 
     await page.goto("/admin/users");
     await expect(page.locator("#users-table")).toBeVisible();
-    // Verify the table rendered with at least one user row
-    await expect(page.locator("#users-table tbody tr").first()).toBeVisible({ timeout: 10000 });
+    await expect(page.locator("#users-table tbody tr")).toHaveCount(2, { timeout: 10000 });
     await expect(page.locator("text=alice@test.com")).toBeVisible();
+    await expect(page.locator("text=bob@test.com")).toBeVisible();
   });
 
   test("shows create user modal", async ({ page }) => {

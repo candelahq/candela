@@ -74,6 +74,7 @@ type Span struct {
 	ProjectID     string            `json:"project_id"`
 	Environment   string            `json:"environment,omitempty"`
 	ServiceName   string            `json:"service_name,omitempty"`
+	UserID        string            `json:"user_id,omitempty"`
 }
 
 // TraceSummary is a lightweight summary for list views.
@@ -91,6 +92,7 @@ type TraceSummary struct {
 	Status          SpanStatus    `json:"status"`
 	PrimaryModel    string        `json:"primary_model"`
 	PrimaryProvider string        `json:"primary_provider"`
+	UserID          string        `json:"user_id,omitempty"`
 }
 
 // Trace is a complete trace with all spans.
@@ -106,6 +108,7 @@ type Trace struct {
 	TotalCostUSD float64       `json:"total_cost_usd"`
 	RootSpanName string        `json:"root_span_name"`
 	Spans        []Span        `json:"spans"`
+	UserID       string        `json:"user_id,omitempty"`
 }
 
 // TraceQuery defines filters for listing traces.
@@ -122,6 +125,7 @@ type TraceQuery struct {
 	Descending  bool
 	PageSize    int
 	PageToken   string
+	UserID      string // Filter by user (empty = all, for admins)
 }
 
 // TraceResult is the paginated result of a trace query.
@@ -168,6 +172,7 @@ type UsageQuery struct {
 	Environment string
 	StartTime   time.Time
 	EndTime     time.Time
+	UserID      string // Filter by user (empty = all, for admins)
 }
 
 // ModelUsage holds per-model aggregated metrics.
@@ -279,4 +284,141 @@ type ProjectStore interface {
 
 	// ValidateAPIKey checks a raw key against stored hashes. Returns the key record if valid.
 	ValidateAPIKey(ctx context.Context, rawKey string) (*APIKey, error)
+}
+
+// --- Multi-User Management ---
+
+// UserRecord is the Go representation of a Candela user for the store layer.
+type UserRecord struct {
+	ID          string    `json:"id"`
+	Email       string    `json:"email"`
+	DisplayName string    `json:"display_name,omitempty"`
+	Role        string    `json:"role"` // "developer" or "admin"
+	Status      string    `json:"status"` // "provisioned", "active", "inactive"
+	CreatedAt   time.Time `json:"created_at"`
+	LastSeenAt  time.Time `json:"last_seen_at"`
+	RateLimit   int       `json:"rate_limit,omitempty"` // Requests/minute; 0 = default
+}
+
+// BudgetRecord is the Go representation of a user's recurring budget.
+type BudgetRecord struct {
+	UserID      string    `json:"user_id"`
+	LimitUSD    float64   `json:"limit_usd"`
+	SpentUSD    float64   `json:"spent_usd"`
+	TokensUsed  int64     `json:"tokens_used"`
+	PeriodType  string    `json:"period_type"` // "monthly", "weekly", "quarterly"
+	PeriodKey   string    `json:"period_key"`  // "2026-04", "2026-W15"
+	PeriodStart time.Time `json:"period_start"`
+	PeriodEnd   time.Time `json:"period_end"`
+}
+
+// GrantRecord is the Go representation of a one-time budget grant.
+type GrantRecord struct {
+	ID        string    `json:"id"`
+	UserID    string    `json:"user_id"`
+	AmountUSD float64   `json:"amount_usd"`
+	SpentUSD  float64   `json:"spent_usd"`
+	Reason    string    `json:"reason"`
+	GrantedBy string    `json:"granted_by"`
+	StartsAt  time.Time `json:"starts_at"`
+	ExpiresAt time.Time `json:"expires_at"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+// Remaining returns how much of this grant is still available.
+func (g *GrantRecord) Remaining() float64 {
+	return g.AmountUSD - g.SpentUSD
+}
+
+// AuditRecord is the Go representation of an admin audit log entry.
+type AuditRecord struct {
+	ID         string    `json:"id"`
+	UserID     string    `json:"user_id"`
+	ActorEmail string    `json:"actor_email"`
+	Action     string    `json:"action"`
+	Details    string    `json:"details"`
+	Timestamp  time.Time `json:"timestamp"`
+}
+
+// BudgetCheckResult is returned by CheckBudget.
+type BudgetCheckResult struct {
+	Allowed       bool    // Whether the estimated cost is within budget
+	RemainingUSD  float64 // Total remaining across grants + budget
+	GrantsUSD     float64 // Remaining in active grants
+	BudgetUSD     float64 // Remaining in recurring budget
+	EstimatedCost float64 // The estimated cost that was checked
+}
+
+// UserStore manages users, budgets, grants, audit, and rate limits.
+// Implemented by firestoredb for production.
+type UserStore interface {
+	// ── User CRUD ──
+
+	// CreateUser pre-provisions a new user.
+	CreateUser(ctx context.Context, user *UserRecord) error
+
+	// GetUser retrieves a user by ID.
+	GetUser(ctx context.Context, id string) (*UserRecord, error)
+
+	// GetUserByEmail retrieves a user by email (for IAP first-login lookup).
+	GetUserByEmail(ctx context.Context, email string) (*UserRecord, error)
+
+	// ListUsers returns all users, optionally filtered by status.
+	ListUsers(ctx context.Context, statusFilter string, limit, offset int) ([]*UserRecord, int, error)
+
+	// UpdateUser modifies mutable fields.
+	UpdateUser(ctx context.Context, user *UserRecord) error
+
+	// TouchLastSeen updates the user's last_seen_at timestamp.
+	TouchLastSeen(ctx context.Context, id string) error
+
+	// ── Budgets ──
+
+	// SetBudget creates or updates a user's recurring budget.
+	SetBudget(ctx context.Context, budget *BudgetRecord) error
+
+	// GetBudget returns the current-period budget for a user.
+	GetBudget(ctx context.Context, userID string) (*BudgetRecord, error)
+
+	// ResetSpend zeroes a user's current-period spend (emergency override).
+	ResetSpend(ctx context.Context, userID string) error
+
+	// ── Grants ──
+
+	// CreateGrant issues a one-time bonus budget.
+	CreateGrant(ctx context.Context, grant *GrantRecord) error
+
+	// ListGrants returns grants for a user, optionally only active ones.
+	ListGrants(ctx context.Context, userID string, activeOnly bool) ([]*GrantRecord, error)
+
+	// RevokeGrant cancels an active grant by setting its expiry to now.
+	RevokeGrant(ctx context.Context, userID, grantID string) error
+
+	// ── Budget Enforcement ──
+
+	// CheckBudget evaluates whether an estimated cost is within the user's budget.
+	// This is a read-only pre-flight check.
+	CheckBudget(ctx context.Context, userID string, estimatedCostUSD float64) (*BudgetCheckResult, error)
+
+	// DeductSpend subtracts actual cost from the user's budget using the
+	// grant-first waterfall: active grants (earliest-expiring first) → monthly budget.
+	// This must be transactional.
+	DeductSpend(ctx context.Context, userID string, costUSD float64, tokens int64) error
+
+	// ── Rate Limiting ──
+
+	// CheckRateLimit atomically increments and checks the current-minute counter.
+	// Returns (allowed, currentCount, limit).
+	CheckRateLimit(ctx context.Context, userID string) (bool, int, int, error)
+
+	// ── Audit ──
+
+	// LogAction records an admin action in the audit trail.
+	LogAction(ctx context.Context, entry *AuditRecord) error
+
+	// ListAuditLog returns the audit trail for a user.
+	ListAuditLog(ctx context.Context, userID string, limit int) ([]*AuditRecord, error)
+
+	// Close releases resources.
+	Close() error
 }

@@ -42,7 +42,7 @@ async function mockAdminUser(page: import("@playwright/test").Page) {
       status: 2, // ACTIVE
     },
     budget: { limitUsd: 100, spentUsd: 10, periodType: 1 },
-    grants: [],
+    activeGrants: [],
   });
 }
 
@@ -57,7 +57,7 @@ async function mockDevUser(page: import("@playwright/test").Page) {
       status: 2, // ACTIVE
     },
     budget: { limitUsd: 50, spentUsd: 5, periodType: 1 },
-    grants: [],
+    activeGrants: [],
   });
 }
 
@@ -69,20 +69,20 @@ test.describe("Admin Route Guard", () => {
   test("non-admin sees access denied on /admin/users", async ({ page }) => {
     await mockDevUser(page);
     await page.goto("/admin/users");
-    await expect(page.locator(".admin-guard-title")).toHaveText("Access Denied");
+    await expect(page.locator("h2").filter({ hasText: "Access Denied" })).toBeVisible();
     await expect(page.locator("#users-table")).not.toBeVisible();
   });
 
   test("non-admin sees access denied on /admin/budgets", async ({ page }) => {
     await mockDevUser(page);
     await page.goto("/admin/budgets");
-    await expect(page.locator(".admin-guard-title")).toHaveText("Access Denied");
+    await expect(page.locator("h2").filter({ hasText: "Access Denied" })).toBeVisible();
   });
 
   test("non-admin sees access denied on /admin/audit", async ({ page }) => {
     await mockDevUser(page);
     await page.goto("/admin/audit");
-    await expect(page.locator(".admin-guard-title")).toHaveText("Access Denied");
+    await expect(page.locator("h2").filter({ hasText: "Access Denied" })).toBeVisible();
   });
 });
 
@@ -212,12 +212,12 @@ test.describe("Sidebar Admin Visibility", () => {
   test("admin sees Admin section in sidebar", async ({ page }) => {
     await mockAdminUser(page);
     await page.goto("/");
-    await expect(page.locator(".nav-section-title").filter({ hasText: "Admin" })).toBeVisible();
+    await expect(page.locator(".nav-section-label").filter({ hasText: "Admin" })).toBeVisible();
   });
 
   test("developer does NOT see Admin section in sidebar", async ({ page }) => {
     await mockDevUser(page);
     await page.goto("/");
-    await expect(page.locator(".nav-section-title").filter({ hasText: "Admin" })).not.toBeVisible();
+    await expect(page.locator(".nav-section-label").filter({ hasText: "Admin" })).not.toBeVisible();
   });
 });

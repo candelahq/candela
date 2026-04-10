@@ -8,14 +8,16 @@ locals {
 }
 
 resource "google_cloud_run_v2_service" "candela" {
+  provider = google-beta
+
   name     = var.service_name
   location = var.region
 
   # Set to true after initial deploy is confirmed working.
   deletion_protection = false
 
-  # IAP is enabled via: gcloud beta run services update candela --region=REGION --iap
-  # The google-beta provider supports iap_enabled natively.
+  # Enable IAP directly on the Cloud Run service (requires google-beta provider).
+  iap_enabled = true
 
   template {
     service_account = google_service_account.candela.email

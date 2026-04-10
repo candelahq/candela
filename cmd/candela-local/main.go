@@ -201,10 +201,24 @@ func loadConfig(configPath string) *Config {
 		return cfg
 	}
 
-	// Trim leading whitespace from each line (the terraform output indents).
+	// Strip common leading indent (handles terraform output which indents
+	// the entire block uniformly). We detect the indent of the first non-empty,
+	// non-comment line and strip that prefix from all lines. This preserves
+	// nested YAML structure unlike TrimSpace.
 	lines := strings.Split(string(data), "\n")
-	for i, line := range lines {
-		lines[i] = strings.TrimSpace(line)
+	indent := ""
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+			continue
+		}
+		indent = line[:len(line)-len(strings.TrimLeft(line, " \t"))]
+		break
+	}
+	if indent != "" {
+		for i, line := range lines {
+			lines[i] = strings.TrimPrefix(line, indent)
+		}
 	}
 	cleaned := strings.Join(lines, "\n")
 

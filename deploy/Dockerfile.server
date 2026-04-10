@@ -4,14 +4,17 @@
 # ──────────────────────────────────────────────────
 
 # ── Stage 1: Build Go backend ──
-FROM golang:1.26-alpine AS go-builder
+# DuckDB requires glibc (not musl/Alpine) for its static bindings.
+FROM golang:1.26-bookworm AS go-builder
+
+RUN apt-get update && apt-get install -y --no-install-recommends build-essential && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /build
 COPY go.mod go.sum ./
 RUN go mod download
 
 COPY . .
-RUN CGO_ENABLED=0 go build -o candela-server ./cmd/candela-server
+RUN go build -o candela-server ./cmd/candela-server
 
 # ── Stage 2: Build Next.js UI ──
 FROM node:22-alpine AS ui-builder
@@ -33,9 +36,10 @@ COPY gen/ts/ ../gen/ts/
 RUN pnpm run build
 
 # ── Stage 3: Runtime ──
-FROM node:22-alpine AS runtime
+# Debian slim for glibc compatibility with DuckDB Go binary.
+FROM node:22-slim AS runtime
 
-RUN apk add --no-cache ca-certificates
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates && rm -rf /var/lib/apt/lists/*
 
 # Go backend binary.
 COPY --from=go-builder /build/candela-server /usr/local/bin/candela-server

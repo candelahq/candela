@@ -11,8 +11,8 @@ resource "google_cloud_run_v2_service" "candela" {
   name     = var.service_name
   location = var.region
 
-  # Prevent accidental deletion in production.
-  deletion_protection = true
+  # Set to true after initial deploy is confirmed working.
+  deletion_protection = false
 
   template {
     service_account = google_service_account.candela.email
@@ -82,23 +82,16 @@ resource "google_cloud_run_v2_service" "candela" {
   ]
 }
 
-# ── IAP Configuration ──
-# Require authentication — IAP handles it.
-# No unauthenticated access to the Cloud Run service.
+# ── Access Control ──
+# For initial testing, allow the IAP Google Group to invoke directly.
+# Full IAP setup (load balancer + OAuth consent screen) is a follow-up.
 
-resource "google_cloud_run_v2_service_iam_member" "iap_invoker" {
+resource "google_cloud_run_v2_service_iam_member" "group_invoker" {
   project  = var.project_id
   location = var.region
   name     = google_cloud_run_v2_service.candela.name
   role     = "roles/run.invoker"
-  member   = "serviceAccount:service-${data.google_project.current.number}@gcp-sa-iap.iam.gserviceaccount.com"
-}
-
-# Grant the Google Group access through IAP.
-resource "google_iap_web_iam_member" "group_access" {
-  project = var.project_id
-  role    = "roles/iap.httpsResourceAccessUser"
-  member  = "group:${var.iap_google_group}"
+  member   = "group:${var.iap_google_group}"
 }
 
 # ── IAP Enablement ──

@@ -14,6 +14,9 @@ resource "google_cloud_run_v2_service" "candela" {
   # Set to true after initial deploy is confirmed working.
   deletion_protection = false
 
+  # IAP is enabled via: gcloud beta run services update candela --region=REGION --iap
+  # The google-beta provider supports iap_enabled natively.
+
   template {
     service_account = google_service_account.candela.email
 
@@ -83,8 +86,27 @@ resource "google_cloud_run_v2_service" "candela" {
 }
 
 # ── Access Control ──
-# For initial testing, allow the IAP Google Group to invoke directly.
-# Full IAP setup (load balancer + OAuth consent screen) is a follow-up.
+# IAP for Cloud Run requires:
+# 1. iap.httpsResourceAccessor on the Cloud Run service's IAP resource
+# 2. run.invoker for the IAP service agent (so IAP can forward requests)
+# 3. run.invoker for the Google Group (belt + suspenders)
+
+resource "google_iap_web_cloud_run_service_iam_member" "group_iap_access" {
+  project                = var.project_id
+  location               = var.region
+  cloud_run_service_name = google_cloud_run_v2_service.candela.name
+  role                   = "roles/iap.httpsResourceAccessor"
+  member                 = "group:${var.iap_google_group}"
+}
+
+# IAP service agent needs run.invoker to forward authenticated requests.
+resource "google_cloud_run_v2_service_iam_member" "iap_sa_invoker" {
+  project  = var.project_id
+  location = var.region
+  name     = google_cloud_run_v2_service.candela.name
+  role     = "roles/run.invoker"
+  member   = "serviceAccount:service-${data.google_project.current.number}@gcp-sa-iap.iam.gserviceaccount.com"
+}
 
 resource "google_cloud_run_v2_service_iam_member" "group_invoker" {
   project  = var.project_id
@@ -94,15 +116,6 @@ resource "google_cloud_run_v2_service_iam_member" "group_invoker" {
   member   = "group:${var.iap_google_group}"
 }
 
-# ── IAP Enablement ──
-# IAP is enabled via gcloud (not Terraform — the Terraform resources are deprecated).
-# Run once after initial deploy:
-#
-#   gcloud run services update candela --region=REGION --iap
-#   gcloud run services describe candela --region=REGION \
-#     --format='value(metadata.annotations."run.googleapis.com/iap-client-id")'
-#
-# The client ID from above is the `audience` value for candela-local (~/.candela.yaml).
 
 # ── Data Sources ──
 

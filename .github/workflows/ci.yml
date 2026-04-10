@@ -65,7 +65,11 @@ jobs:
           nix develop -c bash -c "cd proto && buf generate"
 
       - name: Copy generated types
-        run: cp -r gen/ts/candela ui/src/gen
+        run: |
+          cp -r gen/ts/candela ui/src/gen
+          mkdir -p ui/src/buf/validate
+          cp gen/ts/buf/validate/validate_pb.ts ui/src/buf/validate/
+          rm -f ui/src/gen/types/bq_span_pb.ts
 
       - name: Lint
         run: nix develop -c pnpm run lint

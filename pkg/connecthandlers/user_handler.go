@@ -51,6 +51,16 @@ func (h *UserHandler) CreateUser(
 		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("email is required"))
 	}
 
+	// Check for duplicate email.
+	normalizedEmail := strings.ToLower(req.Msg.Email)
+	if _, err := h.store.GetUserByEmail(ctx, normalizedEmail); err == nil {
+		return nil, connect.NewError(connect.CodeAlreadyExists,
+			fmt.Errorf("user with email %q already exists", normalizedEmail))
+	} else if !errors.Is(err, storage.ErrNotFound) {
+		return nil, connect.NewError(connect.CodeInternal,
+			fmt.Errorf("failed to check existing user: %w", err))
+	}
+
 	user := &storage.UserRecord{
 		Email:       strings.ToLower(req.Msg.Email),
 		DisplayName: req.Msg.DisplayName,

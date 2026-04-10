@@ -5,6 +5,7 @@ import { userClient } from "@/lib/api";
 import { HelpTip } from "@/components/Tooltip";
 import { useCreateUserValidation } from "@/hooks/useProtoValidation";
 import type { User } from "@/gen/types/user_pb";
+import { UserRole, UserStatus } from "@/gen/types/user_pb";
 
 interface UsersState {
   users: User[];
@@ -29,19 +30,19 @@ function reducer(state: UsersState, action: Action): UsersState {
   }
 }
 
-const roleLabel = (role: number) => {
+const roleLabel = (role: UserRole) => {
   switch (role) {
-    case 1: return "Developer";
-    case 2: return "Admin";
+    case UserRole.DEVELOPER: return "Developer";
+    case UserRole.ADMIN: return "Admin";
     default: return "Unknown";
   }
 };
 
-const statusLabel = (status: number) => {
+const statusLabel = (status: UserStatus) => {
   switch (status) {
-    case 1: return { label: "Provisioned", className: "status-badge status-provisioned" };
-    case 2: return { label: "Active", className: "status-badge status-active" };
-    case 3: return { label: "Inactive", className: "status-badge status-inactive" };
+    case UserStatus.PROVISIONED: return { label: "Provisioned", className: "status-badge status-provisioned" };
+    case UserStatus.ACTIVE: return { label: "Active", className: "status-badge status-active" };
+    case UserStatus.INACTIVE: return { label: "Inactive", className: "status-badge status-inactive" };
     default: return { label: "Unknown", className: "status-badge" };
   }
 };
@@ -51,7 +52,7 @@ export default function AdminUsersPage() {
     users: [], total: 0, isLoading: true, error: null,
   });
   const [showCreateModal, setShowCreateModal] = useState(false);
-  const [createForm, setCreateForm] = useState({ email: "", displayName: "", role: 1, budget: 0 });
+  const [createForm, setCreateForm] = useState({ email: "", displayName: "", role: UserRole.DEVELOPER, budget: 0 });
   const [createError, setCreateError] = useState<string | null>(null);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const { validate, getError, clearErrors } = useCreateUserValidation();
@@ -89,7 +90,7 @@ export default function AdminUsersPage() {
         monthlyBudgetUsd: createForm.budget,
       });
       setShowCreateModal(false);
-      setCreateForm({ email: "", displayName: "", role: 2, budget: 0 });
+      setCreateForm({ email: "", displayName: "", role: UserRole.DEVELOPER, budget: 0 });
       clearErrors();
       fetchUsers();
     } catch (err: unknown) {
@@ -253,8 +254,8 @@ export default function AdminUsersPage() {
                   onChange={(e) => setCreateForm({ ...createForm, role: Number(e.target.value) })}
                   className="form-input"
                 >
-                  <option value={1}>Developer</option>
-                  <option value={2}>Admin</option>
+                  <option value={UserRole.DEVELOPER}>Developer</option>
+                  <option value={UserRole.ADMIN}>Admin</option>
                 </select>
               </div>
               <div className="form-group">

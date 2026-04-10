@@ -36,7 +36,7 @@ auth:
 firestore:
   enabled: true
   project_id: "your-gcp-project-id"
-  database_id: "(default)"
+  database_id: "candela"
 
 worker:
   batch_size: 100

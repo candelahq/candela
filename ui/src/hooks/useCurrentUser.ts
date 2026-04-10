@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useReducer} from "react";
 import { userClient } from "@/lib/api";
 import type { User, UserBudget, BudgetGrant } from "@/gen/types/user_pb";
+import { UserRole } from "@/gen/types/user_pb";
 
 export interface CurrentUser {
   user: User | null;
@@ -29,7 +30,7 @@ function reducer(state: CurrentUser, action: Action): CurrentUser {
         budget: action.budget,
         activeGrants: action.grants,
         totalRemainingUsd: action.remaining,
-        isAdmin: action.user.role === 2, // USER_ROLE_ADMIN = 2
+        isAdmin: action.user.role === UserRole.ADMIN,
         isLoading: false,
         error: null,
       };

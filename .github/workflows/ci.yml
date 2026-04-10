@@ -100,7 +100,9 @@ jobs:
           nix develop -c bash -c "cd proto && buf generate"
 
       - name: Copy generated types
-        run: cp -r gen/ts/candela ui/src/gen
+        run: |
+          cp -r gen/ts/candela/* ui/src/gen/
+          rm -f ui/src/gen/types/bq_span_pb.ts
 
       - name: Install Playwright browsers (Using Nix)
         run: nix develop -c pnpm exec playwright install --with-deps chromium

@@ -3,6 +3,7 @@ managed:
   enabled: true
   override:
     - file_option: go_package_prefix
+      module: buf.build/candelahq/candela
       value: github.com/candelahq/candela/gen/go
 plugins:
   # Go protobuf
@@ -13,7 +14,12 @@ plugins:
   - remote: buf.build/connectrpc/go
     out: ../gen/go
     opt: paths=source_relative
-  # TypeScript (ES) — Remote Generation
+  # TypeScript (ES) — message types
+  - remote: buf.build/bufbuild/es
+    out: ../gen/ts
+    opt: target=ts
+    include_imports: true
+  # TypeScript (ES) — ConnectRPC service stubs
   - remote: buf.build/connectrpc/es
     out: ../gen/ts
     opt: target=ts

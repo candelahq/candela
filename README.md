@@ -31,6 +31,7 @@ For deep observability into agent frameworks (**ADK**, **LangChain**, **CrewAI**
 
 - **🕯️ OTel-Native**: OTLP is our native language. No proprietary SDKs.
 - **💰 Real-time Cost Tracking**: Automatic token extraction and USD calculation for OpenAI, Google, and Anthropic.
+- **🔐 Role-Based Access Control**: Admin vs Developer roles with budget enforcement and grant-based spending.
 - **🧪 LLM-as-Judge (Phase 3)**: Automated quality scoring and evaluation rubrics.
 - **🗄️ Pluggable Storage**: **DuckDB** for high-performance local/edge; **BigQuery** for serverless production scale; **SQLite** for lightweight dev.
 - **📡 SSE Streaming Support**: Captures full streaming responses without interfering with user latency.
@@ -205,7 +206,7 @@ cd ui
 pnpm install          # install deps (included in nix shell)
 pnpm run dev           # start dev server → http://localhost:3000
 pnpm run build         # production build (includes TypeScript type-check)
-pnpm run test:e2e      # run Playwright E2E tests (12 tests)
+pnpm run test:e2e      # run Playwright E2E tests (27+ tests)
 pnpm run test:e2e:ui   # Playwright interactive UI mode
 ```
 
@@ -221,13 +222,15 @@ The UI communicates with the backend via **ConnectRPC v2** on `localhost:8080`. 
 - **Phase 1: Foundation** ✅ (Ingestion, Proxy, Cost Calc, Docs)
 - **Phase 2: Storage & Architecture** ✅ (DuckDB, CQRS, BigQuery, Pub/Sub, CORS)
 - **Phase 3: Visual Explorer** ✅ (Next.js UI, Dashboard, Traces, Costs, Settings, E2E Tests)
-- **Phase 4: Multi-User Platform** 🟡 (IAP Auth, Token Budgets, Admin Panel, Per-User Views)
+- **Phase 4: Multi-User Platform** ✅ (IAP Auth, Token Budgets, Admin Panel, RBAC)
   - Terraform infrastructure (Cloud Run, BigQuery, Firestore, IAP)
-  - Proto-first user/budget/grant schemas
-  - `candela-local` auth-injecting proxy for developer machines
+  - Proto-first user/budget/grant schemas with `protovalidate`
+  - Role-based access control (admin guard interceptor)
+  - Admin UI: user management, budget explainer, audit logs
+  - Client-side form validation (`@bufbuild/protovalidate`)
   - Budget enforcement with grant-first waterfall
-  - Admin panel for user/budget management
-- **Phase 5: Ecosystem & Polish** 📋 (Agent DAGs, Multi-region, Alerting, OpenCode Plugin)
+  - `candela-local` auth-injecting proxy for developer machines
+- **Phase 5: Ecosystem & Polish** 📋 (Agent DAGs, Multi-region, Alerting, Google Workspace Sync)
 
 ---
 
@@ -256,10 +259,11 @@ candela/
 ├── collector/                   # Custom OTel Collector distro
 ├── docs/                        # Deep-dive documentation
 ├── ui/                          # Next.js 16 web interface
-│   ├── src/app/                 # App Router pages (dashboard, traces, etc.)
+│   ├── src/app/                 # App Router pages (dashboard, traces, admin, etc.)
 │   ├── src/gen/                 # Generated TS proto stubs
+│   ├── src/hooks/               # React hooks (useCurrentUser, useProtoValidation)
 │   ├── src/lib/                 # ConnectRPC transport config
-│   ├── e2e/                     # Playwright E2E tests
+│   ├── e2e/                     # Playwright E2E tests (app + admin)
 │   └── playwright.config.ts     # Playwright config
 ├── .github/workflows/ci.yml    # CI pipeline (Go + UI + Playwright)
 └── config.yaml                  # Server configuration

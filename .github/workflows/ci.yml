@@ -66,9 +66,7 @@ jobs:
 
       - name: Copy generated types
         run: |
-          cp -r gen/ts/candela ui/src/gen
-          mkdir -p ui/src/buf/validate
-          cp gen/ts/buf/validate/validate_pb.ts ui/src/buf/validate/
+          cp -r gen/ts/candela/* ui/src/gen/
           rm -f ui/src/gen/types/bq_span_pb.ts
 
       - name: Lint

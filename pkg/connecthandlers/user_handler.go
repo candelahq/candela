@@ -62,7 +62,7 @@ func (h *UserHandler) CreateUser(
 	}
 
 	user := &storage.UserRecord{
-		Email:       strings.ToLower(req.Msg.Email),
+		Email:       normalizedEmail,
 		DisplayName: req.Msg.DisplayName,
 		Role:        roleToString(req.Msg.Role),
 	}

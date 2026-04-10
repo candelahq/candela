@@ -2,6 +2,7 @@ package connecthandlers
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"testing"
 	"time"
@@ -294,8 +295,8 @@ func TestUserHandler_CreateUser_DuplicateEmail(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for duplicate email")
 	}
-	connectErr, ok := err.(*connect.Error)
-	if !ok {
+	var connectErr *connect.Error
+	if !errors.As(err, &connectErr) {
 		t.Fatalf("expected *connect.Error, got %T", err)
 	}
 	if connectErr.Code() != connect.CodeAlreadyExists {

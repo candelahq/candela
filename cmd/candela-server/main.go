@@ -19,12 +19,14 @@ import (
 	"log/slog"
 
 	"github.com/candelahq/candela/gen/go/candela/v1/candelav1connect"
+	"github.com/candelahq/candela/pkg/auth"
 	"github.com/candelahq/candela/pkg/connecthandlers"
 	"github.com/candelahq/candela/pkg/costcalc"
 	"github.com/candelahq/candela/pkg/proxy"
 	"github.com/candelahq/candela/pkg/storage"
 	bqstore "github.com/candelahq/candela/pkg/storage/bigquery"
 	duckdbstore "github.com/candelahq/candela/pkg/storage/duckdb"
+	firestorestore "github.com/candelahq/candela/pkg/storage/firestoredb"
 	"github.com/candelahq/candela/pkg/storage/projectdb"
 	sqlitestore "github.com/candelahq/candela/pkg/storage/sqlite"
 )
@@ -66,6 +68,15 @@ type Config struct {
 		BatchSize     int    `yaml:"batch_size"`
 		FlushInterval string `yaml:"flush_interval"`
 	} `yaml:"worker"`
+	Auth struct {
+		DevMode  bool   `yaml:"dev_mode"`  // If true, skip IAP validation
+		Audience string `yaml:"audience"` // IAP OAuth Client ID
+	} `yaml:"auth"`
+	Firestore struct {
+		Enabled    bool   `yaml:"enabled"`
+		ProjectID  string `yaml:"project_id"`
+		DatabaseID string `yaml:"database_id"` // e.g. "candela" or "(default)"
+	} `yaml:"firestore"`
 }
 
 func main() {
@@ -142,6 +153,26 @@ func main() {
 		"ingestion", ingestionPath,
 		"dashboard", dashboardPath,
 		"project", projectPath)
+
+	// Initialize Firestore-backed UserStore and UserService (if enabled).
+	var userStore storage.UserStore
+	if cfg.Firestore.Enabled {
+		fStore, err := firestorestore.New(context.Background(),
+			cfg.Firestore.ProjectID, cfg.Firestore.DatabaseID)
+		if err != nil {
+			slog.Error("failed to initialize Firestore", "error", err)
+			os.Exit(1)
+		}
+		defer func() { _ = fStore.Close() }()
+		userStore = fStore
+
+		userPath, userH := candelav1connect.NewUserServiceHandler(
+			connecthandlers.NewUserHandler(userStore))
+		mux.Handle(userPath, userH)
+		slog.Info("UserService registered", "path", userPath)
+	} else {
+		slog.Info("Firestore disabled — UserService not available")
+	}
 
 	// Register LLM proxy routes (selective activation).
 	if cfg.Proxy.Enabled {
@@ -220,9 +251,20 @@ func main() {
 	}
 
 	addr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)
+
+	// Wrap the mux with IAP auth middleware.
+	devMode := cfg.Auth.DevMode
+	if os.Getenv("CANDELA_DEV_MODE") == "true" {
+		devMode = true
+	}
+	authedMux := auth.IAPMiddleware(corsMiddleware(mux, cfg.CORS.AllowedOrigins), cfg.Auth.Audience, devMode)
+	if devMode {
+		slog.Info("🔓 Running in dev mode — IAP auth disabled")
+	}
+
 	srv := &http.Server{
 		Addr:    addr,
-		Handler: h2c.NewHandler(corsMiddleware(mux, cfg.CORS.AllowedOrigins), &http2.Server{}),
+		Handler: h2c.NewHandler(authedMux, &http2.Server{}),
 	}
 
 	// Graceful shutdown.

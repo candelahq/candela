@@ -26,7 +26,7 @@ resource "google_cloud_run_v2_service" "candela" {
       image = local.image
 
       ports {
-        container_port = 8181
+        container_port = 3000
       }
 
       resources {

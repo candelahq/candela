@@ -274,6 +274,35 @@ func TestUserHandler_CreateUser_MissingEmail(t *testing.T) {
 	}
 }
 
+func TestUserHandler_CreateUser_DuplicateEmail(t *testing.T) {
+	store := newMockUserStore()
+	handler := NewUserHandler(store)
+	ctx := authedCtx("admin@example.com")
+
+	// First creation succeeds.
+	_, err := handler.CreateUser(ctx, connect.NewRequest(&v1.CreateUserRequest{
+		Email: "dupe@example.com",
+	}))
+	if err != nil {
+		t.Fatalf("first CreateUser: %v", err)
+	}
+
+	// Second creation with same email should fail.
+	_, err = handler.CreateUser(ctx, connect.NewRequest(&v1.CreateUserRequest{
+		Email: "dupe@example.com",
+	}))
+	if err == nil {
+		t.Fatal("expected error for duplicate email")
+	}
+	connectErr, ok := err.(*connect.Error)
+	if !ok {
+		t.Fatalf("expected *connect.Error, got %T", err)
+	}
+	if connectErr.Code() != connect.CodeAlreadyExists {
+		t.Errorf("code = %v, want AlreadyExists", connectErr.Code())
+	}
+}
+
 func TestUserHandler_GetUser_NotFound(t *testing.T) {
 	store := newMockUserStore()
 	handler := NewUserHandler(store)

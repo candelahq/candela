@@ -31,8 +31,8 @@ function reducer(state: UsersState, action: Action): UsersState {
 
 const roleLabel = (role: number) => {
   switch (role) {
-    case 1: return "Admin";
-    case 2: return "Developer";
+    case 1: return "Developer";
+    case 2: return "Admin";
     default: return "Unknown";
   }
 };
@@ -51,7 +51,7 @@ export default function AdminUsersPage() {
     users: [], total: 0, isLoading: true, error: null,
   });
   const [showCreateModal, setShowCreateModal] = useState(false);
-  const [createForm, setCreateForm] = useState({ email: "", displayName: "", role: 2, budget: 0 });
+  const [createForm, setCreateForm] = useState({ email: "", displayName: "", role: 1, budget: 0 });
   const [createError, setCreateError] = useState<string | null>(null);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const { validate, getError, clearErrors } = useCreateUserValidation();
@@ -253,8 +253,8 @@ export default function AdminUsersPage() {
                   onChange={(e) => setCreateForm({ ...createForm, role: Number(e.target.value) })}
                   className="form-input"
                 >
-                  <option value={2}>Developer</option>
-                  <option value={1}>Admin</option>
+                  <option value={1}>Developer</option>
+                  <option value={2}>Admin</option>
                 </select>
               </div>
               <div className="form-group">

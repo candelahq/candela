@@ -29,7 +29,7 @@ function reducer(state: CurrentUser, action: Action): CurrentUser {
         budget: action.budget,
         activeGrants: action.grants,
         totalRemainingUsd: action.remaining,
-        isAdmin: action.user.role === 1, // USER_ROLE_ADMIN = 1
+        isAdmin: action.user.role === 2, // USER_ROLE_ADMIN = 2
         isLoading: false,
         error: null,
       };

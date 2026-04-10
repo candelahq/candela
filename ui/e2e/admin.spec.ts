@@ -38,7 +38,7 @@ async function mockAdminUser(page: import("@playwright/test").Page) {
       id: "admin-1",
       email: "admin@test.com",
       displayName: "Admin User",
-      role: 1, // ADMIN
+      role: 2, // ADMIN
       status: 2, // ACTIVE
     },
     budget: { limitUsd: 100, spentUsd: 10, periodType: 1 },
@@ -53,7 +53,7 @@ async function mockDevUser(page: import("@playwright/test").Page) {
       id: "dev-1",
       email: "dev@test.com",
       displayName: "Dev User",
-      role: 2, // DEVELOPER
+      role: 1, // DEVELOPER
       status: 2, // ACTIVE
     },
     budget: { limitUsd: 50, spentUsd: 5, periodType: 1 },

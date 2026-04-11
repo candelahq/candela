@@ -308,14 +308,14 @@ type ProjectStore interface {
 
 // UserRecord is the Go representation of a Candela user for the store layer.
 type UserRecord struct {
-	ID          string    `json:"id"`
-	Email       string    `json:"email"`
-	DisplayName string    `json:"display_name,omitempty"`
-	Role        string    `json:"role"` // "developer" or "admin"
-	Status      string    `json:"status"` // "provisioned", "active", "inactive"
-	CreatedAt   time.Time `json:"created_at"`
-	LastSeenAt  time.Time `json:"last_seen_at"`
-	RateLimit   int       `json:"rate_limit,omitempty"` // Requests/minute; 0 = default
+	ID          string    `json:"id" firestore:"id"`
+	Email       string    `json:"email" firestore:"email"`
+	DisplayName string    `json:"display_name,omitempty" firestore:"display_name,omitempty"`
+	Role        string    `json:"role" firestore:"role"`     // "developer" or "admin"
+	Status      string    `json:"status" firestore:"status"` // "provisioned", "active", "inactive"
+	CreatedAt   time.Time `json:"created_at" firestore:"created_at"`
+	LastSeenAt  time.Time `json:"last_seen_at" firestore:"last_seen_at"`
+	RateLimit   int       `json:"rate_limit,omitempty" firestore:"rate_limit,omitempty"` // Requests/minute; 0 = default
 }
 
 // BudgetRecord is the Go representation of a user's recurring budget.

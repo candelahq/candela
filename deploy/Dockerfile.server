@@ -52,9 +52,8 @@ COPY --from=ui-builder /build/ui/.next/standalone /app/ui
 COPY --from=ui-builder /build/ui/.next/static /app/ui/.next/static
 COPY --from=ui-builder /build/ui/public /app/ui/public
 
-# Production config for Go backend.
-COPY deploy/config.production.yaml /etc/candela/config.yaml
-ENV CANDELA_CONFIG=/etc/candela/config.yaml
+# Config is generated at runtime from environment variables (see entrypoint.sh).
+# No config file is baked into the image.
 
 # Entrypoint script.
 COPY deploy/entrypoint.sh /usr/local/bin/entrypoint.sh

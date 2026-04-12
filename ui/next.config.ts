@@ -11,10 +11,10 @@ const nextConfig: NextConfig = {
     return {
       // "beforeFiles" rewrites are checked before pages/public files.
       beforeFiles: [
-        // ConnectRPC services (paths containing dots like candela.v1.*)
+        // ConnectRPC services (paths like /candela.v1.UserService/Method)
         {
-          source: "/:path(candela\\.v1\\..+)",
-          destination: `${backendUrl}/:path`,
+          source: "/candela.v1.:path*",
+          destination: `${backendUrl}/candela.v1.:path*`,
         },
         // LLM proxy routes
         {

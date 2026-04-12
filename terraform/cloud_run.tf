@@ -1,6 +1,7 @@
 # ──────────────────────────────────────────────────
-# Cloud Run — Candela server + IAP
-# Single service: Go backend + proxy + embedded UI.
+# Cloud Run — Candela server (API + proxy)
+# Protected by run.invoker IAM (no IAP).
+# Programmatic access via ID tokens from candela-local.
 # ──────────────────────────────────────────────────
 
 locals {
@@ -8,10 +9,11 @@ locals {
 }
 
 resource "google_cloud_run_v2_service" "candela" {
+  provider = google-beta
+
   name     = var.service_name
   location = var.region
 
-  # Prevent accidental deletion in production.
   deletion_protection = true
 
   template {
@@ -26,7 +28,7 @@ resource "google_cloud_run_v2_service" "candela" {
       image = local.image
 
       ports {
-        container_port = 8181
+        container_port = 3000
       }
 
       resources {
@@ -73,6 +75,10 @@ resource "google_cloud_run_v2_service" "candela" {
         name  = "CANDELA_PROXY_ENABLED"
         value = "true"
       }
+      env {
+        name  = "CANDELA_DEV_MODE"
+        value = "true" # IAP auth disabled; access control via run.invoker IAM
+      }
     }
   }
 
@@ -82,34 +88,20 @@ resource "google_cloud_run_v2_service" "candela" {
   ]
 }
 
-# ── IAP Configuration ──
-# Require authentication — IAP handles it.
-# No unauthenticated access to the Cloud Run service.
+# ── Access Control ──
+# Cloud Run is NOT publicly accessible. Access requires:
+# 1. A valid Google ID token (audience = Cloud Run service URL)
+# 2. The caller must have roles/run.invoker on the service
+# candela-local injects ID tokens automatically for developer tools.
 
-resource "google_cloud_run_v2_service_iam_member" "iap_invoker" {
+resource "google_cloud_run_v2_service_iam_member" "group_invoker" {
   project  = var.project_id
   location = var.region
   name     = google_cloud_run_v2_service.candela.name
   role     = "roles/run.invoker"
-  member   = "serviceAccount:service-${data.google_project.current.number}@gcp-sa-iap.iam.gserviceaccount.com"
+  member   = "group:${var.iap_google_group}"
 }
 
-# Grant the Google Group access through IAP.
-resource "google_iap_web_iam_member" "group_access" {
-  project = var.project_id
-  role    = "roles/iap.httpsResourceAccessUser"
-  member  = "group:${var.iap_google_group}"
-}
-
-# ── IAP Enablement ──
-# IAP is enabled via gcloud (not Terraform — the Terraform resources are deprecated).
-# Run once after initial deploy:
-#
-#   gcloud run services update candela --region=REGION --iap
-#   gcloud run services describe candela --region=REGION \
-#     --format='value(metadata.annotations."run.googleapis.com/iap-client-id")'
-#
-# The client ID from above is the `audience` value for candela-local (~/.candela.yaml).
 
 # ── Data Sources ──
 

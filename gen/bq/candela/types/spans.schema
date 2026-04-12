@@ -120,6 +120,30 @@
   "description": "Estimated cost in USD, calculated by Candela."
  },
  {
+  "name": "gen_ai_temperature",
+  "type": "FLOAT",
+  "mode": "NULLABLE",
+  "description": "Sampling temperature used for the request."
+ },
+ {
+  "name": "gen_ai_max_tokens",
+  "type": "INTEGER",
+  "mode": "NULLABLE",
+  "description": "Max tokens requested for the completion."
+ },
+ {
+  "name": "gen_ai_input_content",
+  "type": "STRING",
+  "mode": "NULLABLE",
+  "description": "Input prompt content."
+ },
+ {
+  "name": "gen_ai_output_content",
+  "type": "STRING",
+  "mode": "NULLABLE",
+  "description": "Output completion content."
+ },
+ {
   "name": "attributes",
   "type": "RECORD",
   "mode": "REPEATED",

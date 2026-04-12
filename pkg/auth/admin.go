@@ -13,19 +13,19 @@ import (
 // adminOnlyProcedures lists the ConnectRPC procedures that require admin role.
 // Self-service RPCs (GetCurrentUser, GetMyBudget) are NOT in this list.
 var adminOnlyProcedures = map[string]bool{
-	"/candela.v1.UserService/CreateUser":      true,
-	"/candela.v1.UserService/ListUsers":       true,
-	"/candela.v1.UserService/GetUser":         true,
-	"/candela.v1.UserService/UpdateUser":      true,
-	"/candela.v1.UserService/DeactivateUser":  true,
-	"/candela.v1.UserService/ReactivateUser":  true,
-	"/candela.v1.UserService/SetBudget":       true,
-	"/candela.v1.UserService/GetBudget":       true,
-	"/candela.v1.UserService/ResetSpend":      true,
-	"/candela.v1.UserService/CreateGrant":     true,
-	"/candela.v1.UserService/ListGrants":      true,
-	"/candela.v1.UserService/RevokeGrant":     true,
-	"/candela.v1.UserService/ListAuditLog":    true,
+	"/candela.v1.UserService/CreateUser":     true,
+	"/candela.v1.UserService/ListUsers":      true,
+	"/candela.v1.UserService/GetUser":        true,
+	"/candela.v1.UserService/UpdateUser":     true,
+	"/candela.v1.UserService/DeactivateUser": true,
+	"/candela.v1.UserService/ReactivateUser": true,
+	"/candela.v1.UserService/SetBudget":      true,
+	"/candela.v1.UserService/GetBudget":      true,
+	"/candela.v1.UserService/ResetSpend":     true,
+	"/candela.v1.UserService/CreateGrant":    true,
+	"/candela.v1.UserService/ListGrants":     true,
+	"/candela.v1.UserService/RevokeGrant":    true,
+	"/candela.v1.UserService/ListAuditLog":   true,
 }
 
 // AdminInterceptor returns a ConnectRPC interceptor that enforces admin-only

@@ -29,7 +29,9 @@ import (
 	"syscall"
 	"time"
 
+	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/google"
+	"google.golang.org/api/idtoken"
 	"gopkg.in/yaml.v3"
 )
 
@@ -92,13 +94,25 @@ func main() {
 		os.Exit(1)
 	}
 
-	// ── Get OIDC token source via ADC ──
+	// ── Get OIDC ID token source via ADC ──
+	// Strategy 1: idtoken.NewTokenSource (works for service accounts).
+	// Strategy 2: google.DefaultTokenSource with openid scope (works for user credentials).
 	ctx := context.Background()
-	tokenSource, err := google.DefaultTokenSource(ctx, cfg.Audience)
-	if err != nil {
-		slog.Error("failed to get Application Default Credentials — run 'gcloud auth application-default login' first",
-			"error", err)
-		os.Exit(1)
+	var tokenSource oauth2.TokenSource
+
+	ts, err := idtoken.NewTokenSource(ctx, cfg.Audience)
+	if err == nil {
+		slog.Info("using service account ID token source")
+		tokenSource = ts
+	} else {
+		slog.Info("idtoken unavailable (user credentials), using OAuth2 with openid scope", "reason", err)
+		ts2, err2 := google.DefaultTokenSource(ctx, "openid", "email")
+		if err2 != nil {
+			slog.Error("failed to get credentials — run 'gcloud auth application-default login' first",
+				"error", err2)
+			os.Exit(1)
+		}
+		tokenSource = ts2
 	}
 
 	// ── Build reverse proxy ──
@@ -109,22 +123,19 @@ func main() {
 			req.URL.Host = remoteURL.Host
 			req.Host = remoteURL.Host
 
-			// Inject OIDC identity token.
+			// Inject OIDC identity token for IAP.
+			// For user credentials (OAuth2), the ID token is in token.Extra("id_token").
+			// For service account credentials (idtoken pkg), AccessToken IS the ID token.
 			token, err := tokenSource.Token()
 			if err != nil {
 				slog.Error("failed to get identity token", "error", err)
 				return
 			}
-
-			// For IAP, the identity token goes in the Authorization header
-			// as a Bearer token. The ID token is in token.Extra("id_token")
-			// when using google.DefaultTokenSource. If not available,
-			// fall back to the access token.
+			bearerToken := token.AccessToken
 			if idToken, ok := token.Extra("id_token").(string); ok && idToken != "" {
-				req.Header.Set("Authorization", "Bearer "+idToken)
-			} else {
-				req.Header.Set("Authorization", "Bearer "+token.AccessToken)
+				bearerToken = idToken
 			}
+			req.Header.Set("Authorization", "Bearer "+bearerToken)
 
 			// Preserve the original path.
 			if _, ok := req.Header["User-Agent"]; !ok {

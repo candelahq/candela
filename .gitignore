@@ -31,9 +31,13 @@ opencode.json
 .DS_Store
 Thumbs.db
 
-# Environment
+# Environment & Config
 .env
 .env.local
+config.yaml
+deploy/config.production.yaml
+!config.example.yaml
+!deploy/config.production.example.yaml
 
 # Nix
 result
@@ -46,3 +50,10 @@ __pycache__/
 *.db
 *.duckdb
 *.duckdb.wal
+
+# Terraform
+*.tfvars
+!*.example.tfvars
+.terraform/
+*.tfstate
+*.tfstate.backup

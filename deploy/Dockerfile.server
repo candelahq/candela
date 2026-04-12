@@ -1,17 +1,65 @@
-# Build the Candela server
-FROM golang:1.26-alpine AS builder
+# ──────────────────────────────────────────────────
+# Candela — Combined Container (Go backend + Next.js UI)
+# Multi-stage build: Go binary + Next.js standalone → single image.
+# ──────────────────────────────────────────────────
+
+# ── Stage 1: Build Go backend ──
+# DuckDB requires glibc (not musl/Alpine) for its static bindings.
+FROM golang:1.26-bookworm AS go-builder
+
+RUN apt-get update && apt-get install -y --no-install-recommends build-essential && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /build
 COPY go.mod go.sum ./
 RUN go mod download
 
 COPY . .
-RUN CGO_ENABLED=0 go build -o candela-server ./cmd/candela-server
+RUN go build -o candela-server ./cmd/candela-server
 
-# Runtime
-FROM alpine:3.20
-RUN apk add --no-cache ca-certificates
-COPY --from=builder /build/candela-server /usr/local/bin/candela-server
+# ── Stage 2: Build Next.js UI ──
+FROM node:22-alpine AS ui-builder
 
-EXPOSE 8080
-ENTRYPOINT ["candela-server"]
+WORKDIR /build/ui
+
+# Install dependencies first (cache layer).
+COPY ui/package.json ui/pnpm-lock.yaml ./
+RUN corepack enable && corepack prepare pnpm@latest --activate
+RUN pnpm install --frozen-lockfile
+
+# Copy UI source and build.
+COPY ui/ ./
+
+# Copy generated proto types (needed for build).
+COPY gen/ts/ ../gen/ts/
+
+# Build standalone output.
+# NEXT_PUBLIC_API_URL="" makes the client use relative URLs (same origin).
+# Next.js rewrites proxy these to the Go backend sidecar.
+ENV NEXT_PUBLIC_API_URL=""
+RUN pnpm run build
+
+# ── Stage 3: Runtime ──
+# Debian slim for glibc compatibility with DuckDB Go binary.
+FROM node:22-slim AS runtime
+
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates && rm -rf /var/lib/apt/lists/*
+
+# Go backend binary.
+COPY --from=go-builder /build/candela-server /usr/local/bin/candela-server
+
+# Next.js standalone server + static assets.
+COPY --from=ui-builder /build/ui/.next/standalone /app/ui
+COPY --from=ui-builder /build/ui/.next/static /app/ui/.next/static
+COPY --from=ui-builder /build/ui/public /app/ui/public
+
+# Config is generated at runtime from environment variables (see entrypoint.sh).
+# No config file is baked into the image.
+
+# Entrypoint script.
+COPY deploy/entrypoint.sh /usr/local/bin/entrypoint.sh
+
+# Cloud Run expects port 3000 (Next.js UI).
+# Go backend runs on 8181 (internal, proxied via rewrites).
+EXPOSE 3000
+
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]

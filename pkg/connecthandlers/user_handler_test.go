@@ -638,8 +638,8 @@ func TestUserHandler_GetMyBudget_Unauthenticated(t *testing.T) {
 
 func TestRoleConversion(t *testing.T) {
 	tests := []struct {
-		proto  typespb.UserRole
-		str    string
+		proto typespb.UserRole
+		str   string
 	}{
 		{typespb.UserRole_USER_ROLE_DEVELOPER, "developer"},
 		{typespb.UserRole_USER_ROLE_ADMIN, "admin"},

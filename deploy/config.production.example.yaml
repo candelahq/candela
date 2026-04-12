@@ -1,0 +1,44 @@
+# Candela Production Configuration (Example)
+# Copy to config.production.yaml and fill in your GCP project details.
+# Deployed to Cloud Run via CANDELA_CONFIG env var.
+
+server:
+  host: "0.0.0.0"
+  port: 8181
+
+storage:
+  backend: "bigquery"
+  bigquery:
+    project_id: "your-gcp-project-id"
+    dataset: "candela"
+    table: "spans"
+    location: "US"
+
+proxy:
+  enabled: true
+  project_id: "default"
+  vertex_ai:
+    project_id: "your-gcp-project-id"
+    region: "us-east5"
+  providers:
+    - openai
+    - google
+    - anthropic
+    - gemini-oai
+
+# No CORS needed — UI and API are same-origin in combined container.
+cors:
+  allowed_origins: []
+
+auth:
+  dev_mode: true  # Cloud Run invoker IAM handles access control.
+  # TODO: replace with Firebase Auth / Cloud Run ID token validation.
+
+firestore:
+  enabled: true
+  project_id: "your-gcp-project-id"
+  database_id: "candela"
+
+worker:
+  batch_size: 100
+  flush_interval: "2s"

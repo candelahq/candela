@@ -1,4 +1,4 @@
-# Candela Configuration
+# Candela Configuration (Example)
 # Copy to config.yaml and adjust for your environment.
 
 server:
@@ -24,7 +24,7 @@ proxy:
   # Set your GCP project and region. Auth is automatic via ADC
   # (run: gcloud auth application-default login).
   vertex_ai:
-    project_id: "your-gcp-project-id"  # Your GCP project ID
+    project_id: "your-gcp-project-id"
     region: "us-east5"      # Vertex AI region (Claude available here)
 
   # Specify which providers to enable. If omitted, all providers are enabled.

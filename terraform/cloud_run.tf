@@ -1,6 +1,7 @@
 # ──────────────────────────────────────────────────
-# Cloud Run — Candela server + IAP
-# Single service: Go backend + proxy + embedded UI.
+# Cloud Run — Candela server (API + proxy)
+# Protected by run.invoker IAM (no IAP).
+# Programmatic access via ID tokens from candela-local.
 # ──────────────────────────────────────────────────
 
 locals {
@@ -15,9 +16,6 @@ resource "google_cloud_run_v2_service" "candela" {
 
   # Set to true after initial deploy is confirmed working.
   deletion_protection = false
-
-  # Enable IAP directly on the Cloud Run service (requires google-beta provider).
-  iap_enabled = true
 
   template {
     service_account = google_service_account.candela.email
@@ -78,6 +76,10 @@ resource "google_cloud_run_v2_service" "candela" {
         name  = "CANDELA_PROXY_ENABLED"
         value = "true"
       }
+      env {
+        name  = "CANDELA_DEV_MODE"
+        value = "true" # IAP auth disabled; access control via run.invoker IAM
+      }
     }
   }
 
@@ -88,27 +90,10 @@ resource "google_cloud_run_v2_service" "candela" {
 }
 
 # ── Access Control ──
-# IAP for Cloud Run requires:
-# 1. iap.httpsResourceAccessor on the Cloud Run service's IAP resource
-# 2. run.invoker for the IAP service agent (so IAP can forward requests)
-# 3. run.invoker for the Google Group (belt + suspenders)
-
-resource "google_iap_web_cloud_run_service_iam_member" "group_iap_access" {
-  project                = var.project_id
-  location               = var.region
-  cloud_run_service_name = google_cloud_run_v2_service.candela.name
-  role                   = "roles/iap.httpsResourceAccessor"
-  member                 = "group:${var.iap_google_group}"
-}
-
-# IAP service agent needs run.invoker to forward authenticated requests.
-resource "google_cloud_run_v2_service_iam_member" "iap_sa_invoker" {
-  project  = var.project_id
-  location = var.region
-  name     = google_cloud_run_v2_service.candela.name
-  role     = "roles/run.invoker"
-  member   = "serviceAccount:service-${data.google_project.current.number}@gcp-sa-iap.iam.gserviceaccount.com"
-}
+# Cloud Run is NOT publicly accessible. Access requires:
+# 1. A valid Google ID token (audience = Cloud Run service URL)
+# 2. The caller must have roles/run.invoker on the service
+# candela-local injects ID tokens automatically for developer tools.
 
 resource "google_cloud_run_v2_service_iam_member" "group_invoker" {
   project  = var.project_id

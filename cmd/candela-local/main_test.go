@@ -113,7 +113,7 @@ port: 7777
 	}
 
 	t.Setenv("CANDELA_CONFIG", cfgPath)
-	cfg := loadConfig("")  // Empty path should fall back to env var.
+	cfg := loadConfig("") // Empty path should fall back to env var.
 
 	if cfg.Remote != "https://env-test.run.app" {
 		t.Errorf("Remote = %q, want %q", cfg.Remote, "https://env-test.run.app")

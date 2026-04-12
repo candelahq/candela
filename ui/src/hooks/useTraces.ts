@@ -2,6 +2,7 @@
 
 import { useCallback, useReducer, useRef } from "react";
 import { traceClient } from "@/lib/api";
+import { DEFAULT_PROJECT_ID } from "@/lib/constants";
 import type { TraceSummaryRow, TraceFilters } from "@/types/traces";
 import { DEFAULT_FILTERS } from "@/types/traces";
 
@@ -88,6 +89,7 @@ export function useTraces() {
     dispatch({ type: "fetch", filters: f });
     traceClient
       .listTraces({
+        projectId: DEFAULT_PROJECT_ID, // FIXME: Hardcoded - see constants.ts for evolution plan
         pagination: { pageSize: 100 },
         search: f.search,
         model: f.model,

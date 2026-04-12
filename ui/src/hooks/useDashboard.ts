@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useReducer } from "react";
 import { dashboardClient, traceClient } from "@/lib/api";
+import { DEFAULT_PROJECT_ID } from "@/lib/constants";
 import { timestampFromDate } from "@bufbuild/protobuf/wkt";
 import type { DataPoint } from "@/components/chart";
 
@@ -110,6 +111,7 @@ export function useDashboard() {
     const start = new Date(now.getTime() - timeRangeToMs(state.timeRange));
 
     const summaryPromise = dashboardClient.getUsageSummary({
+      projectId: DEFAULT_PROJECT_ID, // FIXME: Hardcoded - see constants.ts for evolution plan
       timeRange: {
         start: timestampFromDate(start),
         end: timestampFromDate(now),
@@ -117,6 +119,7 @@ export function useDashboard() {
     });
 
     const tracesPromise = traceClient.listTraces({
+      projectId: DEFAULT_PROJECT_ID, // FIXME: Hardcoded - see constants.ts for evolution plan
       orderBy: "start_time",
       descending: true,
       pagination: { pageSize: 5 },

@@ -19,6 +19,13 @@ resource "google_bigquery_dataset_iam_member" "candela_bigquery" {
   member     = "serviceAccount:${google_service_account.candela.email}"
 }
 
+# BigQuery: run queries (project-level)
+resource "google_project_iam_member" "candela_bigquery_job" {
+  project = var.project_id
+  role    = "roles/bigquery.jobUser"
+  member  = "serviceAccount:${google_service_account.candela.email}"
+}
+
 # Firestore: read + write users, budgets, grants
 resource "google_project_iam_member" "candela_firestore" {
   project = var.project_id

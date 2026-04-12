@@ -23,11 +23,11 @@ output "service_account_email" {
 }
 
 output "candela_local_config" {
-  description = "Template for ~/.candela.yaml — fill in audience after enabling IAP"
+  description = "Template for ~/.candela.yaml"
   value       = <<-EOT
     # ~/.candela.yaml
     remote: ${google_cloud_run_v2_service.candela.uri}
-    audience: <run: gcloud run services describe ${var.service_name} --region=${var.region} --format='value(metadata.annotations."run.googleapis.com/iap-client-id")'>
+    audience: ${google_cloud_run_v2_service.candela.uri}
     port: 8181
   EOT
 }

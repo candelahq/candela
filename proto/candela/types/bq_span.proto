@@ -59,6 +59,14 @@ message BqSpanRow {
   int64 gen_ai_total_tokens = 34;
   // Estimated cost in USD, calculated by Candela.
   double gen_ai_cost_usd = 35;
+  // Sampling temperature used for the request.
+  double gen_ai_temperature = 36;
+  // Max tokens requested for the completion.
+  int64 gen_ai_max_tokens = 37;
+  // Input prompt content.
+  string gen_ai_input_content = 38;
+  // Output completion content.
+  string gen_ai_output_content = 39;
 
   // Structured attributes from OpenTelemetry key-value pairs.
   repeated BqAttribute attributes = 40;

@@ -1,0 +1,8 @@
+.git
+ui/node_modules
+ui/.next
+ui/out
+*.duckdb
+*.db
+.env*
+terraform/.terraform

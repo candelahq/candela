@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useReducer } from "react";
 import { dashboardClient } from "@/lib/api";
+import { DEFAULT_PROJECT_ID } from "@/lib/constants";
 import { timestampFromDate } from "@bufbuild/protobuf/wkt";
 import type { DataPoint } from "@/components/chart";
 import type { TimeRange } from "@/hooks/useDashboard";
@@ -97,8 +98,14 @@ export function useCosts() {
       end: timestampFromDate(now),
     };
 
-    const summaryPromise = dashboardClient.getUsageSummary({ timeRange });
-    const modelsPromise = dashboardClient.getModelBreakdown({ timeRange });
+    const summaryPromise = dashboardClient.getUsageSummary({
+      projectId: DEFAULT_PROJECT_ID, // FIXME: Hardcoded - see constants.ts for evolution plan
+      timeRange
+    });
+    const modelsPromise = dashboardClient.getModelBreakdown({
+      projectId: DEFAULT_PROJECT_ID, // FIXME: Hardcoded - see constants.ts for evolution plan
+      timeRange
+    });
 
     Promise.all([summaryPromise, modelsPromise])
       .then(([summaryRes, modelsRes]) => {

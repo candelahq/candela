@@ -46,3 +46,10 @@ __pycache__/
 *.db
 *.duckdb
 *.duckdb.wal
+
+# Terraform
+*.tfvars
+!*.example.tfvars
+.terraform/
+*.tfstate
+*.tfstate.backup

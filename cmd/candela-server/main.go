@@ -71,7 +71,7 @@ type Config struct {
 		FlushInterval string `yaml:"flush_interval"`
 	} `yaml:"worker"`
 	Auth struct {
-		DevMode  bool   `yaml:"dev_mode"`  // If true, skip IAP validation
+		DevMode  bool   `yaml:"dev_mode"` // If true, skip IAP validation
 		Audience string `yaml:"audience"` // IAP OAuth Client ID
 	} `yaml:"auth"`
 	Firestore struct {

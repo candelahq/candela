@@ -30,8 +30,7 @@ cors:
   allowed_origins: []
 
 auth:
-  dev_mode: false
-  # audience is set via CANDELA_IAP_AUDIENCE env var in Cloud Run.
+  dev_mode: true  # Cloud Run invoker IAM handles access control (no IAP).
 
 firestore:
   enabled: true

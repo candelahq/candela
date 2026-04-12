@@ -11,6 +11,9 @@ echo "Starting Candela backend on :8181..."
 /usr/local/bin/candela-server &
 GO_PID=$!
 
+# Monitor: if Go backend exits, kill the container.
+(while kill -0 "$GO_PID" 2>/dev/null; do sleep 5; done; echo "Backend exited, shutting down..."; kill 1) &
+
 # Give Go a moment to bind.
 sleep 1
 

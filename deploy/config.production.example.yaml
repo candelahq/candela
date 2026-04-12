@@ -1,4 +1,5 @@
-# Candela Production Configuration
+# Candela Production Configuration (Example)
+# Copy to config.production.yaml and fill in your GCP project details.
 # Deployed to Cloud Run via CANDELA_CONFIG env var.
 
 server:
@@ -30,7 +31,8 @@ cors:
   allowed_origins: []
 
 auth:
-  dev_mode: true  # Cloud Run invoker IAM handles access control (no IAP).
+  dev_mode: true  # Cloud Run invoker IAM handles access control.
+  # TODO: replace with Firebase Auth / Cloud Run ID token validation.
 
 firestore:
   enabled: true

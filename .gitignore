@@ -34,6 +34,7 @@ Thumbs.db
 # Environment & Config
 .env
 .env.local
+.env.*.local
 config.yaml
 deploy/config.production.yaml
 !config.example.yaml
@@ -57,3 +58,10 @@ __pycache__/
 .terraform/
 *.tfstate
 *.tfstate.backup
+
+# Firebase
+firebase.json
+.firebaserc
+!firebase.example.json
+!.firebaserc.example
+.firebase/

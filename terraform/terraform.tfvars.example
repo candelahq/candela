@@ -6,11 +6,6 @@ project_id             = "your-gcp-project-id"
 region                 = "us-central1"
 invoker_google_group   = "devs@company.com"
 
-# Firebase Auth — Google Sign-In
-# Create OAuth credentials at: https://console.cloud.google.com/apis/credentials
-google_oauth_client_id     = "your-oauth-client-id.apps.googleusercontent.com"
-google_oauth_client_secret = "your-oauth-client-secret"
-
 # Optional overrides:
 # service_name       = "candela"
 # image_tag          = "latest"
@@ -22,3 +17,6 @@ google_oauth_client_secret = "your-oauth-client-secret"
 # bigquery_location  = "US"
 # firestore_location = "nam5"
 # vertex_ai_region   = "us-east5"
+
+# NOTE: After `terraform apply`, enable Google Sign-In in Firebase Console:
+#   Firebase Console → Authentication → Sign-in method → Google → Enable

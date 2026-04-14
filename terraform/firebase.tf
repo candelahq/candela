@@ -1,5 +1,5 @@
 # ──────────────────────────────────────────────────
-# Firebase — Auth, Web App, and App Hosting
+# Firebase — Project, Web App, and Auth baseline
 # ──────────────────────────────────────────────────
 
 # Enable Firebase on the existing GCP project.
@@ -26,8 +26,12 @@ data "google_firebase_web_app_config" "candela_ui" {
   web_app_id = google_firebase_web_app.candela_ui.app_id
 }
 
-# ── Firebase Auth — Google Sign-In ──
-# Note: Identity Platform (idp) config requires the google-beta provider.
+# ── Firebase Auth ──
+# Terraform configures the Identity Platform base settings.
+# Google Sign-In is enabled via Firebase Console (one-time toggle):
+#   Firebase Console → Authentication → Sign-in method → Google → Enable
+#
+# This avoids needing custom OAuth client credentials in Terraform.
 
 resource "google_identity_platform_config" "auth" {
   provider = google-beta
@@ -43,17 +47,4 @@ resource "google_identity_platform_config" "auth" {
   }
 
   depends_on = [google_firebase_project.default]
-}
-
-resource "google_identity_platform_default_supported_idp_config" "google" {
-  provider = google-beta
-  project  = var.project_id
-  idp_id   = "google.com"
-
-  client_id     = var.google_oauth_client_id
-  client_secret = var.google_oauth_client_secret
-
-  enabled = true
-
-  depends_on = [google_identity_platform_config.auth]
 }

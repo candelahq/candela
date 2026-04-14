@@ -37,6 +37,12 @@ resource "google_identity_platform_config" "auth" {
   provider = google-beta
   project  = var.project_id
 
+  authorized_domains = [
+    "localhost",
+    "${var.project_id}.firebaseapp.com",
+    "${var.project_id}.web.app",
+  ]
+
   sign_in {
     allow_duplicate_emails = false
 

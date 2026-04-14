@@ -1389,6 +1389,27 @@ tr:hover .model-bar {
   letter-spacing: 0.05em;
 }
 
+.sidebar-signout {
+  width: 100%;
+  padding: 8px 12px;
+  margin-bottom: 8px;
+  font-size: 12px;
+  font-family: inherit;
+  font-weight: 500;
+  color: var(--text-secondary);
+  background: none;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.sidebar-signout:hover {
+  color: var(--error);
+  border-color: var(--error);
+  background: rgba(248, 113, 113, 0.08);
+}
+
 /* ──────────────────────────────────────────
    Admin — Guard / Access Denied
    ────────────────────────────────────────── */

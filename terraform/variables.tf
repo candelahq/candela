@@ -64,21 +64,6 @@ variable "invoker_google_group" {
   type        = string
 }
 
-# ── Firebase Auth ──
-
-variable "google_oauth_client_id" {
-  description = "Google OAuth 2.0 client ID for Firebase Auth Google Sign-In"
-  type        = string
-  sensitive   = true
-}
-
-variable "google_oauth_client_secret" {
-  description = "Google OAuth 2.0 client secret for Firebase Auth Google Sign-In"
-  type        = string
-  sensitive   = true
-}
-
-
 
 # ── BigQuery ──
 

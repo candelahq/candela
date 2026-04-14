@@ -2,9 +2,14 @@
 # Example tfvars — Copy to terraform.tfvars and fill in
 # ──────────────────────────────────────────────────
 
-project_id       = "your-gcp-project-id"
-region           = "us-central1"
-iap_google_group = "devs@company.com"
+project_id             = "your-gcp-project-id"
+region                 = "us-central1"
+invoker_google_group   = "devs@company.com"
+
+# Firebase Auth — Google Sign-In
+# Create OAuth credentials at: https://console.cloud.google.com/apis/credentials
+google_oauth_client_id     = "your-oauth-client-id.apps.googleusercontent.com"
+google_oauth_client_secret = "your-oauth-client-secret"
 
 # Optional overrides:
 # service_name       = "candela"
@@ -17,6 +22,3 @@ iap_google_group = "devs@company.com"
 # bigquery_location  = "US"
 # firestore_location = "nam5"
 # vertex_ai_region   = "us-east5"
-
-# NOTE: IAP is enabled post-deploy via:
-#   gcloud run services update candela --region=us-central1 --iap

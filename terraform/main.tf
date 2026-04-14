@@ -44,10 +44,11 @@ resource "google_project_service" "apis" {
     "artifactregistry.googleapis.com",
     "bigquery.googleapis.com",
     "firestore.googleapis.com",
-    "iap.googleapis.com",
     "iam.googleapis.com",
     "aiplatform.googleapis.com",
     "cloudresourcemanager.googleapis.com",
+    "firebase.googleapis.com",
+    "identitytoolkit.googleapis.com",
   ])
 
   service            = each.value

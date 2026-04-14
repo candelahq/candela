@@ -1,15 +1,15 @@
-// Package auth provides IAP-based authentication and user context helpers
-// for the Candela server. In production, IAP validates the identity and sets
-// a JWT assertion header. The interceptor extracts the email/sub and makes
-// the user available via context.
+// Package auth provides authentication middleware and user context helpers
+// for the Candela server. In production, Firebase Auth validates browser users
+// and Google ID tokens validate candela-local/service account callers.
+// The middleware extracts the email/uid and makes the user available via context.
 package auth
 
 import "context"
 
 // User represents the authenticated identity for the current request.
 type User struct {
-	ID    string // IAP subject (stable identifier)
-	Email string // IAP email claim
+	ID    string // Firebase UID or Google subject
+	Email string // Verified email claim
 }
 
 type contextKey struct{}

@@ -6,17 +6,19 @@ package main
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
 
+	firebase "firebase.google.com/go/v4"
+	fbauth "firebase.google.com/go/v4/auth"
 	"golang.org/x/net/http2"
 	"golang.org/x/net/http2/h2c"
 	"golang.org/x/oauth2/google"
 	"gopkg.in/yaml.v3"
-	"log/slog"
 
 	connect "connectrpc.com/connect"
 	"connectrpc.com/validate"
@@ -71,8 +73,7 @@ type Config struct {
 		FlushInterval string `yaml:"flush_interval"`
 	} `yaml:"worker"`
 	Auth struct {
-		DevMode  bool   `yaml:"dev_mode"` // If true, skip IAP validation
-		Audience string `yaml:"audience"` // IAP OAuth Client ID
+		DevMode bool `yaml:"dev_mode"` // If true, skip auth validation
 	} `yaml:"auth"`
 	Firestore struct {
 		Enabled    bool   `yaml:"enabled"`
@@ -256,14 +257,40 @@ func main() {
 
 	addr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)
 
-	// Wrap the mux with IAP auth middleware.
+	// Wrap the mux with Firebase Auth middleware.
 	devMode := cfg.Auth.DevMode
 	if os.Getenv("CANDELA_DEV_MODE") == "true" {
 		devMode = true
 	}
-	authedMux := auth.IAPMiddleware(corsMiddleware(mux, cfg.CORS.AllowedOrigins), cfg.Auth.Audience, devMode)
+
+	// Initialize Firebase Admin SDK for token verification.
+	var fbAuthClient *fbauth.Client
+	if !devMode {
+		fbApp, err := firebase.NewApp(context.Background(), nil)
+		if err != nil {
+			slog.Warn("failed to initialize Firebase Admin SDK — Firebase auth disabled", "error", err)
+		} else {
+			fbAuthClient, err = fbApp.Auth(context.Background())
+			if err != nil {
+				slog.Warn("failed to get Firebase Auth client", "error", err)
+				fbAuthClient = nil
+			} else {
+				slog.Info("🔐 Firebase Auth initialized")
+			}
+		}
+	}
+
+	// Cloud Run service URL is the audience for Google ID tokens (candela-local).
+	cloudRunURL := os.Getenv("CLOUD_RUN_URL")
+
+	authedMux := auth.FirebaseAuthMiddleware(
+		corsMiddleware(mux, cfg.CORS.AllowedOrigins),
+		fbAuthClient,
+		cloudRunURL,
+		devMode,
+	)
 	if devMode {
-		slog.Info("🔓 Running in dev mode — IAP auth disabled")
+		slog.Info("🔓 Running in dev mode — auth disabled")
 	}
 
 	srv := &http.Server{

@@ -14,7 +14,7 @@ resource "google_cloud_run_v2_service" "candela" {
   name     = var.service_name
   location = var.region
 
-  deletion_protection = true
+  deletion_protection = false
 
   template {
     service_account = google_service_account.candela.email
@@ -77,7 +77,11 @@ resource "google_cloud_run_v2_service" "candela" {
       }
       env {
         name  = "CANDELA_DEV_MODE"
-        value = "true" # IAP auth disabled; access control via run.invoker IAM
+        value = "false" # Firebase Auth validates tokens; set to true only for local dev
+      }
+      env {
+        name  = "CLOUD_RUN_URL"
+        value = "" # Will be set after first deploy (chicken-and-egg)
       }
     }
   }
@@ -99,7 +103,7 @@ resource "google_cloud_run_v2_service_iam_member" "group_invoker" {
   location = var.region
   name     = google_cloud_run_v2_service.candela.name
   role     = "roles/run.invoker"
-  member   = "group:${var.iap_google_group}"
+  member   = "group:${var.invoker_google_group}"
 }
 
 

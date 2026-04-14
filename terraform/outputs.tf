@@ -31,3 +31,13 @@ output "candela_local_config" {
     port: 8181
   EOT
 }
+
+output "firebase_config" {
+  description = "Firebase Web App config for the Next.js UI"
+  value = {
+    api_key     = data.google_firebase_web_app_config.candela_ui.api_key
+    auth_domain = "${var.project_id}.firebaseapp.com"
+    project_id  = var.project_id
+    app_id      = google_firebase_web_app.candela_ui.app_id
+  }
+}

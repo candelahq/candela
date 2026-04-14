@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 import "./globals.css";
-import { Sidebar } from "@/components/sidebar";
+import { AuthProvider } from "@/components/AuthProvider";
+import { AuthGuard } from "@/components/AuthGuard";
+import { AppShell } from "@/components/AppShell";
 
 export const metadata: Metadata = {
   title: "Candela — LLM Observability",
@@ -15,12 +17,11 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body>
-        <div className="app-layout">
-          <Sidebar />
-          <main className="main-content">
-            {children}
-          </main>
-        </div>
+        <AuthProvider>
+          <AuthGuard>
+            <AppShell>{children}</AppShell>
+          </AuthGuard>
+        </AuthProvider>
       </body>
     </html>
   );

@@ -127,8 +127,35 @@ func main() {
 	})
 
 	// Register ConnectRPC service handlers.
+
+	// Initialize Firestore-backed UserStore (if enabled).
+	// Needed by trace/dashboard handlers for user-scoped access control,
+	// and by UserService for user management.
+	var userStore storage.UserStore
+	if cfg.Firestore.Enabled {
+		fStore, err := firestorestore.New(context.Background(),
+			cfg.Firestore.ProjectID, cfg.Firestore.DatabaseID)
+		if err != nil {
+			slog.Error("failed to initialize Firestore", "error", err)
+			os.Exit(1)
+		}
+		defer func() { _ = fStore.Close() }()
+		userStore = fStore
+
+		// Create protovalidate interceptor (validates request fields before handler).
+		validateInterceptor := validate.NewInterceptor()
+
+		userPath, userH := candelav1connect.NewUserServiceHandler(
+			connecthandlers.NewUserHandler(fStore),
+			connect.WithInterceptors(validateInterceptor, auth.AdminInterceptor(fStore)))
+		mux.Handle(userPath, userH)
+		slog.Info("UserService registered", "path", userPath, "admin_guard", true, "validation", true)
+	} else {
+		slog.Info("Firestore disabled — UserService not available, all users see all traces")
+	}
+
 	tracePath, traceH := candelav1connect.NewTraceServiceHandler(
-		connecthandlers.NewTraceHandler(reader))
+		connecthandlers.NewTraceHandler(reader, userStore))
 	mux.Handle(tracePath, traceH)
 
 	ingestionPath, ingestionH := candelav1connect.NewIngestionServiceHandler(
@@ -136,7 +163,7 @@ func main() {
 	mux.Handle(ingestionPath, ingestionH)
 
 	dashboardPath, dashboardH := candelav1connect.NewDashboardServiceHandler(
-		connecthandlers.NewDashboardHandler(reader))
+		connecthandlers.NewDashboardHandler(reader, userStore))
 	mux.Handle(dashboardPath, dashboardH)
 
 	// Initialize project store (separate SQLite DB for relational metadata).
@@ -156,28 +183,6 @@ func main() {
 		"ingestion", ingestionPath,
 		"dashboard", dashboardPath,
 		"project", projectPath)
-
-	// Initialize Firestore-backed UserStore and UserService (if enabled).
-	if cfg.Firestore.Enabled {
-		fStore, err := firestorestore.New(context.Background(),
-			cfg.Firestore.ProjectID, cfg.Firestore.DatabaseID)
-		if err != nil {
-			slog.Error("failed to initialize Firestore", "error", err)
-			os.Exit(1)
-		}
-		defer func() { _ = fStore.Close() }()
-
-		// Create protovalidate interceptor (validates request fields before handler).
-		validateInterceptor := validate.NewInterceptor()
-
-		userPath, userH := candelav1connect.NewUserServiceHandler(
-			connecthandlers.NewUserHandler(fStore),
-			connect.WithInterceptors(validateInterceptor, auth.AdminInterceptor(fStore)))
-		mux.Handle(userPath, userH)
-		slog.Info("UserService registered", "path", userPath, "admin_guard", true, "validation", true)
-	} else {
-		slog.Info("Firestore disabled — UserService not available")
-	}
 
 	// Register LLM proxy routes (selective activation).
 	if cfg.Proxy.Enabled {

@@ -62,6 +62,7 @@ func (s *Store) migrate() error {
 			project_id     VARCHAR DEFAULT '',
 			environment    VARCHAR DEFAULT '',
 			service_name   VARCHAR DEFAULT '',
+			user_id        VARCHAR DEFAULT '',
 
 			gen_ai_model          VARCHAR DEFAULT '',
 			gen_ai_provider       VARCHAR DEFAULT '',
@@ -83,6 +84,9 @@ func (s *Store) migrate() error {
 		`CREATE INDEX IF NOT EXISTS idx_spans_project_time ON spans(project_id, start_time)`,
 		`CREATE INDEX IF NOT EXISTS idx_spans_trace ON spans(trace_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_spans_kind ON spans(kind)`,
+		`CREATE INDEX IF NOT EXISTS idx_spans_user ON spans(user_id)`,
+		// Migration: add user_id column to existing tables.
+		`ALTER TABLE spans ADD COLUMN IF NOT EXISTS user_id VARCHAR DEFAULT ''`,
 	}
 
 	for _, q := range queries {
@@ -131,6 +135,7 @@ func (s *Store) IngestSpans(ctx context.Context, spans []storage.Span) error {
 				span.EndTime,
 				span.Duration.Nanoseconds(),
 				span.ProjectID, span.Environment, span.ServiceName,
+				span.UserID,
 				genAI.Model, genAI.Provider,
 				genAI.InputTokens, genAI.OutputTokens, genAI.TotalTokens,
 				genAI.CostUSD, genAI.Temperature, genAI.MaxTokens,
@@ -193,10 +198,11 @@ func (s *Store) QueryTraces(ctx context.Context, q storage.TraceQuery) (*storage
 			MAX(status)::INTEGER as status
 		FROM spans
 		WHERE project_id = ? AND start_time >= ? AND start_time <= ?
+			AND (? = '' OR user_id = ?)
 		GROUP BY trace_id
 		ORDER BY MIN(start_time) DESC
 		LIMIT ?
-	`, q.ProjectID, q.StartTime, q.EndTime, q.PageSize)
+	`, q.ProjectID, q.StartTime, q.EndTime, q.UserID, q.UserID, q.PageSize)
 	if err != nil {
 		return nil, fmt.Errorf("querying traces: %w", err)
 	}
@@ -282,7 +288,8 @@ func (s *Store) GetUsageSummary(ctx context.Context, q storage.UsageQuery) (*sto
 				ELSE 0 END
 		FROM spans
 		WHERE project_id = ? AND start_time >= ? AND start_time <= ?
-	`, q.ProjectID, q.StartTime, q.EndTime).Scan(
+			AND (? = '' OR user_id = ?)
+	`, q.ProjectID, q.StartTime, q.EndTime, q.UserID, q.UserID).Scan(
 		&summary.TotalTraces, &summary.TotalSpans, &summary.TotalLLMCalls,
 		&summary.TotalInputTokens, &summary.TotalOutputTokens, &summary.TotalCostUSD,
 		&summary.AvgLatencyMs, &summary.ErrorRate,
@@ -304,9 +311,10 @@ func (s *Store) GetModelBreakdown(ctx context.Context, q storage.UsageQuery) ([]
 		FROM spans
 		WHERE project_id = ? AND start_time >= ? AND start_time <= ?
 			AND gen_ai_model != ''
+			AND (? = '' OR user_id = ?)
 		GROUP BY gen_ai_model, gen_ai_provider
 		ORDER BY SUM(gen_ai_cost_usd) DESC
-	`, q.ProjectID, q.StartTime, q.EndTime)
+	`, q.ProjectID, q.StartTime, q.EndTime, q.UserID, q.UserID)
 	if err != nil {
 		return nil, fmt.Errorf("querying model breakdown: %w", err)
 	}

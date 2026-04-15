@@ -48,7 +48,12 @@ func FirebaseAuthMiddleware(next http.Handler, fbAuth *fbauth.Client, cloudRunAu
 		if fbAuth != nil {
 			decoded, err := fbAuth.VerifyIDToken(r.Context(), token)
 			if err == nil {
-				email, _ := decoded.Claims["email"].(string)
+				email, ok := decoded.Claims["email"].(string)
+				if !ok || email == "" {
+					slog.Warn("Firebase token missing email claim", "uid", decoded.UID, "path", r.URL.Path)
+					writeError(w, http.StatusUnauthorized, "token missing email claim")
+					return
+				}
 				user := &User{
 					ID:    decoded.UID,
 					Email: strings.ToLower(email),
@@ -66,13 +71,19 @@ func FirebaseAuthMiddleware(next http.Handler, fbAuth *fbauth.Client, cloudRunAu
 		if cloudRunAudience != "" {
 			payload, err := idtoken.Validate(r.Context(), token, cloudRunAudience)
 			if err == nil {
-				email, _ := payload.Claims["email"].(string)
-				sub := payload.Subject
-				if sub == "" {
-					sub = email
+				email, ok := payload.Claims["email"].(string)
+				if !ok || email == "" {
+					slog.Warn("Google ID token missing email claim", "sub", payload.Subject, "path", r.URL.Path)
+					writeError(w, http.StatusUnauthorized, "token missing email claim")
+					return
+				}
+				if payload.Subject == "" {
+					slog.Warn("Google ID token missing sub claim", "email", email, "path", r.URL.Path)
+					writeError(w, http.StatusUnauthorized, "token missing subject claim")
+					return
 				}
 				user := &User{
-					ID:    sub,
+					ID:    payload.Subject,
 					Email: strings.ToLower(email),
 				}
 				slog.Debug("authenticated via Google ID token",

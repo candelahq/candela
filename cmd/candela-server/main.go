@@ -273,16 +273,15 @@ func main() {
 	if !devMode {
 		fbApp, err := firebase.NewApp(context.Background(), nil)
 		if err != nil {
-			slog.Warn("failed to initialize Firebase Admin SDK — Firebase auth disabled", "error", err)
-		} else {
-			fbAuthClient, err = fbApp.Auth(context.Background())
-			if err != nil {
-				slog.Warn("failed to get Firebase Auth client", "error", err)
-				fbAuthClient = nil
-			} else {
-				slog.Info("🔐 Firebase Auth initialized")
-			}
+			slog.Error("failed to initialize Firebase Admin SDK", "error", err)
+			os.Exit(1)
 		}
+		fbAuthClient, err = fbApp.Auth(context.Background())
+		if err != nil {
+			slog.Error("failed to get Firebase Auth client", "error", err)
+			os.Exit(1)
+		}
+		slog.Info("🔐 Firebase Auth initialized")
 	}
 
 	// Cloud Run service URL is the audience for Google ID tokens (candela-local).

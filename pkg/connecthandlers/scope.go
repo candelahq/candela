@@ -2,6 +2,8 @@ package connecthandlers
 
 import (
 	"context"
+	"errors"
+	"log/slog"
 
 	"github.com/candelahq/candela/pkg/auth"
 	"github.com/candelahq/candela/pkg/storage"
@@ -29,6 +31,12 @@ func scopeUserID(ctx context.Context, users storage.UserStore) string {
 	// Look up the caller's role in the user store.
 	record, err := users.GetUserByEmail(ctx, caller.Email)
 	if err != nil {
+		if errors.Is(err, storage.ErrNotFound) {
+			slog.Debug("user not found in store, scoping to own ID", "email", caller.Email)
+		} else {
+			slog.Warn("failed to look up user role, scoping to own ID",
+				"email", caller.Email, "error", err)
+		}
 		// Unknown user — scope to their own ID (conservative).
 		return caller.ID
 	}

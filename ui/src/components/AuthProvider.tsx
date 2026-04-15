@@ -40,15 +40,12 @@ export function useAuth() {
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
-  const [loading, setLoading] = useState(true);
   const configured = firebaseAuth !== null;
+  // Start as not-loading when Firebase isn't configured (no auth to wait for).
+  const [loading, setLoading] = useState(configured);
 
   useEffect(() => {
-    if (!firebaseAuth) {
-      // Firebase not configured (dev/SSR) — skip auth.
-      setLoading(false);
-      return;
-    }
+    if (!firebaseAuth) return;
     const unsubscribe = onAuthStateChanged(firebaseAuth, (user) => {
       setUser(user);
       setLoading(false);

@@ -18,6 +18,8 @@ import { firebaseAuth, googleProvider } from "@/lib/firebase";
 interface AuthContextType {
   user: User | null;
   loading: boolean;
+  /** Whether Firebase Auth is configured (false in local dev without env vars). */
+  configured: boolean;
   signIn: () => Promise<void>;
   signOut: () => Promise<void>;
   getIdToken: () => Promise<string | null>;
@@ -26,6 +28,7 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType>({
   user: null,
   loading: true,
+  configured: false,
   signIn: async () => {},
   signOut: async () => {},
   getIdToken: async () => null,
@@ -38,6 +41,7 @@ export function useAuth() {
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
+  const configured = firebaseAuth !== null;
 
   useEffect(() => {
     if (!firebaseAuth) {
@@ -68,7 +72,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   return (
-    <AuthContext.Provider value={{ user, loading, signIn, signOut, getIdToken }}>
+    <AuthContext.Provider
+      value={{ user, loading, configured, signIn, signOut, getIdToken }}
+    >
       {children}
     </AuthContext.Provider>
   );

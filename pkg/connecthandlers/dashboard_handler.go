@@ -12,11 +12,12 @@ import (
 // DashboardHandler implements the DashboardService ConnectRPC handler.
 type DashboardHandler struct {
 	store storage.SpanReader
+	users storage.UserStore // optional, nil in local dev
 }
 
 // NewDashboardHandler creates a new DashboardHandler.
-func NewDashboardHandler(store storage.SpanReader) *DashboardHandler {
-	return &DashboardHandler{store: store}
+func NewDashboardHandler(store storage.SpanReader, users storage.UserStore) *DashboardHandler {
+	return &DashboardHandler{store: store, users: users}
 }
 
 func (h *DashboardHandler) GetUsageSummary(
@@ -28,6 +29,7 @@ func (h *DashboardHandler) GetUsageSummary(
 	q := storage.UsageQuery{
 		ProjectID:   msg.ProjectId,
 		Environment: msg.Environment,
+		UserID:      scopeUserID(ctx, h.users),
 	}
 	if msg.TimeRange != nil {
 		if msg.TimeRange.Start != nil {
@@ -67,7 +69,7 @@ func (h *DashboardHandler) GetModelBreakdown(
 ) (*connect.Response[v1.GetModelBreakdownResponse], error) {
 	msg := req.Msg
 
-	q := storage.UsageQuery{ProjectID: msg.ProjectId}
+	q := storage.UsageQuery{ProjectID: msg.ProjectId, UserID: scopeUserID(ctx, h.users)}
 	if msg.TimeRange != nil {
 		if msg.TimeRange.Start != nil {
 			q.StartTime = msg.TimeRange.Start.AsTime()

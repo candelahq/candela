@@ -57,13 +57,12 @@ variable "memory" {
   default     = "512Mi"
 }
 
-# ── IAP ──
+# ── Access Control ──
 
-variable "iap_google_group" {
-  description = "Google Group email that gets IAP access (e.g., devs@company.com)"
+variable "invoker_google_group" {
+  description = "Google Group email that gets Cloud Run invoker access"
   type        = string
 }
-
 
 
 # ── BigQuery ──

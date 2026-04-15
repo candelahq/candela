@@ -7,14 +7,14 @@ const nextConfig: NextConfig = {
 
   // Proxy API calls to the Go backend (runs as a sidecar in the same container).
   async rewrites() {
-    const backendUrl = process.env.BACKEND_URL || "http://localhost:8181";
+    const backendUrl = process.env.BACKEND_URL || "http://localhost:8080";
     return {
       // "beforeFiles" rewrites are checked before pages/public files.
       beforeFiles: [
         // ConnectRPC services (paths like /candela.v1.UserService/Method)
         {
-          source: "/candela.v1.:path*",
-          destination: `${backendUrl}/candela.v1.:path*`,
+          source: "/candela.v1.:service/:method*",
+          destination: `${backendUrl}/candela.v1.:service/:method*`,
         },
         // LLM proxy routes
         {

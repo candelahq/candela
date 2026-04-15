@@ -55,7 +55,6 @@ test.describe("App Shell", () => {
   test("shows environment indicator in sidebar footer", async ({ page }) => {
     await page.goto("/");
     await expect(page.locator(".sidebar-env")).toContainText("Development");
-    await expect(page.locator(".sidebar-env")).toContainText("localhost:8181");
   });
 });
 

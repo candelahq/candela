@@ -16,11 +16,12 @@ import (
 // TraceHandler implements the TraceService ConnectRPC handler.
 type TraceHandler struct {
 	store storage.SpanReader
+	users storage.UserStore // optional, nil in local dev
 }
 
 // NewTraceHandler creates a new TraceHandler.
-func NewTraceHandler(store storage.SpanReader) *TraceHandler {
-	return &TraceHandler{store: store}
+func NewTraceHandler(store storage.SpanReader, users storage.UserStore) *TraceHandler {
+	return &TraceHandler{store: store, users: users}
 }
 
 func (h *TraceHandler) GetTrace(
@@ -51,6 +52,7 @@ func (h *TraceHandler) ListTraces(
 		Search:      msg.Search,
 		OrderBy:     msg.OrderBy,
 		Descending:  msg.Descending,
+		UserID:      scopeUserID(ctx, h.users),
 	}
 
 	if msg.TimeRange != nil {

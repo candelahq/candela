@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useCurrentUser } from "@/hooks/useCurrentUser";
+import { useAuth } from "@/components/AuthProvider";
 
 const navItems = [
   {
@@ -34,6 +35,7 @@ const adminItems = {
 export function Sidebar() {
   const pathname = usePathname();
   const { user, isAdmin, isLoading } = useCurrentUser();
+  const { user: authUser, signOut } = useAuth();
 
   const sections = isAdmin ? [...navItems, adminItems] : navItems;
 
@@ -83,12 +85,14 @@ export function Sidebar() {
             </div>
           </div>
         )}
+        {authUser && (
+          <button className="sidebar-signout" onClick={signOut}>
+            Sign out
+          </button>
+        )}
         <div className="sidebar-env">
           <span className="env-dot" />
           <span>Development</span>
-          <span className="mono" style={{ marginLeft: "auto", color: "var(--text-muted)" }}>
-            localhost:8181
-          </span>
         </div>
       </div>
     </aside>

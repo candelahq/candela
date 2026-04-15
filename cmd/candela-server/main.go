@@ -6,17 +6,19 @@ package main
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
 
+	firebase "firebase.google.com/go/v4"
+	fbauth "firebase.google.com/go/v4/auth"
 	"golang.org/x/net/http2"
 	"golang.org/x/net/http2/h2c"
 	"golang.org/x/oauth2/google"
 	"gopkg.in/yaml.v3"
-	"log/slog"
 
 	connect "connectrpc.com/connect"
 	"connectrpc.com/validate"
@@ -71,8 +73,7 @@ type Config struct {
 		FlushInterval string `yaml:"flush_interval"`
 	} `yaml:"worker"`
 	Auth struct {
-		DevMode  bool   `yaml:"dev_mode"` // If true, skip IAP validation
-		Audience string `yaml:"audience"` // IAP OAuth Client ID
+		DevMode bool `yaml:"dev_mode"` // If true, skip auth validation
 	} `yaml:"auth"`
 	Firestore struct {
 		Enabled    bool   `yaml:"enabled"`
@@ -126,8 +127,35 @@ func main() {
 	})
 
 	// Register ConnectRPC service handlers.
+
+	// Initialize Firestore-backed UserStore (if enabled).
+	// Needed by trace/dashboard handlers for user-scoped access control,
+	// and by UserService for user management.
+	var userStore storage.UserStore
+	if cfg.Firestore.Enabled {
+		fStore, err := firestorestore.New(context.Background(),
+			cfg.Firestore.ProjectID, cfg.Firestore.DatabaseID)
+		if err != nil {
+			slog.Error("failed to initialize Firestore", "error", err)
+			os.Exit(1)
+		}
+		defer func() { _ = fStore.Close() }()
+		userStore = fStore
+
+		// Create protovalidate interceptor (validates request fields before handler).
+		validateInterceptor := validate.NewInterceptor()
+
+		userPath, userH := candelav1connect.NewUserServiceHandler(
+			connecthandlers.NewUserHandler(fStore),
+			connect.WithInterceptors(validateInterceptor, auth.AdminInterceptor(fStore)))
+		mux.Handle(userPath, userH)
+		slog.Info("UserService registered", "path", userPath, "admin_guard", true, "validation", true)
+	} else {
+		slog.Info("Firestore disabled — UserService not available, all users see all traces")
+	}
+
 	tracePath, traceH := candelav1connect.NewTraceServiceHandler(
-		connecthandlers.NewTraceHandler(reader))
+		connecthandlers.NewTraceHandler(reader, userStore))
 	mux.Handle(tracePath, traceH)
 
 	ingestionPath, ingestionH := candelav1connect.NewIngestionServiceHandler(
@@ -135,7 +163,7 @@ func main() {
 	mux.Handle(ingestionPath, ingestionH)
 
 	dashboardPath, dashboardH := candelav1connect.NewDashboardServiceHandler(
-		connecthandlers.NewDashboardHandler(reader))
+		connecthandlers.NewDashboardHandler(reader, userStore))
 	mux.Handle(dashboardPath, dashboardH)
 
 	// Initialize project store (separate SQLite DB for relational metadata).
@@ -155,28 +183,6 @@ func main() {
 		"ingestion", ingestionPath,
 		"dashboard", dashboardPath,
 		"project", projectPath)
-
-	// Initialize Firestore-backed UserStore and UserService (if enabled).
-	if cfg.Firestore.Enabled {
-		fStore, err := firestorestore.New(context.Background(),
-			cfg.Firestore.ProjectID, cfg.Firestore.DatabaseID)
-		if err != nil {
-			slog.Error("failed to initialize Firestore", "error", err)
-			os.Exit(1)
-		}
-		defer func() { _ = fStore.Close() }()
-
-		// Create protovalidate interceptor (validates request fields before handler).
-		validateInterceptor := validate.NewInterceptor()
-
-		userPath, userH := candelav1connect.NewUserServiceHandler(
-			connecthandlers.NewUserHandler(fStore),
-			connect.WithInterceptors(validateInterceptor, auth.AdminInterceptor(fStore)))
-		mux.Handle(userPath, userH)
-		slog.Info("UserService registered", "path", userPath, "admin_guard", true, "validation", true)
-	} else {
-		slog.Info("Firestore disabled — UserService not available")
-	}
 
 	// Register LLM proxy routes (selective activation).
 	if cfg.Proxy.Enabled {
@@ -256,14 +262,39 @@ func main() {
 
 	addr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)
 
-	// Wrap the mux with IAP auth middleware.
+	// Wrap the mux with Firebase Auth middleware.
 	devMode := cfg.Auth.DevMode
 	if os.Getenv("CANDELA_DEV_MODE") == "true" {
 		devMode = true
 	}
-	authedMux := auth.IAPMiddleware(corsMiddleware(mux, cfg.CORS.AllowedOrigins), cfg.Auth.Audience, devMode)
+
+	// Initialize Firebase Admin SDK for token verification.
+	var fbAuthClient *fbauth.Client
+	if !devMode {
+		fbApp, err := firebase.NewApp(context.Background(), nil)
+		if err != nil {
+			slog.Error("failed to initialize Firebase Admin SDK", "error", err)
+			os.Exit(1)
+		}
+		fbAuthClient, err = fbApp.Auth(context.Background())
+		if err != nil {
+			slog.Error("failed to get Firebase Auth client", "error", err)
+			os.Exit(1)
+		}
+		slog.Info("🔐 Firebase Auth initialized")
+	}
+
+	// Cloud Run service URL is the audience for Google ID tokens (candela-local).
+	cloudRunURL := os.Getenv("CLOUD_RUN_URL")
+
+	authedMux := auth.FirebaseAuthMiddleware(
+		corsMiddleware(mux, cfg.CORS.AllowedOrigins),
+		fbAuthClient,
+		cloudRunURL,
+		devMode,
+	)
 	if devMode {
-		slog.Info("🔓 Running in dev mode — IAP auth disabled")
+		slog.Info("🔓 Running in dev mode — auth disabled")
 	}
 
 	srv := &http.Server{

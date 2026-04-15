@@ -35,7 +35,9 @@ COPY gen/ts/ ../gen/ts/
 # Build standalone output.
 # NEXT_PUBLIC_API_URL="" makes the client use relative URLs (same origin).
 # Next.js rewrites proxy these to the Go backend sidecar.
+# BACKEND_URL must match the port in deploy/entrypoint.sh (8181).
 ENV NEXT_PUBLIC_API_URL=""
+ENV BACKEND_URL="http://localhost:8181"
 RUN pnpm run build
 
 # ── Stage 3: Runtime ──

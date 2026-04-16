@@ -81,7 +81,7 @@ resource "google_cloud_run_v2_service" "candela" {
       }
       env {
         name  = "CLOUD_RUN_URL"
-        value = "" # Will be set after first deploy (chicken-and-egg)
+        value = "https://candela-6y6kmipuda-uc.a.run.app"
       }
     }
   }

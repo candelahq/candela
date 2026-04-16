@@ -1,9 +1,13 @@
 package auth
 
 import (
+	"context"
+	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"strings"
+	"time"
 
 	fbauth "firebase.google.com/go/v4/auth"
 	"google.golang.org/api/idtoken"
@@ -91,12 +95,63 @@ func FirebaseAuthMiddleware(next http.Handler, fbAuth *fbauth.Client, cloudRunAu
 				next.ServeHTTP(w, r.WithContext(NewContext(r.Context(), user)))
 				return
 			}
-			slog.Warn("Google ID token validation failed",
+			slog.Debug("Google ID token validation failed, trying OAuth2 access token",
 				"error", err, "path", r.URL.Path)
 		}
 
+		// Strategy 3: Try Google OAuth2 access token (candela-local with user ADC).
+		// Validates via Google's userinfo endpoint.
+		user, err := validateAccessToken(r.Context(), token)
+		if err == nil {
+			slog.Debug("authenticated via OAuth2 access token",
+				"uid", user.ID, "email", user.Email, "path", r.URL.Path)
+			next.ServeHTTP(w, r.WithContext(NewContext(r.Context(), user)))
+			return
+		}
+		slog.Warn("all auth strategies failed", "path", r.URL.Path, "lastError", err)
+
 		writeError(w, http.StatusUnauthorized, "invalid authentication token")
 	})
+}
+
+// validateAccessToken validates a Google OAuth2 access token by calling
+// Google's userinfo endpoint. Returns user info if the token is valid.
+func validateAccessToken(ctx context.Context, accessToken string) (*User, error) {
+	req, err := http.NewRequestWithContext(ctx, "GET", "https://www.googleapis.com/oauth2/v3/userinfo", nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+accessToken)
+
+	client := &http.Client{Timeout: 5 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("userinfo returned status %d", resp.StatusCode)
+	}
+
+	var info struct {
+		Sub   string `json:"sub"`
+		Email string `json:"email"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&info); err != nil {
+		return nil, fmt.Errorf("failed to decode userinfo: %w", err)
+	}
+	if info.Email == "" {
+		return nil, fmt.Errorf("userinfo missing email")
+	}
+	if info.Sub == "" {
+		return nil, fmt.Errorf("userinfo missing sub")
+	}
+
+	return &User{
+		ID:    info.Sub,
+		Email: strings.ToLower(info.Email),
+	}, nil
 }
 
 // extractBearerToken pulls the token from "Authorization: Bearer <token>".

@@ -99,11 +99,13 @@ func main() {
 	// Strategy 2: google.DefaultTokenSource with openid scope (works for user credentials).
 	ctx := context.Background()
 	var tokenSource oauth2.TokenSource
+	useIDToken := false
 
 	ts, err := idtoken.NewTokenSource(ctx, cfg.Audience)
 	if err == nil {
 		slog.Info("using service account ID token source")
 		tokenSource = ts
+		useIDToken = true
 	} else {
 		slog.Info("idtoken unavailable (user credentials), using OAuth2 with openid scope", "reason", err)
 		ts2, err2 := google.DefaultTokenSource(ctx, "openid", "email")
@@ -132,8 +134,10 @@ func main() {
 				return
 			}
 			bearerToken := token.AccessToken
-			if idToken, ok := token.Extra("id_token").(string); ok && idToken != "" {
-				bearerToken = idToken
+			if useIDToken {
+				if idToken, ok := token.Extra("id_token").(string); ok && idToken != "" {
+					bearerToken = idToken
+				}
 			}
 			req.Header.Set("Authorization", "Bearer "+bearerToken)
 

@@ -726,7 +726,7 @@ tr:hover td {
   max-height: none;
 }
 
-.span-content-pre:not(.expanded)::after {
+.span-content-pre.is-truncated::after {
   content: '';
   position: sticky;
   bottom: 0;

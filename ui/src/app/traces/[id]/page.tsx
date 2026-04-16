@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useMemo } from "react";
 
 import { useParams, useRouter } from "next/navigation";
 import { useTrace, kindLabel, kindColor } from "@/hooks/useTrace";
@@ -12,21 +12,29 @@ import { SpanStatus } from "@/gen/types/trace_pb";
 function ExpandablePre({ content, label }: { content: string; label: string }) {
   const [expanded, setExpanded] = useState(false);
 
-  // Try to pretty-print JSON
-  let formatted = content;
-  try {
-    const parsed = JSON.parse(content);
-    formatted = JSON.stringify(parsed, null, 2);
-  } catch {
-    // not JSON, use as-is
-  }
+  const formatted = useMemo(() => {
+    const trimmed = content.trim();
+    if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
+      try {
+        const parsed = JSON.parse(trimmed);
+        return JSON.stringify(parsed, null, 2);
+      } catch {
+        // Not valid JSON, return original
+      }
+    }
+    return content;
+  }, [content]);
 
-  const needsExpand = formatted.length > 500 || formatted.split("\n").length > 15;
+  const needsExpand = useMemo(() => {
+    return formatted.length > 500 || formatted.split("\n").length > 15;
+  }, [formatted]);
 
   return (
     <div className="span-content-block">
       <div className="span-content-label">{label}</div>
-      <pre className={`span-content-pre ${expanded ? "expanded" : ""}`}>
+      <pre className={`span-content-pre ${expanded ? "expanded" : ""} ${
+          needsExpand && !expanded ? "is-truncated" : ""
+        }`}>
         {formatted}
       </pre>
       {needsExpand && (

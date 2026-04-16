@@ -1,10 +1,45 @@
 "use client";
 
+import { useState } from "react";
+
 import { useParams, useRouter } from "next/navigation";
 import { useTrace, kindLabel, kindColor } from "@/hooks/useTrace";
 import type { SpanNode } from "@/hooks/useTrace";
 import { ErrorBanner } from "@/components/ErrorBanner";
 import { SpanStatus } from "@/gen/types/trace_pb";
+
+
+function ExpandablePre({ content, label }: { content: string; label: string }) {
+  const [expanded, setExpanded] = useState(false);
+
+  // Try to pretty-print JSON
+  let formatted = content;
+  try {
+    const parsed = JSON.parse(content);
+    formatted = JSON.stringify(parsed, null, 2);
+  } catch {
+    // not JSON, use as-is
+  }
+
+  const needsExpand = formatted.length > 500 || formatted.split("\n").length > 15;
+
+  return (
+    <div className="span-content-block">
+      <div className="span-content-label">{label}</div>
+      <pre className={`span-content-pre ${expanded ? "expanded" : ""}`}>
+        {formatted}
+      </pre>
+      {needsExpand && (
+        <button
+          className="span-content-toggle"
+          onClick={() => setExpanded(!expanded)}
+        >
+          {expanded ? "▲ Collapse" : "▼ Show full content"}
+        </button>
+      )}
+    </div>
+  );
+}
 
 // ──────────────────────────────────────────
 // Components
@@ -160,16 +195,10 @@ function SpanDetail({ node }: { node: SpanNode }) {
           </div>
 
           {genAi.inputContent && (
-            <div className="span-content-block">
-              <div className="span-content-label">📥 Prompt</div>
-              <pre className="span-content-pre">{genAi.inputContent}</pre>
-            </div>
+            <ExpandablePre content={genAi.inputContent} label="📥 Prompt" />
           )}
           {genAi.outputContent && (
-            <div className="span-content-block">
-              <div className="span-content-label">📤 Completion</div>
-              <pre className="span-content-pre">{genAi.outputContent}</pre>
-            </div>
+            <ExpandablePre content={genAi.outputContent} label="📤 Completion" />
           )}
         </div>
       )}
@@ -185,16 +214,10 @@ function SpanDetail({ node }: { node: SpanNode }) {
             </div>
           </div>
           {tool.toolInput && (
-            <div className="span-content-block">
-              <div className="span-content-label">Input</div>
-              <pre className="span-content-pre">{tool.toolInput}</pre>
-            </div>
+            <ExpandablePre content={tool.toolInput} label="🔧 Input" />
           )}
           {tool.toolOutput && (
-            <div className="span-content-block">
-              <div className="span-content-label">Output</div>
-              <pre className="span-content-pre">{tool.toolOutput}</pre>
-            </div>
+            <ExpandablePre content={tool.toolOutput} label="📋 Output" />
           )}
         </div>
       )}

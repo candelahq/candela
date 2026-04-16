@@ -718,6 +718,45 @@ tr:hover td {
   max-height: 300px;
   overflow-y: auto;
   color: var(--text-secondary);
+  position: relative;
+  transition: max-height 0.3s ease;
+}
+
+.span-content-pre.expanded {
+  max-height: none;
+}
+
+.span-content-pre:not(.expanded)::after {
+  content: '';
+  position: sticky;
+  bottom: 0;
+  left: 0;
+  display: block;
+  width: 100%;
+  height: 40px;
+  background: linear-gradient(transparent, var(--bg-primary));
+  pointer-events: none;
+}
+
+.span-content-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 6px 16px;
+  margin-top: 4px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.span-content-toggle:hover {
+  background: var(--bg-hover);
+  border-color: var(--accent);
 }
 
 /* Attribute table */

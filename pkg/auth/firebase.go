@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"time"
 
 	fbauth "firebase.google.com/go/v4/auth"
 	"google.golang.org/api/idtoken"
@@ -107,7 +108,7 @@ func FirebaseAuthMiddleware(next http.Handler, fbAuth *fbauth.Client, cloudRunAu
 			next.ServeHTTP(w, r.WithContext(NewContext(r.Context(), user)))
 			return
 		}
-		slog.Warn("all auth strategies failed", "path", r.URL.Path)
+		slog.Warn("all auth strategies failed", "path", r.URL.Path, "lastError", err)
 
 		writeError(w, http.StatusUnauthorized, "invalid authentication token")
 	})
@@ -122,7 +123,8 @@ func validateAccessToken(ctx context.Context, accessToken string) (*User, error)
 	}
 	req.Header.Set("Authorization", "Bearer "+accessToken)
 
-	resp, err := http.DefaultClient.Do(req)
+	client := &http.Client{Timeout: 5 * time.Second}
+	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err
 	}

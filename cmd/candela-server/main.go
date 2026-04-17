@@ -64,6 +64,11 @@ type Config struct {
 			ProjectID string `yaml:"project_id"` // GCP project for Vertex AI
 			Region    string `yaml:"region"`     // e.g. "us-central1"
 		} `yaml:"vertex_ai"`
+		LMStudio struct {
+			Enabled bool                `yaml:"enabled"`
+			Port    int                 `yaml:"port"` // Default: 1234 (LM Studio default)
+			Models  []proxy.CompatModel `yaml:"models"`
+		} `yaml:"lmstudio"`
 	} `yaml:"proxy"`
 	CORS struct {
 		AllowedOrigins []string `yaml:"allowed_origins"` // e.g. ["http://localhost:3000"]
@@ -185,6 +190,7 @@ func main() {
 		"project", projectPath)
 
 	// Register LLM proxy routes (selective activation).
+	var llmProxy *proxy.Proxy
 	if cfg.Proxy.Enabled {
 		allProviders := proxy.DefaultProviders()
 
@@ -244,7 +250,7 @@ func main() {
 		}
 
 		if len(activeProviders) > 0 {
-			llmProxy := proxy.New(proxy.Config{
+			llmProxy = proxy.New(proxy.Config{
 				Providers: activeProviders,
 				ProjectID: cfg.Proxy.ProjectID,
 			}, processor, calc)
@@ -255,6 +261,20 @@ func main() {
 				names = append(names, "/proxy/"+p.Name+"/")
 			}
 			slog.Info("🔀 LLM proxy enabled", "routes", names)
+
+			// LM Studio compat mode: register /v1/ routes on main mux
+			// and start a secondary listener on the LM Studio port.
+			if cfg.Proxy.LMStudio.Enabled && len(cfg.Proxy.LMStudio.Models) > 0 {
+				llmProxy.RegisterCompatRoutes(mux, cfg.Proxy.LMStudio.Models)
+
+				var modelNames []string
+				for _, m := range cfg.Proxy.LMStudio.Models {
+					modelNames = append(modelNames, m.ID)
+				}
+				slog.Info("🖥️  LM Studio compat mode enabled",
+					"models", modelNames,
+					"main_routes", []string{"/v1/models", "/v1/chat/completions"})
+			}
 		} else {
 			slog.Warn("proxy enabled but no valid providers configured")
 		}
@@ -314,6 +334,39 @@ func main() {
 		}
 	}()
 
+	// Secondary LM Studio-compatible listener (port 1234 by default).
+	// This lets IntelliJ's "Enable LM Studio" checkbox work with zero URL changes.
+	var lmSrv *http.Server
+	if cfg.Proxy.LMStudio.Enabled && len(cfg.Proxy.LMStudio.Models) > 0 && llmProxy != nil {
+		lmPort := cfg.Proxy.LMStudio.Port
+		if lmPort == 0 {
+			lmPort = 1234
+		}
+
+		// Build a minimal mux for the LM Studio port.
+		// Reuse the same proxy instance — shares circuit breakers,
+		// connection pool, and respects provider filtering.
+		lmMux := http.NewServeMux()
+		llmProxy.RegisterRoutes(lmMux)
+		llmProxy.RegisterCompatRoutes(lmMux, cfg.Proxy.LMStudio.Models)
+
+		// Health check for LM Studio port.
+		lmMux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
+			_, _ = fmt.Fprintln(w, `{"status":"ok","mode":"lmstudio"}`)
+		})
+
+		lmAddr := fmt.Sprintf("%s:%d", cfg.Server.Host, lmPort)
+		lmSrv = &http.Server{Addr: lmAddr, Handler: lmMux}
+
+		go func() {
+			slog.Info("🖥️  LM Studio compat listener starting", "addr", lmAddr)
+			if err := lmSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+				slog.Warn("LM Studio compat listener failed (port may be in use)",
+					"addr", lmAddr, "error", err)
+			}
+		}()
+	}
+
 	<-ctx.Done()
 	slog.Info("shutting down...")
 
@@ -321,6 +374,11 @@ func main() {
 	defer cancel()
 
 	processor.Stop()
+	if lmSrv != nil {
+		if err := lmSrv.Shutdown(shutdownCtx); err != nil {
+			slog.Error("LM Studio listener shutdown error", "error", err)
+		}
+	}
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		slog.Error("shutdown error", "error", err)
 	}

@@ -65,10 +65,3 @@ repos:
         language: system
         pass_filenames: false
         files: '\.go$'
-
-      - id: playwright-e2e
-        name: playwright e2e
-        entry: bash -c 'cd ui && npx playwright test --list >/dev/null 2>&1 && npx playwright test || echo "⚠️  Playwright browsers not installed locally, skipping e2e (CI will run them)"'
-        language: system
-        pass_filenames: false
-        files: '^ui/'

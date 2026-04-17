@@ -190,6 +190,7 @@ func main() {
 		"project", projectPath)
 
 	// Register LLM proxy routes (selective activation).
+	var llmProxy *proxy.Proxy
 	if cfg.Proxy.Enabled {
 		allProviders := proxy.DefaultProviders()
 
@@ -249,7 +250,7 @@ func main() {
 		}
 
 		if len(activeProviders) > 0 {
-			llmProxy := proxy.New(proxy.Config{
+			llmProxy = proxy.New(proxy.Config{
 				Providers: activeProviders,
 				ProjectID: cfg.Proxy.ProjectID,
 			}, processor, calc)
@@ -336,47 +337,18 @@ func main() {
 	// Secondary LM Studio-compatible listener (port 1234 by default).
 	// This lets IntelliJ's "Enable LM Studio" checkbox work with zero URL changes.
 	var lmSrv *http.Server
-	if cfg.Proxy.LMStudio.Enabled && len(cfg.Proxy.LMStudio.Models) > 0 {
+	if cfg.Proxy.LMStudio.Enabled && len(cfg.Proxy.LMStudio.Models) > 0 && llmProxy != nil {
 		lmPort := cfg.Proxy.LMStudio.Port
 		if lmPort == 0 {
 			lmPort = 1234
 		}
 
-		// Build a minimal mux for the LM Studio port (compat routes only).
+		// Build a minimal mux for the LM Studio port.
+		// Reuse the same proxy instance — shares circuit breakers,
+		// connection pool, and respects provider filtering.
 		lmMux := http.NewServeMux()
-		// Re-create the proxy for the LM Studio mux routes.
-		if cfg.Proxy.Enabled {
-			allProviders := proxy.DefaultProviders()
-			if cfg.Proxy.VertexAI.ProjectID != "" {
-				region := cfg.Proxy.VertexAI.Region
-				if region == "" {
-					region = "us-central1"
-				}
-				tokenSource, _ := google.DefaultTokenSource(context.Background(),
-					"https://www.googleapis.com/auth/cloud-platform")
-				for i, p := range allProviders {
-					if p.Name == "anthropic" {
-						allProviders[i].UpstreamURL = fmt.Sprintf(
-							"https://%s-aiplatform.googleapis.com", region)
-						allProviders[i].FormatTranslator = &proxy.AnthropicFormatTranslator{}
-						allProviders[i].PathRewriter = &proxy.VertexAIPathRewriter{
-							ProjectID: cfg.Proxy.VertexAI.ProjectID,
-							Region:    region,
-						}
-						if tokenSource != nil {
-							allProviders[i].TokenSource = tokenSource
-						}
-						break
-					}
-				}
-			}
-			lmProxy := proxy.New(proxy.Config{
-				Providers: allProviders,
-				ProjectID: cfg.Proxy.ProjectID,
-			}, processor, calc)
-			lmProxy.RegisterRoutes(lmMux)
-			lmProxy.RegisterCompatRoutes(lmMux, cfg.Proxy.LMStudio.Models)
-		}
+		llmProxy.RegisterRoutes(lmMux)
+		llmProxy.RegisterCompatRoutes(lmMux, cfg.Proxy.LMStudio.Models)
 
 		// Health check for LM Studio port.
 		lmMux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {

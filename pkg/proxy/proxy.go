@@ -219,7 +219,12 @@ func buildModelsResponse(models []CompatModel) []byte {
 		})
 	}
 
-	b, _ := json.Marshal(resp)
+	b, err := json.Marshal(resp)
+	if err != nil {
+		// Should never happen with simple string/int fields, but be safe.
+		slog.Error("failed to marshal models response", "error", err)
+		return []byte(`{"object":"list","data":[]}`)
+	}
 	return b
 }
 

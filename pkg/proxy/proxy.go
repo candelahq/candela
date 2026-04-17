@@ -134,6 +134,95 @@ func (p *Proxy) RegisterRoutes(mux *http.ServeMux) {
 	}
 }
 
+// CompatModel maps a model ID to a provider name for LM Studio compat mode.
+type CompatModel struct {
+	ID       string `yaml:"id" json:"id"`
+	Provider string `yaml:"provider" json:"provider"`
+}
+
+// RegisterCompatRoutes registers OpenAI-compatible routes at /v1/ (no /proxy/ prefix).
+// This enables LM Studio, IntelliJ's LM Studio integration, and similar tools
+// that expect an OpenAI-compatible API at the root path.
+//
+// GET /v1/models returns the configured model list.
+// POST /v1/chat/completions routes to the correct provider based on the model name.
+func (p *Proxy) RegisterCompatRoutes(mux *http.ServeMux, models []CompatModel) {
+	// Build the /v1/models response once at startup.
+	modelList := buildModelsResponse(models)
+
+	// GET /v1/models — return the configured model list.
+	mux.HandleFunc("GET /v1/models", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write(modelList)
+	})
+
+	// Build model→provider lookup.
+	modelToProvider := make(map[string]string, len(models))
+	for _, m := range models {
+		modelToProvider[m.ID] = m.Provider
+	}
+
+	// POST /v1/chat/completions — route to provider based on model name in body.
+	mux.HandleFunc("POST /v1/chat/completions", func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			http.Error(w, "failed to read request body", http.StatusBadRequest)
+			return
+		}
+		_ = r.Body.Close()
+
+		var req struct {
+			Model string `json:"model"`
+		}
+		if err := json.Unmarshal(body, &req); err != nil || req.Model == "" {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = w.Write([]byte(`{"error":{"message":"missing or invalid model field","type":"invalid_request_error"}}`))
+			return
+		}
+
+		providerName, ok := modelToProvider[req.Model]
+		if !ok {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = fmt.Fprintf(w, `{"error":{"message":"unknown model: %s. Configure it in proxy.lmstudio.models","type":"invalid_request_error"}}`, req.Model)
+			return
+		}
+
+		// Rewrite to internal proxy path and delegate to existing handler.
+		r.URL.Path = "/proxy/" + providerName + "/v1/chat/completions"
+		r.Body = io.NopCloser(bytes.NewReader(body))
+		r.ContentLength = int64(len(body))
+		p.handleProxy(w, r)
+	})
+}
+
+func buildModelsResponse(models []CompatModel) []byte {
+	type modelEntry struct {
+		ID      string `json:"id"`
+		Object  string `json:"object"`
+		Created int64  `json:"created"`
+		OwnedBy string `json:"owned_by"`
+	}
+	type modelsResponse struct {
+		Object string       `json:"object"`
+		Data   []modelEntry `json:"data"`
+	}
+
+	resp := modelsResponse{Object: "list"}
+	for _, m := range models {
+		resp.Data = append(resp.Data, modelEntry{
+			ID:      m.ID,
+			Object:  "model",
+			Created: 1700000000,
+			OwnedBy: m.Provider,
+		})
+	}
+
+	b, _ := json.Marshal(resp)
+	return b
+}
+
 func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 	startTime := time.Now()
 

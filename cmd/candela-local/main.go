@@ -193,7 +193,7 @@ func main() {
 	lmAddr := fmt.Sprintf("127.0.0.1:%d", lmPort)
 	lmSrv = &http.Server{Addr: lmAddr, Handler: proxy}
 	go func() {
-		slog.Info("🖥️  LM Studio compat listener started",
+		slog.Info("🖥️ LM Studio compat listener started",
 			"addr", fmt.Sprintf("http://%s", lmAddr),
 			"models", fmt.Sprintf("http://%s/v1/models", lmAddr))
 		if err := lmSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
@@ -208,7 +208,9 @@ func main() {
 	defer cancel()
 
 	if lmSrv != nil {
-		_ = lmSrv.Shutdown(shutdownCtx)
+		if err := lmSrv.Shutdown(shutdownCtx); err != nil {
+			slog.Error("LM Studio shutdown error", "error", err)
+		}
 	}
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		slog.Error("shutdown error", "error", err)

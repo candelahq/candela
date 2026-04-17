@@ -150,8 +150,14 @@ func (p *Proxy) RegisterCompatRoutes(mux *http.ServeMux, models []CompatModel) {
 	// Build the /v1/models response once at startup.
 	modelList := buildModelsResponse(models)
 
-	// GET /v1/models — return the configured model list.
+	// GET /v1/models — return the configured model list (OpenAI-compatible).
 	mux.HandleFunc("GET /v1/models", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write(modelList)
+	})
+
+	// GET /api/v0/models — LM Studio native API (used by IntelliJ's "Test Connection").
+	mux.HandleFunc("GET /api/v0/models", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write(modelList)
 	})
@@ -199,10 +205,16 @@ func (p *Proxy) RegisterCompatRoutes(mux *http.ServeMux, models []CompatModel) {
 
 func buildModelsResponse(models []CompatModel) []byte {
 	type modelEntry struct {
-		ID      string `json:"id"`
-		Object  string `json:"object"`
-		Created int64  `json:"created"`
-		OwnedBy string `json:"owned_by"`
+		ID                string `json:"id"`
+		Object            string `json:"object"`
+		Created           int64  `json:"created"`
+		OwnedBy           string `json:"owned_by"`
+		Type              string `json:"type"`               // LM Studio: "llm", "vlm", "embeddings"
+		Publisher         string `json:"publisher"`          // LM Studio: model publisher
+		Arch              string `json:"arch"`               // LM Studio: model architecture (required by IntelliJ)
+		CompatibilityType string `json:"compatibility_type"` // LM Studio: "gguf", "mlx", etc.
+		State             string `json:"state"`              // LM Studio: "loaded", "not-loaded"
+		MaxContextLength  int    `json:"max_context_length"` // LM Studio: context window size
 	}
 	type modelsResponse struct {
 		Object string       `json:"object"`
@@ -212,10 +224,16 @@ func buildModelsResponse(models []CompatModel) []byte {
 	resp := modelsResponse{Object: "list"}
 	for _, m := range models {
 		resp.Data = append(resp.Data, modelEntry{
-			ID:      m.ID,
-			Object:  "model",
-			Created: 1700000000,
-			OwnedBy: m.Provider,
+			ID:                m.ID,
+			Object:            "model",
+			Created:           1700000000,
+			OwnedBy:           m.Provider,
+			Type:              "llm",
+			Publisher:         m.Provider,
+			Arch:              "auto",
+			CompatibilityType: "gguf",
+			State:             "loaded",
+			MaxContextLength:  128000,
 		})
 	}
 

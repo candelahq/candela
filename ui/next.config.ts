@@ -21,6 +21,15 @@ const nextConfig: NextConfig = {
           source: "/proxy/:path*",
           destination: `${backendUrl}/proxy/:path*`,
         },
+        // LM Studio compat routes (OpenAI-compatible + native API)
+        {
+          source: "/v1/:path*",
+          destination: `${backendUrl}/v1/:path*`,
+        },
+        {
+          source: "/api/v0/:path*",
+          destination: `${backendUrl}/api/v0/:path*`,
+        },
         // Health check
         {
           source: "/healthz",

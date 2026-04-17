@@ -209,6 +209,10 @@ func (t *AnthropicFormatTranslator) TranslateStreamChunk(data []byte, model stri
 	info := ParseModelName(model)
 	var result strings.Builder
 
+	// We need a consistent ID across all chunks in the stream.
+	// Extract it from message_start if present, otherwise generate one.
+	streamID := fmt.Sprintf("chatcmpl-%d", time.Now().UnixNano())
+
 	for _, line := range strings.Split(string(data), "\n") {
 		line = strings.TrimSpace(line)
 
@@ -236,8 +240,12 @@ func (t *AnthropicFormatTranslator) TranslateStreamChunk(data []byte, model stri
 		chunkType, _ := chunk["type"].(string)
 		switch chunkType {
 		case "message_start":
+			// Extract message ID for use in all subsequent chunks.
+			if msgID := getStringField(chunk, "message", "id"); msgID != "" {
+				streamID = msgID
+			}
 			oaiChunk := openAIStreamChunk{
-				ID:      getStringField(chunk, "message", "id"),
+				ID:      streamID,
 				Object:  "chat.completion.chunk",
 				Created: time.Now().Unix(),
 				Model:   info.Display,
@@ -256,6 +264,7 @@ func (t *AnthropicFormatTranslator) TranslateStreamChunk(data []byte, model stri
 				text, _ := delta["text"].(string)
 				if text != "" {
 					oaiChunk := openAIStreamChunk{
+						ID:      streamID,
 						Object:  "chat.completion.chunk",
 						Created: time.Now().Unix(),
 						Model:   info.Display,
@@ -271,6 +280,7 @@ func (t *AnthropicFormatTranslator) TranslateStreamChunk(data []byte, model stri
 				partialJSON, _ := delta["partial_json"].(string)
 				if partialJSON != "" {
 					oaiChunk := map[string]interface{}{
+						"id":      streamID,
 						"object":  "chat.completion.chunk",
 						"created": time.Now().Unix(),
 						"model":   info.Display,
@@ -302,6 +312,7 @@ func (t *AnthropicFormatTranslator) TranslateStreamChunk(data []byte, model stri
 				toolID, _ := cb["id"].(string)
 				toolName, _ := cb["name"].(string)
 				oaiChunk := map[string]interface{}{
+					"id":      streamID,
 					"object":  "chat.completion.chunk",
 					"created": time.Now().Unix(),
 					"model":   info.Display,
@@ -334,6 +345,7 @@ func (t *AnthropicFormatTranslator) TranslateStreamChunk(data []byte, model stri
 			sr, _ := stopDelta["stop_reason"].(string)
 
 			oaiChunk := openAIStreamChunk{
+				ID:      streamID,
 				Object:  "chat.completion.chunk",
 				Created: time.Now().Unix(),
 				Model:   info.Display,

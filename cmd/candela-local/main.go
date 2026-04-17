@@ -37,9 +37,10 @@ import (
 
 // Config holds the candela-local configuration.
 type Config struct {
-	Remote   string `yaml:"remote"`   // Remote Candela server URL
-	Audience string `yaml:"audience"` // IAP OAuth Client ID (OIDC audience)
-	Port     int    `yaml:"port"`     // Local port to listen on
+	Remote       string `yaml:"remote"`        // Remote Candela server URL
+	Audience     string `yaml:"audience"`      // IAP OAuth Client ID (OIDC audience)
+	Port         int    `yaml:"port"`          // Local port to listen on
+	LMStudioPort int    `yaml:"lmstudio_port"` // LM Studio compat listener port (default: 1234)
 }
 
 func main() {
@@ -158,6 +159,16 @@ func main() {
 		Handler: proxy,
 	}
 
+	// ── LM Studio compat listener ──
+	// Starts a secondary proxy on a separate port (default 1234) so IntelliJ's
+	// "Enable LM Studio" checkbox works with zero URL changes. The remote
+	// Candela server serves /v1/models, /v1/chat/completions, and /api/v0/models.
+	lmPort := cfg.LMStudioPort
+	if lmPort == 0 {
+		lmPort = 1234
+	}
+	var lmSrv *http.Server
+
 	// ── Graceful shutdown ──
 	sigCtx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -178,12 +189,27 @@ func main() {
 		}
 	}()
 
+	// Start LM Studio compat listener on separate port.
+	lmAddr := fmt.Sprintf("127.0.0.1:%d", lmPort)
+	lmSrv = &http.Server{Addr: lmAddr, Handler: proxy}
+	go func() {
+		slog.Info("🖥️  LM Studio compat listener started",
+			"addr", fmt.Sprintf("http://%s", lmAddr),
+			"models", fmt.Sprintf("http://%s/v1/models", lmAddr))
+		if err := lmSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			slog.Warn("LM Studio listener failed (port may be in use)", "addr", lmAddr, "error", err)
+		}
+	}()
+
 	<-sigCtx.Done()
 	slog.Info("shutting down...")
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
+	if lmSrv != nil {
+		_ = lmSrv.Shutdown(shutdownCtx)
+	}
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		slog.Error("shutdown error", "error", err)
 	}

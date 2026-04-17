@@ -35,6 +35,24 @@ proxy:
     - google
     - anthropic
     - gemini-oai
+  lmstudio:
+    enabled: ${CANDELA_LMSTUDIO_ENABLED:-true}
+    port: ${CANDELA_LMSTUDIO_PORT:-1234}
+    models:
+      - id: gpt-4o
+        provider: openai
+      - id: gpt-4o-mini
+        provider: openai
+      - id: o3-mini
+        provider: openai
+      - id: claude-sonnet-4-20250514
+        provider: anthropic
+      - id: claude-opus-4-20250514
+        provider: anthropic
+      - id: gemini-2.5-pro
+        provider: gemini-oai
+      - id: gemini-2.5-flash
+        provider: gemini-oai
 
 cors:
   allowed_origins: []

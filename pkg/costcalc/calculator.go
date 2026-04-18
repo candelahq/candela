@@ -33,6 +33,11 @@ func New() *Calculator {
 
 // Calculate returns the estimated cost in USD for the given model and token counts.
 func (c *Calculator) Calculate(provider, model string, inputTokens, outputTokens int64) float64 {
+	// Local models run on your hardware — no API cost.
+	if strings.ToLower(provider) == "local" {
+		return 0
+	}
+
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 

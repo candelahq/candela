@@ -37,10 +37,11 @@ import (
 
 // Config holds the candela-local configuration.
 type Config struct {
-	Remote       string `yaml:"remote"`        // Remote Candela server URL
-	Audience     string `yaml:"audience"`      // IAP OAuth Client ID (OIDC audience)
-	Port         int    `yaml:"port"`          // Local port to listen on
-	LMStudioPort int    `yaml:"lmstudio_port"` // LM Studio compat listener port (default: 1234)
+	Remote        string `yaml:"remote"`         // Remote Candela server URL
+	Audience      string `yaml:"audience"`       // IAP OAuth Client ID (OIDC audience)
+	Port          int    `yaml:"port"`           // Local port to listen on
+	LMStudioPort  int    `yaml:"lmstudio_port"`  // LM Studio compat listener port (default: 1234)
+	LocalUpstream string `yaml:"local_upstream"` // Local runtime URL (e.g. http://127.0.0.1:11434)
 }
 
 func main() {
@@ -153,10 +154,48 @@ func main() {
 		},
 	}
 
+	// ── Local runtime proxy ──
+	// If a local upstream is configured, route /proxy/local/ directly to the
+	// local runtime (Ollama, vLLM, LM Studio) without a cloud round-trip.
+	mux := http.NewServeMux()
+
+	if cfg.LocalUpstream != "" {
+		localURL, err := url.Parse(cfg.LocalUpstream)
+		if err != nil {
+			slog.Error("invalid local_upstream URL", "url", cfg.LocalUpstream, "error", err)
+			os.Exit(1)
+		}
+
+		localProxy := &httputil.ReverseProxy{
+			Director: func(req *http.Request) {
+				// Strip the /proxy/local prefix before forwarding.
+				req.URL.Scheme = localURL.Scheme
+				req.URL.Host = localURL.Host
+				req.Host = localURL.Host
+				req.URL.Path = strings.TrimPrefix(req.URL.Path, "/proxy/local")
+				if req.URL.Path == "" {
+					req.URL.Path = "/"
+				}
+				if _, ok := req.Header["User-Agent"]; !ok {
+					req.Header.Set("User-Agent", "candela-local/1.0")
+				}
+			},
+			ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
+				slog.Error("local proxy error", "path", r.URL.Path, "error", err)
+				http.Error(w, fmt.Sprintf(`{"error": "local runtime unavailable: %s"}`, err), http.StatusBadGateway)
+			},
+		}
+		mux.Handle("/proxy/local/", localProxy)
+		slog.Info("🏠 local runtime proxy enabled", "upstream", cfg.LocalUpstream)
+	}
+
+	// Everything else → remote Candela server.
+	mux.Handle("/", proxy)
+
 	addr := fmt.Sprintf("127.0.0.1:%d", cfg.Port)
 	srv := &http.Server{
 		Addr:    addr,
-		Handler: proxy,
+		Handler: mux,
 	}
 
 	// ── LM Studio compat listener ──
@@ -178,10 +217,15 @@ func main() {
 			"local", fmt.Sprintf("http://%s", addr),
 			"remote", cfg.Remote,
 			"audience", cfg.Audience[:min(20, len(cfg.Audience))]+"...")
-		slog.Info("Point your tools at:",
+		logFields := []any{
 			"openai", fmt.Sprintf("http://%s/proxy/openai/v1", addr),
 			"anthropic", fmt.Sprintf("http://%s/proxy/anthropic/", addr),
-			"google", fmt.Sprintf("http://%s/proxy/google/", addr))
+			"google", fmt.Sprintf("http://%s/proxy/google/", addr),
+		}
+		if cfg.LocalUpstream != "" {
+			logFields = append(logFields, "local", fmt.Sprintf("http://%s/proxy/local/v1", addr))
+		}
+		slog.Info("Point your tools at:", logFields...)
 
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			slog.Error("server error", "error", err)

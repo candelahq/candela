@@ -40,6 +40,9 @@ proxy:
   #   OpenAI:     Base URL = http://localhost:8181/proxy/openai/v1
   #   Gemini:     Base URL = http://localhost:8181/proxy/gemini-oai/v1
   #   Anthropic:  Base URL = http://localhost:8181/proxy/anthropic/v1
+  #
+  # Local models (Ollama/vLLM/LM Studio) are handled by candela-local.
+  # See ~/.candela.yaml for local runtime configuration.
   providers:
     - openai
     - google
@@ -69,6 +72,11 @@ proxy:
         provider: gemini-oai
       - id: gemini-2.5-flash
         provider: gemini-oai
+      # Local models (requires a running Ollama/vLLM/LM Studio)
+      # - id: llama3.2:8b
+      #   provider: local
+      # - id: codellama:13b
+      #   provider: local
 
 cors:
   # Origins allowed to make cross-origin requests.

@@ -142,3 +142,52 @@ remote: https://partial.run.app
 		t.Errorf("Port = %d, want 0", cfg.Port)
 	}
 }
+
+func TestLoadConfig_LocalUpstream(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "candela.yaml")
+	err := os.WriteFile(cfgPath, []byte(`
+remote: https://candela-xxx.run.app
+audience: test-audience
+local_upstream: "http://127.0.0.1:11434"
+`), 0o644)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := loadConfig(cfgPath)
+	if cfg.LocalUpstream != "http://127.0.0.1:11434" {
+		t.Errorf("LocalUpstream = %q, want %q", cfg.LocalUpstream, "http://127.0.0.1:11434")
+	}
+}
+
+func TestSingleJoiningSlash(t *testing.T) {
+	tests := []struct {
+		a, b string
+		want string
+	}{
+		// Basic cases
+		{"/api", "/v1/models", "/api/v1/models"},
+		{"", "/v1/chat", "/v1/chat"},
+		{"/", "/v1/chat", "/v1/chat"},
+
+		// Slash normalization
+		{"/api/", "/v1/models", "/api/v1/models"},
+		{"/api", "v1/models", "/api/v1/models"},
+		{"/api/", "v1/models", "/api/v1/models"},
+
+		// Root paths
+		{"", "/", "/"},
+		{"/", "/", "/"},
+		{"", "", "/"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.a+"_"+tt.b, func(t *testing.T) {
+			got := singleJoiningSlash(tt.a, tt.b)
+			if got != tt.want {
+				t.Errorf("singleJoiningSlash(%q, %q) = %q, want %q", tt.a, tt.b, got, tt.want)
+			}
+		})
+	}
+}

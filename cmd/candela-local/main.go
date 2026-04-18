@@ -16,6 +16,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"log/slog"
@@ -150,7 +151,9 @@ func main() {
 		},
 		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
 			slog.Error("proxy error", "path", r.URL.Path, "error", err)
-			http.Error(w, fmt.Sprintf(`{"error": "proxy error: %s"}`, err), http.StatusBadGateway)
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadGateway)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": fmt.Sprintf("proxy error: %v", err)})
 		},
 	}
 
@@ -168,21 +171,24 @@ func main() {
 
 		localProxy := &httputil.ReverseProxy{
 			Director: func(req *http.Request) {
-				// Strip the /proxy/local prefix before forwarding.
+				// Strip the /proxy/local prefix and prepend the upstream path.
 				req.URL.Scheme = localURL.Scheme
 				req.URL.Host = localURL.Host
 				req.Host = localURL.Host
-				req.URL.Path = strings.TrimPrefix(req.URL.Path, "/proxy/local")
-				if req.URL.Path == "" {
-					req.URL.Path = "/"
+				stripped := strings.TrimPrefix(req.URL.Path, "/proxy/local")
+				if stripped == "" {
+					stripped = "/"
 				}
+				req.URL.Path = singleJoiningSlash(localURL.Path, stripped)
 				if _, ok := req.Header["User-Agent"]; !ok {
 					req.Header.Set("User-Agent", "candela-local/1.0")
 				}
 			},
 			ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
 				slog.Error("local proxy error", "path", r.URL.Path, "error", err)
-				http.Error(w, fmt.Sprintf(`{"error": "local runtime unavailable: %s"}`, err), http.StatusBadGateway)
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusBadGateway)
+				_ = json.NewEncoder(w).Encode(map[string]string{"error": fmt.Sprintf("local runtime unavailable: %v", err)})
 			},
 		}
 		mux.Handle("/proxy/local/", localProxy)
@@ -316,4 +322,18 @@ func loadConfig(configPath string) *Config {
 
 	slog.Info("loaded config", "path", configPath)
 	return cfg
+}
+
+// singleJoiningSlash joins two URL path segments with exactly one slash.
+// This is the same logic used by net/http/httputil.NewSingleHostReverseProxy.
+func singleJoiningSlash(a, b string) string {
+	aslash := strings.HasSuffix(a, "/")
+	bslash := strings.HasPrefix(b, "/")
+	switch {
+	case aslash && bslash:
+		return a + b[1:]
+	case !aslash && !bslash:
+		return a + "/" + b
+	}
+	return a + b
 }

@@ -191,3 +191,51 @@ func TestSingleJoiningSlash(t *testing.T) {
 		})
 	}
 }
+
+func TestLoadConfig_RuntimeManagement(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "candela.yaml")
+	err := os.WriteFile(cfgPath, []byte(`
+remote: https://candela-xxx.run.app
+audience: test-audience
+port: 8181
+runtime_backend: ollama
+runtime_config:
+  host: 127.0.0.1
+  port: 11434
+runtime_manage:
+  auto_start: true
+  auto_pull: true
+  health_interval: 15s
+  models:
+    - llama3.2:8b
+    - codellama:13b
+`), 0o644)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := loadConfig(cfgPath)
+
+	if cfg.RuntimeBackend != "ollama" {
+		t.Errorf("RuntimeBackend = %q, want %q", cfg.RuntimeBackend, "ollama")
+	}
+	if cfg.RuntimeConfig.Host != "127.0.0.1" {
+		t.Errorf("RuntimeConfig.Host = %q, want %q", cfg.RuntimeConfig.Host, "127.0.0.1")
+	}
+	if cfg.RuntimeConfig.Port != 11434 {
+		t.Errorf("RuntimeConfig.Port = %d, want 11434", cfg.RuntimeConfig.Port)
+	}
+	if !cfg.RuntimeManage.AutoStart {
+		t.Error("RuntimeManage.AutoStart should be true")
+	}
+	if !cfg.RuntimeManage.AutoPull {
+		t.Error("RuntimeManage.AutoPull should be true")
+	}
+	if len(cfg.RuntimeManage.Models) != 2 {
+		t.Fatalf("RuntimeManage.Models = %v, want 2 entries", cfg.RuntimeManage.Models)
+	}
+	if cfg.RuntimeManage.Models[0] != "llama3.2:8b" {
+		t.Errorf("Models[0] = %q, want %q", cfg.RuntimeManage.Models[0], "llama3.2:8b")
+	}
+}

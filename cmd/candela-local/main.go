@@ -30,6 +30,13 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/candelahq/candela/pkg/runtime"
+
+	// Register runtime backends.
+	_ "github.com/candelahq/candela/pkg/runtime/lmstudio"
+	_ "github.com/candelahq/candela/pkg/runtime/ollama"
+	_ "github.com/candelahq/candela/pkg/runtime/vllm"
+
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/google"
 	"google.golang.org/api/idtoken"
@@ -43,6 +50,11 @@ type Config struct {
 	Port          int    `yaml:"port"`           // Local port to listen on
 	LMStudioPort  int    `yaml:"lmstudio_port"`  // LM Studio compat listener port (default: 1234)
 	LocalUpstream string `yaml:"local_upstream"` // Local runtime URL (e.g. http://127.0.0.1:11434)
+
+	// Runtime management configuration.
+	RuntimeBackend string                `yaml:"runtime_backend"` // "ollama", "vllm", "lmstudio"
+	RuntimeConfig  runtime.Config        `yaml:"runtime_config"`  // Host, port, args for the backend
+	RuntimeManage  runtime.ManagerConfig `yaml:"runtime_manage"`  // Auto-start, auto-pull, models
 }
 
 func main() {
@@ -195,6 +207,26 @@ func main() {
 		slog.Info("🏠 local runtime proxy enabled", "upstream", cfg.LocalUpstream)
 	}
 
+	// ── Local runtime management API ──
+	// If a runtime backend is configured, create a Manager and expose
+	// the /_local/* management endpoints for the embedded UI.
+	var mgr *runtime.Manager
+	if cfg.RuntimeBackend != "" {
+		rt, err := runtime.New(cfg.RuntimeBackend, cfg.RuntimeConfig)
+		if err != nil {
+			slog.Error("failed to create runtime", "backend", cfg.RuntimeBackend, "error", err)
+			os.Exit(1)
+		}
+		mgr = runtime.NewManager(rt, cfg.RuntimeManage)
+		if err := mgr.Start(ctx); err != nil {
+			slog.Error("failed to start runtime manager", "error", err)
+			os.Exit(1)
+		}
+		registerLocalAPI(mux, mgr)
+		slog.Info("🔧 local management API enabled", "backend", cfg.RuntimeBackend,
+			"endpoints", "/_local/{health,models,models/pull,backends}")
+	}
+
 	// Everything else → remote Candela server.
 	mux.Handle("/", proxy)
 
@@ -260,6 +292,11 @@ func main() {
 	if lmSrv != nil {
 		if err := lmSrv.Shutdown(shutdownCtx); err != nil {
 			slog.Error("LM Studio shutdown error", "error", err)
+		}
+	}
+	if mgr != nil {
+		if err := mgr.Stop(shutdownCtx); err != nil {
+			slog.Error("runtime manager shutdown error", "error", err)
 		}
 	}
 	if err := srv.Shutdown(shutdownCtx); err != nil {

@@ -62,6 +62,24 @@ func TestCalculate(t *testing.T) {
 			wantMin:      0,
 			wantMax:      0,
 		},
+		{
+			name:         "Local provider always zero cost",
+			provider:     "local",
+			model:        "llama3.2:8b",
+			inputTokens:  100000,
+			outputTokens: 50000,
+			wantMin:      0,
+			wantMax:      0,
+		},
+		{
+			name:         "Local provider case-insensitive",
+			provider:     "Local",
+			model:        "codellama:13b",
+			inputTokens:  1000000,
+			outputTokens: 1000000,
+			wantMin:      0,
+			wantMax:      0,
+		},
 	}
 
 	for _, tt := range tests {

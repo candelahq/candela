@@ -50,6 +50,8 @@ function formatUptime(seconds) {
 
 let currentHealth = null;
 let pollTimer = null;
+let pullPollTimer = null;
+const completedPulls = new Set(); // tracks models we've already refreshed for
 
 // ── Render functions ──
 
@@ -178,8 +180,6 @@ function renderModels(models) {
 
 // ── Active Pulls ──
 
-let pullPollTimer = null;
-
 function renderActivePulls(pulls) {
   let container = $('#models-list').querySelector('.active-pulls');
   if (!pulls || pulls.length === 0) {
@@ -248,6 +248,23 @@ async function refreshPulls() {
     const resp = await fetch('/_local/api/pulls');
     const pulls = await resp.json();
     renderActivePulls(pulls);
+
+    // Auto-refresh model list when a pull completes.
+    if (pulls) {
+      let needsRefresh = false;
+      for (const p of pulls) {
+        if (p.status === 'complete' && !completedPulls.has(p.model)) {
+          completedPulls.add(p.model);
+          needsRefresh = true;
+        }
+      }
+      if (needsRefresh) refreshModels();
+      // Clean up completed entries that are no longer in the list.
+      const activeModels = new Set(pulls.map(p => p.model));
+      for (const m of completedPulls) {
+        if (!activeModels.has(m)) completedPulls.delete(m);
+      }
+    }
   } catch (err) {
     console.error('refreshPulls failed:', err);
   }

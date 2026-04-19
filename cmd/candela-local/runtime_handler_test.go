@@ -779,3 +779,100 @@ func TestRPC_ListCatalog_NoStateDB(t *testing.T) {
 		t.Errorf("code = %v, want FailedPrecondition", connect.CodeOf(err))
 	}
 }
+
+func TestRPC_DeleteModel_AllowedAfterPullComplete(t *testing.T) {
+	mock := &rpcMockRuntime{healthy: true}
+	mgr := runtime.NewManager(mock, runtime.ManagerConfig{HealthCheck: 10 * time.Second})
+	if err := mgr.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = mgr.Stop(context.Background()) }()
+
+	h := newRuntimeHandler(mgr, nil, context.Background())
+
+	// Simulate a completed pull sitting in activePulls (status="complete").
+	ps := &pullStatus{Model: "llama3.2:8b", Status: "complete", Percent: 100}
+	h.activePulls.Store("llama3.2:8b", ps)
+
+	mux := http.NewServeMux()
+	path, handler := candelav1connect.NewRuntimeServiceHandler(h)
+	mux.Handle(path, handler)
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+	client := candelav1connect.NewRuntimeServiceClient(http.DefaultClient, srv.URL)
+
+	// Delete should succeed — pull is complete, not active.
+	_, err := client.DeleteModel(context.Background(),
+		connect.NewRequest(&v1.DeleteModelRequest{Model: "llama3.2:8b"}))
+	if err != nil {
+		t.Fatalf("delete should succeed after pull completes, got: %v", err)
+	}
+}
+
+func TestRPC_DeleteModel_BlockedDuringActivePull(t *testing.T) {
+	mock := &rpcMockRuntime{healthy: true, pullDelay: 5 * time.Second}
+	mgr := runtime.NewManager(mock, runtime.ManagerConfig{HealthCheck: 10 * time.Second})
+	if err := mgr.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = mgr.Stop(context.Background()) }()
+
+	h := newRuntimeHandler(mgr, nil, context.Background())
+
+	mux := http.NewServeMux()
+	path, handler := candelav1connect.NewRuntimeServiceHandler(h)
+	mux.Handle(path, handler)
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+	client := candelav1connect.NewRuntimeServiceClient(http.DefaultClient, srv.URL)
+
+	// Start a pull.
+	_, err := client.PullModel(context.Background(),
+		connect.NewRequest(&v1.PullModelRequest{Model: "big-model:70b"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(50 * time.Millisecond)
+
+	// Delete should be blocked while pulling.
+	_, err = client.DeleteModel(context.Background(),
+		connect.NewRequest(&v1.DeleteModelRequest{Model: "big-model:70b"}))
+	if err == nil {
+		t.Fatal("delete should be blocked during active pull")
+	}
+	if connect.CodeOf(err) != connect.CodeFailedPrecondition {
+		t.Errorf("code = %v, want FailedPrecondition", connect.CodeOf(err))
+	}
+}
+
+func TestRPC_CancelPull_RejectsCompletedPull(t *testing.T) {
+	mock := &rpcMockRuntime{healthy: true}
+	mgr := runtime.NewManager(mock, runtime.ManagerConfig{HealthCheck: 10 * time.Second})
+	if err := mgr.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = mgr.Stop(context.Background()) }()
+
+	h := newRuntimeHandler(mgr, nil, context.Background())
+
+	// Simulate a completed pull.
+	ps := &pullStatus{Model: "done-model:7b", Status: "complete", Percent: 100}
+	h.activePulls.Store("done-model:7b", ps)
+
+	mux := http.NewServeMux()
+	path, handler := candelav1connect.NewRuntimeServiceHandler(h)
+	mux.Handle(path, handler)
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+	client := candelav1connect.NewRuntimeServiceClient(http.DefaultClient, srv.URL)
+
+	// Cancel should fail — pull already completed.
+	_, err := client.CancelPull(context.Background(),
+		connect.NewRequest(&v1.CancelPullRequest{Model: "done-model:7b"}))
+	if err == nil {
+		t.Fatal("cancel should reject already-completed pull")
+	}
+	if connect.CodeOf(err) != connect.CodeFailedPrecondition {
+		t.Errorf("code = %v, want FailedPrecondition", connect.CodeOf(err))
+	}
+}

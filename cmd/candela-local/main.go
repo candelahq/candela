@@ -100,80 +100,87 @@ func main() {
 		cfg.Port = 8181
 	}
 
-	// ── Validate ──
-	if cfg.Remote == "" {
-		slog.Error("remote URL is required (set in ~/.candela.yaml or --remote)")
-		os.Exit(1)
-	}
-	if cfg.Audience == "" {
-		slog.Error("audience is required (set in ~/.candela.yaml or --audience)")
-		os.Exit(1)
-	}
-
-	remoteURL, err := url.Parse(cfg.Remote)
-	if err != nil {
-		slog.Error("invalid remote URL", "url", cfg.Remote, "error", err)
-		os.Exit(1)
-	}
-
-	// ── Get OIDC ID token source via ADC ──
-	// Strategy 1: idtoken.NewTokenSource (works for service accounts).
-	// Strategy 2: google.DefaultTokenSource with openid scope (works for user credentials).
+	// ── Validate & mode detection ──
 	ctx := context.Background()
-	var tokenSource oauth2.TokenSource
-	useIDToken := false
+	soloMode := cfg.Remote == ""
 
-	ts, err := idtoken.NewTokenSource(ctx, cfg.Audience)
-	if err == nil {
-		slog.Info("using service account ID token source")
-		tokenSource = ts
-		useIDToken = true
+	var proxy *httputil.ReverseProxy
+
+	if soloMode {
+		slog.Info("🏠 solo mode — no remote server configured, local-only operation")
+		if cfg.Audience != "" {
+			slog.Warn("audience is set but remote is empty — audience will be ignored")
+		}
 	} else {
-		slog.Info("idtoken unavailable (user credentials), using OAuth2 with openid scope", "reason", err)
-		ts2, err2 := google.DefaultTokenSource(ctx, "openid", "email")
-		if err2 != nil {
-			slog.Error("failed to get credentials — run 'gcloud auth application-default login' first",
-				"error", err2)
+		if cfg.Audience == "" {
+			slog.Error("audience is required when remote is set (set in ~/.candela.yaml or --audience)")
 			os.Exit(1)
 		}
-		tokenSource = ts2
-	}
 
-	// ── Build reverse proxy ──
-	proxy := &httputil.ReverseProxy{
-		Director: func(req *http.Request) {
-			// Rewrite the request to point at the remote server.
-			req.URL.Scheme = remoteURL.Scheme
-			req.URL.Host = remoteURL.Host
-			req.Host = remoteURL.Host
+		remoteURL, err := url.Parse(cfg.Remote)
+		if err != nil {
+			slog.Error("invalid remote URL", "url", cfg.Remote, "error", err)
+			os.Exit(1)
+		}
 
-			// Inject OIDC identity token for IAP.
-			// For user credentials (OAuth2), the ID token is in token.Extra("id_token").
-			// For service account credentials (idtoken pkg), AccessToken IS the ID token.
-			token, err := tokenSource.Token()
-			if err != nil {
-				slog.Error("failed to get identity token", "error", err)
-				return
+		// ── Get OIDC ID token source via ADC ──
+		// Strategy 1: idtoken.NewTokenSource (works for service accounts).
+		// Strategy 2: google.DefaultTokenSource with openid scope (works for user credentials).
+		var tokenSource oauth2.TokenSource
+		useIDToken := false
+
+		ts, err := idtoken.NewTokenSource(ctx, cfg.Audience)
+		if err == nil {
+			slog.Info("using service account ID token source")
+			tokenSource = ts
+			useIDToken = true
+		} else {
+			slog.Info("idtoken unavailable (user credentials), using OAuth2 with openid scope", "reason", err)
+			ts2, err2 := google.DefaultTokenSource(ctx, "openid", "email")
+			if err2 != nil {
+				slog.Error("failed to get credentials — run 'gcloud auth application-default login' first",
+					"error", err2)
+				os.Exit(1)
 			}
-			bearerToken := token.AccessToken
-			if useIDToken {
-				if idToken, ok := token.Extra("id_token").(string); ok && idToken != "" {
-					bearerToken = idToken
+			tokenSource = ts2
+		}
+
+		// ── Build reverse proxy ──
+		proxy = &httputil.ReverseProxy{
+			Director: func(req *http.Request) {
+				// Rewrite the request to point at the remote server.
+				req.URL.Scheme = remoteURL.Scheme
+				req.URL.Host = remoteURL.Host
+				req.Host = remoteURL.Host
+
+				// Inject OIDC identity token for IAP.
+				// For user credentials (OAuth2), the ID token is in token.Extra("id_token").
+				// For service account credentials (idtoken pkg), AccessToken IS the ID token.
+				token, err := tokenSource.Token()
+				if err != nil {
+					slog.Error("failed to get identity token", "error", err)
+					return
 				}
-			}
-			req.Header.Set("Authorization", "Bearer "+bearerToken)
+				bearerToken := token.AccessToken
+				if useIDToken {
+					if idToken, ok := token.Extra("id_token").(string); ok && idToken != "" {
+						bearerToken = idToken
+					}
+				}
+				req.Header.Set("Authorization", "Bearer "+bearerToken)
 
-			// Preserve the original path.
-			if _, ok := req.Header["User-Agent"]; !ok {
-				req.Header.Set("User-Agent", "candela-local/1.0")
-			}
-		},
-		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
-			slog.Error("proxy error", "path", r.URL.Path, "error", err)
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusBadGateway)
-			_ = json.NewEncoder(w).Encode(map[string]string{"error": fmt.Sprintf("proxy error: %v", err)})
-		},
+				// Preserve the original path.
+				if _, ok := req.Header["User-Agent"]; !ok {
+					req.Header.Set("User-Agent", "candela-local/1.0")
+				}
+			},
+			ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
+				slog.Error("proxy error", "path", r.URL.Path, "error", err)
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusBadGateway)
+				_ = json.NewEncoder(w).Encode(map[string]string{"error": fmt.Sprintf("proxy error: %v", err)})
+			},
+		}
 	}
 
 	// ── Local runtime proxy ──
@@ -223,7 +230,7 @@ func main() {
 	if statePath == "" {
 		statePath = "~/.candela/state.db"
 	}
-	stateDB, err = openStateDB(statePath)
+	stateDB, err := openStateDB(statePath)
 	if err != nil {
 		slog.Warn("state DB unavailable (running without persistence)", "error", err)
 		stateDB = nil
@@ -268,8 +275,16 @@ func main() {
 		"ui", fmt.Sprintf("http://127.0.0.1:%d/_local/", cfg.Port),
 		"rpc", rpcPath)
 
-	// Everything else → remote Candela server.
-	mux.Handle("/", proxy)
+	// Everything else → remote Candela server (if configured).
+	if proxy != nil {
+		mux.Handle("/", proxy)
+	} else {
+		mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusNotFound)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": "solo mode — no remote server configured"})
+		})
+	}
 
 	addr := fmt.Sprintf("127.0.0.1:%d", cfg.Port)
 	srv := &http.Server{
@@ -307,19 +322,24 @@ func main() {
 	defer stop()
 
 	go func() {
-		slog.Info("🕯️ candela-local proxy started",
-			"local", fmt.Sprintf("http://%s", addr),
-			"remote", cfg.Remote,
-			"audience", cfg.Audience[:min(20, len(cfg.Audience))]+"...")
-		logFields := []any{
-			"openai", fmt.Sprintf("http://%s/proxy/openai/v1", addr),
-			"anthropic", fmt.Sprintf("http://%s/proxy/anthropic/", addr),
-			"google", fmt.Sprintf("http://%s/proxy/google/", addr),
+		if soloMode {
+			slog.Info("🕯️ candela-local started (solo mode)",
+				"local", fmt.Sprintf("http://%s", addr))
+		} else {
+			slog.Info("🕯️ candela-local proxy started",
+				"local", fmt.Sprintf("http://%s", addr),
+				"remote", cfg.Remote,
+				"audience", cfg.Audience[:min(20, len(cfg.Audience))]+"...")
+			logFields := []any{
+				"openai", fmt.Sprintf("http://%s/proxy/openai/v1", addr),
+				"anthropic", fmt.Sprintf("http://%s/proxy/anthropic/", addr),
+				"google", fmt.Sprintf("http://%s/proxy/google/", addr),
+			}
+			if cfg.LocalUpstream != "" {
+				logFields = append(logFields, "local", fmt.Sprintf("http://%s/proxy/local/v1", addr))
+			}
+			slog.Info("Point your tools at:", logFields...)
 		}
-		if cfg.LocalUpstream != "" {
-			logFields = append(logFields, "local", fmt.Sprintf("http://%s/proxy/local/v1", addr))
-		}
-		slog.Info("Point your tools at:", logFields...)
 
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			slog.Error("server error", "error", err)

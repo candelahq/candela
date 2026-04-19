@@ -366,3 +366,111 @@ func TestLMHandler_Chat_MalformedBody(t *testing.T) {
 		t.Errorf("source = %q, want remote (malformed body fallback)", result["source"])
 	}
 }
+
+func setupSoloLMHandler(t *testing.T, localModels []runtime.Model) *httptest.Server {
+	t.Helper()
+
+	localSrv := mockLocalServer(t)
+
+	mock := &lmMockRuntime{models: localModels}
+	mgr := runtime.NewManager(mock, runtime.ManagerConfig{HealthCheck: 10 * 1e9})
+	if err := mgr.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = mgr.Stop(context.Background()) })
+
+	// Solo mode: nil remote proxy.
+	h := newLMHandler(mgr, nil, proxyTo(localSrv.URL))
+
+	srv := httptest.NewServer(h)
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+func TestLMHandler_SoloMode_ModelsLocalOnly(t *testing.T) {
+	localModels := []runtime.Model{
+		{ID: "llama3.2:3b"},
+		{ID: "mistral:7b"},
+	}
+
+	srv := setupSoloLMHandler(t, localModels)
+
+	resp, err := http.Get(srv.URL + "/v1/models")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	var result openaiModelList
+	_ = json.NewDecoder(resp.Body).Decode(&result)
+
+	// Should return only local models, no remote.
+	if len(result.Data) != 2 {
+		t.Fatalf("got %d models, want 2 (local only)", len(result.Data))
+	}
+	if result.Data[0].ID != "llama3.2:3b" {
+		t.Errorf("first model = %q, want llama3.2:3b", result.Data[0].ID)
+	}
+}
+
+func TestLMHandler_SoloMode_ChatLocalRoutes(t *testing.T) {
+	localModels := []runtime.Model{{ID: "llama3.2:3b"}}
+	srv := setupSoloLMHandler(t, localModels)
+
+	// Populate cache.
+	resp, _ := http.Get(srv.URL + "/v1/models")
+	_ = resp.Body.Close()
+
+	body := `{"model": "llama3.2:3b", "messages": [{"role": "user", "content": "hi"}]}`
+	resp, err := http.Post(srv.URL+"/v1/chat/completions", "application/json", strings.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	var result map[string]string
+	_ = json.NewDecoder(resp.Body).Decode(&result)
+
+	if result["source"] != "local" {
+		t.Errorf("source = %q, want local", result["source"])
+	}
+}
+
+func TestLMHandler_SoloMode_ChatUnknownModel404(t *testing.T) {
+	localModels := []runtime.Model{{ID: "llama3.2:3b"}}
+	srv := setupSoloLMHandler(t, localModels)
+
+	body := `{"model": "gpt-4o", "messages": [{"role": "user", "content": "hi"}]}`
+	resp, err := http.Post(srv.URL+"/v1/chat/completions", "application/json", strings.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusNotFound {
+		t.Errorf("status = %d, want 404 (no remote in solo mode)", resp.StatusCode)
+	}
+}
+
+func TestLMHandler_SoloMode_PassthroughNoPanic(t *testing.T) {
+	localModels := []runtime.Model{{ID: "llama3.2:3b"}}
+	srv := setupSoloLMHandler(t, localModels)
+
+	// Unknown path in solo mode should return 404, not panic.
+	resp, err := http.Get(srv.URL + "/api/v0/whatever")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusNotFound {
+		t.Errorf("status = %d, want 404 (solo mode passthrough)", resp.StatusCode)
+	}
+
+	// Verify it's proper JSON.
+	var result map[string]string
+	_ = json.NewDecoder(resp.Body).Decode(&result)
+	if result["error"] == "" {
+		t.Error("expected JSON error body")
+	}
+}

@@ -278,14 +278,29 @@ func main() {
 	}
 
 	// ── LM Studio compat listener ──
-	// Starts a secondary proxy on a separate port (default 1234) so IntelliJ's
-	// "Enable LM Studio" checkbox works with zero URL changes. The remote
-	// Candela server serves /v1/models, /v1/chat/completions, and /api/v0/models.
+	// Starts a secondary listener on a separate port (default 1234) so IntelliJ's
+	// "Enable LM Studio" checkbox works with zero URL changes.
+	// Uses a smart handler that merges local runtime models with remote cloud
+	// models and routes chat/completions to the right backend.
 	lmPort := cfg.LMStudioPort
 	if lmPort == 0 {
 		lmPort = 1234
 	}
 	var lmSrv *http.Server
+
+	// Build a local proxy for the runtime (use explicit local_upstream or runtime endpoint).
+	var runtimeLocalProxy *httputil.ReverseProxy
+	if cfg.LocalUpstream != "" {
+		// Reuse the already-configured local upstream proxy target.
+		runtimeLocalProxy = buildLocalProxy(cfg.LocalUpstream)
+	} else if mgr != nil {
+		// Auto-create a local proxy pointing at the runtime endpoint.
+		runtimeLocalProxy = buildLocalProxy(mgr.Runtime().Endpoint())
+	}
+
+	// Build the smart LM handler.
+	lmH := newLMHandler(mgr, proxy, runtimeLocalProxy)
+	lmAddr := fmt.Sprintf("127.0.0.1:%d", lmPort)
 
 	// ── Graceful shutdown ──
 	sigCtx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
@@ -313,8 +328,7 @@ func main() {
 	}()
 
 	// Start LM Studio compat listener on separate port.
-	lmAddr := fmt.Sprintf("127.0.0.1:%d", lmPort)
-	lmSrv = &http.Server{Addr: lmAddr, Handler: proxy}
+	lmSrv = &http.Server{Addr: lmAddr, Handler: lmH}
 	go func() {
 		slog.Info("🖥️ LM Studio compat listener started",
 			"addr", fmt.Sprintf("http://%s", lmAddr),
@@ -417,4 +431,29 @@ func singleJoiningSlash(a, b string) string {
 		return a + "/" + b
 	}
 	return a + b
+}
+
+// buildLocalProxy creates a reverse proxy to a local runtime endpoint.
+func buildLocalProxy(upstream string) *httputil.ReverseProxy {
+	u, err := url.Parse(upstream)
+	if err != nil {
+		slog.Warn("invalid local proxy URL", "url", upstream, "error", err)
+		return nil
+	}
+	return &httputil.ReverseProxy{
+		Director: func(req *http.Request) {
+			req.URL.Scheme = u.Scheme
+			req.URL.Host = u.Host
+			req.Host = u.Host
+			if _, ok := req.Header["User-Agent"]; !ok {
+				req.Header.Set("User-Agent", "candela-local/1.0")
+			}
+		},
+		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
+			slog.Error("local proxy error", "path", r.URL.Path, "error", err)
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadGateway)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": fmt.Sprintf("local runtime unavailable: %v", err)})
+		},
+	}
 }

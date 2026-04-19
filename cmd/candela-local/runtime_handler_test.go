@@ -31,6 +31,8 @@ type rpcMockRuntime struct {
 	pullCalled   []string
 	healthErr    error
 	listErr      error
+	pullDelay    time.Duration // simulate slow pull for progress tracking tests
+	startCalled  int           // counts rt.Start() calls
 }
 
 func (m *rpcMockRuntime) Name() string     { return "mock" }
@@ -40,6 +42,7 @@ func (m *rpcMockRuntime) Start(_ context.Context) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.healthy = true
+	m.startCalled++
 	return nil
 }
 
@@ -80,7 +83,15 @@ func (m *rpcMockRuntime) ListModels(_ context.Context) ([]runtime.Model, error) 
 func (m *rpcMockRuntime) PullModel(_ context.Context, modelID string, progress chan<- runtime.PullProgress) error {
 	m.mu.Lock()
 	m.pullCalled = append(m.pullCalled, modelID)
+	delay := m.pullDelay
 	m.mu.Unlock()
+
+	if delay > 0 {
+		if progress != nil {
+			progress <- runtime.PullProgress{Status: "pulling", Percent: 50}
+		}
+		time.Sleep(delay)
+	}
 	if progress != nil {
 		progress <- runtime.PullProgress{Status: "done", Percent: 100}
 	}
@@ -423,5 +434,189 @@ func TestRPC_ResetState_NoStateDB(t *testing.T) {
 	}
 	if connect.CodeOf(err) != connect.CodeFailedPrecondition {
 		t.Errorf("code = %v, want FailedPrecondition", connect.CodeOf(err))
+	}
+}
+
+func TestPullModel_ActivePullsTracking(t *testing.T) {
+	mock := &rpcMockRuntime{
+		healthy:   true,
+		pullDelay: 200 * time.Millisecond,
+	}
+	mgr := runtime.NewManager(mock, runtime.ManagerConfig{
+		HealthCheck: 10 * time.Second,
+	})
+	if err := mgr.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = mgr.Stop(context.Background()) }()
+
+	h := newRuntimeHandler(mgr, nil, context.Background())
+
+	// Trigger a pull via the handler directly.
+	resp, err := h.PullModel(context.Background(),
+		connect.NewRequest(&v1.PullModelRequest{Model: "test-model:7b"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.Msg.Status != "pulling" {
+		t.Errorf("status = %q, want pulling", resp.Msg.Status)
+	}
+
+	// ActivePulls should show the in-flight pull.
+	time.Sleep(50 * time.Millisecond)
+	pulls := h.ActivePulls()
+	if len(pulls) != 1 {
+		t.Fatalf("activePulls = %d, want 1", len(pulls))
+	}
+	if pulls[0].Model != "test-model:7b" {
+		t.Errorf("model = %q, want test-model:7b", pulls[0].Model)
+	}
+	if pulls[0].Status != "pulling" {
+		t.Errorf("status = %q, want pulling", pulls[0].Status)
+	}
+
+	// Wait for pull to complete.
+	time.Sleep(300 * time.Millisecond)
+	pulls = h.ActivePulls()
+	if len(pulls) != 1 {
+		t.Fatalf("after complete: activePulls = %d, want 1", len(pulls))
+	}
+	if pulls[0].Status != "complete" {
+		t.Errorf("after complete: status = %q, want complete", pulls[0].Status)
+	}
+	if pulls[0].Percent != 100 {
+		t.Errorf("after complete: percent = %v, want 100", pulls[0].Percent)
+	}
+}
+
+func TestPullModel_DuplicateDetection(t *testing.T) {
+	mock := &rpcMockRuntime{
+		healthy:   true,
+		pullDelay: 500 * time.Millisecond,
+	}
+	mgr := runtime.NewManager(mock, runtime.ManagerConfig{
+		HealthCheck: 10 * time.Second,
+	})
+	if err := mgr.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = mgr.Stop(context.Background()) }()
+
+	h := newRuntimeHandler(mgr, nil, context.Background())
+
+	// First pull.
+	resp1, err := h.PullModel(context.Background(),
+		connect.NewRequest(&v1.PullModelRequest{Model: "dup-model"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp1.Msg.Status != "pulling" {
+		t.Errorf("first pull status = %q, want pulling", resp1.Msg.Status)
+	}
+
+	// Second pull of same model — should return already_pulling.
+	resp2, err := h.PullModel(context.Background(),
+		connect.NewRequest(&v1.PullModelRequest{Model: "dup-model"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp2.Msg.Status != "already_pulling" {
+		t.Errorf("duplicate pull status = %q, want already_pulling", resp2.Msg.Status)
+	}
+
+	// Only one actual pull should have been triggered.
+	time.Sleep(100 * time.Millisecond)
+	mock.mu.Lock()
+	n := len(mock.pullCalled)
+	mock.mu.Unlock()
+	if n != 1 {
+		t.Errorf("pullCalled count = %d, want 1", n)
+	}
+}
+
+func TestServeActivePulls_Endpoint(t *testing.T) {
+	mock := &rpcMockRuntime{
+		healthy:   true,
+		pullDelay: 200 * time.Millisecond,
+	}
+	mgr := runtime.NewManager(mock, runtime.ManagerConfig{
+		HealthCheck: 10 * time.Second,
+	})
+	if err := mgr.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = mgr.Stop(context.Background()) }()
+
+	h := newRuntimeHandler(mgr, nil, context.Background())
+
+	// No active pulls — should return empty JSON array.
+	rec := httptest.NewRecorder()
+	h.ServeActivePulls(rec, httptest.NewRequest("GET", "/_local/api/pulls", nil))
+	if rec.Code != 200 {
+		t.Errorf("status = %d, want 200", rec.Code)
+	}
+	if ct := rec.Header().Get("Content-Type"); ct != "application/json" {
+		t.Errorf("content-type = %q, want application/json", ct)
+	}
+	if body := rec.Body.String(); body != "[]\n" {
+		t.Errorf("empty pulls body = %q, want []\n", body)
+	}
+
+	// Start a pull and check the endpoint again.
+	_, _ = h.PullModel(context.Background(),
+		connect.NewRequest(&v1.PullModelRequest{Model: "endpoint-test"}))
+	time.Sleep(50 * time.Millisecond)
+
+	rec = httptest.NewRecorder()
+	h.ServeActivePulls(rec, httptest.NewRequest("GET", "/_local/api/pulls", nil))
+	body := rec.Body.String()
+	if body == "[]\n" {
+		t.Error("expected non-empty pulls array during active pull")
+	}
+}
+
+func TestRPC_StartRuntime_AlwaysStartsRegardlessOfAutoStart(t *testing.T) {
+	mock := &rpcMockRuntime{healthy: false}
+	// AutoStart is false — mgr.Start() won't call rt.Start().
+	mgr := runtime.NewManager(mock, runtime.ManagerConfig{
+		AutoStart:   false,
+		HealthCheck: 10 * time.Second,
+	})
+	if err := mgr.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = mgr.Stop(context.Background()) }()
+
+	// rt.Start() should NOT have been called by mgr.Start() (autoStart=false).
+	mock.mu.Lock()
+	beforeCount := mock.startCalled
+	mock.mu.Unlock()
+	if beforeCount != 0 {
+		t.Fatalf("startCalled = %d before RPC, want 0", beforeCount)
+	}
+
+	h := newRuntimeHandler(mgr, nil, context.Background())
+
+	// Call StartRuntime RPC — should call rt.Start() directly.
+	_, err := h.StartRuntime(context.Background(),
+		connect.NewRequest(&v1.StartRuntimeRequest{}))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	mock.mu.Lock()
+	afterCount := mock.startCalled
+	mock.mu.Unlock()
+	// rt.Start() called once by handler + once by mgr.Start() re-triggered.
+	if afterCount < 1 {
+		t.Errorf("startCalled = %d after RPC, want >= 1", afterCount)
+	}
+
+	// Mock should now be healthy.
+	mock.mu.Lock()
+	healthy := mock.healthy
+	mock.mu.Unlock()
+	if !healthy {
+		t.Error("mock should be healthy after StartRuntime RPC")
 	}
 }

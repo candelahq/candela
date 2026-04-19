@@ -302,21 +302,48 @@ async function refreshBackends() {
 }
 
 async function startRuntime() {
+  const btn = $('#btn-start');
+  const origText = btn.textContent;
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span> Starting…';
+
+  // Immediately show "starting" state in health badge.
+  const badge = $('#health-badge');
+  badge.className = 'health-badge starting';
+  $('#health-status').textContent = 'STARTING';
+
   try {
-    const data = await rpc('StartRuntime');
-    renderHealth({ status: data.status, models: [] });
-    await refreshHealth();
+    await rpc('StartRuntime');
+    // Poll health quickly until it's running or we timeout.
+    for (let i = 0; i < 15; i++) {
+      await new Promise(r => setTimeout(r, 1000));
+      await refreshHealth();
+      const status = $('#health-status').textContent;
+      if (status === 'RUNNING' || status === 'ERROR') break;
+    }
   } catch (err) {
     alert('Start failed: ' + err.message);
+    await refreshHealth();
+  } finally {
+    btn.disabled = false;
+    btn.textContent = origText;
   }
 }
 
 async function stopRuntime() {
+  const btn = $('#btn-stop');
+  const origText = btn.textContent;
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span> Stopping…';
+
   try {
     const data = await rpc('StopRuntime');
     renderHealth({ status: data.status, models: [] });
   } catch (err) {
     alert('Stop failed: ' + err.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = origText;
   }
 }
 

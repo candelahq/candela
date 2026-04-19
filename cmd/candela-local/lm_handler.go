@@ -44,7 +44,13 @@ func (h *lmHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case r.URL.Path == "/v1/chat/completions" && r.Method == http.MethodPost:
 		h.serveChat(w, r)
 	default:
-		h.remoteProxy.ServeHTTP(w, r)
+		if h.remoteProxy != nil {
+			h.remoteProxy.ServeHTTP(w, r)
+		} else {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusNotFound)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": "solo mode — no remote server configured"})
+		}
 	}
 }
 
@@ -108,6 +114,10 @@ func (h *lmHandler) serveModels(w http.ResponseWriter, r *http.Request) {
 
 // fetchRemoteModels proxies a GET /v1/models to the remote server and parses the response.
 func (h *lmHandler) fetchRemoteModels(r *http.Request) []openaiModel {
+	if h.remoteProxy == nil {
+		return nil // solo mode — no remote
+	}
+
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer cancel()
 
@@ -150,8 +160,12 @@ func (h *lmHandler) serveChat(w http.ResponseWriter, r *http.Request) {
 	if h.isLocalModel(req.Model) {
 		slog.Debug("lm handler: routing to local runtime", "model", req.Model)
 		h.localProxy.ServeHTTP(w, r)
-	} else {
+	} else if h.remoteProxy != nil {
 		h.remoteProxy.ServeHTTP(w, r)
+	} else {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusNotFound)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "model not found locally and no remote server configured"})
 	}
 }
 

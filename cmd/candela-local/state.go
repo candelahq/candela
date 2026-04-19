@@ -92,8 +92,7 @@ func (s *StateDB) migrate() error {
 
 	// Seed default catalog if empty.
 	var count int
-	_ = s.db.QueryRow("SELECT COUNT(*) FROM local_model_catalog").Scan(&count)
-	if count == 0 {
+	if err := s.db.QueryRow("SELECT COUNT(*) FROM local_model_catalog").Scan(&count); err == nil && count == 0 {
 		s.seedCatalog()
 	}
 	return nil
@@ -253,9 +252,11 @@ func (s *StateDB) seedCatalog() {
 		{ID: "codellama:7b", Name: "Code Llama 7B", Description: "Optimized for code generation", SizeHint: "3.8 GB"},
 	}
 	for _, m := range models {
-		_, _ = s.db.Exec(
+		if _, err := s.db.Exec(
 			"INSERT OR IGNORE INTO local_model_catalog (id, name, description, size_hint) VALUES (?, ?, ?, ?)",
-			m.ID, m.Name, m.Description, m.SizeHint)
+			m.ID, m.Name, m.Description, m.SizeHint); err != nil {
+			slog.Warn("state db: seed catalog entry", "id", m.ID, "error", err)
+		}
 	}
 }
 
@@ -276,6 +277,9 @@ func (s *StateDB) ListCatalog() []CatalogEntry {
 			continue
 		}
 		entries = append(entries, e)
+	}
+	if err := rows.Err(); err != nil {
+		slog.Warn("state db: list catalog rows", "error", err)
 	}
 	return entries
 }

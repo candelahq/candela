@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"sync"
 	"testing"
 	"time"
@@ -311,5 +312,116 @@ func TestRPC_StartStopRuntime(t *testing.T) {
 	// have run yet. The runtime itself reports running.
 	if startResp.Msg.Status.Backend != "mock" {
 		t.Errorf("backend = %q, want mock", startResp.Msg.Status.Backend)
+	}
+}
+
+// setupRPCHandlerWithState is like setupRPCHandler but includes a real state DB.
+func setupRPCHandlerWithState(t *testing.T) (candelav1connect.RuntimeServiceClient, *StateDB) {
+	t.Helper()
+
+	mock := &rpcMockRuntime{
+		healthy: true,
+		models:  []runtime.Model{{ID: "test-model", Loaded: true}},
+	}
+
+	mgr := runtime.NewManager(mock, runtime.ManagerConfig{
+		HealthCheck: 10 * time.Second,
+	})
+	if err := mgr.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = mgr.Stop(context.Background()) })
+
+	// Wait for health.
+	for i := 0; i < 10; i++ {
+		if mgr.Health().Status == runtime.StatusRunning {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	// Create a temp state DB.
+	dbPath := filepath.Join(t.TempDir(), "state.db")
+	stateDB, err := openStateDB(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = stateDB.Close() })
+
+	mux := http.NewServeMux()
+	path, handler := candelav1connect.NewRuntimeServiceHandler(
+		newRuntimeHandler(mgr, stateDB))
+	mux.Handle(path, handler)
+
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+
+	client := candelav1connect.NewRuntimeServiceClient(
+		http.DefaultClient, srv.URL)
+	return client, stateDB
+}
+
+func TestRPC_ResetState(t *testing.T) {
+	client, stateDB := setupRPCHandlerWithState(t)
+
+	// Populate state.
+	if err := stateDB.SetSetting("theme", "dark"); err != nil {
+		t.Fatal(err)
+	}
+	if err := stateDB.RecordPull("llama3.2:8b", "ollama", 4_700_000_000); err != nil {
+		t.Fatal(err)
+	}
+
+	// Verify state exists.
+	if got := stateDB.GetSetting("theme"); got != "dark" {
+		t.Fatalf("pre-reset: theme = %q, want dark", got)
+	}
+
+	// Reset via RPC.
+	_, err := client.ResetState(context.Background(),
+		connect.NewRequest(&v1.ResetStateRequest{}))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Verify state is cleared.
+	if got := stateDB.GetSetting("theme"); got != "" {
+		t.Errorf("after reset: theme = %q, want empty", got)
+	}
+	records, _ := stateDB.RecentPulls(10)
+	if len(records) != 0 {
+		t.Errorf("after reset: %d pull records, want 0", len(records))
+	}
+}
+
+func TestRPC_ResetState_NoStateDB(t *testing.T) {
+	// Setup handler with nil state DB.
+	mock := &rpcMockRuntime{healthy: true}
+	mgr := runtime.NewManager(mock, runtime.ManagerConfig{
+		HealthCheck: 10 * time.Second,
+	})
+	if err := mgr.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = mgr.Stop(context.Background()) }()
+
+	mux := http.NewServeMux()
+	path, handler := candelav1connect.NewRuntimeServiceHandler(
+		newRuntimeHandler(mgr, nil)) // nil state DB
+	mux.Handle(path, handler)
+
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	client := candelav1connect.NewRuntimeServiceClient(
+		http.DefaultClient, srv.URL)
+
+	_, err := client.ResetState(context.Background(),
+		connect.NewRequest(&v1.ResetStateRequest{}))
+	if err == nil {
+		t.Fatal("expected error when state DB is nil")
+	}
+	if connect.CodeOf(err) != connect.CodeFailedPrecondition {
+		t.Errorf("code = %v, want FailedPrecondition", connect.CodeOf(err))
 	}
 }

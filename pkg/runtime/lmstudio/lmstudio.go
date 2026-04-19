@@ -167,3 +167,23 @@ func (r *Runtime) PullModel(ctx context.Context, modelID string, progress chan<-
 	slog.Info("model download initiated", "model", modelID, "backend", "lmstudio")
 	return nil
 }
+
+// LoadModel loads a model into GPU memory using the lms CLI.
+func (r *Runtime) LoadModel(ctx context.Context, modelID string) error {
+	cmd := exec.CommandContext(ctx, r.binary, "load", modelID)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("lmstudio: load model %q: %w\n%s", modelID, err, output)
+	}
+	slog.Info("model loaded", "model", modelID, "backend", "lmstudio")
+	return nil
+}
+
+// UnloadModel removes a model from GPU memory using the lms CLI.
+func (r *Runtime) UnloadModel(ctx context.Context, modelID string) error {
+	cmd := exec.CommandContext(ctx, r.binary, "unload", modelID)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("lmstudio: unload model %q: %w\n%s", modelID, err, output)
+	}
+	slog.Info("model unloaded", "model", modelID, "backend", "lmstudio")
+	return nil
+}

@@ -6,6 +6,7 @@
 package ollama
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -27,18 +28,20 @@ func init() {
 
 // Runtime manages an Ollama inference server.
 type Runtime struct {
-	host   string
-	port   int
-	binary string
-	cmd    *exec.Cmd
+	host       string
+	port       int
+	binary     string
+	cmd        *exec.Cmd
+	httpClient *http.Client
 }
 
 // New creates an Ollama runtime with the given config.
 func New(cfg runtime.Config) (*Runtime, error) {
 	return &Runtime{
-		host:   runtime.DefaultHost(cfg.Host),
-		port:   runtime.DefaultPort(cfg.Port, 11434),
-		binary: runtime.ConfigBinary(cfg.Args, "ollama"),
+		host:       runtime.DefaultHost(cfg.Host),
+		port:       runtime.DefaultPort(cfg.Port, 11434),
+		binary:     runtime.ConfigBinary(cfg.Args, "ollama"),
+		httpClient: &http.Client{Timeout: 30 * time.Second},
 	}, nil
 }
 
@@ -54,7 +57,9 @@ func (r *Runtime) baseURL() string {
 
 // Start launches `ollama serve` and waits until the server is healthy.
 func (r *Runtime) Start(ctx context.Context) error {
-	r.cmd = exec.CommandContext(ctx, r.binary, "serve")
+	// Use exec.Command (not CommandContext) so the process outlives the
+	// calling context — its lifecycle is managed by Stop().
+	r.cmd = exec.Command(r.binary, "serve")
 	r.cmd.Env = append(r.cmd.Environ(),
 		fmt.Sprintf("OLLAMA_HOST=%s:%d", r.host, r.port),
 	)
@@ -84,7 +89,7 @@ func (r *Runtime) Health(ctx context.Context) (*runtime.Health, error) {
 	if err != nil {
 		return nil, err
 	}
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := r.httpClient.Do(req)
 	if err != nil {
 		return &runtime.Health{
 			Status:    runtime.StatusStopped,
@@ -118,13 +123,20 @@ type ollamaTagsResponse struct {
 	} `json:"models"`
 }
 
-// ListModels returns all locally available models.
+// ollamaPsResponse is the JSON response from GET /api/ps (running models).
+type ollamaPsResponse struct {
+	Models []struct {
+		Name string `json:"name"`
+	} `json:"models"`
+}
+
+// ListModels returns all locally available models, marking loaded ones.
 func (r *Runtime) ListModels(ctx context.Context) ([]runtime.Model, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, r.baseURL()+"/api/tags", nil)
 	if err != nil {
 		return nil, err
 	}
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := r.httpClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("ollama: list models: %w", err)
 	}
@@ -135,6 +147,9 @@ func (r *Runtime) ListModels(ctx context.Context) ([]runtime.Model, error) {
 		return nil, fmt.Errorf("ollama: decode tags: %w", err)
 	}
 
+	// Fetch running models to determine loaded state.
+	loaded := r.runningModels(ctx)
+
 	models := make([]runtime.Model, len(result.Models))
 	for i, m := range result.Models {
 		models[i] = runtime.Model{
@@ -143,9 +158,33 @@ func (r *Runtime) ListModels(ctx context.Context) ([]runtime.Model, error) {
 			Family:       m.Details.Family,
 			Parameters:   m.Details.ParameterSize,
 			Quantization: m.Details.Quantization,
+			Loaded:       loaded[m.Name],
 		}
 	}
 	return models, nil
+}
+
+// runningModels returns a set of model names currently loaded in memory.
+func (r *Runtime) runningModels(ctx context.Context) map[string]bool {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, r.baseURL()+"/api/ps", nil)
+	if err != nil {
+		return nil
+	}
+	resp, err := r.httpClient.Do(req)
+	if err != nil {
+		return nil
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	var ps ollamaPsResponse
+	if err := json.NewDecoder(resp.Body).Decode(&ps); err != nil {
+		return nil
+	}
+	m := make(map[string]bool, len(ps.Models))
+	for _, model := range ps.Models {
+		m[model.Name] = true
+	}
+	return m
 }
 
 // PullModel downloads a model from the Ollama registry.
@@ -159,7 +198,7 @@ func (r *Runtime) PullModel(ctx context.Context, modelID string, progress chan<-
 	}
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := r.httpClient.Do(req)
 	if err != nil {
 		return fmt.Errorf("ollama: pull %q: %w", modelID, err)
 	}
@@ -200,5 +239,54 @@ func (r *Runtime) PullModel(ctx context.Context, modelID string, progress chan<-
 	}
 
 	slog.Info("model pulled", "model", modelID, "backend", "ollama")
+	return nil
+}
+
+// LoadModel loads a model into GPU memory by sending a generate request
+// with keep_alive set to -1 (infinite). The model will stay loaded until
+// explicitly unloaded or the server is stopped.
+func (r *Runtime) LoadModel(ctx context.Context, modelID string) error {
+	return r.sendKeepAlive(ctx, modelID, -1, "load")
+}
+
+// UnloadModel removes a model from GPU memory by sending a generate request
+// with keep_alive set to 0 (immediate eviction).
+func (r *Runtime) UnloadModel(ctx context.Context, modelID string) error {
+	return r.sendKeepAlive(ctx, modelID, 0, "unload")
+}
+
+// sendKeepAlive sends a /api/generate request to control model VRAM residency.
+func (r *Runtime) sendKeepAlive(ctx context.Context, modelID string, keepAlive int, action string) error {
+	reqBody := struct {
+		Model     string `json:"model"`
+		KeepAlive int    `json:"keep_alive"`
+	}{
+		Model:     modelID,
+		KeepAlive: keepAlive,
+	}
+	payload, err := json.Marshal(reqBody)
+	if err != nil {
+		return err
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		r.baseURL()+"/api/generate", bytes.NewReader(payload))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := r.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("ollama: %s model %q: %w", action, modelID, err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	// Drain the response body (Ollama streams NDJSON even for empty generates).
+	_, _ = io.Copy(io.Discard, resp.Body)
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("ollama: %s model %q: status %d", action, modelID, resp.StatusCode)
+	}
+	slog.Info("model "+action+"ed", "model", modelID, "backend", "ollama")
 	return nil
 }

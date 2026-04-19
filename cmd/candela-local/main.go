@@ -16,9 +16,11 @@ package main
 
 import (
 	"context"
+	"embed"
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"net/http"
 	"net/http/httputil"
@@ -30,6 +32,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/candelahq/candela/gen/go/candela/v1/candelav1connect"
 	"github.com/candelahq/candela/pkg/runtime"
 
 	// Register runtime backends.
@@ -43,6 +46,9 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+//go:embed ui
+var uiFS embed.FS
+
 // Config holds the candela-local configuration.
 type Config struct {
 	Remote        string `yaml:"remote"`         // Remote Candela server URL
@@ -50,6 +56,7 @@ type Config struct {
 	Port          int    `yaml:"port"`           // Local port to listen on
 	LMStudioPort  int    `yaml:"lmstudio_port"`  // LM Studio compat listener port (default: 1234)
 	LocalUpstream string `yaml:"local_upstream"` // Local runtime URL (e.g. http://127.0.0.1:11434)
+	StateDBPath   string `yaml:"state_db_path"`  // Path to SQLite state DB (default: ~/.candela/state.db)
 
 	// Runtime management configuration.
 	RuntimeBackend string                `yaml:"runtime_backend"` // "ollama", "vllm", "lmstudio"
@@ -207,10 +214,23 @@ func main() {
 		slog.Info("🏠 local runtime proxy enabled", "upstream", cfg.LocalUpstream)
 	}
 
-	// ── Local runtime management API ──
-	// If a runtime backend is configured, create a Manager and expose
-	// the /_local/* management endpoints for the embedded UI.
+	// ── Runtime management (ConnectRPC + embedded UI) ──
 	var mgr *runtime.Manager
+	var stateDB *StateDB
+
+	// Open state DB (best-effort — not required to run).
+	statePath := cfg.StateDBPath
+	if statePath == "" {
+		statePath = "~/.candela/state.db"
+	}
+	stateDB, err = openStateDB(statePath)
+	if err != nil {
+		slog.Warn("state DB unavailable (running without persistence)", "error", err)
+		stateDB = nil
+	} else {
+		slog.Info("📦 state DB opened", "path", statePath)
+	}
+
 	if cfg.RuntimeBackend != "" {
 		rt, err := runtime.New(cfg.RuntimeBackend, cfg.RuntimeConfig)
 		if err != nil {
@@ -222,10 +242,31 @@ func main() {
 			slog.Error("failed to start runtime manager", "error", err)
 			os.Exit(1)
 		}
-		registerLocalAPI(mux, mgr)
-		slog.Info("🔧 local management API enabled", "backend", cfg.RuntimeBackend,
-			"endpoints", "/_local/{health,models,models/pull,backends}")
+		// Record in state DB.
+		if stateDB != nil {
+			_ = stateDB.SetRuntimeState(cfg.RuntimeBackend, "")
+		}
 	}
+
+	// Mount ConnectRPC RuntimeService.
+	handler := newRuntimeHandler(mgr, stateDB, ctx)
+	rpcPath, rpcHandler := candelav1connect.NewRuntimeServiceHandler(handler)
+	mux.Handle(rpcPath, rpcHandler)
+
+	// Mount active pulls REST endpoint for the embedded UI.
+	mux.HandleFunc("/_local/api/pulls", handler.ServeActivePulls)
+
+	// Mount embedded UI at /_local/.
+	uiContent, err := fs.Sub(uiFS, "ui")
+	if err != nil {
+		slog.Error("failed to load embedded UI", "error", err)
+		os.Exit(1)
+	}
+	mux.Handle("/_local/", http.StripPrefix("/_local/", http.FileServer(http.FS(uiContent))))
+
+	slog.Info("🔧 management UI enabled",
+		"ui", fmt.Sprintf("http://127.0.0.1:%d/_local/", cfg.Port),
+		"rpc", rpcPath)
 
 	// Everything else → remote Candela server.
 	mux.Handle("/", proxy)
@@ -301,6 +342,9 @@ func main() {
 	}
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		slog.Error("shutdown error", "error", err)
+	}
+	if stateDB != nil {
+		_ = stateDB.Close()
 	}
 	slog.Info("candela-local stopped")
 }

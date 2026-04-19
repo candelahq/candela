@@ -136,3 +136,72 @@ func TestEndpoint(t *testing.T) {
 		t.Errorf("Endpoint() = %q, want http://192.168.1.100:11434/v1", got)
 	}
 }
+
+func TestLoadModel(t *testing.T) {
+	var receivedModel string
+	var receivedKeepAlive float64
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/generate", func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Errorf("decode error: %v", err)
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		receivedModel, _ = body["model"].(string)
+		receivedKeepAlive, _ = body["keep_alive"].(float64)
+		w.WriteHeader(http.StatusOK)
+	})
+
+	rt := testServer(t, mux)
+
+	if err := rt.LoadModel(context.Background(), "llama3.2:8b"); err != nil {
+		t.Fatalf("LoadModel() error: %v", err)
+	}
+	if receivedModel != "llama3.2:8b" {
+		t.Errorf("model = %q, want %q", receivedModel, "llama3.2:8b")
+	}
+	if receivedKeepAlive != -1 {
+		t.Errorf("keep_alive = %v, want -1", receivedKeepAlive)
+	}
+}
+
+func TestUnloadModel(t *testing.T) {
+	var receivedModel string
+	var receivedKeepAlive float64
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/generate", func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Errorf("decode error: %v", err)
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		receivedModel, _ = body["model"].(string)
+		receivedKeepAlive, _ = body["keep_alive"].(float64)
+		w.WriteHeader(http.StatusOK)
+	})
+
+	rt := testServer(t, mux)
+
+	if err := rt.UnloadModel(context.Background(), "llama3.2:8b"); err != nil {
+		t.Fatalf("UnloadModel() error: %v", err)
+	}
+	if receivedModel != "llama3.2:8b" {
+		t.Errorf("model = %q, want %q", receivedModel, "llama3.2:8b")
+	}
+	if receivedKeepAlive != 0 {
+		t.Errorf("keep_alive = %v, want 0", receivedKeepAlive)
+	}
+}
+
+func TestLoadModel_ServerDown(t *testing.T) {
+	rt, _ := New(runtime.Config{Host: "127.0.0.1", Port: 19999})
+
+	err := rt.LoadModel(context.Background(), "llama3.2:8b")
+	if err == nil {
+		t.Fatal("LoadModel() should return error when server is down")
+	}
+}

@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Candela Local — Runtime Management</title>
+  <meta name="description" content="Local LLM runtime management dashboard for Candela">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <!-- ── Top Bar ── -->
+  <header id="header">
+    <div class="header-left">
+      <span class="logo">🕯️</span>
+      <h1>Candela <span class="text-muted">Local</span></h1>
+    </div>
+    <div class="header-right" id="header-status">
+      <span class="status-label" id="header-backend">—</span>
+      <span class="status-dot" id="header-dot"></span>
+    </div>
+  </header>
+
+  <main id="app">
+    <div class="grid">
+      <!-- ── Health Card ── -->
+      <section class="card card-health" id="health-card">
+        <div class="card-header">
+          <h2>Health</h2>
+          <div class="card-actions">
+            <button class="btn btn-sm btn-start" id="btn-start" title="Start runtime">▶ Start</button>
+            <button class="btn btn-sm btn-stop" id="btn-stop" title="Stop runtime">◼ Stop</button>
+          </div>
+        </div>
+        <div class="health-grid">
+          <div class="health-badge" id="health-badge">
+            <span class="badge-dot" id="health-dot"></span>
+            <span id="health-status">LOADING</span>
+          </div>
+          <div class="health-details">
+            <div class="detail">
+              <span class="detail-label">Endpoint</span>
+              <span class="detail-value" id="health-endpoint">—</span>
+            </div>
+            <div class="detail">
+              <span class="detail-label">Uptime</span>
+              <span class="detail-value" id="health-uptime">—</span>
+            </div>
+            <div class="detail">
+              <span class="detail-label">Backend</span>
+              <span class="detail-value" id="health-backend">—</span>
+            </div>
+          </div>
+        </div>
+        <div class="health-error hidden" id="health-error"></div>
+      </section>
+
+      <!-- ── Models Card ── -->
+      <section class="card card-models" id="models-card">
+        <div class="card-header">
+          <h2>Models</h2>
+          <button class="btn btn-sm btn-ghost" id="btn-refresh-models" title="Refresh model list">↻</button>
+        </div>
+        <div class="models-list" id="models-list">
+          <div class="loading-placeholder">Loading models…</div>
+        </div>
+      </section>
+
+      <!-- ── Pull Model Card ── -->
+      <section class="card card-pull">
+        <div class="card-header">
+          <h2>Pull Model</h2>
+          <a class="btn btn-sm btn-ghost" href="https://ollama.com/library" target="_blank" title="Browse all models">Browse ↗</a>
+        </div>
+        <form id="pull-form" class="pull-form">
+          <input
+            type="text"
+            id="pull-input"
+            placeholder="e.g., llama3.2:8b, mistral:7b"
+            autocomplete="off"
+            required
+          >
+          <button type="submit" class="btn btn-primary" id="btn-pull">Pull</button>
+        </form>
+        <div class="pull-status hidden" id="pull-status"></div>
+        <div class="popular-models" id="popular-models">
+          <div class="popular-header">Popular Models</div>
+          <div class="popular-grid" id="popular-grid"></div>
+        </div>
+      </section>
+
+      <!-- ── Backends Card ── -->
+      <section class="card card-backends">
+        <div class="card-header">
+          <h2>Available Backends</h2>
+        </div>
+        <div class="backends-list" id="backends-list">
+          <div class="loading-placeholder">Scanning…</div>
+        </div>
+      </section>
+
+      <!-- ── Settings Card ── -->
+      <section class="card card-settings">
+        <div class="card-header">
+          <h2>Settings</h2>
+        </div>
+        <div class="settings-content">
+          <div class="setting-row">
+            <div>
+              <span class="setting-label">State Database</span>
+              <span class="setting-desc">~/.candela/state.db</span>
+            </div>
+          </div>
+          <div class="setting-row setting-danger">
+            <div>
+              <span class="setting-label">Reset State</span>
+              <span class="setting-desc">Clear all preferences, pull history, and saved settings. Config file is not affected.</span>
+            </div>
+            <button class="btn btn-danger" id="btn-reset">Reset</button>
+          </div>
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <footer id="footer">
+    <span class="text-muted">Candela Local • ConnectRPC</span>
+    <span class="text-muted" id="footer-checked">Last check: —</span>
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>

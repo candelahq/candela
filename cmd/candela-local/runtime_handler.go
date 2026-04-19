@@ -19,11 +19,12 @@ import (
 // pullStatus tracks an in-flight model pull.
 type pullStatus struct {
 	mu        sync.Mutex
-	Model     string  `json:"model"`
-	Status    string  `json:"status"` // "pulling", "complete", "failed"
-	Percent   float64 `json:"percent"`
-	Error     string  `json:"error,omitempty"`
-	StartedAt string  `json:"startedAt"`
+	cancel    context.CancelFunc // cancels the pull context
+	Model     string             `json:"model"`
+	Status    string             `json:"status"` // "pulling", "complete", "failed", "cancelled"
+	Percent   float64            `json:"percent"`
+	Error     string             `json:"error,omitempty"`
+	StartedAt string             `json:"startedAt"`
 }
 
 // snapshot returns a copy safe for reading without holding the lock.
@@ -180,7 +181,9 @@ func (h *runtimeHandler) PullModel(
 	}
 
 	// Register the active pull.
+	pullCtx, pullCancel := context.WithCancel(h.appCtx)
 	ps := &pullStatus{
+		cancel:    pullCancel,
 		Model:     model,
 		Status:    "pulling",
 		StartedAt: time.Now().UTC().Format(time.RFC3339),
@@ -191,7 +194,9 @@ func (h *runtimeHandler) PullModel(
 	progress := make(chan runtime.PullProgress, 16)
 	go func() {
 		// Drain progress updates.
+		progressDone := make(chan struct{})
 		go func() {
+			defer close(progressDone)
 			for p := range progress {
 				ps.mu.Lock()
 				ps.Percent = p.Percent
@@ -200,16 +205,22 @@ func (h *runtimeHandler) PullModel(
 			}
 		}()
 
-		err := h.mgr.Runtime().PullModel(h.appCtx, model, progress)
+		err := h.mgr.Runtime().PullModel(pullCtx, model, progress)
 		close(progress)
+		<-progressDone // wait for drain goroutine to finish before setting final status
 
 		if err != nil {
-			slog.Error("model pull failed", "model", model, "error", err)
 			ps.mu.Lock()
-			ps.Status = "failed"
-			ps.Error = err.Error()
+			if pullCtx.Err() != nil {
+				slog.Info("model pull cancelled", "model", model)
+				ps.Status = "cancelled"
+			} else {
+				slog.Error("model pull failed", "model", model, "error", err)
+				ps.Status = "failed"
+				ps.Error = err.Error()
+			}
 			ps.mu.Unlock()
-			// Keep failed status visible for 30s then remove — use
+			// Keep status visible for 30s then remove — use
 			// CompareAndDelete so a re-pull's entry isn't clobbered.
 			time.AfterFunc(30*time.Second, func() { h.activePulls.CompareAndDelete(model, ps) })
 			return
@@ -291,7 +302,69 @@ func (h *runtimeHandler) ResetState(
 	return connect.NewResponse(&v1.ResetStateResponse{}), nil
 }
 
-// ── Helpers ──
+func (h *runtimeHandler) DeleteModel(
+	ctx context.Context,
+	req *connect.Request[v1.DeleteModelRequest],
+) (*connect.Response[v1.DeleteModelResponse], error) {
+	if h.mgr == nil {
+		return nil, connect.NewError(connect.CodeFailedPrecondition, errNoRuntime)
+	}
+	model := req.Msg.GetModel()
+	if model == "" {
+		return nil, connect.NewError(connect.CodeInvalidArgument, errModelRequired)
+	}
+	if _, pulling := h.activePulls.Load(model); pulling {
+		return nil, connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("cannot delete model %q while it is being pulled", model))
+	}
+	if err := h.mgr.Runtime().DeleteModel(ctx, model); err != nil {
+		return nil, connect.NewError(connect.CodeInternal, err)
+	}
+	slog.Info("model deleted via RPC", "model", model)
+	return connect.NewResponse(&v1.DeleteModelResponse{}), nil
+}
+
+func (h *runtimeHandler) CancelPull(
+	_ context.Context,
+	req *connect.Request[v1.CancelPullRequest],
+) (*connect.Response[v1.CancelPullResponse], error) {
+	model := req.Msg.GetModel()
+	if model == "" {
+		return nil, connect.NewError(connect.CodeInvalidArgument, errModelRequired)
+	}
+	val, ok := h.activePulls.Load(model)
+	if !ok {
+		return nil, connect.NewError(connect.CodeNotFound, fmt.Errorf("no active pull for %q", model))
+	}
+	ps := val.(*pullStatus)
+	ps.mu.Lock()
+	if ps.cancel != nil {
+		ps.cancel()
+	}
+	ps.mu.Unlock()
+	slog.Info("pull cancelled via RPC", "model", model)
+	return connect.NewResponse(&v1.CancelPullResponse{}), nil
+}
+
+func (h *runtimeHandler) ListCatalog(
+	_ context.Context,
+	_ *connect.Request[v1.ListCatalogRequest],
+) (*connect.Response[v1.ListCatalogResponse], error) {
+	if h.state == nil {
+		return nil, connect.NewError(connect.CodeFailedPrecondition, errNoStateDB)
+	}
+	entries := h.state.ListCatalog()
+	resp := &v1.ListCatalogResponse{}
+	for _, e := range entries {
+		resp.Models = append(resp.Models, &v1.CatalogModel{
+			Id:          e.ID,
+			Name:        e.Name,
+			Description: e.Description,
+			SizeHint:    e.SizeHint,
+			Pinned:      e.Pinned,
+		})
+	}
+	return connect.NewResponse(resp), nil
+}
 
 var (
 	errNoRuntime     = fmt.Errorf("no runtime backend configured")

@@ -187,3 +187,8 @@ func (r *Runtime) UnloadModel(ctx context.Context, modelID string) error {
 	slog.Info("model unloaded", "model", modelID, "backend", "lmstudio")
 	return nil
 }
+
+// DeleteModel is not supported by LM Studio (use the LM Studio GUI).
+func (r *Runtime) DeleteModel(_ context.Context, _ string) error {
+	return fmt.Errorf("lmstudio: delete not supported (use the LM Studio GUI)")
+}

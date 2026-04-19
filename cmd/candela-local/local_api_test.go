@@ -63,6 +63,7 @@ func (m *apiMockRuntime) PullModel(_ context.Context, modelID string, progress c
 
 func (m *apiMockRuntime) LoadModel(_ context.Context, _ string) error   { return nil }
 func (m *apiMockRuntime) UnloadModel(_ context.Context, _ string) error { return nil }
+func (m *apiMockRuntime) DeleteModel(_ context.Context, _ string) error { return nil }
 
 func setupAPI(t *testing.T) (*http.ServeMux, *apiMockRuntime) {
 	t.Helper()

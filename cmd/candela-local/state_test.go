@@ -146,3 +146,92 @@ func TestStateDB_CreatesMissingDirs(t *testing.T) {
 	}
 	_ = db.Close()
 }
+
+func TestStateDB_CatalogSeeded(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.db")
+	db, err := openStateDB(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = db.Close() }()
+
+	entries := db.ListCatalog()
+	if len(entries) != 8 {
+		t.Fatalf("seeded catalog = %d entries, want 8", len(entries))
+	}
+
+	// Verify a known entry exists.
+	found := false
+	for _, e := range entries {
+		if e.ID == "llama3.2:3b" {
+			found = true
+			if e.Name != "Llama 3.2 3B" {
+				t.Errorf("name = %q, want Llama 3.2 3B", e.Name)
+			}
+			if e.SizeHint != "2.0 GB" {
+				t.Errorf("sizeHint = %q, want 2.0 GB", e.SizeHint)
+			}
+		}
+	}
+	if !found {
+		t.Error("llama3.2:3b not found in seeded catalog")
+	}
+}
+
+func TestStateDB_CatalogAddRemove(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.db")
+	db, err := openStateDB(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = db.Close() }()
+
+	// Add a custom entry.
+	err = db.AddToCatalog(CatalogEntry{
+		ID:          "custom-model:latest",
+		Name:        "Custom Model",
+		Description: "A test model",
+		SizeHint:    "1.0 GB",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	entries := db.ListCatalog()
+	if len(entries) != 9 { // 8 seeded + 1 custom
+		t.Fatalf("catalog = %d entries, want 9", len(entries))
+	}
+
+	// Remove it.
+	if err := db.RemoveFromCatalog("custom-model:latest"); err != nil {
+		t.Fatal(err)
+	}
+	entries = db.ListCatalog()
+	if len(entries) != 8 {
+		t.Fatalf("after remove: catalog = %d entries, want 8", len(entries))
+	}
+}
+
+func TestStateDB_CatalogPinnedOrder(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.db")
+	db, err := openStateDB(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = db.Close() }()
+
+	// Pin a model that sorts last alphabetically.
+	err = db.AddToCatalog(CatalogEntry{
+		ID:     "zzz-model:latest",
+		Name:   "ZZZ Model",
+		Pinned: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	entries := db.ListCatalog()
+	if entries[0].ID != "zzz-model:latest" {
+		t.Errorf("first entry = %q, want zzz-model:latest (pinned should sort first)", entries[0].ID)
+	}
+}

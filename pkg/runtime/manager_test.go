@@ -73,6 +73,7 @@ func (m *mockRuntime) PullModel(_ context.Context, modelID string, progress chan
 
 func (m *mockRuntime) LoadModel(_ context.Context, _ string) error   { return nil }
 func (m *mockRuntime) UnloadModel(_ context.Context, _ string) error { return nil }
+func (m *mockRuntime) DeleteModel(_ context.Context, _ string) error { return nil }
 
 func TestManagerAutoStart(t *testing.T) {
 	mock := &mockRuntime{

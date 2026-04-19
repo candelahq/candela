@@ -123,7 +123,14 @@ type ollamaTagsResponse struct {
 	} `json:"models"`
 }
 
-// ListModels returns all locally available models.
+// ollamaPsResponse is the JSON response from GET /api/ps (running models).
+type ollamaPsResponse struct {
+	Models []struct {
+		Name string `json:"name"`
+	} `json:"models"`
+}
+
+// ListModels returns all locally available models, marking loaded ones.
 func (r *Runtime) ListModels(ctx context.Context) ([]runtime.Model, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, r.baseURL()+"/api/tags", nil)
 	if err != nil {
@@ -140,6 +147,9 @@ func (r *Runtime) ListModels(ctx context.Context) ([]runtime.Model, error) {
 		return nil, fmt.Errorf("ollama: decode tags: %w", err)
 	}
 
+	// Fetch running models to determine loaded state.
+	loaded := r.runningModels(ctx)
+
 	models := make([]runtime.Model, len(result.Models))
 	for i, m := range result.Models {
 		models[i] = runtime.Model{
@@ -148,9 +158,33 @@ func (r *Runtime) ListModels(ctx context.Context) ([]runtime.Model, error) {
 			Family:       m.Details.Family,
 			Parameters:   m.Details.ParameterSize,
 			Quantization: m.Details.Quantization,
+			Loaded:       loaded[m.Name],
 		}
 	}
 	return models, nil
+}
+
+// runningModels returns a set of model names currently loaded in memory.
+func (r *Runtime) runningModels(ctx context.Context) map[string]bool {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, r.baseURL()+"/api/ps", nil)
+	if err != nil {
+		return nil
+	}
+	resp, err := r.httpClient.Do(req)
+	if err != nil {
+		return nil
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	var ps ollamaPsResponse
+	if err := json.NewDecoder(resp.Body).Decode(&ps); err != nil {
+		return nil
+	}
+	m := make(map[string]bool, len(ps.Models))
+	for _, model := range ps.Models {
+		m[model.Name] = true
+	}
+	return m
 }
 
 // PullModel downloads a model from the Ollama registry.

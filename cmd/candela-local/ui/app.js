@@ -98,13 +98,17 @@ function renderHealth(data) {
     $('#footer-checked').textContent = `Last check: ${d.toLocaleTimeString()}`;
   }
 
-  // Also render models from health response.
-  if (models.length > 0 || currentHealth === null) {
+  // Render models only on initial load. After that, models are updated
+  // only by explicit user actions (refresh, load, unload).
+  if (currentHealth === null && models.length > 0) {
     renderModels(models);
   }
 
   currentHealth = status;
 }
+
+// Track models mid-load/unload so health poll doesn't reset their spinner.
+const pendingModels = new Map(); // model ID -> 'loading' | 'unloading'
 
 function renderModels(models) {
   const list = $('#models-list');
@@ -128,9 +132,17 @@ function renderModels(models) {
       formatBytes(m.sizeBytes),
     ].filter(Boolean).join(' · ');
 
-    const action = loaded
-      ? `<button class="btn btn-sm btn-model" data-action="unload" data-model-id="${escapeAttr(m.id)}">Unload</button>`
-      : `<button class="btn btn-sm btn-model" data-action="load" data-model-id="${escapeAttr(m.id)}">Load</button>`;
+    let action;
+    const pending = pendingModels.get(m.id);
+    if (pending === 'loading') {
+      action = `<button class="btn btn-sm btn-model" disabled><span class="spinner"></span> Loading…</button>`;
+    } else if (pending === 'unloading') {
+      action = `<button class="btn btn-sm btn-model" disabled><span class="spinner"></span> Unloading…</button>`;
+    } else if (loaded) {
+      action = `<button class="btn btn-sm btn-model" data-action="unload" data-model-id="${escapeAttr(m.id)}">Unload</button>`;
+    } else {
+      action = `<button class="btn btn-sm btn-model" data-action="load" data-model-id="${escapeAttr(m.id)}">Load</button>`;
+    }
 
     return `
       <div class="model-row">
@@ -148,8 +160,8 @@ function renderModels(models) {
   list.querySelectorAll('[data-action]').forEach(btn => {
     btn.addEventListener('click', () => {
       const modelId = btn.getAttribute('data-model-id');
-      if (btn.dataset.action === 'load') loadModel(modelId);
-      else unloadModel(modelId);
+      if (btn.dataset.action === 'load') loadModel(modelId, btn);
+      else unloadModel(modelId, btn);
     });
   });
 }
@@ -347,21 +359,35 @@ async function stopRuntime() {
   }
 }
 
-async function loadModel(modelId) {
+async function loadModel(modelId, btn) {
+  pendingModels.set(modelId, 'loading');
+  if (btn) {
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner"></span> Loading…';
+  }
   try {
     await rpc('LoadModel', { model: modelId });
-    await refreshHealth();
   } catch (err) {
     alert('Load failed: ' + err.message);
+  } finally {
+    pendingModels.delete(modelId);
+    await refreshModels();
   }
 }
 
-async function unloadModel(modelId) {
+async function unloadModel(modelId, btn) {
+  pendingModels.set(modelId, 'unloading');
+  if (btn) {
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner"></span> Unloading…';
+  }
   try {
     await rpc('UnloadModel', { model: modelId });
-    await refreshHealth();
   } catch (err) {
     alert('Unload failed: ' + err.message);
+  } finally {
+    pendingModels.delete(modelId);
+    await refreshModels();
   }
 }
 
@@ -451,11 +477,12 @@ async function init() {
   // Fire all initial data loads in parallel.
   await Promise.allSettled([
     refreshHealth(),
+    refreshModels(),
     refreshBackends(),
     refreshPulls(),
   ]);
 
-  // Poll health every 5 seconds.
+  // Poll health every 5 seconds (updates badge only, not models).
   pollTimer = setInterval(refreshHealth, 5000);
 }
 

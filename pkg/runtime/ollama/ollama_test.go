@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/candelahq/candela/pkg/runtime"
@@ -203,5 +204,62 @@ func TestLoadModel_ServerDown(t *testing.T) {
 	err := rt.LoadModel(context.Background(), "llama3.2:8b")
 	if err == nil {
 		t.Fatal("LoadModel() should return error when server is down")
+	}
+}
+
+func TestDeleteModel(t *testing.T) {
+	var receivedMethod, receivedModel string
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/delete", func(w http.ResponseWriter, r *http.Request) {
+		receivedMethod = r.Method
+		var body struct {
+			Name string `json:"name"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		receivedModel = body.Name
+		w.WriteHeader(http.StatusOK)
+	})
+
+	rt := testServer(t, mux)
+
+	if err := rt.DeleteModel(context.Background(), "llama3.2:8b"); err != nil {
+		t.Fatalf("DeleteModel() error: %v", err)
+	}
+	if receivedMethod != http.MethodDelete {
+		t.Errorf("method = %q, want DELETE", receivedMethod)
+	}
+	if receivedModel != "llama3.2:8b" {
+		t.Errorf("model = %q, want %q", receivedModel, "llama3.2:8b")
+	}
+}
+
+func TestDeleteModel_NotFound(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/delete", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte(`{"error":"model 'nonexistent' not found"}`))
+	})
+
+	rt := testServer(t, mux)
+
+	err := rt.DeleteModel(context.Background(), "nonexistent")
+	if err == nil {
+		t.Fatal("DeleteModel() should return error for 404")
+	}
+	if !strings.Contains(err.Error(), "nonexistent") {
+		t.Errorf("error should contain model name, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "not found") {
+		t.Errorf("error should contain response body, got: %v", err)
+	}
+}
+
+func TestDeleteModel_ServerDown(t *testing.T) {
+	rt, _ := New(runtime.Config{Host: "127.0.0.1", Port: 19999})
+
+	err := rt.DeleteModel(context.Background(), "llama3.2:8b")
+	if err == nil {
+		t.Fatal("DeleteModel() should return error when server is down")
 	}
 }

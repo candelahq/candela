@@ -120,6 +120,8 @@ func TestEmbeddedUI_ServesJS(t *testing.T) {
 		{"delete confirmation", "Delete"},
 		{"cancel button", "cancel-pull"},
 		{"trash icon button", "btn-danger"},
+		{"auto-refresh on complete", "completedPulls"},
+		{"refreshModels on pull complete", "refreshModels()"},
 	}
 	for _, tc := range jsChecks {
 		if !strings.Contains(js, tc.want) {

@@ -193,6 +193,7 @@ func (h *runtimeHandler) PullModel(
 	// Use a progress channel so we can track download percent.
 	progress := make(chan runtime.PullProgress, 16)
 	go func() {
+		defer pullCancel() // always release context resources
 		// Drain progress updates.
 		progressDone := make(chan struct{})
 		go func() {
@@ -313,8 +314,14 @@ func (h *runtimeHandler) DeleteModel(
 	if model == "" {
 		return nil, connect.NewError(connect.CodeInvalidArgument, errModelRequired)
 	}
-	if _, pulling := h.activePulls.Load(model); pulling {
-		return nil, connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("cannot delete model %q while it is being pulled", model))
+	if val, ok := h.activePulls.Load(model); ok {
+		ps := val.(*pullStatus)
+		ps.mu.Lock()
+		status := ps.Status
+		ps.mu.Unlock()
+		if status == "pulling" {
+			return nil, connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("cannot delete model %q while it is being pulled", model))
+		}
 	}
 	if err := h.mgr.Runtime().DeleteModel(ctx, model); err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
@@ -336,6 +343,12 @@ func (h *runtimeHandler) CancelPull(
 		return nil, connect.NewError(connect.CodeNotFound, fmt.Errorf("no active pull for %q", model))
 	}
 	ps := val.(*pullStatus)
+	ps.mu.Lock()
+	status := ps.Status
+	ps.mu.Unlock()
+	if status != "pulling" {
+		return nil, connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("pull for %q is already %s", model, status))
+	}
 	ps.mu.Lock()
 	if ps.cancel != nil {
 		ps.cancel()

@@ -89,7 +89,7 @@ func (r *Runtime) Health(ctx context.Context) (*runtime.Health, error) {
 	if err != nil {
 		return nil, err
 	}
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := r.httpClient.Do(req)
 	if err != nil {
 		return &runtime.Health{
 			Status:    runtime.StatusStopped,
@@ -136,7 +136,7 @@ func (r *Runtime) ListModels(ctx context.Context) ([]runtime.Model, error) {
 	if err != nil {
 		return nil, err
 	}
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := r.httpClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("ollama: list models: %w", err)
 	}
@@ -198,7 +198,7 @@ func (r *Runtime) PullModel(ctx context.Context, modelID string, progress chan<-
 	}
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := r.httpClient.Do(req)
 	if err != nil {
 		return fmt.Errorf("ollama: pull %q: %w", modelID, err)
 	}

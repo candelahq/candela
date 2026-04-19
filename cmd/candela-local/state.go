@@ -127,8 +127,8 @@ func (s *StateDB) GetRuntimeState() RuntimeState {
 	_ = s.db.QueryRow("SELECT backend, last_started, last_model FROM runtime_state WHERE id = 1").
 		Scan(&rs.Backend, &started, &rs.LastModel)
 	if started.Valid {
-		// SQLite datetime('now') returns 'YYYY-MM-DD HH:MM:SS'
-		t, err := time.Parse("2006-01-02 15:04:05", started.String)
+		// SQLite datetime('now') returns 'YYYY-MM-DD HH:MM:SS' in UTC.
+		t, err := time.ParseInLocation("2006-01-02 15:04:05", started.String, time.UTC)
 		if err != nil {
 			slog.Warn("state db: failed to parse last_started", "value", started.String, "error", err)
 		} else {

@@ -209,8 +209,9 @@ func (h *runtimeHandler) PullModel(
 			ps.Status = "failed"
 			ps.Error = err.Error()
 			ps.mu.Unlock()
-			// Keep failed status visible for 30s then remove.
-			time.AfterFunc(30*time.Second, func() { h.activePulls.Delete(model) })
+			// Keep failed status visible for 30s then remove — use
+			// CompareAndDelete so a re-pull's entry isn't clobbered.
+			time.AfterFunc(30*time.Second, func() { h.activePulls.CompareAndDelete(model, ps) })
 			return
 		}
 
@@ -228,7 +229,7 @@ func (h *runtimeHandler) PullModel(
 		}
 
 		// Keep completed status visible for 10s then remove.
-		time.AfterFunc(10*time.Second, func() { h.activePulls.Delete(model) })
+		time.AfterFunc(10*time.Second, func() { h.activePulls.CompareAndDelete(model, ps) })
 	}()
 
 	return connect.NewResponse(&v1.PullModelResponse{Status: "pulling"}), nil

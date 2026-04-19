@@ -257,7 +257,11 @@ func main() {
 	mux.HandleFunc("/_local/api/pulls", handler.ServeActivePulls)
 
 	// Mount embedded UI at /_local/.
-	uiContent, _ := fs.Sub(uiFS, "ui")
+	uiContent, err := fs.Sub(uiFS, "ui")
+	if err != nil {
+		slog.Error("failed to load embedded UI", "error", err)
+		os.Exit(1)
+	}
 	mux.Handle("/_local/", http.StripPrefix("/_local/", http.FileServer(http.FS(uiContent))))
 
 	slog.Info("🔧 management UI enabled",

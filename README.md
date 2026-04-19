@@ -103,18 +103,30 @@ response = client.messages.create(...)
 
 ```mermaid
 graph TD
-    subgraph "Your Application"
-        App[App Logic]
-        SDK[OTel SDK / LLM Client]
+    subgraph "Developer Tools"
+        JB[JetBrains / Cline]
+        App[App / Agent]
+        SDK[OTel SDK]
     end
 
-    subgraph "Candela Platform"
-        Proxy[LLM API Proxy]
+    subgraph "candela-local"
+        LM["LM Compat Listener (:1234)<br/>Unified /v1/models"]
+        LP[Local Proxy]
+        RP[Remote Proxy + Auth]
+    end
+
+    subgraph "Local Runtimes"
+        Ollama["Ollama (:11434)"]
+        VLLM["vLLM (:8000)"]
+        LMS["LM Studio (:1234)"]
+    end
+
+    subgraph "Candela Cloud"
         Server[Go Backend Server]
+        Proxy[LLM API Proxy]
         Processor[Span Processor<br/>Fan-out to Writers]
-        DuckDB[(DuckDB<br/>SpanWriter + SpanReader)]
-        BQ[(BigQuery<br/>SpanWriter + SpanReader)]
-        PubSub[Pub/Sub<br/>SpanWriter Only]
+        DuckDB[(DuckDB)]
+        BQ[(BigQuery)]
     end
 
     subgraph "Upstream LLMs"
@@ -123,17 +135,21 @@ graph TD
         OAI[OpenAI]
     end
 
-    App -->|Proxy Mode| Proxy
-    App -->|OTel Mode| Server
+    JB -->|/v1/models<br/>/v1/chat/completions| LM
+    LM -->|Local model| LP
+    LM -->|Remote model| RP
+    LP --> Ollama
+    LP -.-> VLLM
+    LP -.-> LMS
+    RP -->|OIDC Auth| Server
+    App -->|Proxy Mode| RP
+    App -->|OTel Mode| SDK --> Server
     Proxy -->|Forward| VAI
     Proxy -->|Forward| ANT
     Proxy -->|Forward| OAI
-    Proxy -.->|Capture| Server
-    Server --> Processor
+    Proxy -.->|Capture| Processor
     Processor -->|Write| DuckDB
     Processor -.->|Write| BQ
-    Processor -.->|Write| PubSub
-    DuckDB -->|Read| Server
 ```
 
 ### Storage Architecture (CQRS)
@@ -217,9 +233,28 @@ The UI communicates with the backend via **ConnectRPC v2** on `localhost:8080`. 
 
 ---
 
-## 🕹️ candela-local — Runtime Management
+## 🕹️ candela-local — Local Development Proxy
 
-`candela-local` includes an embedded management UI at `/_local/` for controlling local LLM runtimes:
+`candela-local` is an auth-injecting proxy + runtime manager for developer machines.
+
+### Unified Model Discovery
+
+The LM-compatible listener on `:1234` merges **local** and **remote** models into a single `/v1/models` response:
+
+```bash
+# JetBrains, Cline, or any OpenAI-compatible client sees everything:
+curl http://localhost:1234/v1/models
+# → local: llama3.2:3b, mistral:7b (from Ollama)
+# → remote: gpt-4o, claude-3.5-sonnet (from Cloud Run)
+```
+
+`/v1/chat/completions` automatically routes to the right backend:
+- **Local model** → Ollama/vLLM/LM Studio (no round-trip)
+- **Remote model** → Cloud Run proxy (with OIDC auth injection)
+
+### Runtime Management UI
+
+Embedded management UI at `/_local/` for controlling local LLM runtimes:
 
 - **Runtime control** — Start/stop Ollama, vLLM, or LM Studio; health monitoring with auto-polling
 - **Model management** — List, load, unload, and **delete** models from disk

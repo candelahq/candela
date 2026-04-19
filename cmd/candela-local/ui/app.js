@@ -138,11 +138,17 @@ function renderModels(models) {
       action = `<button class="btn btn-sm btn-model" disabled><span class="spinner"></span> Loading…</button>`;
     } else if (pending === 'unloading') {
       action = `<button class="btn btn-sm btn-model" disabled><span class="spinner"></span> Unloading…</button>`;
+    } else if (pending === 'deleting') {
+      action = `<button class="btn btn-sm btn-model" disabled><span class="spinner"></span> Deleting…</button>`;
     } else if (loaded) {
       action = `<button class="btn btn-sm btn-model" data-action="unload" data-model-id="${escapeAttr(m.id)}">Unload</button>`;
     } else {
       action = `<button class="btn btn-sm btn-model" data-action="load" data-model-id="${escapeAttr(m.id)}">Load</button>`;
     }
+
+    const deleteBtn = pending
+      ? ''
+      : `<button class="btn btn-sm btn-danger" data-action="delete" data-model-id="${escapeAttr(m.id)}" title="Delete model from disk">🗑</button>`;
 
     return `
       <div class="model-row">
@@ -151,7 +157,10 @@ function renderModels(models) {
           <span class="model-name">${escapeHtml(m.id)}</span>
           <span class="model-meta">${escapeHtml(meta)} · ${statusText}</span>
         </div>
-        ${action}
+        <div class="model-actions">
+          ${action}
+          ${deleteBtn}
+        </div>
       </div>
     `;
   }).join('');
@@ -161,7 +170,8 @@ function renderModels(models) {
     btn.addEventListener('click', () => {
       const modelId = btn.getAttribute('data-model-id');
       if (btn.dataset.action === 'load') loadModel(modelId, btn);
-      else unloadModel(modelId, btn);
+      else if (btn.dataset.action === 'unload') unloadModel(modelId, btn);
+      else if (btn.dataset.action === 'delete') deleteModel(modelId, btn);
     });
   });
 }
@@ -192,12 +202,21 @@ function renderActivePulls(pulls) {
     } else if (p.status === 'failed') {
       statusClass = 'pull-failed';
       label = `Failed: ${escapeHtml(p.error)}`;
+    } else if (p.status === 'cancelled') {
+      statusClass = 'pull-failed';
+      label = 'Cancelled';
     }
+
+    const cancelBtn = (p.status === 'pulling')
+      ? `<button class="btn btn-sm btn-danger pull-cancel" data-action="cancel-pull" data-model-id="${escapeAttr(p.model)}" title="Cancel pull">✕</button>`
+      : '';
+
     return `
       <div class="pull-row ${statusClass}">
         <div class="pull-info">
           <span class="pull-model">${escapeHtml(p.model)}</span>
           <span class="pull-label">${label}</span>
+          ${cancelBtn}
         </div>
         <div class="pull-bar-track">
           <div class="pull-bar-fill" style="width: ${pct}%"></div>
@@ -212,6 +231,11 @@ function renderActivePulls(pulls) {
     $('#models-list').prepend(container);
   }
   container.innerHTML = html;
+
+  // Bind cancel buttons.
+  container.querySelectorAll('[data-action="cancel-pull"]').forEach(btn => {
+    btn.addEventListener('click', () => cancelPull(btn.getAttribute('data-model-id')));
+  });
 
   // Start fast-polling (every 2s) while pulls are active.
   if (!pullPollTimer) {
@@ -406,6 +430,32 @@ async function pullModel(modelId) {
   }
 }
 
+async function cancelPull(modelId) {
+  try {
+    await rpc('CancelPull', { model: modelId });
+    await refreshPulls();
+  } catch (err) {
+    alert('Cancel failed: ' + err.message);
+  }
+}
+
+async function deleteModel(modelId, btn) {
+  if (!confirm(`Delete "${modelId}" from disk? This cannot be undone.`)) return;
+  pendingModels.set(modelId, 'deleting');
+  if (btn) {
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner"></span>';
+  }
+  try {
+    await rpc('DeleteModel', { model: modelId });
+  } catch (err) {
+    alert('Delete failed: ' + err.message);
+  } finally {
+    pendingModels.delete(modelId);
+    await refreshModels();
+  }
+}
+
 async function resetState() {
   if (!confirm('Reset all local state? This clears preferences and pull history. Your config file is not affected.')) {
     return;
@@ -419,36 +469,36 @@ async function resetState() {
   }
 }
 
-// ── Popular Models Catalog ──
+// ── Models Catalog ──
 
-const POPULAR_MODELS = [
-  { id: 'llama3.2:3b',       size: '2 GB',  desc: 'Fast & lightweight general-purpose' },
-  { id: 'llama3.2:8b',       size: '5 GB',  desc: 'Strong general-purpose, great quality' },
-  { id: 'mistral:7b',        size: '4 GB',  desc: 'Excellent quality/speed balance' },
-  { id: 'qwen2.5-coder:7b',  size: '4 GB',  desc: 'Code completion & generation' },
-  { id: 'codellama:13b',     size: '7 GB',  desc: 'Advanced code generation' },
-  { id: 'gemma2:9b',         size: '5 GB',  desc: 'Google, strong reasoning' },
-  { id: 'phi3:mini',         size: '2 GB',  desc: 'Microsoft, compact reasoning' },
-  { id: 'deepseek-coder:6.7b', size: '4 GB', desc: 'Code-focused, multi-language' },
-];
-
-function renderPopularModels() {
+async function renderPopularModels() {
   const grid = $('#popular-grid');
-  grid.innerHTML = POPULAR_MODELS.map(m => `
-    <button class="popular-item" data-model="${escapeAttr(m.id)}" title="Click to fill pull input">
-      <span class="popular-name">${escapeHtml(m.id)}</span>
-      <span class="popular-desc">${escapeHtml(m.desc)}</span>
-      <span class="popular-size">${escapeHtml(m.size)}</span>
-    </button>
-  `).join('');
+  try {
+    const data = await rpc('ListCatalog');
+    const models = data.models || [];
+    if (models.length === 0) {
+      grid.innerHTML = '<div class="empty-state">No catalog models.</div>';
+      return;
+    }
+    grid.innerHTML = models.map(m => `
+      <button class="popular-item" data-model="${escapeAttr(m.id)}" title="Click to fill pull input">
+        <span class="popular-name">${escapeHtml(m.id)}</span>
+        <span class="popular-desc">${escapeHtml(m.description)}</span>
+        <span class="popular-size">${escapeHtml(m.sizeHint)}</span>
+      </button>
+    `).join('');
 
-  grid.querySelectorAll('.popular-item').forEach(btn => {
-    btn.addEventListener('click', () => {
-      const input = $('#pull-input');
-      input.value = btn.dataset.model;
-      input.focus();
+    grid.querySelectorAll('.popular-item').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const input = $('#pull-input');
+        input.value = btn.dataset.model;
+        input.focus();
+      });
     });
-  });
+  } catch (err) {
+    console.error('ListCatalog failed:', err);
+    grid.innerHTML = '<div class="empty-state">Failed to load catalog.</div>';
+  }
 }
 
 // ── Event listeners ──
@@ -471,15 +521,13 @@ $('#pull-form').addEventListener('submit', (e) => {
 // ── Initialize ──
 
 async function init() {
-  // Render static content.
-  renderPopularModels();
-
   // Fire all initial data loads in parallel.
   await Promise.allSettled([
     refreshHealth(),
     refreshModels(),
     refreshBackends(),
     refreshPulls(),
+    renderPopularModels(),
   ]);
 
   // Poll health every 5 seconds (updates badge only, not models).

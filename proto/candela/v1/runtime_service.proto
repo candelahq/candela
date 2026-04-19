@@ -45,6 +45,12 @@ service RuntimeService {
   // Poll GetHealth or ListModels to see when the model appears.
   rpc PullModel(PullModelRequest) returns (PullModelResponse);
 
+  // CancelPull cancels an in-flight model download.
+  rpc CancelPull(CancelPullRequest) returns (CancelPullResponse);
+
+  // DeleteModel removes a model from disk. Only supported by Ollama.
+  rpc DeleteModel(DeleteModelRequest) returns (DeleteModelResponse);
+
   // ── Discovery ──
 
   // ListBackends returns registered runtime backends and their install status.
@@ -55,6 +61,11 @@ service RuntimeService {
   // ResetState clears all local state (preferences, pull history) from the
   // state database. The YAML config file is not affected.
   rpc ResetState(ResetStateRequest) returns (ResetStateResponse);
+
+  // ── Catalog ──
+
+  // ListCatalog returns the user's model catalog (suggested models to pull).
+  rpc ListCatalog(ListCatalogRequest) returns (ListCatalogResponse);
 }
 
 // ── Shared types ──
@@ -177,3 +188,37 @@ message ListBackendsResponse {
 message ResetStateRequest {}
 
 message ResetStateResponse {}
+
+message CancelPullRequest {
+  // Model whose pull should be cancelled.
+  string model = 1;
+}
+
+message CancelPullResponse {}
+
+message DeleteModelRequest {
+  // Model to delete from disk (e.g. "llama3.2:3b").
+  string model = 1;
+}
+
+message DeleteModelResponse {}
+
+// CatalogModel describes a suggested model in the user's catalog.
+message CatalogModel {
+  // Model identifier (e.g. "llama3.2:3b").
+  string id = 1;
+  // Display name.
+  string name = 2;
+  // Short description.
+  string description = 3;
+  // Approximate download size (e.g. "2.0 GB").
+  string size_hint = 4;
+  // User-pinned favorite.
+  bool pinned = 5;
+}
+
+message ListCatalogRequest {}
+
+message ListCatalogResponse {
+  repeated CatalogModel models = 1;
+}

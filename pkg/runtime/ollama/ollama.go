@@ -290,3 +290,34 @@ func (r *Runtime) sendKeepAlive(ctx context.Context, modelID string, keepAlive i
 	slog.Info("model "+action+"ed", "model", modelID, "backend", "ollama")
 	return nil
 }
+
+// DeleteModel removes a model from disk via the Ollama API.
+func (r *Runtime) DeleteModel(ctx context.Context, modelID string) error {
+	reqBody := struct {
+		Name string `json:"name"`
+	}{Name: modelID}
+	payload, err := json.Marshal(reqBody)
+	if err != nil {
+		return err
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodDelete,
+		r.baseURL()+"/api/delete", bytes.NewReader(payload))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := r.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("ollama: delete %q: %w", modelID, err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	_, _ = io.Copy(io.Discard, resp.Body)
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("ollama: delete %q: status %d", modelID, resp.StatusCode)
+	}
+	slog.Info("model deleted", "model", modelID, "backend", "ollama")
+	return nil
+}

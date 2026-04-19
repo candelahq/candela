@@ -313,11 +313,12 @@ func (r *Runtime) DeleteModel(ctx context.Context, modelID string) error {
 		return fmt.Errorf("ollama: delete %q: %w", modelID, err)
 	}
 	defer func() { _ = resp.Body.Close() }()
-	_, _ = io.Copy(io.Discard, resp.Body)
 
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("ollama: delete %q: status %d", modelID, resp.StatusCode)
+		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
+		return fmt.Errorf("ollama: delete %q: status %d: %s", modelID, resp.StatusCode, respBody)
 	}
+	_, _ = io.Copy(io.Discard, resp.Body)
 	slog.Info("model deleted", "model", modelID, "backend", "ollama")
 	return nil
 }

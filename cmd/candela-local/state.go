@@ -274,6 +274,7 @@ func (s *StateDB) ListCatalog() []CatalogEntry {
 	for rows.Next() {
 		var e CatalogEntry
 		if err := rows.Scan(&e.ID, &e.Name, &e.Description, &e.SizeHint, &e.Pinned); err != nil {
+			slog.Warn("state db: scan catalog row", "error", err)
 			continue
 		}
 		entries = append(entries, e)

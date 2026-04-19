@@ -313,6 +313,9 @@ func (h *runtimeHandler) DeleteModel(
 	if model == "" {
 		return nil, connect.NewError(connect.CodeInvalidArgument, errModelRequired)
 	}
+	if _, pulling := h.activePulls.Load(model); pulling {
+		return nil, connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("cannot delete model %q while it is being pulled", model))
+	}
 	if err := h.mgr.Runtime().DeleteModel(ctx, model); err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}

@@ -57,7 +57,9 @@ func (r *Runtime) baseURL() string {
 
 // Start launches `ollama serve` and waits until the server is healthy.
 func (r *Runtime) Start(ctx context.Context) error {
-	r.cmd = exec.CommandContext(ctx, r.binary, "serve")
+	// Use exec.Command (not CommandContext) so the process outlives the
+	// calling context — its lifecycle is managed by Stop().
+	r.cmd = exec.Command(r.binary, "serve")
 	r.cmd.Env = append(r.cmd.Environ(),
 		fmt.Sprintf("OLLAMA_HOST=%s:%d", r.host, r.port),
 	)

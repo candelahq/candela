@@ -29,6 +29,7 @@ type rpcMockRuntime struct {
 	loadCalled   []string
 	unloadCalled []string
 	pullCalled   []string
+	deleteCalled []string
 	healthErr    error
 	listErr      error
 	pullDelay    time.Duration // simulate slow pull for progress tracking tests
@@ -80,7 +81,7 @@ func (m *rpcMockRuntime) ListModels(_ context.Context) ([]runtime.Model, error) 
 	return m.models, nil
 }
 
-func (m *rpcMockRuntime) PullModel(_ context.Context, modelID string, progress chan<- runtime.PullProgress) error {
+func (m *rpcMockRuntime) PullModel(ctx context.Context, modelID string, progress chan<- runtime.PullProgress) error {
 	m.mu.Lock()
 	m.pullCalled = append(m.pullCalled, modelID)
 	delay := m.pullDelay
@@ -90,7 +91,11 @@ func (m *rpcMockRuntime) PullModel(_ context.Context, modelID string, progress c
 		if progress != nil {
 			progress <- runtime.PullProgress{Status: "pulling", Percent: 50}
 		}
-		time.Sleep(delay)
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(delay):
+		}
 	}
 	if progress != nil {
 		progress <- runtime.PullProgress{Status: "done", Percent: 100}
@@ -108,6 +113,13 @@ func (m *rpcMockRuntime) LoadModel(_ context.Context, modelID string) error {
 func (m *rpcMockRuntime) UnloadModel(_ context.Context, modelID string) error {
 	m.mu.Lock()
 	m.unloadCalled = append(m.unloadCalled, modelID)
+	m.mu.Unlock()
+	return nil
+}
+
+func (m *rpcMockRuntime) DeleteModel(_ context.Context, modelID string) error {
+	m.mu.Lock()
+	m.deleteCalled = append(m.deleteCalled, modelID)
 	m.mu.Unlock()
 	return nil
 }
@@ -622,5 +634,148 @@ func TestRPC_StartRuntime_AlwaysStartsRegardlessOfAutoStart(t *testing.T) {
 	mock.mu.Unlock()
 	if !healthy {
 		t.Error("mock should be healthy after StartRuntime RPC")
+	}
+}
+
+func TestRPC_DeleteModel(t *testing.T) {
+	client, mock := setupRPCHandler(t)
+
+	_, err := client.DeleteModel(context.Background(),
+		connect.NewRequest(&v1.DeleteModelRequest{Model: "llama3.2:8b"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	mock.mu.Lock()
+	deleted := mock.deleteCalled
+	mock.mu.Unlock()
+	if len(deleted) != 1 || deleted[0] != "llama3.2:8b" {
+		t.Errorf("deleteCalled = %v, want [llama3.2:8b]", deleted)
+	}
+}
+
+func TestRPC_DeleteModel_EmptyModel(t *testing.T) {
+	client, _ := setupRPCHandler(t)
+
+	_, err := client.DeleteModel(context.Background(),
+		connect.NewRequest(&v1.DeleteModelRequest{}))
+	if err == nil {
+		t.Fatal("expected error for empty model")
+	}
+	if connect.CodeOf(err) != connect.CodeInvalidArgument {
+		t.Errorf("code = %v, want InvalidArgument", connect.CodeOf(err))
+	}
+}
+
+func TestRPC_CancelPull(t *testing.T) {
+	mock := &rpcMockRuntime{
+		healthy:   true,
+		pullDelay: 2 * time.Second, // long enough to cancel
+	}
+	mgr := runtime.NewManager(mock, runtime.ManagerConfig{
+		HealthCheck: 10 * time.Second,
+	})
+	if err := mgr.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = mgr.Stop(context.Background()) }()
+
+	h := newRuntimeHandler(mgr, nil, context.Background())
+
+	mux := http.NewServeMux()
+	path, handler := candelav1connect.NewRuntimeServiceHandler(h)
+	mux.Handle(path, handler)
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	client := candelav1connect.NewRuntimeServiceClient(http.DefaultClient, srv.URL)
+
+	// Start a pull.
+	_, err := client.PullModel(context.Background(),
+		connect.NewRequest(&v1.PullModelRequest{Model: "big-model:70b"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Wait for it to appear in active pulls.
+	time.Sleep(50 * time.Millisecond)
+	pulls := h.ActivePulls()
+	if len(pulls) != 1 || pulls[0].Status != "pulling" {
+		t.Fatalf("expected active pull, got %+v", pulls)
+	}
+
+	// Cancel it.
+	_, err = client.CancelPull(context.Background(),
+		connect.NewRequest(&v1.CancelPullRequest{Model: "big-model:70b"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Wait for status to update.
+	var cancelled bool
+	for i := 0; i < 40; i++ {
+		time.Sleep(50 * time.Millisecond)
+		pulls = h.ActivePulls()
+		if len(pulls) == 1 && pulls[0].Status == "cancelled" {
+			cancelled = true
+			break
+		}
+	}
+	if !cancelled {
+		t.Fatalf("pull not cancelled; status = %+v", pulls)
+	}
+}
+
+func TestRPC_CancelPull_NotFound(t *testing.T) {
+	client, _ := setupRPCHandler(t)
+
+	_, err := client.CancelPull(context.Background(),
+		connect.NewRequest(&v1.CancelPullRequest{Model: "nonexistent:7b"}))
+	if err == nil {
+		t.Fatal("expected error for non-existent pull")
+	}
+	if connect.CodeOf(err) != connect.CodeNotFound {
+		t.Errorf("code = %v, want NotFound", connect.CodeOf(err))
+	}
+}
+
+func TestRPC_ListCatalog(t *testing.T) {
+	client, _ := setupRPCHandlerWithState(t)
+
+	resp, err := client.ListCatalog(context.Background(),
+		connect.NewRequest(&v1.ListCatalogRequest{}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	models := resp.Msg.GetModels()
+	if len(models) != 8 {
+		t.Fatalf("catalog = %d models, want 8", len(models))
+	}
+
+	// Verify a known entry.
+	found := false
+	for _, m := range models {
+		if m.Id == "llama3.2:3b" {
+			found = true
+			if m.Name != "Llama 3.2 3B" {
+				t.Errorf("name = %q, want Llama 3.2 3B", m.Name)
+			}
+		}
+	}
+	if !found {
+		t.Error("llama3.2:3b not found in catalog response")
+	}
+}
+
+func TestRPC_ListCatalog_NoStateDB(t *testing.T) {
+	client, _ := setupRPCHandler(t) // nil state DB
+
+	_, err := client.ListCatalog(context.Background(),
+		connect.NewRequest(&v1.ListCatalogRequest{}))
+	if err == nil {
+		t.Fatal("expected error when state DB is nil")
+	}
+	if connect.CodeOf(err) != connect.CodeFailedPrecondition {
+		t.Errorf("code = %v, want FailedPrecondition", connect.CodeOf(err))
 	}
 }

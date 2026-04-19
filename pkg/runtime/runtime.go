@@ -96,4 +96,9 @@ type Runtime interface {
 	// UnloadModel removes a model from GPU memory.
 	// For vLLM this stops the process entirely.
 	UnloadModel(ctx context.Context, modelID string) error
+
+	// DeleteModel removes a model from disk entirely.
+	// Only supported by runtimes that manage their own model storage
+	// (e.g. Ollama). Returns an error for unsupported runtimes.
+	DeleteModel(ctx context.Context, modelID string) error
 }

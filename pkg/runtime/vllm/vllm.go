@@ -216,3 +216,8 @@ func (r *Runtime) UnloadModel(ctx context.Context, modelID string) error {
 	slog.Info("vllm: unloading model (stopping process)", "model", modelID)
 	return r.Stop(ctx)
 }
+
+// DeleteModel is not supported by vLLM (models live in HuggingFace cache).
+func (r *Runtime) DeleteModel(_ context.Context, _ string) error {
+	return fmt.Errorf("vllm: delete not supported (remove from HuggingFace cache manually)")
+}

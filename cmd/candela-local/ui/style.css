@@ -687,6 +687,34 @@ main {
   font-size: 0.72rem;
 }
 
+.model-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.btn-danger {
+  background: transparent;
+  color: #f87171;
+  border: 1px solid rgba(248, 113, 113, 0.3);
+  padding: 0.25rem 0.5rem;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.72rem;
+  transition: all 0.2s;
+}
+.btn-danger:hover {
+  background: rgba(248, 113, 113, 0.15);
+  border-color: #f87171;
+}
+
+.pull-cancel {
+  margin-left: auto;
+  padding: 0.15rem 0.4rem;
+  font-size: 0.65rem;
+  line-height: 1;
+}
+
 /* ── Footer ── */
 footer {
   display: flex;

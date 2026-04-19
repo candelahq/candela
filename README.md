@@ -217,6 +217,21 @@ The UI communicates with the backend via **ConnectRPC v2** on `localhost:8080`. 
 
 ---
 
+## 🕹️ candela-local — Runtime Management
+
+`candela-local` includes an embedded management UI at `/_local/` for controlling local LLM runtimes:
+
+- **Runtime control** — Start/stop Ollama, vLLM, or LM Studio; health monitoring with auto-polling
+- **Model management** — List, load, unload, and **delete** models from disk
+- **Pull models** — Download models with real-time progress tracking and **cancel** support
+- **Model catalog** — Suggested models stored in SQLite (`local_model_catalog`), seeded with popular defaults
+- **Backend discovery** — Auto-detect installed runtimes and show install hints
+- **State persistence** — Settings, pull history, and runtime state persisted to `~/.candela/state.db`
+
+All features are accessible via **ConnectRPC** (`RuntimeService`) and the embedded vanilla JS dashboard.
+
+---
+
 ## 🗺️ Roadmap
 
 - **Phase 1: Foundation** ✅ (Ingestion, Proxy, Cost Calc, Docs)
@@ -230,6 +245,7 @@ The UI communicates with the backend via **ConnectRPC v2** on `localhost:8080`. 
   - Client-side form validation (`@bufbuild/protovalidate`)
   - Budget enforcement with grant-first waterfall
   - `candela-local` auth-injecting proxy for developer machines
+  - `candela-local` embedded runtime management UI (`/_local/`)
 - **Phase 5: Ecosystem & Polish** 📋 (Agent DAGs, Multi-region, Alerting, Google Workspace Sync)
 
 ---
@@ -250,6 +266,7 @@ candela/
 │   ├── proxy/                   # LLM API reverse proxy
 │   ├── costcalc/                # Token cost calculation engine
 │   ├── connecthandlers/         # ConnectRPC service handlers
+│   ├── runtime/                 # Local LLM runtime abstraction (Ollama, vLLM, LM Studio)
 │   └── ingestion/               # OTel span ingestion
 ├── terraform/                   # GCP infrastructure (OpenTofu/Terraform)
 │   ├── cloud_run.tf             # Cloud Run + IAP
@@ -266,6 +283,8 @@ candela/
 │   ├── e2e/                     # Playwright E2E tests (app + admin)
 │   └── playwright.config.ts     # Playwright config
 ├── .github/workflows/ci.yml    # CI pipeline (Go + UI + Playwright)
+├── cmd/candela-local/           # Local dev proxy + runtime manager
+│   └── ui/                      # Embedded management UI (vanilla JS)
 └── config.yaml                  # Server configuration
 ```
 ---

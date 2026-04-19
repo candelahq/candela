@@ -194,7 +194,9 @@ func (h *runtimeHandler) PullModel(
 	progress := make(chan runtime.PullProgress, 16)
 	go func() {
 		// Drain progress updates.
+		progressDone := make(chan struct{})
 		go func() {
+			defer close(progressDone)
 			for p := range progress {
 				ps.mu.Lock()
 				ps.Percent = p.Percent
@@ -205,6 +207,7 @@ func (h *runtimeHandler) PullModel(
 
 		err := h.mgr.Runtime().PullModel(pullCtx, model, progress)
 		close(progress)
+		<-progressDone // wait for drain goroutine to finish before setting final status
 
 		if err != nil {
 			ps.mu.Lock()

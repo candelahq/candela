@@ -253,6 +253,9 @@ func main() {
 	rpcPath, rpcHandler := candelav1connect.NewRuntimeServiceHandler(handler)
 	mux.Handle(rpcPath, rpcHandler)
 
+	// Mount active pulls REST endpoint for the embedded UI.
+	mux.HandleFunc("/_local/api/pulls", handler.ServeActivePulls)
+
 	// Mount embedded UI at /_local/.
 	uiContent, _ := fs.Sub(uiFS, "ui")
 	mux.Handle("/_local/", http.StripPrefix("/_local/", http.FileServer(http.FS(uiContent))))

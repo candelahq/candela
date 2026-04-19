@@ -387,6 +387,71 @@ main {
   color: var(--accent);
 }
 
+/* ── Active Pulls Progress ── */
+.active-pulls {
+  margin-bottom: 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.pull-row {
+  padding: 0.6rem 0.8rem;
+  border-radius: var(--radius-sm);
+  background: rgba(59, 130, 246, 0.06);
+  border: 1px solid rgba(59, 130, 246, 0.15);
+  animation: fade-in 0.3s ease-out;
+}
+.pull-row.pull-complete {
+  background: var(--green-dim);
+  border-color: rgba(34, 197, 94, 0.2);
+}
+.pull-row.pull-failed {
+  background: var(--red-dim);
+  border-color: rgba(239, 68, 68, 0.2);
+}
+
+.pull-info {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.35rem;
+}
+
+.pull-model {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.pull-label {
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: rgb(96, 165, 250);
+}
+.pull-complete .pull-label { color: var(--green); }
+.pull-failed .pull-label { color: var(--red); font-size: 0.72rem; }
+
+.pull-bar-track {
+  height: 4px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.06);
+  overflow: hidden;
+}
+
+.pull-bar-fill {
+  height: 100%;
+  border-radius: 2px;
+  background: linear-gradient(90deg, #3b82f6, #8b5cf6);
+  transition: width 0.4s ease-out;
+}
+.pull-complete .pull-bar-fill {
+  background: var(--green);
+}
+.pull-failed .pull-bar-fill {
+  background: var(--red);
+}
+
 /* ── Backends ── */
 .backends-list {
   display: flex;

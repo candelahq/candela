@@ -114,6 +114,10 @@ function renderModels(models) {
     return;
   }
 
+  // Keep the active-pulls section intact — only replace the model rows.
+  const pullsSection = list.querySelector('.active-pulls');
+  const pullsHtml = pullsSection ? pullsSection.outerHTML : '';
+
   list.innerHTML = models.map(m => {
     const loaded = m.loaded;
     const dotClass = loaded ? 'loaded' : 'available';
@@ -148,6 +152,69 @@ function renderModels(models) {
       else unloadModel(modelId);
     });
   });
+}
+
+// ── Active Pulls ──
+
+let pullPollTimer = null;
+
+function renderActivePulls(pulls) {
+  let container = $('#models-list').querySelector('.active-pulls');
+  if (!pulls || pulls.length === 0) {
+    if (container) container.remove();
+    // Stop fast-polling when no active pulls.
+    if (pullPollTimer) {
+      clearInterval(pullPollTimer);
+      pullPollTimer = null;
+    }
+    return;
+  }
+
+  const html = pulls.map(p => {
+    const pct = Math.round(p.percent);
+    let statusClass = 'pull-active';
+    let label = `Pulling… ${pct}%`;
+    if (p.status === 'complete') {
+      statusClass = 'pull-complete';
+      label = 'Complete!';
+    } else if (p.status === 'failed') {
+      statusClass = 'pull-failed';
+      label = `Failed: ${escapeHtml(p.error)}`;
+    }
+    return `
+      <div class="pull-row ${statusClass}">
+        <div class="pull-info">
+          <span class="pull-model">${escapeHtml(p.model)}</span>
+          <span class="pull-label">${label}</span>
+        </div>
+        <div class="pull-bar-track">
+          <div class="pull-bar-fill" style="width: ${pct}%"></div>
+        </div>
+      </div>
+    `;
+  }).join('');
+
+  if (!container) {
+    container = document.createElement('div');
+    container.className = 'active-pulls';
+    $('#models-list').prepend(container);
+  }
+  container.innerHTML = html;
+
+  // Start fast-polling (every 2s) while pulls are active.
+  if (!pullPollTimer) {
+    pullPollTimer = setInterval(refreshPulls, 2000);
+  }
+}
+
+async function refreshPulls() {
+  try {
+    const resp = await fetch('/_local/api/pulls');
+    const pulls = await resp.json();
+    renderActivePulls(pulls);
+  } catch (err) {
+    console.error('refreshPulls failed:', err);
+  }
 }
 
 function renderBackends(data) {
@@ -275,10 +342,11 @@ async function pullModel(modelId) {
   const statusEl = $('#pull-status');
   try {
     await rpc('PullModel', { model: modelId });
-    statusEl.textContent = `Pulling "${modelId}"… This may take a while. Refresh models to check progress.`;
+    statusEl.textContent = `Pull started for "${modelId}"…`;
     show(statusEl);
-    // Auto-hide after 10s.
-    setTimeout(() => hide(statusEl), 10000);
+    setTimeout(() => hide(statusEl), 5000);
+    // Immediately fetch pull status.
+    await refreshPulls();
   } catch (err) {
     statusEl.textContent = `Pull failed: ${err.message}`;
     show(statusEl);
@@ -322,6 +390,7 @@ async function init() {
   await Promise.allSettled([
     refreshHealth(),
     refreshBackends(),
+    refreshPulls(),
   ]);
 
   // Poll health every 5 seconds.

@@ -2,8 +2,12 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
+	"net/http"
+	"sync"
+	"time"
 
 	connect "connectrpc.com/connect"
 	"google.golang.org/protobuf/types/known/timestamppb"
@@ -12,11 +16,21 @@ import (
 	"github.com/candelahq/candela/pkg/runtime"
 )
 
+// pullStatus tracks an in-flight model pull.
+type pullStatus struct {
+	Model     string  `json:"model"`
+	Status    string  `json:"status"` // "pulling", "complete", "failed"
+	Percent   float64 `json:"percent"`
+	Error     string  `json:"error,omitempty"`
+	StartedAt string  `json:"startedAt"`
+}
+
 // runtimeHandler implements the ConnectRPC RuntimeServiceHandler.
 type runtimeHandler struct {
-	mgr    *runtime.Manager
-	state  *StateDB
-	appCtx context.Context // application-level context for background goroutines
+	mgr         *runtime.Manager
+	state       *StateDB
+	appCtx      context.Context // application-level context for background goroutines
+	activePulls sync.Map        // model -> *pullStatus
 }
 
 // newRuntimeHandler creates a handler backed by the given Manager and state DB.
@@ -146,23 +160,80 @@ func (h *runtimeHandler) PullModel(
 		return nil, connect.NewError(connect.CodeInvalidArgument, errModelRequired)
 	}
 
-	// Run the pull in the background using the app-level context so it
-	// survives the HTTP handler but is cancelled on graceful shutdown.
+	// Check if already pulling.
+	if _, loaded := h.activePulls.Load(model); loaded {
+		return connect.NewResponse(&v1.PullModelResponse{Status: "already_pulling"}), nil
+	}
+
+	// Register the active pull.
+	ps := &pullStatus{
+		Model:     model,
+		Status:    "pulling",
+		StartedAt: time.Now().UTC().Format(time.RFC3339),
+	}
+	h.activePulls.Store(model, ps)
+
+	// Use a progress channel so we can track download percent.
+	progress := make(chan runtime.PullProgress, 16)
 	go func() {
-		if err := h.mgr.Runtime().PullModel(h.appCtx, model, nil); err != nil {
+		// Drain progress updates.
+		go func() {
+			for p := range progress {
+				ps.Percent = p.Percent
+				ps.Status = "pulling"
+			}
+		}()
+
+		err := h.mgr.Runtime().PullModel(h.appCtx, model, progress)
+		close(progress)
+
+		if err != nil {
 			slog.Error("model pull failed", "model", model, "error", err)
+			ps.Status = "failed"
+			ps.Error = err.Error()
+			// Keep failed status visible for 30s then remove.
+			time.AfterFunc(30*time.Second, func() { h.activePulls.Delete(model) })
 			return
 		}
+
 		slog.Info("model pull complete", "model", model)
+		ps.Status = "complete"
+		ps.Percent = 100
+
 		// Record in state DB if available.
 		if h.state != nil {
 			if err := h.state.RecordPull(model, h.mgr.Runtime().Name(), 0); err != nil {
 				slog.Warn("failed to record pull", "model", model, "error", err)
 			}
 		}
+
+		// Keep completed status visible for 10s then remove.
+		time.AfterFunc(10*time.Second, func() { h.activePulls.Delete(model) })
 	}()
 
 	return connect.NewResponse(&v1.PullModelResponse{Status: "pulling"}), nil
+}
+
+// ActivePulls returns a snapshot of all in-flight and recently completed pulls.
+func (h *runtimeHandler) ActivePulls() []pullStatus {
+	var pulls []pullStatus
+	h.activePulls.Range(func(_, value any) bool {
+		if ps, ok := value.(*pullStatus); ok {
+			pulls = append(pulls, *ps)
+		}
+		return true
+	})
+	return pulls
+}
+
+// ServeActivePulls is an HTTP handler that returns active pulls as JSON.
+func (h *runtimeHandler) ServeActivePulls(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	pulls := h.ActivePulls()
+	if pulls == nil {
+		pulls = []pullStatus{}
+	}
+	_ = json.NewEncoder(w).Encode(pulls)
 }
 
 func (h *runtimeHandler) ListBackends(

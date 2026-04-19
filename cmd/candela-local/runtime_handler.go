@@ -18,11 +18,25 @@ import (
 
 // pullStatus tracks an in-flight model pull.
 type pullStatus struct {
+	mu        sync.Mutex
 	Model     string  `json:"model"`
 	Status    string  `json:"status"` // "pulling", "complete", "failed"
 	Percent   float64 `json:"percent"`
 	Error     string  `json:"error,omitempty"`
 	StartedAt string  `json:"startedAt"`
+}
+
+// snapshot returns a copy safe for reading without holding the lock.
+func (ps *pullStatus) snapshot() pullStatus {
+	ps.mu.Lock()
+	defer ps.mu.Unlock()
+	return pullStatus{
+		Model:     ps.Model,
+		Status:    ps.Status,
+		Percent:   ps.Percent,
+		Error:     ps.Error,
+		StartedAt: ps.StartedAt,
+	}
 }
 
 // runtimeHandler implements the ConnectRPC RuntimeServiceHandler.
@@ -179,8 +193,10 @@ func (h *runtimeHandler) PullModel(
 		// Drain progress updates.
 		go func() {
 			for p := range progress {
+				ps.mu.Lock()
 				ps.Percent = p.Percent
 				ps.Status = "pulling"
+				ps.mu.Unlock()
 			}
 		}()
 
@@ -189,16 +205,20 @@ func (h *runtimeHandler) PullModel(
 
 		if err != nil {
 			slog.Error("model pull failed", "model", model, "error", err)
+			ps.mu.Lock()
 			ps.Status = "failed"
 			ps.Error = err.Error()
+			ps.mu.Unlock()
 			// Keep failed status visible for 30s then remove.
 			time.AfterFunc(30*time.Second, func() { h.activePulls.Delete(model) })
 			return
 		}
 
 		slog.Info("model pull complete", "model", model)
+		ps.mu.Lock()
 		ps.Status = "complete"
 		ps.Percent = 100
+		ps.mu.Unlock()
 
 		// Record in state DB if available.
 		if h.state != nil {
@@ -219,7 +239,7 @@ func (h *runtimeHandler) ActivePulls() []pullStatus {
 	var pulls []pullStatus
 	h.activePulls.Range(func(_, value any) bool {
 		if ps, ok := value.(*pullStatus); ok {
-			pulls = append(pulls, *ps)
+			pulls = append(pulls, ps.snapshot())
 		}
 		return true
 	})

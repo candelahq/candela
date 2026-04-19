@@ -46,7 +46,13 @@ func NewManager(rt Runtime, cfg ManagerConfig) *Manager {
 }
 
 // Start optionally launches the runtime and begins health monitoring.
+// Can be called after Stop to restart the Manager.
 func (m *Manager) Start(ctx context.Context) error {
+	// Cancel any previous health loop (enables restart after Stop).
+	if m.cancel != nil {
+		m.cancel()
+	}
+
 	if m.autoStart {
 		slog.Info("starting runtime", "backend", m.rt.Name())
 		if err := m.rt.Start(ctx); err != nil {
@@ -82,7 +88,17 @@ func (m *Manager) Stop(ctx context.Context) error {
 	if m.cancel != nil {
 		m.cancel()
 	}
-	return m.rt.Stop(ctx)
+	err := m.rt.Stop(ctx)
+	// Update cached health immediately so GetHealth reflects the stopped state.
+	m.mu.Lock()
+	m.health = &Health{
+		Status:    StatusStopped,
+		Endpoint:  m.rt.Endpoint(),
+		CheckedAt: time.Now(),
+	}
+	m.startedAt = time.Time{}
+	m.mu.Unlock()
+	return err
 }
 
 // Health returns the latest cached health status.
@@ -105,6 +121,16 @@ func (m *Manager) Endpoint() string {
 // Runtime returns the underlying runtime for direct API calls.
 func (m *Manager) Runtime() Runtime {
 	return m.rt
+}
+
+// LoadModel loads a model into GPU memory via the underlying runtime.
+func (m *Manager) LoadModel(ctx context.Context, modelID string) error {
+	return m.rt.LoadModel(ctx, modelID)
+}
+
+// UnloadModel removes a model from GPU memory via the underlying runtime.
+func (m *Manager) UnloadModel(ctx context.Context, modelID string) error {
+	return m.rt.UnloadModel(ctx, modelID)
 }
 
 func (m *Manager) healthLoop(ctx context.Context) {

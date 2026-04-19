@@ -366,6 +366,38 @@ async function resetState() {
   }
 }
 
+// ── Popular Models Catalog ──
+
+const POPULAR_MODELS = [
+  { id: 'llama3.2:3b',       size: '2 GB',  desc: 'Fast & lightweight general-purpose' },
+  { id: 'llama3.2:8b',       size: '5 GB',  desc: 'Strong general-purpose, great quality' },
+  { id: 'mistral:7b',        size: '4 GB',  desc: 'Excellent quality/speed balance' },
+  { id: 'qwen2.5-coder:7b',  size: '4 GB',  desc: 'Code completion & generation' },
+  { id: 'codellama:13b',     size: '7 GB',  desc: 'Advanced code generation' },
+  { id: 'gemma2:9b',         size: '5 GB',  desc: 'Google, strong reasoning' },
+  { id: 'phi3:mini',         size: '2 GB',  desc: 'Microsoft, compact reasoning' },
+  { id: 'deepseek-coder:6.7b', size: '4 GB', desc: 'Code-focused, multi-language' },
+];
+
+function renderPopularModels() {
+  const grid = $('#popular-grid');
+  grid.innerHTML = POPULAR_MODELS.map(m => `
+    <button class="popular-item" data-model="${escapeAttr(m.id)}" title="Click to fill pull input">
+      <span class="popular-name">${escapeHtml(m.id)}</span>
+      <span class="popular-desc">${escapeHtml(m.desc)}</span>
+      <span class="popular-size">${escapeHtml(m.size)}</span>
+    </button>
+  `).join('');
+
+  grid.querySelectorAll('.popular-item').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const input = $('#pull-input');
+      input.value = btn.dataset.model;
+      input.focus();
+    });
+  });
+}
+
 // ── Event listeners ──
 
 $('#btn-start').addEventListener('click', startRuntime);
@@ -386,6 +418,9 @@ $('#pull-form').addEventListener('submit', (e) => {
 // ── Initialize ──
 
 async function init() {
+  // Render static content.
+  renderPopularModels();
+
   // Fire all initial data loads in parallel.
   await Promise.allSettled([
     refreshHealth(),

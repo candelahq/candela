@@ -72,6 +72,7 @@
       <section class="card card-pull">
         <div class="card-header">
           <h2>Pull Model</h2>
+          <a class="btn btn-sm btn-ghost" href="https://ollama.com/library" target="_blank" title="Browse all models">Browse ↗</a>
         </div>
         <form id="pull-form" class="pull-form">
           <input
@@ -84,6 +85,10 @@
           <button type="submit" class="btn btn-primary" id="btn-pull">Pull</button>
         </form>
         <div class="pull-status hidden" id="pull-status"></div>
+        <div class="popular-models" id="popular-models">
+          <div class="popular-header">Popular Models</div>
+          <div class="popular-grid" id="popular-grid"></div>
+        </div>
       </section>
 
       <!-- ── Backends Card ── -->

@@ -3,6 +3,7 @@ package main
 import (
 	"database/sql"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"time"
@@ -127,7 +128,12 @@ func (s *StateDB) GetRuntimeState() RuntimeState {
 		Scan(&rs.Backend, &started, &rs.LastModel)
 	if started.Valid {
 		// SQLite datetime('now') returns 'YYYY-MM-DD HH:MM:SS'
-		rs.LastStarted, _ = time.Parse("2006-01-02 15:04:05", started.String)
+		t, err := time.Parse("2006-01-02 15:04:05", started.String)
+		if err != nil {
+			slog.Warn("state db: failed to parse last_started", "value", started.String, "error", err)
+		} else {
+			rs.LastStarted = t
+		}
 	}
 	return rs
 }
@@ -174,7 +180,12 @@ func (s *StateDB) RecentPulls(n int) ([]PullRecord, error) {
 		if err := rows.Scan(&r.Model, &r.Backend, &at, &r.SizeBytes); err != nil {
 			return nil, err
 		}
-		r.PulledAt, _ = time.Parse("2006-01-02 15:04:05", at)
+		t, err := time.Parse("2006-01-02 15:04:05", at)
+		if err != nil {
+			slog.Warn("state db: failed to parse pulled_at", "value", at, "error", err)
+		} else {
+			r.PulledAt = t
+		}
 		records = append(records, r)
 	}
 	return records, rows.Err()

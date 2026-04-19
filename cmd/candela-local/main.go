@@ -56,6 +56,7 @@ type Config struct {
 	Port          int    `yaml:"port"`           // Local port to listen on
 	LMStudioPort  int    `yaml:"lmstudio_port"`  // LM Studio compat listener port (default: 1234)
 	LocalUpstream string `yaml:"local_upstream"` // Local runtime URL (e.g. http://127.0.0.1:11434)
+	StateDBPath   string `yaml:"state_db_path"`  // Path to SQLite state DB (default: ~/.candela/state.db)
 
 	// Runtime management configuration.
 	RuntimeBackend string                `yaml:"runtime_backend"` // "ollama", "vllm", "lmstudio"
@@ -218,7 +219,10 @@ func main() {
 	var stateDB *StateDB
 
 	// Open state DB (best-effort — not required to run).
-	statePath := filepath.Join(os.Getenv("HOME"), ".candela", "state.db")
+	statePath := cfg.StateDBPath
+	if statePath == "" {
+		statePath = "~/.candela/state.db"
+	}
 	stateDB, err = openStateDB(statePath)
 	if err != nil {
 		slog.Warn("state DB unavailable (running without persistence)", "error", err)
@@ -245,7 +249,7 @@ func main() {
 	}
 
 	// Mount ConnectRPC RuntimeService.
-	handler := newRuntimeHandler(mgr, stateDB)
+	handler := newRuntimeHandler(mgr, stateDB, ctx)
 	rpcPath, rpcHandler := candelav1connect.NewRuntimeServiceHandler(handler)
 	mux.Handle(rpcPath, rpcHandler)
 

@@ -14,14 +14,17 @@ import (
 
 // runtimeHandler implements the ConnectRPC RuntimeServiceHandler.
 type runtimeHandler struct {
-	mgr   *runtime.Manager
-	state *StateDB
+	mgr    *runtime.Manager
+	state  *StateDB
+	appCtx context.Context // application-level context for background goroutines
 }
 
 // newRuntimeHandler creates a handler backed by the given Manager and state DB.
 // Either may be nil if not configured (RPCs will return appropriate errors).
-func newRuntimeHandler(mgr *runtime.Manager, state *StateDB) *runtimeHandler {
-	return &runtimeHandler{mgr: mgr, state: state}
+// appCtx should be the application's long-lived context so background tasks
+// (e.g. model pulls) are cancelled on graceful shutdown.
+func newRuntimeHandler(mgr *runtime.Manager, state *StateDB, appCtx context.Context) *runtimeHandler {
+	return &runtimeHandler{mgr: mgr, state: state, appCtx: appCtx}
 }
 
 func (h *runtimeHandler) StartRuntime(
@@ -31,8 +34,14 @@ func (h *runtimeHandler) StartRuntime(
 	if h.mgr == nil {
 		return nil, connect.NewError(connect.CodeFailedPrecondition, errNoRuntime)
 	}
-	if err := h.mgr.Start(ctx); err != nil {
+	// Always start the runtime when explicitly requested via RPC,
+	// regardless of the auto_start config flag.
+	if err := h.mgr.Runtime().Start(ctx); err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
+	}
+	// Re-start the health loop so it picks up the new state.
+	if err := h.mgr.Start(ctx); err != nil {
+		slog.Warn("failed to restart health loop", "error", err)
 	}
 	return connect.NewResponse(&v1.StartRuntimeResponse{
 		Status: healthToProto(h.mgr.Health(), h.mgr.Runtime().Name()),
@@ -137,12 +146,10 @@ func (h *runtimeHandler) PullModel(
 		return nil, connect.NewError(connect.CodeInvalidArgument, errModelRequired)
 	}
 
-	// Run the pull in the background — use context.Background() so it
-	// survives after the HTTP handler returns.
-	progress := make(chan runtime.PullProgress, 16)
+	// Run the pull in the background using the app-level context so it
+	// survives the HTTP handler but is cancelled on graceful shutdown.
 	go func() {
-		defer close(progress)
-		if err := h.mgr.Runtime().PullModel(context.Background(), model, progress); err != nil {
+		if err := h.mgr.Runtime().PullModel(h.appCtx, model, nil); err != nil {
 			slog.Error("model pull failed", "model", model, "error", err)
 			return
 		}

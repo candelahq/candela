@@ -130,7 +130,7 @@ func setupRPCHandler(t *testing.T) (candelav1connect.RuntimeServiceClient, *rpcM
 
 	mux := http.NewServeMux()
 	path, handler := candelav1connect.NewRuntimeServiceHandler(
-		newRuntimeHandler(mgr, nil))
+		newRuntimeHandler(mgr, nil, context.Background()))
 	mux.Handle(path, handler)
 
 	srv := httptest.NewServer(mux)
@@ -350,7 +350,7 @@ func setupRPCHandlerWithState(t *testing.T) (candelav1connect.RuntimeServiceClie
 
 	mux := http.NewServeMux()
 	path, handler := candelav1connect.NewRuntimeServiceHandler(
-		newRuntimeHandler(mgr, stateDB))
+		newRuntimeHandler(mgr, stateDB, context.Background()))
 	mux.Handle(path, handler)
 
 	srv := httptest.NewServer(mux)
@@ -407,7 +407,7 @@ func TestRPC_ResetState_NoStateDB(t *testing.T) {
 
 	mux := http.NewServeMux()
 	path, handler := candelav1connect.NewRuntimeServiceHandler(
-		newRuntimeHandler(mgr, nil)) // nil state DB
+		newRuntimeHandler(mgr, nil, context.Background())) // nil state DB
 	mux.Handle(path, handler)
 
 	srv := httptest.NewServer(mux)

@@ -6,6 +6,7 @@
 package ollama
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -27,18 +28,20 @@ func init() {
 
 // Runtime manages an Ollama inference server.
 type Runtime struct {
-	host   string
-	port   int
-	binary string
-	cmd    *exec.Cmd
+	host       string
+	port       int
+	binary     string
+	cmd        *exec.Cmd
+	httpClient *http.Client
 }
 
 // New creates an Ollama runtime with the given config.
 func New(cfg runtime.Config) (*Runtime, error) {
 	return &Runtime{
-		host:   runtime.DefaultHost(cfg.Host),
-		port:   runtime.DefaultPort(cfg.Port, 11434),
-		binary: runtime.ConfigBinary(cfg.Args, "ollama"),
+		host:       runtime.DefaultHost(cfg.Host),
+		port:       runtime.DefaultPort(cfg.Port, 11434),
+		binary:     runtime.ConfigBinary(cfg.Args, "ollama"),
+		httpClient: &http.Client{Timeout: 30 * time.Second},
 	}, nil
 }
 
@@ -207,50 +210,47 @@ func (r *Runtime) PullModel(ctx context.Context, modelID string, progress chan<-
 // with keep_alive set to -1 (infinite). The model will stay loaded until
 // explicitly unloaded or the server is stopped.
 func (r *Runtime) LoadModel(ctx context.Context, modelID string) error {
-	body := fmt.Sprintf(`{"model": %q, "keep_alive": -1}`, modelID)
+	return r.sendKeepAlive(ctx, modelID, -1, "load")
+}
+
+// UnloadModel removes a model from GPU memory by sending a generate request
+// with keep_alive set to 0 (immediate eviction).
+func (r *Runtime) UnloadModel(ctx context.Context, modelID string) error {
+	return r.sendKeepAlive(ctx, modelID, 0, "unload")
+}
+
+// sendKeepAlive sends a /api/generate request to control model VRAM residency.
+func (r *Runtime) sendKeepAlive(ctx context.Context, modelID string, keepAlive int, action string) error {
+	reqBody := struct {
+		Model     string `json:"model"`
+		KeepAlive int    `json:"keep_alive"`
+	}{
+		Model:     modelID,
+		KeepAlive: keepAlive,
+	}
+	payload, err := json.Marshal(reqBody)
+	if err != nil {
+		return err
+	}
+
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
-		r.baseURL()+"/api/generate", strings.NewReader(body))
+		r.baseURL()+"/api/generate", bytes.NewReader(payload))
 	if err != nil {
 		return err
 	}
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := r.httpClient.Do(req)
 	if err != nil {
-		return fmt.Errorf("ollama: load model %q: %w", modelID, err)
+		return fmt.Errorf("ollama: %s model %q: %w", action, modelID, err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 	// Drain the response body (Ollama streams NDJSON even for empty generates).
 	_, _ = io.Copy(io.Discard, resp.Body)
 
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("ollama: load model %q: status %d", modelID, resp.StatusCode)
+		return fmt.Errorf("ollama: %s model %q: status %d", action, modelID, resp.StatusCode)
 	}
-	slog.Info("model loaded", "model", modelID, "backend", "ollama")
-	return nil
-}
-
-// UnloadModel removes a model from GPU memory by sending a generate request
-// with keep_alive set to 0 (immediate eviction).
-func (r *Runtime) UnloadModel(ctx context.Context, modelID string) error {
-	body := fmt.Sprintf(`{"model": %q, "keep_alive": 0}`, modelID)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
-		r.baseURL()+"/api/generate", strings.NewReader(body))
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return fmt.Errorf("ollama: unload model %q: %w", modelID, err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-	_, _ = io.Copy(io.Discard, resp.Body)
-
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("ollama: unload model %q: status %d", modelID, resp.StatusCode)
-	}
-	slog.Info("model unloaded", "model", modelID, "backend", "ollama")
+	slog.Info("model "+action+"ed", "model", modelID, "backend", "ollama")
 	return nil
 }

@@ -125,8 +125,8 @@ function renderModels(models) {
     ].filter(Boolean).join(' · ');
 
     const action = loaded
-      ? `<button class="btn btn-sm btn-model" onclick="unloadModel('${m.id}')">Unload</button>`
-      : `<button class="btn btn-sm btn-model" onclick="loadModel('${m.id}')">Load</button>`;
+      ? `<button class="btn btn-sm btn-model" data-action="unload" data-model-id="${escapeAttr(m.id)}">Unload</button>`
+      : `<button class="btn btn-sm btn-model" data-action="load" data-model-id="${escapeAttr(m.id)}">Load</button>`;
 
     return `
       <div class="model-row">
@@ -139,6 +139,15 @@ function renderModels(models) {
       </div>
     `;
   }).join('');
+
+  // Bind click handlers via event delegation (safe against XSS).
+  list.querySelectorAll('[data-action]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const modelId = btn.getAttribute('data-model-id');
+      if (btn.dataset.action === 'load') loadModel(modelId);
+      else unloadModel(modelId);
+    });
+  });
 }
 
 function renderBackends(data) {
@@ -183,6 +192,11 @@ function renderBackends(data) {
 function escapeHtml(str) {
   if (!str) return '';
   return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+function escapeAttr(str) {
+  if (!str) return '';
+  return str.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
 // ── Actions ──
@@ -239,24 +253,23 @@ async function stopRuntime() {
   }
 }
 
-// Exposed globally for inline onclick handlers.
-window.loadModel = async function(modelId) {
+async function loadModel(modelId) {
   try {
     await rpc('LoadModel', { model: modelId });
     await refreshHealth();
   } catch (err) {
     alert('Load failed: ' + err.message);
   }
-};
+}
 
-window.unloadModel = async function(modelId) {
+async function unloadModel(modelId) {
   try {
     await rpc('UnloadModel', { model: modelId });
     await refreshHealth();
   } catch (err) {
     alert('Unload failed: ' + err.message);
   }
-};
+}
 
 async function pullModel(modelId) {
   const statusEl = $('#pull-status');

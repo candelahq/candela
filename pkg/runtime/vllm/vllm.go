@@ -201,7 +201,7 @@ func (r *Runtime) LoadModel(ctx context.Context, modelID string) error {
 	cmdArgs := []string{"serve", r.model, "--port", fmt.Sprintf("%d", r.port), "--host", r.host}
 	cmdArgs = append(cmdArgs, r.args...)
 
-	r.cmd = exec.CommandContext(ctx, r.binary, cmdArgs...)
+	r.cmd = exec.Command(r.binary, cmdArgs...)
 	if err := r.cmd.Start(); err != nil {
 		return fmt.Errorf("vllm: starting with model %q: %w", modelID, err)
 	}

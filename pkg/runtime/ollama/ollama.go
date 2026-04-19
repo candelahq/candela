@@ -202,3 +202,55 @@ func (r *Runtime) PullModel(ctx context.Context, modelID string, progress chan<-
 	slog.Info("model pulled", "model", modelID, "backend", "ollama")
 	return nil
 }
+
+// LoadModel loads a model into GPU memory by sending a generate request
+// with keep_alive set to -1 (infinite). The model will stay loaded until
+// explicitly unloaded or the server is stopped.
+func (r *Runtime) LoadModel(ctx context.Context, modelID string) error {
+	body := fmt.Sprintf(`{"model": %q, "keep_alive": -1}`, modelID)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		r.baseURL()+"/api/generate", strings.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("ollama: load model %q: %w", modelID, err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	// Drain the response body (Ollama streams NDJSON even for empty generates).
+	_, _ = io.Copy(io.Discard, resp.Body)
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("ollama: load model %q: status %d", modelID, resp.StatusCode)
+	}
+	slog.Info("model loaded", "model", modelID, "backend", "ollama")
+	return nil
+}
+
+// UnloadModel removes a model from GPU memory by sending a generate request
+// with keep_alive set to 0 (immediate eviction).
+func (r *Runtime) UnloadModel(ctx context.Context, modelID string) error {
+	body := fmt.Sprintf(`{"model": %q, "keep_alive": 0}`, modelID)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		r.baseURL()+"/api/generate", strings.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("ollama: unload model %q: %w", modelID, err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	_, _ = io.Copy(io.Discard, resp.Body)
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("ollama: unload model %q: status %d", modelID, resp.StatusCode)
+	}
+	slog.Info("model unloaded", "model", modelID, "backend", "ollama")
+	return nil
+}

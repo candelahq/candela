@@ -85,4 +85,15 @@ type Runtime interface {
 	// The progress channel receives status updates; it may be nil if the
 	// caller doesn't need progress updates.
 	PullModel(ctx context.Context, modelID string, progress chan<- PullProgress) error
+
+	// LoadModel loads a model into GPU memory (or equivalent).
+	// For Ollama, this pins the model in memory. For vLLM, this may
+	// require restarting the process with a different model — in that case
+	// the method returns immediately and the caller should poll Health()
+	// for readiness.
+	LoadModel(ctx context.Context, modelID string) error
+
+	// UnloadModel removes a model from GPU memory.
+	// For vLLM this stops the process entirely.
+	UnloadModel(ctx context.Context, modelID string) error
 }

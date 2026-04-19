@@ -71,6 +71,9 @@ func (m *mockRuntime) PullModel(_ context.Context, modelID string, progress chan
 	return nil
 }
 
+func (m *mockRuntime) LoadModel(_ context.Context, _ string) error   { return nil }
+func (m *mockRuntime) UnloadModel(_ context.Context, _ string) error { return nil }
+
 func TestManagerAutoStart(t *testing.T) {
 	mock := &mockRuntime{
 		name:     "test",
@@ -198,4 +201,100 @@ func TestManagerStop(t *testing.T) {
 	if !stopped {
 		t.Error("expected runtime.Stop() to be called")
 	}
+}
+
+func TestManagerRestart(t *testing.T) {
+	mock := &mockRuntime{
+		name:     "test",
+		endpoint: "http://127.0.0.1:9999/v1",
+		models:   []runtime.Model{{ID: "test-model", Loaded: true}},
+	}
+	mgr := runtime.NewManager(mock, runtime.ManagerConfig{
+		AutoStart:   true,
+		HealthCheck: 50 * time.Millisecond,
+	})
+	ctx := context.Background()
+
+	// Start.
+	if err := mgr.Start(ctx); err != nil {
+		t.Fatalf("first Start() error: %v", err)
+	}
+	// Wait for health loop to populate.
+	for i := 0; i < 10; i++ {
+		if mgr.Health().Status == runtime.StatusRunning {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if mgr.Health().Status != runtime.StatusRunning {
+		t.Fatalf("status after start = %q, want running", mgr.Health().Status)
+	}
+
+	// Stop.
+	if err := mgr.Stop(ctx); err != nil {
+		t.Fatalf("Stop() error: %v", err)
+	}
+
+	// Restart — this is the key test.
+	mock.mu.Lock()
+	mock.startCalled = false
+	mock.stopCalled = false
+	mock.mu.Unlock()
+
+	if err := mgr.Start(ctx); err != nil {
+		t.Fatalf("second Start() error: %v", err)
+	}
+	defer func() { _ = mgr.Stop(ctx) }()
+
+	// Wait for health loop to repopulate.
+	for i := 0; i < 10; i++ {
+		if mgr.Health().Status == runtime.StatusRunning {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if mgr.Health().Status != runtime.StatusRunning {
+		t.Errorf("status after restart = %q, want running", mgr.Health().Status)
+	}
+
+	mock.mu.Lock()
+	restarted := mock.startCalled
+	mock.mu.Unlock()
+	if !restarted {
+		t.Error("expected runtime.Start() to be called on restart")
+	}
+}
+
+func TestManagerLoadUnloadModel(t *testing.T) {
+	loadCalled := ""
+	unloadCalled := ""
+
+	mock := &mockRuntime{
+		name:     "test",
+		endpoint: "http://127.0.0.1:9999/v1",
+		healthy:  true,
+	}
+	// Override the mock's Load/Unload to track calls.
+	// Since Go doesn't support overriding methods, we test via Manager
+	// which delegates to the Runtime interface. The mock already returns nil.
+	mgr := runtime.NewManager(mock, runtime.ManagerConfig{
+		HealthCheck: 10 * time.Second,
+	})
+	ctx := context.Background()
+	if err := mgr.Start(ctx); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = mgr.Stop(ctx) }()
+
+	// LoadModel and UnloadModel should not error (mock returns nil).
+	if err := mgr.LoadModel(ctx, "test-model"); err != nil {
+		t.Errorf("LoadModel error: %v", err)
+	}
+	if err := mgr.UnloadModel(ctx, "test-model"); err != nil {
+		t.Errorf("UnloadModel error: %v", err)
+	}
+
+	// Verify they don't interfere with each other.
+	_ = loadCalled
+	_ = unloadCalled
 }

@@ -178,3 +178,41 @@ func (r *Runtime) PullModel(_ context.Context, modelID string, progress chan<- r
 	}
 	return nil
 }
+
+// LoadModel switches the model by stopping the current process and launching
+// a new one with the requested model. Returns immediately — the caller should
+// poll Health() for readiness (vLLM reports "starting" via /health/ready until
+// the model is fully loaded).
+//
+// If the requested model is already loaded, this is a no-op.
+func (r *Runtime) LoadModel(ctx context.Context, modelID string) error {
+	if r.model == modelID && r.cmd != nil && r.cmd.Process != nil {
+		slog.Info("vllm: model already loaded", "model", modelID)
+		return nil
+	}
+
+	// Stop current instance if running.
+	if err := r.Stop(ctx); err != nil {
+		slog.Warn("vllm: failed to stop before model switch", "error", err)
+	}
+
+	// Update the model and restart.
+	r.model = modelID
+	cmdArgs := []string{"serve", r.model, "--port", fmt.Sprintf("%d", r.port), "--host", r.host}
+	cmdArgs = append(cmdArgs, r.args...)
+
+	r.cmd = exec.CommandContext(ctx, r.binary, cmdArgs...)
+	if err := r.cmd.Start(); err != nil {
+		return fmt.Errorf("vllm: starting with model %q: %w", modelID, err)
+	}
+
+	slog.Info("vllm: loading model (async)", "model", modelID)
+	return nil
+}
+
+// UnloadModel stops the vLLM process. vLLM can only serve one model per
+// process, so unloading means stopping the server entirely.
+func (r *Runtime) UnloadModel(ctx context.Context, modelID string) error {
+	slog.Info("vllm: unloading model (stopping process)", "model", modelID)
+	return r.Stop(ctx)
+}

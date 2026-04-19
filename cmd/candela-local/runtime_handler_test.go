@@ -475,14 +475,18 @@ func TestPullModel_ActivePullsTracking(t *testing.T) {
 		t.Errorf("status = %q, want pulling", pulls[0].Status)
 	}
 
-	// Wait for pull to complete.
-	time.Sleep(300 * time.Millisecond)
-	pulls = h.ActivePulls()
-	if len(pulls) != 1 {
-		t.Fatalf("after complete: activePulls = %d, want 1", len(pulls))
+	// Wait for pull to complete (poll instead of fixed sleep for race-safety).
+	var completed bool
+	for i := 0; i < 40; i++ { // up to 2s
+		time.Sleep(50 * time.Millisecond)
+		pulls = h.ActivePulls()
+		if len(pulls) == 1 && pulls[0].Status == "complete" {
+			completed = true
+			break
+		}
 	}
-	if pulls[0].Status != "complete" {
-		t.Errorf("after complete: status = %q, want complete", pulls[0].Status)
+	if !completed {
+		t.Fatalf("pull did not complete in time; activePulls = %+v", pulls)
 	}
 	if pulls[0].Percent != 100 {
 		t.Errorf("after complete: percent = %v, want 100", pulls[0].Percent)

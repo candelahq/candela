@@ -88,7 +88,17 @@ func (m *Manager) Stop(ctx context.Context) error {
 	if m.cancel != nil {
 		m.cancel()
 	}
-	return m.rt.Stop(ctx)
+	err := m.rt.Stop(ctx)
+	// Update cached health immediately so GetHealth reflects the stopped state.
+	m.mu.Lock()
+	m.health = &Health{
+		Status:    StatusStopped,
+		Endpoint:  m.rt.Endpoint(),
+		CheckedAt: time.Now(),
+	}
+	m.startedAt = time.Time{}
+	m.mu.Unlock()
+	return err
 }
 
 // Health returns the latest cached health status.

@@ -129,8 +129,8 @@ test.describe("Team Leaderboard", () => {
           userId: "u1",
           email: "alice@test.com",
           displayName: "Alice",
-          callCount: "500",
-          totalTokens: "200000",
+          callCount: 500,
+          totalTokens: 200000,
           costUsd: 15.5,
           avgLatencyMs: 320,
           topModel: "gpt-4o"
@@ -139,8 +139,8 @@ test.describe("Team Leaderboard", () => {
           userId: "u2",
           email: "bob@test.com",
           displayName: "Bob",
-          callCount: "300",
-          totalTokens: "100000",
+          callCount: 300,
+          totalTokens: 100000,
           costUsd: 8.2,
           avgLatencyMs: 450,
           topModel: "claude-3-opus"
@@ -150,16 +150,25 @@ test.describe("Team Leaderboard", () => {
 
     await page.goto("/admin/leaderboard");
 
+    // Header and Subtitle (Standard Admin UI)
     await expect(page.locator(".admin-page-title")).toContainText("Team Leaderboard");
     await expect(page.locator(".admin-page-subtitle")).toBeVisible();
 
-    // Check Rankings
-    await expect(page.locator("text=#1")).toBeVisible();
-    await expect(page.locator("text=Alice")).toBeVisible();
-    await expect(page.locator("text=$15.50")).toBeVisible();
+    // Check Rankings Table
+    const table = page.locator("table");
+    await expect(table).toBeVisible();
 
-    await expect(page.locator("text=#2")).toBeVisible();
-    await expect(page.locator("text=Bob")).toBeVisible();
-    await expect(page.locator("text=$8.20")).toBeVisible();
+    // First Row (Alice)
+    const row1 = table.locator("tbody tr").first();
+    await expect(row1.locator("text=#1")).toBeVisible();
+    await expect(row1.locator("text=Alice")).toBeVisible();
+    await expect(row1.locator("text=$15.50")).toBeVisible();
+    await expect(row1.locator("text=gpt-4o")).toBeVisible();
+
+    // Second Row (Bob)
+    const row2 = table.locator("tbody tr").nth(1);
+    await expect(row2.locator("text=#2")).toBeVisible();
+    await expect(row2.locator("text=Bob")).toBeVisible();
+    await expect(row2.locator("text=$8.20")).toBeVisible();
   });
 });

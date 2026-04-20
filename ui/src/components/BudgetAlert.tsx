@@ -8,19 +8,16 @@ import { BUDGET_ALERT_THRESHOLD } from "@/lib/constants";
 /** Global alert banner that appears when a user is nearing their budget limit. */
 export function BudgetAlert() {
   const { data, loading } = useUsage();
-  const [visible, setVisible] = useState(false);
+  const [dismissed, setDismissed] = useState(false);
 
-  useEffect(() => {
-    if (!loading && data?.budget) {
-      const { percentUsed } = data.budget;
-      // Show alert if threshold exceeded
-      if (percentUsed > BUDGET_ALERT_THRESHOLD) {
-        setVisible(true);
-      }
-    }
-  }, [data, loading]);
+  // Derive visibility from usage data + threshold + dismissal
+  const shouldShow =
+    !loading &&
+    data?.budget &&
+    data.budget.percentUsed > BUDGET_ALERT_THRESHOLD &&
+    !dismissed;
 
-  if (!visible || !data?.budget) return null;
+  if (!shouldShow || !data?.budget) return null;
 
   const { percentUsed, remainingUsd } = data.budget;
   const isOver = percentUsed >= 100;
@@ -38,7 +35,7 @@ export function BudgetAlert() {
           View Details
         </Link>
       </div>
-      <button onClick={() => setVisible(false)} className="alert-close">
+      <button onClick={() => setDismissed(true)} className="alert-close">
         &times;
       </button>
 

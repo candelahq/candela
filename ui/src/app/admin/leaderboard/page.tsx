@@ -9,10 +9,10 @@ import { useEffect } from "react";
 
 export default function LeaderboardPage() {
   const { rankings, loading, error, timeRange, setTimeRange, refresh } = useLeaderboard();
-  const { isAdmin, isLoading: authLoading } = useCurrentUser();
+  const { user, isAdmin, isLoading: authLoading } = useCurrentUser();
 
-  // Route protection - check immediately to prevent content flash
-  if (!authLoading && !isAdmin) {
+  // Route protection - only redirect if definitively not an admin
+  if (!authLoading && user && !isAdmin) {
     redirect("/");
     return null;
   }

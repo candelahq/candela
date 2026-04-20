@@ -8,7 +8,6 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/candelahq/candela/pkg/processor"
@@ -50,7 +49,7 @@ func (s *spanCapture) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	r.Body = io.NopCloser(bytes.NewReader(reqBody))
 	r.ContentLength = int64(len(reqBody))
 
-	// Parse request for model name.
+	// Parse request for model name and input content (extract early to avoid redundant unmarshal).
 	var chatReq struct {
 		Model    string `json:"model"`
 		Stream   *bool  `json:"stream"`
@@ -61,6 +60,16 @@ func (s *spanCapture) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	_ = json.Unmarshal(reqBody, &chatReq)
 
+	// Extract input content now to avoid re-parsing later.
+	var inputContent string
+	if len(chatReq.Messages) > 0 {
+		last := chatReq.Messages[len(chatReq.Messages)-1]
+		inputContent = last.Content
+		if len(inputContent) > 500 {
+			inputContent = inputContent[:500] + "..."
+		}
+	}
+
 	// Capture response.
 	rec := &responseCapture{ResponseWriter: w}
 	s.next.ServeHTTP(rec, r)
@@ -68,10 +77,10 @@ func (s *spanCapture) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	duration := time.Since(start)
 
 	// Build the span asynchronously to not block the response.
-	go s.buildSpan(chatReq.Model, chatReq.Stream, reqBody, rec.body.Bytes(), rec.statusCode, start, duration)
+	go s.buildSpan(chatReq.Model, chatReq.Stream, inputContent, rec.body.Bytes(), rec.statusCode, start, duration)
 }
 
-func (s *spanCapture) buildSpan(model string, stream *bool, reqBody, respBody []byte, statusCode int, start time.Time, duration time.Duration) {
+func (s *spanCapture) buildSpan(model string, stream *bool, inputContent string, respBody []byte, statusCode int, start time.Time, duration time.Duration) {
 	var inputTokens, outputTokens, totalTokens int64
 
 	isStreaming := stream != nil && *stream
@@ -97,22 +106,6 @@ func (s *spanCapture) buildSpan(model string, stream *bool, reqBody, respBody []
 
 	if totalTokens == 0 {
 		totalTokens = inputTokens + outputTokens
-	}
-
-	// Build input content summary.
-	var inputContent string
-	var chatReq struct {
-		Messages []struct {
-			Role    string `json:"role"`
-			Content string `json:"content"`
-		} `json:"messages"`
-	}
-	if err := json.Unmarshal(reqBody, &chatReq); err == nil && len(chatReq.Messages) > 0 {
-		last := chatReq.Messages[len(chatReq.Messages)-1]
-		inputContent = last.Content
-		if len(inputContent) > 500 {
-			inputContent = inputContent[:500] + "..."
-		}
 	}
 
 	spanStatus := storage.SpanStatusOK
@@ -146,16 +139,20 @@ func (s *spanCapture) buildSpan(model string, stream *bool, reqBody, respBody []
 
 // parseSSEUsage extracts token usage from the final SSE data chunk.
 // Ollama and OpenAI-compatible servers include usage in the last chunk.
+// Uses bytes.Split to avoid string conversion of the entire response.
 func parseSSEUsage(body []byte) (input, output, total int64) {
-	lines := strings.Split(string(body), "\n")
+	prefix := []byte("data: ")
+	done := []byte("[DONE]")
+
+	lines := bytes.Split(body, []byte("\n"))
 	// Walk backwards to find the last data line with usage.
 	for i := len(lines) - 1; i >= 0; i-- {
-		line := strings.TrimSpace(lines[i])
-		if !strings.HasPrefix(line, "data: ") {
+		line := bytes.TrimSpace(lines[i])
+		if !bytes.HasPrefix(line, prefix) {
 			continue
 		}
-		data := strings.TrimPrefix(line, "data: ")
-		if data == "[DONE]" {
+		data := bytes.TrimPrefix(line, prefix)
+		if bytes.Equal(data, done) {
 			continue
 		}
 		var chunk struct {
@@ -165,7 +162,7 @@ func parseSSEUsage(body []byte) (input, output, total int64) {
 				TotalTokens      int64 `json:"total_tokens"`
 			} `json:"usage"`
 		}
-		if err := json.Unmarshal([]byte(data), &chunk); err == nil && chunk.Usage.TotalTokens > 0 {
+		if err := json.Unmarshal(data, &chunk); err == nil && chunk.Usage.TotalTokens > 0 {
 			return chunk.Usage.PromptTokens, chunk.Usage.CompletionTokens, chunk.Usage.TotalTokens
 		}
 	}
@@ -198,6 +195,9 @@ func (r *responseCapture) Flush() {
 // generateID returns a random 16-byte hex string for span/trace IDs.
 func generateID() string {
 	b := make([]byte, 16)
-	_, _ = rand.Read(b)
+	if _, err := rand.Read(b); err != nil {
+		// crypto/rand should never fail on supported platforms.
+		panic("crypto/rand failed: " + err.Error())
+	}
 	return hex.EncodeToString(b)
 }

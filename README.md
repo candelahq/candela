@@ -242,7 +242,7 @@ The UI communicates with the backend via **ConnectRPC v2** on `localhost:8080`. 
 ## 🕹️ candela-local — Local Development Proxy
 
 `candela-local` is an auth-injecting proxy + runtime manager for developer machines.
-It operates in two modes:
+It operates in three modes:
 
 ### 🏠 Solo Mode (Zero-Config)
 
@@ -261,9 +261,32 @@ candela-local   # starts on :8181 (proxy) + :1234 (LM compat)
 - Every call traced to `~/.candela/traces.db` (SQLite)
 - Management UI at `http://localhost:8181/_local/`
 
-### 🌐 Team Mode (Cloud + Local)
+### ☁️ Solo + Cloud Mode (Direct Cloud)
 
-Connect to a shared Candela server for cloud models (GPT-4o, Claude, Gemini) alongside local ones.
+Call Gemini and Claude directly using your **Google identity** — no server deployment needed.
+
+```yaml
+# ~/.candela.yaml
+runtime_backend: ollama
+
+providers:
+  - name: google
+    models: [gemini-2.5-pro, gemini-2.0-flash]
+  - name: anthropic
+    models: [claude-sonnet-4-20250514]
+
+vertex_ai:
+  project: my-gcp-project
+```
+
+- Local + cloud models merged into `/v1/models`
+- Smart routing: local stays local, cloud goes direct to Vertex AI via ADC
+- All calls (local + cloud) traced to SQLite — full observability
+- Prerequisites: `gcloud auth application-default login`
+
+### 🌐 Team Mode (Governance + Budgets)
+
+Connect to a shared Candela server for **budget enforcement, RBAC, and team-wide cost tracking**.
 
 ```yaml
 # ~/.candela.yaml
@@ -275,24 +298,26 @@ audience: "12345678.apps.googleusercontent.com"
 - Local + cloud models merged into `/v1/models`
 - Smart routing: local models stay local, cloud models route through Candela server
 - OIDC auth injected automatically via ADC
+- Team-wide cost tracking, budget enforcement, and centralized governance
 
 > [!TIP]
-> A single developer can use Team Mode — just deploy a Candela server.
-> See [docs/candela-local.md](docs/candela-local.md) for full setup guide.
+> See [docs/candela-local.md](docs/candela-local.md) for the full setup guide.
 
 ### Unified Model Discovery
 
-The LM-compatible listener on `:1234` merges **local** and **remote** models into a single `/v1/models` response:
+The LM-compatible listener on `:1234` merges **local**, **cloud**, and **remote** models into a single `/v1/models` response:
 
 ```bash
 # JetBrains, Cline, or any OpenAI-compatible client sees everything:
 curl http://localhost:1234/v1/models
 # → local: llama3.2:3b, mistral:7b (from Ollama)
-# → remote: gpt-4o, claude-3.5-sonnet (from Cloud Run)  [Team Mode only]
+# → cloud: gemini-2.5-pro, claude-sonnet-4 (direct via ADC)  [Solo + Cloud]
+# → remote: gpt-4o (from Cloud Run)  [Team Mode]
 ```
 
 `/v1/chat/completions` automatically routes to the right backend:
 - **Local model** → Ollama/vLLM/LM Studio (no round-trip)
+- **Cloud model** → Vertex AI directly (via Google ADC)
 - **Remote model** → Cloud Run proxy (with OIDC auth injection)
 
 ### Runtime Management UI

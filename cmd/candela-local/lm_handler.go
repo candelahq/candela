@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -12,34 +13,40 @@ import (
 	"sync"
 	"time"
 
+	"github.com/candelahq/candela/pkg/proxy"
 	"github.com/candelahq/candela/pkg/runtime"
 )
 
 // lmHandler implements a smart HTTP handler for the LM Studio compat listener.
-// It intercepts /v1/models (merging local + remote models) and
-// /v1/chat/completions (routing local models to the local runtime).
-// All other paths pass through to the remote proxy.
+// It intercepts /v1/models (merging local + remote + cloud models) and
+// /v1/chat/completions (routing to local runtime, cloud proxy, or remote server).
 type lmHandler struct {
 	mgr          *runtime.Manager       // local runtime manager (may be nil)
 	remoteProxy  *httputil.ReverseProxy // proxy to remote Candela server
 	localProxy   *httputil.ReverseProxy // proxy to local runtime (e.g. Ollama)
 	localHandler http.Handler           // localProxy wrapped with optional span capture
+	cloudProxy   *proxy.Proxy           // direct cloud proxy (solo + cloud mode)
+	cloudModels  map[string]string      // model ID → provider name
 
 	localModels sync.Map // model ID string → bool (cached for fast routing)
 }
 
-// newLMHandler creates a smart LM compat handler that merges local + remote
+// newLMHandler creates a smart LM compat handler that merges local + remote + cloud
 // models and routes chat completions to the correct backend.
-// If localHandler is non-nil, it wraps localProxy with span capture.
-func newLMHandler(mgr *runtime.Manager, remoteProxy, localProxy *httputil.ReverseProxy, localHandler http.Handler) *lmHandler {
+func newLMHandler(mgr *runtime.Manager, remoteProxy, localProxy *httputil.ReverseProxy, localHandler http.Handler, cloudProxy *proxy.Proxy, cloudModels map[string]string) *lmHandler {
 	if localHandler == nil && localProxy != nil {
 		localHandler = localProxy
+	}
+	if cloudModels == nil {
+		cloudModels = make(map[string]string)
 	}
 	return &lmHandler{
 		mgr:          mgr,
 		remoteProxy:  remoteProxy,
 		localProxy:   localProxy,
 		localHandler: localHandler,
+		cloudProxy:   cloudProxy,
+		cloudModels:  cloudModels,
 	}
 }
 
@@ -73,7 +80,7 @@ type openaiModelList struct {
 	Data   []openaiModel `json:"data"`
 }
 
-// serveModels merges local runtime models with remote cloud models.
+// serveModels merges local runtime models with remote and cloud models.
 func (h *lmHandler) serveModels(w http.ResponseWriter, r *http.Request) {
 	var merged []openaiModel
 
@@ -105,11 +112,20 @@ func (h *lmHandler) serveModels(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// 2. Fetch remote models by proxying to the remote Candela server.
+	// 2. Add direct cloud models.
+	for modelID, providerName := range h.cloudModels {
+		merged = append(merged, openaiModel{
+			ID:      modelID,
+			Object:  "model",
+			OwnedBy: providerName,
+		})
+	}
+
+	// 3. Fetch remote models by proxying to the remote Candela server.
 	remoteModels := h.fetchRemoteModels(r)
 	merged = append(merged, remoteModels...)
 
-	// 3. Return merged OpenAI-format response.
+	// 4. Return merged OpenAI-format response.
 	w.Header().Set("Content-Type", "application/json")
 	resp := openaiModelList{Object: "list", Data: merged}
 	if resp.Data == nil {
@@ -144,7 +160,7 @@ func (h *lmHandler) fetchRemoteModels(r *http.Request) []openaiModel {
 	return resp.Data
 }
 
-// serveChat routes chat completions to the local runtime or remote server.
+// serveChat routes chat completions to local runtime, cloud proxy, or remote server.
 func (h *lmHandler) serveChat(w http.ResponseWriter, r *http.Request) {
 	// Read body to peek at the model field (10MB limit to prevent OOM).
 	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 10<<20))
@@ -163,16 +179,32 @@ func (h *lmHandler) serveChat(w http.ResponseWriter, r *http.Request) {
 	r.Body = io.NopCloser(bytes.NewReader(body))
 	r.ContentLength = int64(len(body))
 
+	// 1. Local model → local runtime (with span capture).
 	if h.isLocalModel(req.Model) {
 		slog.Debug("lm handler: routing to local runtime", "model", req.Model)
 		h.localHandler.ServeHTTP(w, r)
-	} else if h.remoteProxy != nil {
-		h.remoteProxy.ServeHTTP(w, r)
-	} else {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusNotFound)
-		_ = json.NewEncoder(w).Encode(map[string]string{"error": "model not found locally and no remote server configured"})
+		return
 	}
+
+	// 2. Cloud model → direct cloud proxy (solo + cloud mode).
+	if providerName, ok := h.cloudModels[req.Model]; ok && h.cloudProxy != nil {
+		slog.Debug("lm handler: routing to cloud provider", "model", req.Model, "provider", providerName)
+		// Rewrite path for the proxy package: /proxy/{provider}/v1/chat/completions
+		r.URL.Path = fmt.Sprintf("/proxy/%s/v1/chat/completions", providerName)
+		h.cloudProxy.ServeHTTP(w, r)
+		return
+	}
+
+	// 3. Remote server → team mode proxy.
+	if h.remoteProxy != nil {
+		h.remoteProxy.ServeHTTP(w, r)
+		return
+	}
+
+	// 4. No handler found.
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusNotFound)
+	_ = json.NewEncoder(w).Encode(map[string]string{"error": "model not found locally and no remote server configured"})
 }
 
 // isLocalModel checks if a model is served by the local runtime.

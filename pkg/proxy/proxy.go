@@ -134,6 +134,12 @@ func (p *Proxy) RegisterRoutes(mux *http.ServeMux) {
 	}
 }
 
+// ServeHTTP implements http.Handler, allowing the proxy to be used directly.
+// The request URL path must be in the form /proxy/{provider}/...
+func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	p.handleProxy(w, r)
+}
+
 // CompatModel maps a model ID to a provider name for LM Studio compat mode.
 type CompatModel struct {
 	ID       string `yaml:"id" json:"id"`
@@ -578,7 +584,9 @@ func (p *Proxy) buildSpan(params spanParams) {
 		Attributes: attrs,
 	}
 
-	p.submitter.SubmitBatch([]storage.Span{span})
+	if p.submitter != nil {
+		p.submitter.SubmitBatch([]storage.Span{span})
+	}
 	slog.Debug("proxied LLM call",
 		"provider", params.provider.Name,
 		"model", params.model,

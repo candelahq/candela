@@ -17,7 +17,7 @@
 **For**: Individual developers who want to run local models with full
 observability and zero cloud dependencies.
 
-**Config**: Simply omit the `remote` field (or leave it empty).
+**Config**: Simply omit the `remote` and `providers` fields.
 
 ```yaml
 # ~/.candela.yaml — Solo Mode
@@ -33,8 +33,43 @@ runtime_backend: ollama
 - Model pulling, health monitoring, backend discovery
 - **No cloud account, no authentication, no remote server needed**
 
-**What you don't get**:
-- Cloud models (GPT-4o, Claude, Gemini) — there's no remote to route to
+---
+
+### ☁️ Solo + Cloud Mode
+
+**For**: Individual developers who want local _and_ cloud models (Gemini,
+Claude) without deploying a Candela server. Uses **Google ADC** — the same
+identity you already have.
+
+**Config**: Add `providers` and `vertex_ai` to your solo config.
+
+```yaml
+# ~/.candela.yaml — Solo + Cloud
+runtime_backend: ollama
+
+providers:
+  - name: google
+    models: [gemini-2.5-pro, gemini-2.0-flash]
+  - name: anthropic
+    models: [claude-sonnet-4-20250514, claude-3-haiku]
+
+vertex_ai:
+  project: my-gcp-project
+  region: us-central1
+```
+
+**Prerequisites**:
+```bash
+gcloud auth application-default login
+# Ensure Vertex AI API is enabled in your project
+```
+
+**What you get**:
+- Everything from Solo Mode, plus:
+- Cloud models (Gemini, Claude) merged into `/v1/models`
+- Smart routing: local models stay local, cloud models route directly to Vertex AI
+- **All calls** (local + cloud) traced to `~/.candela/traces.db`
+- **No server deployment needed** — just your GCP identity
 
 **Architecture**:
 ```
@@ -42,28 +77,29 @@ JetBrains / Cline / curl
         │
         ▼
   LM Compat (:1234)
-  /v1/models → local models only
+  /v1/models → local + cloud models
   /v1/chat/completions
         │
-        ▼
-  spanCapture middleware
-        │
-        ├──▶ Ollama / vLLM (local inference)
-        │
-        ▼
-  SpanProcessor → SQLite (~/.candela/traces.db)
-        │
-        ▼
-  /_local/api/traces → Traces UI card
+        ├── local model ──▶ Ollama / vLLM
+        │                        │
+        │                   spanCapture
+        │                        │
+        └── cloud model ──▶ pkg/proxy ──▶ Vertex AI (Google ADC)
+                                │
+                                ▼
+                          SpanProcessor → SQLite (traces.db)
 ```
+
+> [!NOTE]
+> If `vertex_ai.project` is not set in config, candela-local will try
+> `gcloud config get project` as a fallback and log a warning.
 
 ---
 
 ### 🌐 Team Mode
 
-**For**: Developers on a team with a shared Candela cloud backend, who want
-access to both local models _and_ cloud-hosted models (GPT-4o, Claude,
-Gemini via Vertex AI).
+**For**: Teams that need **budgeting, governance, and RBAC** via a shared
+Candela cloud backend.
 
 **Config**: Set `remote` to your team's Candela server URL.
 
@@ -102,12 +138,6 @@ JetBrains / Cline / curl
                            OpenAI / Anthropic / Google
 ```
 
-> [!TIP]
-> A single developer _can_ use Team Mode without a team — you just need
-> a Candela server deployed. This gives you access to cloud models
-> (GPT-4o, Claude, Gemini) through the unified endpoint, with full
-> cost tracking and observability.
-
 ---
 
 ## Installation
@@ -143,6 +173,17 @@ runtime_backend: ollama             # ollama | vllm | lmstudio
 port: 8181                          # main proxy port (default: 8181)
 lm_studio_port: 1234                # LM compat listener (default: 1234)
 
+# ── Optional: Direct Cloud (Solo + Cloud) ──
+providers:                          # omit for local-only solo mode
+  - name: google                    # Gemini via Vertex AI
+    models: [gemini-2.5-pro]
+  - name: anthropic                 # Claude via Vertex AI
+    models: [claude-sonnet-4-20250514]
+
+vertex_ai:
+  project: my-gcp-project           # required when providers is set
+  region: us-central1               # default: us-central1
+
 # ── Optional: Team Mode (omit for Solo) ──
 remote: https://candela-xxx.run.app # Candela server URL
 audience: "12345678.apps..."        # IAP audience for OIDC auth
@@ -154,8 +195,7 @@ state_db_path: ~/.candela/state.db     # runtime state persistence
 
 ### Environment & Auth
 
-In Team Mode, `candela-local` uses **Application Default Credentials** (ADC)
-to authenticate with the Candela server:
+**Solo + Cloud** and **Team Mode** both use **Application Default Credentials**:
 
 ```bash
 # Set up ADC (one-time)
@@ -167,7 +207,7 @@ gcloud auth application-default login
 ## Unified Model Discovery
 
 The LM-compatible listener on `:1234` provides a single `/v1/models` endpoint
-that merges local and remote models:
+that merges local, cloud, and remote models:
 
 ```bash
 curl http://localhost:1234/v1/models
@@ -183,13 +223,13 @@ curl http://localhost:1234/v1/models
 }
 ```
 
-**Team Mode** returns local + cloud models:
+**Solo + Cloud** returns local + direct cloud models:
 ```json
 {
   "data": [
     {"id": "llama3.2:3b", "owned_by": "ollama"},
-    {"id": "gpt-4o", "owned_by": "openai"},
-    {"id": "claude-3.5-sonnet", "owned_by": "anthropic"}
+    {"id": "gemini-2.5-pro", "owned_by": "gemini-oai"},
+    {"id": "claude-sonnet-4-20250514", "owned_by": "anthropic"}
   ]
 }
 ```
@@ -200,21 +240,21 @@ curl http://localhost:1234/v1/models
 
 | Request model | Mode | Where it runs |
 |---------------|------|---------------|
-| `llama3.2:3b` | Solo or Team | Local (Ollama) |
+| `llama3.2:3b` | Any mode | Local (Ollama) — always preferred |
+| `gemini-2.5-pro` | Solo + Cloud | Vertex AI (direct, via ADC) |
+| `claude-sonnet-4-20250514` | Solo + Cloud | Vertex AI Anthropic (direct) |
 | `gpt-4o` | Team | Cloud (via Candela server) |
-| `gpt-4o` | Solo | 404 — no remote configured |
-| `unknown-model` | Team | Cloud (fallback) |
 | `unknown-model` | Solo | 404 |
 
 > [!NOTE]
-> Model matching is tag-aware: requesting `llama3.2` will match
-> `llama3.2:3b` if that's the only local variant loaded.
+> Local models always take priority. If a model exists both locally and
+> in cloud config, the local runtime handles it.
 
 ---
 
 ## Local Observability (Solo Mode)
 
-In Solo Mode, every LLM call through `:1234` is captured:
+In Solo Mode (and Solo + Cloud), every LLM call through `:1234` is captured:
 
 - **Token extraction** from both streaming (SSE) and non-streaming responses
 - **Cost calculation** via the shared `costcalc` engine
@@ -293,7 +333,7 @@ Access at `http://localhost:8181/_local/`:
 curl http://localhost:1234/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "llama3.2:3b",
+    "model": "gemini-2.5-pro",
     "messages": [{"role": "user", "content": "Hello!"}]
   }'
 ```
@@ -304,7 +344,9 @@ curl http://localhost:1234/v1/chat/completions \
 
 | Symptom | Cause | Fix |
 |---------|-------|-----|
-| "model not found locally and no remote server configured" | Solo Mode + cloud model | Add `remote` to config, or use a local model |
+| "model not found locally and no remote server configured" | Solo Mode + unknown model | Add `providers` for cloud models, or use a local model |
+| "vertex_ai.project is required" | `providers` set but no project | Add `vertex_ai.project` to `~/.candela.yaml` |
+| "failed to get Google ADC" | ADC not configured | Run `gcloud auth application-default login` |
 | "audience is required when remote is set" | Missing `audience` | Add IAP `audience` to `~/.candela.yaml` |
-| Traces card shows "Traces not available" | Not in Solo Mode (Team Mode traces go to cloud) | Expected — check the cloud dashboard |
+| Traces card shows "Traces not available" | Team Mode (traces go to cloud) | Expected — check the cloud dashboard |
 | No models in `/v1/models` | Runtime not started | Start Ollama: `ollama serve` |

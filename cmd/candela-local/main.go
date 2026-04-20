@@ -26,6 +26,7 @@ import (
 	"net/http/httputil"
 	"net/url"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"strings"
@@ -35,6 +36,7 @@ import (
 	"github.com/candelahq/candela/gen/go/candela/v1/candelav1connect"
 	"github.com/candelahq/candela/pkg/costcalc"
 	"github.com/candelahq/candela/pkg/processor"
+	"github.com/candelahq/candela/pkg/proxy"
 	"github.com/candelahq/candela/pkg/runtime"
 	"github.com/candelahq/candela/pkg/storage"
 
@@ -67,6 +69,22 @@ type Config struct {
 	RuntimeBackend string                `yaml:"runtime_backend"` // "ollama", "vllm", "lmstudio"
 	RuntimeConfig  runtime.Config        `yaml:"runtime_config"`  // Host, port, args for the backend
 	RuntimeManage  runtime.ManagerConfig `yaml:"runtime_manage"`  // Auto-start, auto-pull, models
+
+	// Direct cloud providers (solo mode — call Gemini/Claude without a server).
+	Providers []LocalProvider `yaml:"providers"`
+	VertexAI  VertexAIConfig  `yaml:"vertex_ai"`
+}
+
+// LocalProvider configures a direct cloud provider for solo mode.
+type LocalProvider struct {
+	Name   string   `yaml:"name"`   // "google", "anthropic"
+	Models []string `yaml:"models"` // Model IDs to expose (e.g. "gemini-2.5-pro")
+}
+
+// VertexAIConfig holds GCP Vertex AI settings for direct cloud providers.
+type VertexAIConfig struct {
+	Project string `yaml:"project"` // GCP project ID (required)
+	Region  string `yaml:"region"`  // GCP region (default: us-central1)
 }
 
 func main() {
@@ -109,7 +127,7 @@ func main() {
 	ctx := context.Background()
 	soloMode := cfg.Remote == ""
 
-	var proxy *httputil.ReverseProxy
+	var remoteProxy *httputil.ReverseProxy
 	var spanProc *processor.SpanProcessor
 	var traceReader storage.SpanReader
 
@@ -120,23 +138,25 @@ func main() {
 		}
 
 		// Initialize local traces store for observability.
-		tracesDir := "~/.candela"
-		if home, err := os.UserHomeDir(); err == nil {
-			tracesDir = filepath.Join(home, ".candela")
-		}
-		_ = os.MkdirAll(tracesDir, 0o700)
-		tracesPath := filepath.Join(tracesDir, "traces.db")
-		traceStore, err := sqlitestore.New(sqlitestore.Config{Path: tracesPath})
-		if err != nil {
-			slog.Warn("failed to initialize traces store — observability disabled", "error", err)
+		home, homeErr := os.UserHomeDir()
+		if homeErr != nil {
+			slog.Warn("could not resolve home directory — observability disabled", "error", homeErr)
 		} else {
-			defer func() { _ = traceStore.Close() }()
-			calc := costcalc.New()
-			spanProc = processor.New([]storage.SpanWriter{traceStore}, calc, 50)
-			go spanProc.Run(ctx)
-			defer spanProc.Stop()
-			traceReader = traceStore
-			slog.Info("📊 local traces enabled", "path", tracesPath)
+			tracesDir := filepath.Join(home, ".candela")
+			_ = os.MkdirAll(tracesDir, 0o700)
+			tracesPath := filepath.Join(tracesDir, "traces.db")
+			traceStore, err := sqlitestore.New(sqlitestore.Config{Path: tracesPath})
+			if err != nil {
+				slog.Warn("failed to initialize traces store — observability disabled", "error", err)
+			} else {
+				defer func() { _ = traceStore.Close() }()
+				calc := costcalc.New()
+				spanProc = processor.New([]storage.SpanWriter{traceStore}, calc, 50)
+				go spanProc.Run(ctx)
+				defer spanProc.Stop()
+				traceReader = traceStore
+				slog.Info("📊 local traces enabled", "path", tracesPath)
+			}
 		}
 	} else {
 		if cfg.Audience == "" {
@@ -173,7 +193,7 @@ func main() {
 		}
 
 		// ── Build reverse proxy ──
-		proxy = &httputil.ReverseProxy{
+		remoteProxy = &httputil.ReverseProxy{
 			Director: func(req *http.Request) {
 				// Rewrite the request to point at the remote server.
 				req.URL.Scheme = remoteURL.Scheme
@@ -306,8 +326,8 @@ func main() {
 	mux.Handle("/_local/api/traces", newTracesHandler(traceReader))
 
 	// Everything else → remote Candela server (if configured).
-	if proxy != nil {
-		mux.Handle("/", proxy)
+	if remoteProxy != nil {
+		mux.Handle("/", remoteProxy)
 	} else {
 		mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
@@ -349,7 +369,15 @@ func main() {
 	if runtimeLocalProxy != nil {
 		localHandler = newSpanCapture(runtimeLocalProxy, spanProc)
 	}
-	lmH := newLMHandler(mgr, proxy, runtimeLocalProxy, localHandler)
+
+	// Build direct cloud proxy if providers are configured (solo + cloud mode).
+	var cloudProxy *proxy.Proxy
+	cloudModels := make(map[string]string)
+	if soloMode && len(cfg.Providers) > 0 {
+		cloudProxy, cloudModels = buildCloudProxy(*cfg, spanProc)
+	}
+
+	lmH := newLMHandler(mgr, remoteProxy, runtimeLocalProxy, localHandler, cloudProxy, cloudModels)
 	lmAddr := fmt.Sprintf("127.0.0.1:%d", lmPort)
 
 	// ── Graceful shutdown ──
@@ -511,4 +539,83 @@ func buildLocalProxy(upstream string) *httputil.ReverseProxy {
 			_ = json.NewEncoder(w).Encode(map[string]string{"error": fmt.Sprintf("local runtime unavailable: %v", err)})
 		},
 	}
+}
+
+// buildCloudProxy creates a proxy.Proxy for direct cloud model access in solo mode.
+// Uses Google ADC for authentication to Vertex AI endpoints (Gemini + Anthropic).
+func buildCloudProxy(cfg Config, submitter *processor.SpanProcessor) (*proxy.Proxy, map[string]string) {
+	region := cfg.VertexAI.Region
+	if region == "" {
+		region = "us-central1"
+	}
+
+	// Resolve GCP project: config > gcloud fallback.
+	project := cfg.VertexAI.Project
+	if project == "" {
+		// Try gcloud config as fallback.
+		if out, err := exec.Command("gcloud", "config", "get", "project").Output(); err == nil {
+			project = strings.TrimSpace(string(out))
+			if project != "" {
+				slog.Warn("vertex_ai.project not set in config, using gcloud default", "project", project)
+			}
+		}
+	}
+	if project == "" {
+		slog.Error("vertex_ai.project is required for direct cloud providers — set it in ~/.candela.yaml")
+		return nil, nil
+	}
+
+	// Get ADC token source.
+	tokenSource, adcErr := google.DefaultTokenSource(context.Background(),
+		"https://www.googleapis.com/auth/cloud-platform")
+	if adcErr != nil {
+		slog.Error("failed to get Google ADC — run 'gcloud auth application-default login'", "error", adcErr)
+		return nil, nil
+	}
+
+	// Build providers from config.
+	var providers []proxy.Provider
+	cloudModels := make(map[string]string)
+
+	for _, lp := range cfg.Providers {
+		p := proxy.Provider{Name: lp.Name, TokenSource: tokenSource}
+
+		switch lp.Name {
+		case "google", "gemini":
+			p.Name = "gemini-oai"
+			p.UpstreamURL = "https://generativelanguage.googleapis.com/v1beta/openai"
+		case "anthropic":
+			p.UpstreamURL = fmt.Sprintf("https://%s-aiplatform.googleapis.com", region)
+			p.FormatTranslator = &proxy.AnthropicFormatTranslator{}
+			p.PathRewriter = &proxy.VertexAIPathRewriter{
+				ProjectID: project,
+				Region:    region,
+			}
+		default:
+			slog.Warn("unknown provider — skipping", "name", lp.Name)
+			continue
+		}
+
+		providers = append(providers, p)
+		for _, m := range lp.Models {
+			cloudModels[m] = p.Name
+		}
+	}
+
+	if len(providers) == 0 {
+		return nil, nil
+	}
+
+	calc := costcalc.New()
+	cloudProxy := proxy.New(proxy.Config{
+		Providers: providers,
+		ProjectID: "local",
+	}, submitter, calc)
+
+	var names []string
+	for _, p := range providers {
+		names = append(names, p.Name)
+	}
+	slog.Info("☁️ direct cloud providers enabled", "providers", names, "models", len(cloudModels))
+	return cloudProxy, cloudModels
 }

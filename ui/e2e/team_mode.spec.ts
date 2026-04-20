@@ -86,6 +86,22 @@ test.describe("Usage Dashboard", () => {
     await expect(page.locator("text=gpt-4o")).toBeVisible();
     await expect(page.locator("text=claude-3-sonnet")).toBeVisible();
   });
+
+  test("shows global budget alert on home page when over budget", async ({ page }) => {
+    await mockDevUser(page);
+
+    // Mock user spending 95% of budget ($47.50 / $50.0)
+    await mockConnectRPC(page, "/candela.v1.DashboardService/GetMyUsage", {
+      budget: { limitUsd: 50, spentUsd: 47.5, periodType: 1 },
+      totalRemainingUsd: 2.5
+    });
+
+    await page.goto("/");
+
+    // Check Global Alert presence
+    await expect(page.locator(".budget-alert-banner")).toBeVisible();
+    await expect(page.locator("text=You've used 95% of your budget")).toBeVisible();
+  });
 });
 
 // ──────────────────────────────────────────

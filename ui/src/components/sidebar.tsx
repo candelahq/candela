@@ -11,6 +11,7 @@ const navItems = [
     items: [
       { href: "/", label: "Dashboard", icon: "📊" },
       { href: "/traces", label: "Traces", icon: "🔍" },
+      { href: "/usage", label: "My Usage", icon: "📈" },
       { href: "/costs", label: "Costs", icon: "💰" },
     ],
   },
@@ -27,6 +28,7 @@ const adminItems = {
   section: "Admin",
   items: [
     { href: "/admin/users", label: "Users", icon: "👥" },
+    { href: "/admin/leaderboard", label: "Leaderboard", icon: "🏆" },
     { href: "/admin/budgets", label: "Budgets", icon: "💳" },
     { href: "/admin/audit", label: "Audit Log", icon: "📋" },
   ],

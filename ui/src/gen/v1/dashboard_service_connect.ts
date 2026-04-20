@@ -3,7 +3,7 @@
 /* eslint-disable */
 // @ts-nocheck
 
-import { GetLatencyPercentilesRequest, GetLatencyPercentilesResponse, GetModelBreakdownRequest, GetModelBreakdownResponse, GetUsageSummaryRequest, GetUsageSummaryResponse } from "./dashboard_service_pb.js";
+import { GetLatencyPercentilesRequest, GetLatencyPercentilesResponse, GetModelBreakdownRequest, GetModelBreakdownResponse, GetMyUsageRequest, GetMyUsageResponse, GetTeamLeaderboardRequest, GetTeamLeaderboardResponse, GetUsageSummaryRequest, GetUsageSummaryResponse } from "./dashboard_service_pb.js";
 import { MethodKind } from "@bufbuild/protobuf";
 
 /**
@@ -46,6 +46,28 @@ export const DashboardService = {
       name: "GetLatencyPercentiles",
       I: GetLatencyPercentilesRequest,
       O: GetLatencyPercentilesResponse,
+      kind: MethodKind.Unary,
+    },
+    /**
+     * GetMyUsage returns the calling user's personal usage summary.
+     *
+     * @generated from rpc candela.v1.DashboardService.GetMyUsage
+     */
+    getMyUsage: {
+      name: "GetMyUsage",
+      I: GetMyUsageRequest,
+      O: GetMyUsageResponse,
+      kind: MethodKind.Unary,
+    },
+    /**
+     * GetTeamLeaderboard returns per-user usage for the team (admin only).
+     *
+     * @generated from rpc candela.v1.DashboardService.GetTeamLeaderboard
+     */
+    getTeamLeaderboard: {
+      name: "GetTeamLeaderboard",
+      I: GetTeamLeaderboardRequest,
+      O: GetTeamLeaderboardResponse,
       kind: MethodKind.Unary,
     },
   }

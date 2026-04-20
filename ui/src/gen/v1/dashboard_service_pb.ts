@@ -6,13 +6,15 @@ import type { GenFile, GenMessage, GenService } from "@bufbuild/protobuf/codegen
 import { fileDesc, messageDesc, serviceDesc } from "@bufbuild/protobuf/codegenv2";
 import type { TimeRange } from "../types/common_pb";
 import { file_candela_types_common } from "../types/common_pb";
+import type { UserBudget } from "../types/user_pb";
+import { file_candela_types_user } from "../types/user_pb";
 import type { Message } from "@bufbuild/protobuf";
 
 /**
  * Describes the file candela/v1/dashboard_service.proto.
  */
 export const file_candela_v1_dashboard_service: GenFile = /*@__PURE__*/
-  fileDesc("CiJjYW5kZWxhL3YxL2Rhc2hib2FyZF9zZXJ2aWNlLnByb3RvEgpjYW5kZWxhLnYxIm8KFkdldFVzYWdlU3VtbWFyeVJlcXVlc3QSEgoKcHJvamVjdF9pZBgBIAEoCRIsCgp0aW1lX3JhbmdlGAIgASgLMhguY2FuZGVsYS50eXBlcy5UaW1lUmFuZ2USEwoLZW52aXJvbm1lbnQYAyABKAki/QIKF0dldFVzYWdlU3VtbWFyeVJlc3BvbnNlEhQKDHRvdGFsX3RyYWNlcxgBIAEoAxITCgt0b3RhbF9zcGFucxgCIAEoAxIXCg90b3RhbF9sbG1fY2FsbHMYAyABKAMSGgoSdG90YWxfaW5wdXRfdG9rZW5zGAQgASgDEhsKE3RvdGFsX291dHB1dF90b2tlbnMYBSABKAMSFgoOdG90YWxfY29zdF91c2QYBiABKAESFgoOYXZnX2xhdGVuY3lfbXMYByABKAESEgoKZXJyb3JfcmF0ZRgIIAEoARI1ChB0cmFjZXNfb3Zlcl90aW1lGBQgAygLMhsuY2FuZGVsYS52MS5UaW1lU2VyaWVzUG9pbnQSMwoOY29zdF9vdmVyX3RpbWUYFSADKAsyGy5jYW5kZWxhLnYxLlRpbWVTZXJpZXNQb2ludBI1ChB0b2tlbnNfb3Zlcl90aW1lGBYgAygLMhsuY2FuZGVsYS52MS5UaW1lU2VyaWVzUG9pbnQiMwoPVGltZVNlcmllc1BvaW50EhEKCXRpbWVzdGFtcBgBIAEoCRINCgV2YWx1ZRgCIAEoASJcChhHZXRNb2RlbEJyZWFrZG93blJlcXVlc3QSEgoKcHJvamVjdF9pZBgBIAEoCRIsCgp0aW1lX3JhbmdlGAIgASgLMhguY2FuZGVsYS50eXBlcy5UaW1lUmFuZ2UiQwoZR2V0TW9kZWxCcmVha2Rvd25SZXNwb25zZRImCgZtb2RlbHMYASADKAsyFi5jYW5kZWxhLnYxLk1vZGVsVXNhZ2UimAEKCk1vZGVsVXNhZ2USDQoFbW9kZWwYASABKAkSEAoIcHJvdmlkZXIYAiABKAkSEgoKY2FsbF9jb3VudBgDIAEoAxIUCgxpbnB1dF90b2tlbnMYBCABKAMSFQoNb3V0cHV0X3Rva2VucxgFIAEoAxIQCghjb3N0X3VzZBgGIAEoARIWCg5hdmdfbGF0ZW5jeV9tcxgHIAEoASJvChxHZXRMYXRlbmN5UGVyY2VudGlsZXNSZXF1ZXN0EhIKCnByb2plY3RfaWQYASABKAkSLAoKdGltZV9yYW5nZRgCIAEoCzIYLmNhbmRlbGEudHlwZXMuVGltZVJhbmdlEg0KBW1vZGVsGAMgASgJIpcBCh1HZXRMYXRlbmN5UGVyY2VudGlsZXNSZXNwb25zZRIOCgZwNTBfbXMYASABKAESDgoGcDkwX21zGAIgASgBEg4KBnA5NV9tcxgDIAEoARIOCgZwOTlfbXMYBCABKAESNgoRbGF0ZW5jeV9vdmVyX3RpbWUYCiADKAsyGy5jYW5kZWxhLnYxLlRpbWVTZXJpZXNQb2ludDK+AgoQRGFzaGJvYXJkU2VydmljZRJaCg9HZXRVc2FnZVN1bW1hcnkSIi5jYW5kZWxhLnYxLkdldFVzYWdlU3VtbWFyeVJlcXVlc3QaIy5jYW5kZWxhLnYxLkdldFVzYWdlU3VtbWFyeVJlc3BvbnNlEmAKEUdldE1vZGVsQnJlYWtkb3duEiQuY2FuZGVsYS52MS5HZXRNb2RlbEJyZWFrZG93blJlcXVlc3QaJS5jYW5kZWxhLnYxLkdldE1vZGVsQnJlYWtkb3duUmVzcG9uc2USbAoVR2V0TGF0ZW5jeVBlcmNlbnRpbGVzEiguY2FuZGVsYS52MS5HZXRMYXRlbmN5UGVyY2VudGlsZXNSZXF1ZXN0GikuY2FuZGVsYS52MS5HZXRMYXRlbmN5UGVyY2VudGlsZXNSZXNwb25zZUKqAQoOY29tLmNhbmRlbGEudjFCFURhc2hib2FyZFNlcnZpY2VQcm90b1ABWjhnaXRodWIuY29tL2NhbmRlbGFocS9jYW5kZWxhL2dlbi9nby9jYW5kZWxhL3YxO2NhbmRlbGF2MaICA0NYWKoCCkNhbmRlbGEuVjHKAgpDYW5kZWxhXFYx4gIWQ2FuZGVsYVxWMVxHUEJNZXRhZGF0YeoCC0NhbmRlbGE6OlYxYgZwcm90bzM", [file_candela_types_common]);
+  fileDesc("CiJjYW5kZWxhL3YxL2Rhc2hib2FyZF9zZXJ2aWNlLnByb3RvEgpjYW5kZWxhLnYxIm8KFkdldFVzYWdlU3VtbWFyeVJlcXVlc3QSEgoKcHJvamVjdF9pZBgBIAEoCRIsCgp0aW1lX3JhbmdlGAIgASgLMhguY2FuZGVsYS50eXBlcy5UaW1lUmFuZ2USEwoLZW52aXJvbm1lbnQYAyABKAki/QIKF0dldFVzYWdlU3VtbWFyeVJlc3BvbnNlEhQKDHRvdGFsX3RyYWNlcxgBIAEoAxITCgt0b3RhbF9zcGFucxgCIAEoAxIXCg90b3RhbF9sbG1fY2FsbHMYAyABKAMSGgoSdG90YWxfaW5wdXRfdG9rZW5zGAQgASgDEhsKE3RvdGFsX291dHB1dF90b2tlbnMYBSABKAMSFgoOdG90YWxfY29zdF91c2QYBiABKAESFgoOYXZnX2xhdGVuY3lfbXMYByABKAESEgoKZXJyb3JfcmF0ZRgIIAEoARI1ChB0cmFjZXNfb3Zlcl90aW1lGBQgAygLMhsuY2FuZGVsYS52MS5UaW1lU2VyaWVzUG9pbnQSMwoOY29zdF9vdmVyX3RpbWUYFSADKAsyGy5jYW5kZWxhLnYxLlRpbWVTZXJpZXNQb2ludBI1ChB0b2tlbnNfb3Zlcl90aW1lGBYgAygLMhsuY2FuZGVsYS52MS5UaW1lU2VyaWVzUG9pbnQiMwoPVGltZVNlcmllc1BvaW50EhEKCXRpbWVzdGFtcBgBIAEoCRINCgV2YWx1ZRgCIAEoASJcChhHZXRNb2RlbEJyZWFrZG93blJlcXVlc3QSEgoKcHJvamVjdF9pZBgBIAEoCRIsCgp0aW1lX3JhbmdlGAIgASgLMhguY2FuZGVsYS50eXBlcy5UaW1lUmFuZ2UiQwoZR2V0TW9kZWxCcmVha2Rvd25SZXNwb25zZRImCgZtb2RlbHMYASADKAsyFi5jYW5kZWxhLnYxLk1vZGVsVXNhZ2UimAEKCk1vZGVsVXNhZ2USDQoFbW9kZWwYASABKAkSEAoIcHJvdmlkZXIYAiABKAkSEgoKY2FsbF9jb3VudBgDIAEoAxIUCgxpbnB1dF90b2tlbnMYBCABKAMSFQoNb3V0cHV0X3Rva2VucxgFIAEoAxIQCghjb3N0X3VzZBgGIAEoARIWCg5hdmdfbGF0ZW5jeV9tcxgHIAEoASJvChxHZXRMYXRlbmN5UGVyY2VudGlsZXNSZXF1ZXN0EhIKCnByb2plY3RfaWQYASABKAkSLAoKdGltZV9yYW5nZRgCIAEoCzIYLmNhbmRlbGEudHlwZXMuVGltZVJhbmdlEg0KBW1vZGVsGAMgASgJIpcBCh1HZXRMYXRlbmN5UGVyY2VudGlsZXNSZXNwb25zZRIOCgZwNTBfbXMYASABKAESDgoGcDkwX21zGAIgASgBEg4KBnA5NV9tcxgDIAEoARIOCgZwOTlfbXMYBCABKAESNgoRbGF0ZW5jeV9vdmVyX3RpbWUYCiADKAsyGy5jYW5kZWxhLnYxLlRpbWVTZXJpZXNQb2ludCJVChFHZXRNeVVzYWdlUmVxdWVzdBISCgpwcm9qZWN0X2lkGAEgASgJEiwKCnRpbWVfcmFuZ2UYAiABKAsyGC5jYW5kZWxhLnR5cGVzLlRpbWVSYW5nZSKCAgoSR2V0TXlVc2FnZVJlc3BvbnNlEhMKC3RvdGFsX2NhbGxzGAEgASgDEhoKEnRvdGFsX2lucHV0X3Rva2VucxgCIAEoAxIbChN0b3RhbF9vdXRwdXRfdG9rZW5zGAMgASgDEhYKDnRvdGFsX2Nvc3RfdXNkGAQgASgBEhYKDmF2Z19sYXRlbmN5X21zGAUgASgBEiYKBm1vZGVscxgKIAMoCzIWLmNhbmRlbGEudjEuTW9kZWxVc2FnZRIpCgZidWRnZXQYFCABKAsyGS5jYW5kZWxhLnR5cGVzLlVzZXJCdWRnZXQSGwoTdG90YWxfcmVtYWluaW5nX3VzZBgVIAEoASJsChlHZXRUZWFtTGVhZGVyYm9hcmRSZXF1ZXN0EhIKCnByb2plY3RfaWQYASABKAkSLAoKdGltZV9yYW5nZRgCIAEoCzIYLmNhbmRlbGEudHlwZXMuVGltZVJhbmdlEg0KBWxpbWl0GAMgASgFIkIKGkdldFRlYW1MZWFkZXJib2FyZFJlc3BvbnNlEiQKBXVzZXJzGAEgAygLMhUuY2FuZGVsYS52MS5Vc2VyVXNhZ2UiqAEKCVVzZXJVc2FnZRIPCgd1c2VyX2lkGAEgASgJEg0KBWVtYWlsGAIgASgJEhQKDGRpc3BsYXlfbmFtZRgDIAEoCRISCgpjYWxsX2NvdW50GAQgASgDEhQKDHRvdGFsX3Rva2VucxgFIAEoAxIQCghjb3N0X3VzZBgGIAEoARIWCg5hdmdfbGF0ZW5jeV9tcxgHIAEoARIRCgl0b3BfbW9kZWwYCCABKAky8AMKEERhc2hib2FyZFNlcnZpY2USWgoPR2V0VXNhZ2VTdW1tYXJ5EiIuY2FuZGVsYS52MS5HZXRVc2FnZVN1bW1hcnlSZXF1ZXN0GiMuY2FuZGVsYS52MS5HZXRVc2FnZVN1bW1hcnlSZXNwb25zZRJgChFHZXRNb2RlbEJyZWFrZG93bhIkLmNhbmRlbGEudjEuR2V0TW9kZWxCcmVha2Rvd25SZXF1ZXN0GiUuY2FuZGVsYS52MS5HZXRNb2RlbEJyZWFrZG93blJlc3BvbnNlEmwKFUdldExhdGVuY3lQZXJjZW50aWxlcxIoLmNhbmRlbGEudjEuR2V0TGF0ZW5jeVBlcmNlbnRpbGVzUmVxdWVzdBopLmNhbmRlbGEudjEuR2V0TGF0ZW5jeVBlcmNlbnRpbGVzUmVzcG9uc2USSwoKR2V0TXlVc2FnZRIdLmNhbmRlbGEudjEuR2V0TXlVc2FnZVJlcXVlc3QaHi5jYW5kZWxhLnYxLkdldE15VXNhZ2VSZXNwb25zZRJjChJHZXRUZWFtTGVhZGVyYm9hcmQSJS5jYW5kZWxhLnYxLkdldFRlYW1MZWFkZXJib2FyZFJlcXVlc3QaJi5jYW5kZWxhLnYxLkdldFRlYW1MZWFkZXJib2FyZFJlc3BvbnNlQqoBCg5jb20uY2FuZGVsYS52MUIVRGFzaGJvYXJkU2VydmljZVByb3RvUAFaOGdpdGh1Yi5jb20vY2FuZGVsYWhxL2NhbmRlbGEvZ2VuL2dvL2NhbmRlbGEvdjE7Y2FuZGVsYXYxogIDQ1hYqgIKQ2FuZGVsYS5WMcoCCkNhbmRlbGFcVjHiAhZDYW5kZWxhXFYxXEdQQk1ldGFkYXRh6gILQ2FuZGVsYTo6VjFiBnByb3RvMw", [file_candela_types_common, file_candela_types_user]);
 
 /**
  * @generated from message candela.v1.GetUsageSummaryRequest
@@ -287,6 +289,182 @@ export const GetLatencyPercentilesResponseSchema: GenMessage<GetLatencyPercentil
   messageDesc(file_candela_v1_dashboard_service, 7);
 
 /**
+ * @generated from message candela.v1.GetMyUsageRequest
+ */
+export type GetMyUsageRequest = Message<"candela.v1.GetMyUsageRequest"> & {
+  /**
+   * @generated from field: string project_id = 1;
+   */
+  projectId: string;
+
+  /**
+   * @generated from field: candela.types.TimeRange time_range = 2;
+   */
+  timeRange?: TimeRange;
+};
+
+/**
+ * Describes the message candela.v1.GetMyUsageRequest.
+ * Use `create(GetMyUsageRequestSchema)` to create a new message.
+ */
+export const GetMyUsageRequestSchema: GenMessage<GetMyUsageRequest> = /*@__PURE__*/
+  messageDesc(file_candela_v1_dashboard_service, 8);
+
+/**
+ * @generated from message candela.v1.GetMyUsageResponse
+ */
+export type GetMyUsageResponse = Message<"candela.v1.GetMyUsageResponse"> & {
+  /**
+   * @generated from field: int64 total_calls = 1;
+   */
+  totalCalls: bigint;
+
+  /**
+   * @generated from field: int64 total_input_tokens = 2;
+   */
+  totalInputTokens: bigint;
+
+  /**
+   * @generated from field: int64 total_output_tokens = 3;
+   */
+  totalOutputTokens: bigint;
+
+  /**
+   * @generated from field: double total_cost_usd = 4;
+   */
+  totalCostUsd: number;
+
+  /**
+   * @generated from field: double avg_latency_ms = 5;
+   */
+  avgLatencyMs: number;
+
+  /**
+   * Per-model breakdown for this user
+   *
+   * @generated from field: repeated candela.v1.ModelUsage models = 10;
+   */
+  models: ModelUsage[];
+
+  /**
+   * Budget context
+   *
+   * @generated from field: candela.types.UserBudget budget = 20;
+   */
+  budget?: UserBudget;
+
+  /**
+   * @generated from field: double total_remaining_usd = 21;
+   */
+  totalRemainingUsd: number;
+};
+
+/**
+ * Describes the message candela.v1.GetMyUsageResponse.
+ * Use `create(GetMyUsageResponseSchema)` to create a new message.
+ */
+export const GetMyUsageResponseSchema: GenMessage<GetMyUsageResponse> = /*@__PURE__*/
+  messageDesc(file_candela_v1_dashboard_service, 9);
+
+/**
+ * @generated from message candela.v1.GetTeamLeaderboardRequest
+ */
+export type GetTeamLeaderboardRequest = Message<"candela.v1.GetTeamLeaderboardRequest"> & {
+  /**
+   * @generated from field: string project_id = 1;
+   */
+  projectId: string;
+
+  /**
+   * @generated from field: candela.types.TimeRange time_range = 2;
+   */
+  timeRange?: TimeRange;
+
+  /**
+   * default: 20
+   *
+   * @generated from field: int32 limit = 3;
+   */
+  limit: number;
+};
+
+/**
+ * Describes the message candela.v1.GetTeamLeaderboardRequest.
+ * Use `create(GetTeamLeaderboardRequestSchema)` to create a new message.
+ */
+export const GetTeamLeaderboardRequestSchema: GenMessage<GetTeamLeaderboardRequest> = /*@__PURE__*/
+  messageDesc(file_candela_v1_dashboard_service, 10);
+
+/**
+ * @generated from message candela.v1.GetTeamLeaderboardResponse
+ */
+export type GetTeamLeaderboardResponse = Message<"candela.v1.GetTeamLeaderboardResponse"> & {
+  /**
+   * @generated from field: repeated candela.v1.UserUsage users = 1;
+   */
+  users: UserUsage[];
+};
+
+/**
+ * Describes the message candela.v1.GetTeamLeaderboardResponse.
+ * Use `create(GetTeamLeaderboardResponseSchema)` to create a new message.
+ */
+export const GetTeamLeaderboardResponseSchema: GenMessage<GetTeamLeaderboardResponse> = /*@__PURE__*/
+  messageDesc(file_candela_v1_dashboard_service, 11);
+
+/**
+ * @generated from message candela.v1.UserUsage
+ */
+export type UserUsage = Message<"candela.v1.UserUsage"> & {
+  /**
+   * @generated from field: string user_id = 1;
+   */
+  userId: string;
+
+  /**
+   * @generated from field: string email = 2;
+   */
+  email: string;
+
+  /**
+   * @generated from field: string display_name = 3;
+   */
+  displayName: string;
+
+  /**
+   * @generated from field: int64 call_count = 4;
+   */
+  callCount: bigint;
+
+  /**
+   * @generated from field: int64 total_tokens = 5;
+   */
+  totalTokens: bigint;
+
+  /**
+   * @generated from field: double cost_usd = 6;
+   */
+  costUsd: number;
+
+  /**
+   * @generated from field: double avg_latency_ms = 7;
+   */
+  avgLatencyMs: number;
+
+  /**
+   * @generated from field: string top_model = 8;
+   */
+  topModel: string;
+};
+
+/**
+ * Describes the message candela.v1.UserUsage.
+ * Use `create(UserUsageSchema)` to create a new message.
+ */
+export const UserUsageSchema: GenMessage<UserUsage> = /*@__PURE__*/
+  messageDesc(file_candela_v1_dashboard_service, 12);
+
+/**
  * DashboardService provides aggregated metrics and usage data.
  * Exposed via ConnectRPC for the web UI dashboards.
  *
@@ -322,6 +500,26 @@ export const DashboardService: GenService<{
     methodKind: "unary";
     input: typeof GetLatencyPercentilesRequestSchema;
     output: typeof GetLatencyPercentilesResponseSchema;
+  },
+  /**
+   * GetMyUsage returns the calling user's personal usage summary.
+   *
+   * @generated from rpc candela.v1.DashboardService.GetMyUsage
+   */
+  getMyUsage: {
+    methodKind: "unary";
+    input: typeof GetMyUsageRequestSchema;
+    output: typeof GetMyUsageResponseSchema;
+  },
+  /**
+   * GetTeamLeaderboard returns per-user usage for the team (admin only).
+   *
+   * @generated from rpc candela.v1.DashboardService.GetTeamLeaderboard
+   */
+  getTeamLeaderboard: {
+    methodKind: "unary";
+    input: typeof GetTeamLeaderboardRequestSchema;
+    output: typeof GetTeamLeaderboardResponseSchema;
   },
 }> = /*@__PURE__*/
   serviceDesc(file_candela_v1_dashboard_service, 0);

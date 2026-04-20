@@ -3,6 +3,7 @@
 import { useUsage } from "@/hooks/useUsage";
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { BUDGET_ALERT_THRESHOLD } from "@/lib/constants";
 
 /** Global alert banner that appears when a user is nearing their budget limit. */
 export function BudgetAlert() {
@@ -12,8 +13,8 @@ export function BudgetAlert() {
   useEffect(() => {
     if (!loading && data?.budget) {
       const { percentUsed } = data.budget;
-      // Show alert if used > 80%
-      if (percentUsed > 80) {
+      // Show alert if threshold exceeded
+      if (percentUsed > BUDGET_ALERT_THRESHOLD) {
         setVisible(true);
       }
     }

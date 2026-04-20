@@ -11,12 +11,11 @@ export default function LeaderboardPage() {
   const { rankings, loading, error, timeRange, setTimeRange, refresh } = useLeaderboard();
   const { isAdmin, isLoading: authLoading } = useCurrentUser();
 
-  // Route protection
-  useEffect(() => {
-    if (!authLoading && !isAdmin) {
-      redirect("/");
-    }
-  }, [isAdmin, authLoading]);
+  // Route protection - check immediately to prevent content flash
+  if (!authLoading && !isAdmin) {
+    redirect("/");
+    return null;
+  }
 
   if (authLoading) return null;
 
@@ -60,7 +59,7 @@ export default function LeaderboardPage() {
           <div className="card">
             <div className="card-title">Avg Cost / Call</div>
             <div className="card-value">
-              ${rankings.length > 0
+              ${rankings.length > 0 && rankings.reduce((acc, curr) => acc + curr.callCount, 0) > 0
                 ? (rankings.reduce((acc, curr) => acc + curr.costUsd, 0) / rankings.reduce((acc, curr) => acc + curr.callCount, 0)).toFixed(4)
                 : "0.0000"
               }

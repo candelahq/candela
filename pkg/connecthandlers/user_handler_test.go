@@ -66,6 +66,16 @@ func (m *mockUserStore) GetUserByEmail(_ context.Context, email string) (*storag
 	return nil, fmt.Errorf("user email %s: %w", email, storage.ErrNotFound)
 }
 
+func (m *mockUserStore) GetUsers(_ context.Context, ids []string) (map[string]*storage.UserRecord, error) {
+	result := make(map[string]*storage.UserRecord)
+	for _, id := range ids {
+		if u, ok := m.users[id]; ok {
+			result[id] = u
+		}
+	}
+	return result, nil
+}
+
 func (m *mockUserStore) ListUsers(_ context.Context, statusFilter string, limit, offset int) ([]*storage.UserRecord, int, error) {
 	var all []*storage.UserRecord
 	for _, u := range m.users {

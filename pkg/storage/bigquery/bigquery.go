@@ -104,6 +104,7 @@ type spanRow struct {
 	InputContent  string        `bigquery:"gen_ai_input_content"`
 	OutputContent string        `bigquery:"gen_ai_output_content"`
 	Attributes    []AttributeKV `bigquery:"attributes"`
+	UserID        string        `bigquery:"user_id"`
 }
 
 func spanToRow(span storage.Span) spanRow {
@@ -121,6 +122,7 @@ func spanToRow(span storage.Span) spanRow {
 		ProjectID:     span.ProjectID,
 		Environment:   span.Environment,
 		ServiceName:   span.ServiceName,
+		UserID:        span.UserID,
 	}
 
 	if span.GenAI != nil {
@@ -158,6 +160,7 @@ func rowToSpan(row spanRow) storage.Span {
 		ProjectID:     row.ProjectID,
 		Environment:   row.Environment,
 		ServiceName:   row.ServiceName,
+		UserID:        row.UserID,
 	}
 
 	if row.GenAIModel != "" {
@@ -421,6 +424,7 @@ func (s *Store) GetUsageSummary(ctx context.Context, uq storage.UsageQuery) (*st
 		WHERE project_id = @projectID
 		  AND start_time >= @startTime
 		  AND start_time <= @endTime
+		  AND (@userID = '' OR user_id = @userID)
 	`, quoteTable(s.tableID))
 
 	q := s.client.Query(query)
@@ -429,6 +433,7 @@ func (s *Store) GetUsageSummary(ctx context.Context, uq storage.UsageQuery) (*st
 		{Name: "startTime", Value: uq.StartTime},
 		{Name: "endTime", Value: uq.EndTime},
 		{Name: "llmKind", Value: int(storage.SpanKindLLM)},
+		{Name: "userID", Value: uq.UserID},
 	}
 
 	it, err := q.Read(ctx)
@@ -479,6 +484,7 @@ func (s *Store) GetModelBreakdown(ctx context.Context, uq storage.UsageQuery) ([
 		  AND start_time >= @startTime
 		  AND start_time <= @endTime
 		  AND gen_ai_model != ''
+		  AND (@userID = '' OR user_id = @userID)
 		GROUP BY gen_ai_model, gen_ai_provider
 		ORDER BY total_cost_usd DESC
 	`, quoteTable(s.tableID))
@@ -488,6 +494,7 @@ func (s *Store) GetModelBreakdown(ctx context.Context, uq storage.UsageQuery) ([
 		{Name: "projectID", Value: uq.ProjectID},
 		{Name: "startTime", Value: uq.StartTime},
 		{Name: "endTime", Value: uq.EndTime},
+		{Name: "userID", Value: uq.UserID},
 	}
 
 	it, err := q.Read(ctx)
@@ -526,6 +533,70 @@ func (s *Store) GetModelBreakdown(ctx context.Context, uq storage.UsageQuery) ([
 	}
 
 	return models, nil
+}
+
+// GetUserLeaderboard returns per-user usage aggregations ranked by cost.
+func (s *Store) GetUserLeaderboard(ctx context.Context, uq storage.UsageQuery, limit int) ([]storage.UserUsageSummary, error) {
+	if limit <= 0 {
+		limit = 20
+	}
+
+	query := fmt.Sprintf(`
+		SELECT
+			user_id,
+			COUNT(*) AS call_count,
+			COALESCE(SUM(gen_ai_total_tokens), 0) AS total_tokens,
+			COALESCE(SUM(gen_ai_cost_usd), 0) AS total_cost_usd,
+			COALESCE(AVG(duration_ns), 0) AS avg_duration_ns
+		FROM %s
+		WHERE project_id = @projectID
+		  AND start_time >= @startTime
+		  AND start_time <= @endTime
+		  AND user_id != ''
+		GROUP BY user_id
+		ORDER BY total_cost_usd DESC
+		LIMIT @limit
+	`, quoteTable(s.tableID))
+
+	q := s.client.Query(query)
+	q.Parameters = []bigquery.QueryParameter{
+		{Name: "projectID", Value: uq.ProjectID},
+		{Name: "startTime", Value: uq.StartTime},
+		{Name: "endTime", Value: uq.EndTime},
+		{Name: "limit", Value: limit},
+	}
+
+	it, err := q.Read(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("querying user leaderboard: %w", err)
+	}
+
+	var users []storage.UserUsageSummary
+	for {
+		var row struct {
+			UserID        string  `bigquery:"user_id"`
+			CallCount     int64   `bigquery:"call_count"`
+			TotalTokens   int64   `bigquery:"total_tokens"`
+			TotalCostUSD  float64 `bigquery:"total_cost_usd"`
+			AvgDurationNs float64 `bigquery:"avg_duration_ns"`
+		}
+		err := it.Next(&row)
+		if err == iterator.Done {
+			break
+		}
+		if err != nil {
+			return nil, fmt.Errorf("iterating user leaderboard: %w", err)
+		}
+		users = append(users, storage.UserUsageSummary{
+			UserID:       row.UserID,
+			CallCount:    row.CallCount,
+			TotalTokens:  row.TotalTokens,
+			CostUSD:      row.TotalCostUSD,
+			AvgLatencyMs: float64(row.AvgDurationNs) / 1e6,
+		})
+	}
+
+	return users, nil
 }
 
 // querySpans executes a query and scans results into storage.Span.

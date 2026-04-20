@@ -118,6 +118,37 @@ func (s *Store) GetUserByEmail(ctx context.Context, email string) (*storage.User
 	return snapToUser(snap)
 }
 
+func (s *Store) GetUsers(ctx context.Context, ids []string) (map[string]*storage.UserRecord, error) {
+	if len(ids) == 0 {
+		return make(map[string]*storage.UserRecord), nil
+	}
+
+	refs := make([]*firestore.DocumentRef, len(ids))
+	for i, id := range ids {
+		refs[i] = s.client.Collection(usersCol).Doc(id)
+	}
+
+	snaps, err := s.client.GetAll(ctx, refs)
+	if err != nil {
+		return nil, fmt.Errorf("firestoredb: batch fetching users: %w", err)
+	}
+
+	users := make(map[string]*storage.UserRecord, len(snaps))
+	for _, snap := range snaps {
+		if !snap.Exists() {
+			continue
+		}
+		u, err := snapToUser(snap)
+		if err != nil {
+			slog.Warn("skipping malformed user doc during batch fetch", "id", snap.Ref.ID, "error", err)
+			continue
+		}
+		users[u.ID] = u
+	}
+
+	return users, nil
+}
+
 func (s *Store) ListUsers(ctx context.Context, statusFilter string, limit, offset int) ([]*storage.UserRecord, int, error) {
 	q := s.client.Collection(usersCol).OrderBy("email", firestore.Asc)
 	if statusFilter != "" {

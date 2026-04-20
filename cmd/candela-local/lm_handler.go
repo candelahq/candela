@@ -20,20 +20,26 @@ import (
 // /v1/chat/completions (routing local models to the local runtime).
 // All other paths pass through to the remote proxy.
 type lmHandler struct {
-	mgr         *runtime.Manager       // local runtime manager (may be nil)
-	remoteProxy *httputil.ReverseProxy // proxy to remote Candela server
-	localProxy  *httputil.ReverseProxy // proxy to local runtime (e.g. Ollama)
+	mgr          *runtime.Manager       // local runtime manager (may be nil)
+	remoteProxy  *httputil.ReverseProxy // proxy to remote Candela server
+	localProxy   *httputil.ReverseProxy // proxy to local runtime (e.g. Ollama)
+	localHandler http.Handler           // localProxy wrapped with optional span capture
 
 	localModels sync.Map // model ID string → bool (cached for fast routing)
 }
 
 // newLMHandler creates a smart LM compat handler that merges local + remote
 // models and routes chat completions to the correct backend.
-func newLMHandler(mgr *runtime.Manager, remoteProxy, localProxy *httputil.ReverseProxy) *lmHandler {
+// If localHandler is non-nil, it wraps localProxy with span capture.
+func newLMHandler(mgr *runtime.Manager, remoteProxy, localProxy *httputil.ReverseProxy, localHandler http.Handler) *lmHandler {
+	if localHandler == nil && localProxy != nil {
+		localHandler = localProxy
+	}
 	return &lmHandler{
-		mgr:         mgr,
-		remoteProxy: remoteProxy,
-		localProxy:  localProxy,
+		mgr:          mgr,
+		remoteProxy:  remoteProxy,
+		localProxy:   localProxy,
+		localHandler: localHandler,
 	}
 }
 
@@ -159,7 +165,7 @@ func (h *lmHandler) serveChat(w http.ResponseWriter, r *http.Request) {
 
 	if h.isLocalModel(req.Model) {
 		slog.Debug("lm handler: routing to local runtime", "model", req.Model)
-		h.localProxy.ServeHTTP(w, r)
+		h.localHandler.ServeHTTP(w, r)
 	} else if h.remoteProxy != nil {
 		h.remoteProxy.ServeHTTP(w, r)
 	} else {

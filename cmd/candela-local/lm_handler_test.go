@@ -96,7 +96,7 @@ func setupLMHandler(t *testing.T, localModels []runtime.Model, remoteModels []op
 	}
 	t.Cleanup(func() { _ = mgr.Stop(context.Background()) })
 
-	h := newLMHandler(mgr, proxyTo(remoteSrv.URL), proxyTo(localSrv.URL))
+	h := newLMHandler(mgr, proxyTo(remoteSrv.URL), proxyTo(localSrv.URL), nil)
 
 	srv := httptest.NewServer(h)
 	t.Cleanup(srv.Close)
@@ -158,7 +158,7 @@ func TestLMHandler_Models_NoRuntime(t *testing.T) {
 
 	remoteSrv := mockRemoteServer(t, remoteModels)
 
-	h := newLMHandler(nil, proxyTo(remoteSrv.URL), nil)
+	h := newLMHandler(nil, proxyTo(remoteSrv.URL), nil, nil)
 	srv := httptest.NewServer(h)
 	defer srv.Close()
 
@@ -195,7 +195,7 @@ func TestLMHandler_Models_RemoteDown(t *testing.T) {
 	_ = mgr.Start(context.Background())
 	defer func() { _ = mgr.Stop(context.Background()) }()
 
-	h := newLMHandler(mgr, proxyTo(failSrv.URL), proxyTo(localSrv.URL))
+	h := newLMHandler(mgr, proxyTo(failSrv.URL), proxyTo(localSrv.URL), nil)
 	srv := httptest.NewServer(h)
 	defer srv.Close()
 
@@ -302,7 +302,7 @@ func TestLMHandler_Passthrough(t *testing.T) {
 	}))
 	defer remoteSrv.Close()
 
-	h := newLMHandler(nil, proxyTo(remoteSrv.URL), nil)
+	h := newLMHandler(nil, proxyTo(remoteSrv.URL), nil, nil)
 	srv := httptest.NewServer(h)
 	defer srv.Close()
 
@@ -380,7 +380,7 @@ func setupSoloLMHandler(t *testing.T, localModels []runtime.Model) *httptest.Ser
 	t.Cleanup(func() { _ = mgr.Stop(context.Background()) })
 
 	// Solo mode: nil remote proxy.
-	h := newLMHandler(mgr, nil, proxyTo(localSrv.URL))
+	h := newLMHandler(mgr, nil, proxyTo(localSrv.URL), nil)
 
 	srv := httptest.NewServer(h)
 	t.Cleanup(srv.Close)

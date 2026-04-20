@@ -535,6 +535,109 @@ $('#pull-form').addEventListener('submit', (e) => {
   }
 });
 
+// ── Traces ──
+
+async function refreshTraces() {
+  try {
+    const resp = await fetch('/_local/api/traces?limit=50');
+    if (!resp.ok) {
+      const el = $('#traces-list');
+      el.innerHTML = '<div class="empty-state">Traces not available</div>';
+      return;
+    }
+    const data = await resp.json();
+    renderTraces(data);
+  } catch (e) {
+    console.warn('traces fetch failed:', e);
+    const el = $('#traces-list');
+    el.innerHTML = '<div class="empty-state">Could not load traces</div>';
+  }
+}
+
+function renderTraces(data) {
+  const list = $('#traces-list');
+  const summary = $('#traces-summary');
+  const spans = data.spans || [];
+
+  if (spans.length === 0) {
+    list.innerHTML = '<div class="empty-state">No traces yet — send a request through the LM compat listener (:1234)</div>';
+    summary.innerHTML = '';
+    return;
+  }
+
+  // Summary stats.
+  const totalTokens = spans.reduce((a, s) => a + (s.total_tokens || 0), 0);
+  const totalCost = spans.reduce((a, s) => a + (s.cost_usd || 0), 0);
+  const avgDuration = spans.reduce((a, s) => a + (s.duration_ms || 0), 0) / spans.length;
+
+  summary.innerHTML = `
+    <div class="traces-stats">
+      <div class="stat">
+        <span class="stat-value">${spans.length}</span>
+        <span class="stat-label">Calls</span>
+      </div>
+      <div class="stat">
+        <span class="stat-value">${formatTokens(totalTokens)}</span>
+        <span class="stat-label">Tokens</span>
+      </div>
+      <div class="stat">
+        <span class="stat-value">$${totalCost.toFixed(4)}</span>
+        <span class="stat-label">Cost</span>
+      </div>
+      <div class="stat">
+        <span class="stat-value">${avgDuration.toFixed(0)}ms</span>
+        <span class="stat-label">Avg Latency</span>
+      </div>
+    </div>
+  `;
+
+  // Render spans table.
+  list.innerHTML = `
+    <table class="traces-table">
+      <thead>
+        <tr>
+          <th>Time</th>
+          <th>Model</th>
+          <th>Tokens</th>
+          <th>Cost</th>
+          <th>Duration</th>
+          <th>Status</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${spans.map(s => `
+          <tr class="trace-row ${s.status === 'error' ? 'trace-error' : ''}">
+            <td class="trace-time">${formatTime(s.timestamp)}</td>
+            <td class="trace-model">${s.model || '—'}</td>
+            <td class="trace-tokens">
+              <span class="token-in" title="Input">${s.input_tokens || 0}</span>
+              <span class="token-sep">→</span>
+              <span class="token-out" title="Output">${s.output_tokens || 0}</span>
+            </td>
+            <td class="trace-cost">${s.cost_usd > 0 ? '$' + s.cost_usd.toFixed(4) : '—'}</td>
+            <td class="trace-duration">${(s.duration_ms || 0).toFixed(0)}ms</td>
+            <td class="trace-status"><span class="status-pill ${s.status}">${s.status}</span></td>
+          </tr>
+        `).join('')}
+      </tbody>
+    </table>
+  `;
+}
+
+function formatTokens(n) {
+  if (n >= 1000000) return (n / 1000000).toFixed(1) + 'M';
+  if (n >= 1000) return (n / 1000).toFixed(1) + 'K';
+  return n.toString();
+}
+
+function formatTime(iso) {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+}
+
+$('#btn-refresh-traces').addEventListener('click', refreshTraces);
+
 // ── Initialize ──
 
 async function init() {
@@ -545,10 +648,14 @@ async function init() {
     refreshBackends(),
     refreshPulls(),
     renderPopularModels(),
+    refreshTraces(),
   ]);
 
   // Poll health every 5 seconds (updates badge only, not models).
   pollTimer = setInterval(refreshHealth, 5000);
+
+  // Auto-refresh traces every 10 seconds.
+  setInterval(refreshTraces, 10000);
 }
 
 init();

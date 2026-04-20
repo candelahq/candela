@@ -33,7 +33,10 @@ import (
 	"time"
 
 	"github.com/candelahq/candela/gen/go/candela/v1/candelav1connect"
+	"github.com/candelahq/candela/pkg/costcalc"
+	"github.com/candelahq/candela/pkg/processor"
 	"github.com/candelahq/candela/pkg/runtime"
+	"github.com/candelahq/candela/pkg/storage"
 
 	// Register runtime backends.
 	_ "github.com/candelahq/candela/pkg/runtime/lmstudio"
@@ -44,6 +47,8 @@ import (
 	"golang.org/x/oauth2/google"
 	"google.golang.org/api/idtoken"
 	"gopkg.in/yaml.v3"
+
+	sqlitestore "github.com/candelahq/candela/pkg/storage/sqlite"
 )
 
 //go:embed ui
@@ -105,11 +110,33 @@ func main() {
 	soloMode := cfg.Remote == ""
 
 	var proxy *httputil.ReverseProxy
+	var spanProc *processor.SpanProcessor
+	var traceReader storage.SpanReader
 
 	if soloMode {
 		slog.Info("🏠 solo mode — no remote server configured, local-only operation")
 		if cfg.Audience != "" {
 			slog.Warn("audience is set but remote is empty — audience will be ignored")
+		}
+
+		// Initialize local traces store for observability.
+		tracesDir := "~/.candela"
+		if home, err := os.UserHomeDir(); err == nil {
+			tracesDir = filepath.Join(home, ".candela")
+		}
+		_ = os.MkdirAll(tracesDir, 0o700)
+		tracesPath := filepath.Join(tracesDir, "traces.db")
+		traceStore, err := sqlitestore.New(sqlitestore.Config{Path: tracesPath})
+		if err != nil {
+			slog.Warn("failed to initialize traces store — observability disabled", "error", err)
+		} else {
+			defer func() { _ = traceStore.Close() }()
+			calc := costcalc.New()
+			spanProc = processor.New([]storage.SpanWriter{traceStore}, calc, 50)
+			go spanProc.Run(ctx)
+			defer spanProc.Stop()
+			traceReader = traceStore
+			slog.Info("📊 local traces enabled", "path", tracesPath)
 		}
 	} else {
 		if cfg.Audience == "" {
@@ -275,6 +302,9 @@ func main() {
 		"ui", fmt.Sprintf("http://127.0.0.1:%d/_local/", cfg.Port),
 		"rpc", rpcPath)
 
+	// Register traces API endpoint (solo mode observability).
+	mux.Handle("/_local/api/traces", newTracesHandler(traceReader))
+
 	// Everything else → remote Candela server (if configured).
 	if proxy != nil {
 		mux.Handle("/", proxy)
@@ -314,7 +344,12 @@ func main() {
 	}
 
 	// Build the smart LM handler.
-	lmH := newLMHandler(mgr, proxy, runtimeLocalProxy)
+	// In solo mode with traces enabled, wrap local proxy with span capture.
+	var localHandler http.Handler
+	if runtimeLocalProxy != nil {
+		localHandler = newSpanCapture(runtimeLocalProxy, spanProc)
+	}
+	lmH := newLMHandler(mgr, proxy, runtimeLocalProxy, localHandler)
 	lmAddr := fmt.Sprintf("127.0.0.1:%d", lmPort)
 
 	// ── Graceful shutdown ──

@@ -336,6 +336,46 @@ func (s *Store) GetModelBreakdown(ctx context.Context, q storage.UsageQuery) ([]
 	return models, nil
 }
 
+func (s *Store) GetUserLeaderboard(ctx context.Context, q storage.UsageQuery, limit int) ([]storage.UserUsageSummary, error) {
+	if limit <= 0 {
+		limit = 20
+	}
+
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT user_id,
+			COUNT(*)::BIGINT,
+			COALESCE(SUM(gen_ai_total_tokens), 0)::BIGINT,
+			COALESCE(SUM(gen_ai_cost_usd), 0)::DOUBLE,
+			COALESCE(AVG(duration_ns), 0)::DOUBLE / 1000000.0,
+			COALESCE(MODE(gen_ai_model), '') AS top_model
+		FROM spans
+		WHERE project_id = ? AND start_time >= ? AND start_time <= ?
+			AND user_id != ''
+		GROUP BY user_id
+		ORDER BY SUM(gen_ai_cost_usd) DESC
+		LIMIT ?
+	`, q.ProjectID, q.StartTime, q.EndTime, limit)
+	if err != nil {
+		return nil, fmt.Errorf("querying user leaderboard: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var users []storage.UserUsageSummary
+	for rows.Next() {
+		var u storage.UserUsageSummary
+		err := rows.Scan(&u.UserID, &u.CallCount, &u.TotalTokens,
+			&u.CostUSD, &u.AvgLatencyMs, &u.TopModel)
+		if err != nil {
+			return nil, fmt.Errorf("scanning user: %w", err)
+		}
+		users = append(users, u)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterating users: %w", err)
+	}
+	return users, nil
+}
+
 func (s *Store) Ping(ctx context.Context) error {
 	return s.db.PingContext(ctx)
 }

@@ -3,6 +3,7 @@ syntax = "proto3";
 package candela.v1;
 
 import "candela/types/common.proto";
+import "candela/types/user.proto";
 
 option go_package = "github.com/candelahq/candela/gen/go/candela/v1";
 
@@ -17,6 +18,12 @@ service DashboardService {
 
   // GetLatencyPercentiles returns latency distribution data.
   rpc GetLatencyPercentiles(GetLatencyPercentilesRequest) returns (GetLatencyPercentilesResponse);
+
+  // GetMyUsage returns the calling user's personal usage summary.
+  rpc GetMyUsage(GetMyUsageRequest) returns (GetMyUsageResponse);
+
+  // GetTeamLeaderboard returns per-user usage for the team (admin only).
+  rpc GetTeamLeaderboard(GetTeamLeaderboardRequest) returns (GetTeamLeaderboardResponse);
 }
 
 message GetUsageSummaryRequest {
@@ -77,4 +84,47 @@ message GetLatencyPercentilesResponse {
   double p95_ms = 3;
   double p99_ms = 4;
   repeated TimeSeriesPoint latency_over_time = 10;
+}
+
+// ── Per-User Usage ──
+
+message GetMyUsageRequest {
+  string project_id = 1;
+  candela.types.TimeRange time_range = 2;
+}
+
+message GetMyUsageResponse {
+  int64 total_calls = 1;
+  int64 total_input_tokens = 2;
+  int64 total_output_tokens = 3;
+  double total_cost_usd = 4;
+  double avg_latency_ms = 5;
+  // Per-model breakdown for this user
+  repeated ModelUsage models = 10;
+  // Budget context
+  candela.types.UserBudget budget = 20;
+  double total_remaining_usd = 21;
+}
+
+// ── Team Leaderboard ──
+
+message GetTeamLeaderboardRequest {
+  string project_id = 1;
+  candela.types.TimeRange time_range = 2;
+  int32 limit = 3; // default: 20
+}
+
+message GetTeamLeaderboardResponse {
+  repeated UserUsage users = 1;
+}
+
+message UserUsage {
+  string user_id = 1;
+  string email = 2;
+  string display_name = 3;
+  int64 call_count = 4;
+  int64 total_tokens = 5;
+  double cost_usd = 6;
+  double avg_latency_ms = 7;
+  string top_model = 8;
 }

@@ -193,6 +193,16 @@ type UsageQuery struct {
 	UserID      string // Filter by user (empty = all, for admins)
 }
 
+// UserUsageSummary is a per-user aggregation for the team leaderboard.
+type UserUsageSummary struct {
+	UserID       string  `json:"user_id"`
+	CallCount    int64   `json:"call_count"`
+	TotalTokens  int64   `json:"total_tokens"`
+	CostUSD      float64 `json:"cost_usd"`
+	AvgLatencyMs float64 `json:"avg_latency_ms"`
+	TopModel     string  `json:"top_model"`
+}
+
 // ModelUsage holds per-model aggregated metrics.
 type ModelUsage struct {
 	Model        string
@@ -232,6 +242,9 @@ type SpanReader interface {
 
 	// GetModelBreakdown returns usage broken down by model.
 	GetModelBreakdown(ctx context.Context, q UsageQuery) ([]ModelUsage, error)
+
+	// GetUserLeaderboard returns per-user usage ranked by cost (admin only).
+	GetUserLeaderboard(ctx context.Context, q UsageQuery, limit int) ([]UserUsageSummary, error)
 
 	// Ping verifies that the storage backend is reachable.
 	Ping(ctx context.Context) error
@@ -381,6 +394,9 @@ type UserStore interface {
 	// GetUserByEmail retrieves a user by email (for IAP first-login lookup).
 	GetUserByEmail(ctx context.Context, email string) (*UserRecord, error)
 
+	// GetUsers retrieves a map of users by their IDs for batch processing.
+	GetUsers(ctx context.Context, ids []string) (map[string]*UserRecord, error)
+
 	// ListUsers returns all users, optionally filtered by status.
 	ListUsers(ctx context.Context, statusFilter string, limit, offset int) ([]*UserRecord, int, error)
 
@@ -439,4 +455,21 @@ type UserStore interface {
 
 	// Close releases resources.
 	Close() error
+}
+
+// BudgetAlert represents a threshold notification event.
+type BudgetAlert struct {
+	UserID    string    `json:"user_id" firestore:"user_id"`
+	Email     string    `json:"email" firestore:"email"`
+	Threshold float64   `json:"threshold" firestore:"threshold"` // 0.8, 0.9, 1.0
+	SpentUSD  float64   `json:"spent_usd" firestore:"spent_usd"`
+	LimitUSD  float64   `json:"limit_usd" firestore:"limit_usd"`
+	PeriodKey string    `json:"period_key" firestore:"period_key"`
+	SentAt    time.Time `json:"sent_at" firestore:"sent_at"`
+}
+
+// Notifier sends budget alerts through a specific channel.
+// Implementations: logging (v1), Slack, Microsoft Teams.
+type Notifier interface {
+	NotifyBudgetThreshold(ctx context.Context, alert BudgetAlert) error
 }

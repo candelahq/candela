@@ -24,7 +24,9 @@ import (
 
 	"golang.org/x/oauth2"
 
+	"github.com/candelahq/candela/pkg/auth"
 	"github.com/candelahq/candela/pkg/costcalc"
+	"github.com/candelahq/candela/pkg/notify"
 	"github.com/candelahq/candela/pkg/storage"
 )
 
@@ -80,6 +82,10 @@ type Proxy struct {
 	client    *http.Client
 	projectID string
 	breakers  map[string]*CircuitBreaker
+
+	// Optional dependencies for team-mode features.
+	users    storage.UserStore     // Budget deduction (nil = no budget tracking)
+	budgetCk *notify.BudgetChecker // Budget threshold notifications (nil = no alerts)
 }
 
 // Config holds proxy configuration.
@@ -122,6 +128,16 @@ func New(cfg Config, submitter SpanSubmitter, calc *costcalc.Calculator) *Proxy 
 			Timeout: 5 * time.Minute, // LLM calls can be slow
 		},
 	}
+}
+
+// SetUserStore sets the optional UserStore for budget deduction.
+func (p *Proxy) SetUserStore(users storage.UserStore) {
+	p.users = users
+}
+
+// SetBudgetChecker sets the optional BudgetChecker for threshold notifications.
+func (p *Proxy) SetBudgetChecker(ck *notify.BudgetChecker) {
+	p.budgetCk = ck
 }
 
 // RegisterRoutes registers proxy routes on the given mux.
@@ -548,7 +564,7 @@ type spanParams struct {
 }
 
 // buildSpan constructs a storage.Span from parsed parameters and submits it.
-func (p *Proxy) buildSpan(params spanParams) {
+func (p *Proxy) buildSpan(ctx context.Context, params spanParams) {
 	totalTokens := params.inputTokens + params.outputTokens
 	cost := p.calc.Calculate(params.provider.Name, params.model, params.inputTokens, params.outputTokens)
 
@@ -584,9 +600,46 @@ func (p *Proxy) buildSpan(params spanParams) {
 		Attributes: attrs,
 	}
 
+	// Set user ID from auth context for per-user attribution.
+	if caller := auth.FromContext(ctx); caller != nil {
+		span.UserID = caller.ID
+	}
+
 	if p.submitter != nil {
 		p.submitter.SubmitBatch([]storage.Span{span})
 	}
+
+	// Async budget deduction and notification.
+	if p.users != nil && span.UserID != "" && span.GenAI != nil && span.GenAI.CostUSD > 0 {
+		go func() {
+			ctx := context.Background()
+			if err := p.users.DeductSpend(ctx, span.UserID, span.GenAI.CostUSD, span.GenAI.TotalTokens); err != nil {
+				slog.Error("failed to deduct spend",
+					"user_id", span.UserID,
+					"cost_usd", span.GenAI.CostUSD,
+					"error", err)
+				return
+			}
+
+			// Check budget thresholds and notify if needed.
+			if p.budgetCk != nil {
+				budget, err := p.users.GetBudget(ctx, span.UserID)
+				if err == nil && budget != nil && budget.LimitUSD > 0 {
+					var email string
+					user, uerr := p.users.GetUser(ctx, span.UserID)
+					if uerr == nil {
+						email = user.Email
+					}
+					p.budgetCk.CheckAndNotify(ctx, span.UserID, email, budget.PeriodKey,
+						notify.DeductResult{
+							SpentUSD: budget.SpentUSD,
+							LimitUSD: budget.LimitUSD,
+						})
+				}
+			}
+		}()
+	}
+
 	slog.Debug("proxied LLM call",
 		"provider", params.provider.Name,
 		"model", params.model,
@@ -614,7 +667,7 @@ func (p *Proxy) createSpan(
 		status = storage.SpanStatusError
 	}
 
-	p.buildSpan(spanParams{
+	p.buildSpan(ctx, spanParams{
 		provider:      provider,
 		model:         model,
 		inputContent:  inputContent,
@@ -644,7 +697,7 @@ func (p *Proxy) createStreamingSpan(
 	model, inputContent := extractRequestInfo(provider.Name, reqBody)
 	outputContent, inputTokens, outputTokens := extractStreamingUsage(provider.Name, streamData)
 
-	p.buildSpan(spanParams{
+	p.buildSpan(ctx, spanParams{
 		provider:      provider,
 		model:         model,
 		inputContent:  inputContent,

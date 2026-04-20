@@ -394,6 +394,9 @@ type UserStore interface {
 	// GetUserByEmail retrieves a user by email (for IAP first-login lookup).
 	GetUserByEmail(ctx context.Context, email string) (*UserRecord, error)
 
+	// GetUsers retrieves a map of users by their IDs for batch processing.
+	GetUsers(ctx context.Context, ids []string) (map[string]*UserRecord, error)
+
 	// ListUsers returns all users, optionally filtered by status.
 	ListUsers(ctx context.Context, statusFilter string, limit, offset int) ([]*UserRecord, int, error)
 

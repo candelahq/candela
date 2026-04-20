@@ -7,6 +7,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -479,18 +480,9 @@ func buildTrace(traceID string, spans []storage.Span) *storage.Trace {
 // isDuplicateColumn returns true if the error is a "duplicate column" error
 // from an ALTER TABLE ADD COLUMN migration that already ran.
 func isDuplicateColumn(err error) bool {
-	return err != nil && (contains(err.Error(), "duplicate column") || contains(err.Error(), "already exists"))
-}
-
-func contains(s, substr string) bool {
-	return len(s) >= len(substr) && (s == substr || len(s) > 0 && containsAt(s, substr))
-}
-
-func containsAt(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
+	if err == nil {
+		return false
 	}
-	return false
+	msg := err.Error()
+	return strings.Contains(msg, "duplicate column") || strings.Contains(msg, "already exists")
 }

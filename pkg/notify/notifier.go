@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"sync"
 	"time"
 
 	"github.com/candelahq/candela/pkg/storage"
@@ -56,6 +57,7 @@ type BudgetChecker struct {
 	// sent tracks notified thresholds per user per period.
 	// Key: "{userID}:{periodKey}:{threshold}"
 	sent map[string]bool
+	mu   sync.RWMutex
 }
 
 // NewBudgetChecker creates a checker with the given notification channels.
@@ -81,7 +83,11 @@ func (c *BudgetChecker) CheckAndNotify(ctx context.Context, userID, email, perio
 		}
 
 		key := fmt.Sprintf("%s:%s:%.2f", userID, periodKey, threshold)
-		if c.sent[key] {
+		c.mu.RLock()
+		alreadySent := c.sent[key]
+		c.mu.RUnlock()
+
+		if alreadySent {
 			continue
 		}
 
@@ -106,6 +112,8 @@ func (c *BudgetChecker) CheckAndNotify(ctx context.Context, userID, email, perio
 			}
 		}
 
+		c.mu.Lock()
 		c.sent[key] = true
+		c.mu.Unlock()
 	}
 }

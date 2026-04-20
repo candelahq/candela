@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"time"
 
 	connect "connectrpc.com/connect"
@@ -247,6 +248,21 @@ func (h *DashboardHandler) GetTeamLeaderboard(
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
 
+	// Batch enrichment: collect IDs to avoid N+1 query pattern.
+	var userIDs []string
+	for _, u := range users {
+		userIDs = append(userIDs, u.UserID)
+	}
+
+	userMap := make(map[string]*storage.UserRecord)
+	if h.users != nil && len(userIDs) > 0 {
+		userMap, err = h.users.GetUsers(ctx, userIDs)
+		if err != nil {
+			slog.Warn("batch user enrichment failed", "error", err)
+			// Continue with partial data rather than failing the whole request.
+		}
+	}
+
 	var pbUsers []*v1.UserUsage
 	for _, u := range users {
 		pu := &v1.UserUsage{
@@ -258,13 +274,10 @@ func (h *DashboardHandler) GetTeamLeaderboard(
 			TopModel:     u.TopModel,
 		}
 
-		// Enrich with email/display_name from UserStore.
-		if h.users != nil {
-			userRec, err := h.users.GetUser(ctx, u.UserID)
-			if err == nil {
-				pu.Email = userRec.Email
-				pu.DisplayName = userRec.DisplayName
-			}
+		// Enrich from batch-fetched map.
+		if rec, ok := userMap[u.UserID]; ok {
+			pu.Email = rec.Email
+			pu.DisplayName = rec.DisplayName
 		}
 
 		pbUsers = append(pbUsers, pu)

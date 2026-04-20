@@ -1,4 +1,4 @@
-package main
+package processor
 
 import (
 	"context"
@@ -67,7 +67,7 @@ func TestProcessorFanOut(t *testing.T) {
 	w2 := &mockWriter{}
 
 	calc := costcalc.New()
-	proc := NewSpanProcessor([]storage.SpanWriter{w1, w2}, calc, 10)
+	proc := New([]storage.SpanWriter{w1, w2}, calc, 10)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	go proc.Run(ctx)
@@ -99,7 +99,7 @@ func TestProcessorFanOut_OneFailsOtherSucceeds(t *testing.T) {
 	w2 := &mockWriter{}
 
 	calc := costcalc.New()
-	proc := NewSpanProcessor([]storage.SpanWriter{w1, w2}, calc, 2)
+	proc := New([]storage.SpanWriter{w1, w2}, calc, 2)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	go proc.Run(ctx)
@@ -123,11 +123,10 @@ func TestProcessorBackPressure(t *testing.T) {
 	w := &mockWriter{}
 	calc := costcalc.New()
 	// Tiny batch + buffer: batchSize=2, channel=2*10=20
-	proc := NewSpanProcessor([]storage.SpanWriter{w}, calc, 2)
+	proc := New([]storage.SpanWriter{w}, calc, 2)
 
 	// Don't start Run — channel will fill up.
 	// Submit more than the buffer can hold.
-	dropped := 0
 	for i := 0; i < 30; i++ {
 		// The channel is 20 deep. Beyond that, Submit drops.
 		proc.Submit(testSpan(fmt.Sprintf("s%d", i)))
@@ -138,7 +137,7 @@ func TestProcessorBackPressure(t *testing.T) {
 	for range proc.spanCh {
 		received++
 	}
-	dropped = 30 - received
+	dropped := 30 - received
 	if dropped == 0 {
 		t.Error("expected some spans to be dropped due to back-pressure")
 	}

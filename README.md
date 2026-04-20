@@ -22,7 +22,7 @@ Drop Candela into your existing app by just changing your `base_url`. No instrum
 - **Google Gemini**: `http://localhost:8181/proxy/google/`
 - **Anthropic (via Vertex AI)**: `http://localhost:8181/proxy/anthropic/`
 
-> **📍 Port Configuration**: Candela uses port `8181` when running with a config file (recommended), or `8080` when using defaults. See [Port Configuration](#-port-configuration) for details.
+> **📍 Port Configuration**: Candela uses port `8181` by default. See [Port Configuration](#-port-configuration) for details.
 
 ### 2. OTel-Native Agent Mode (Production)
 For deep observability into agent frameworks (**ADK**, **LangChain**, **CrewAI**), Candela ingests standard OTLP spans through a custom-built **OTel Collector distro**.
@@ -263,7 +263,7 @@ pnpm run test:e2e      # run Playwright E2E tests (27+ tests)
 pnpm run test:e2e:ui   # Playwright interactive UI mode
 ```
 
-The UI communicates with the backend via **ConnectRPC v2** on the configured port (`8181` with config file, `8080` without). Pages gracefully handle offline backend state.
+The UI communicates with the backend via **ConnectRPC v2** on port `8181`. Pages gracefully handle offline backend state.
 
 > [!TIP]
 > **Proto Generation**: We use **Buf Remote Generation**. Just run `buf generate` in the `proto/` directory—no local plugins required!
@@ -504,7 +504,7 @@ curl -X POST http://localhost:8181/proxy/anthropic/v1/messages \
 #### Port Already in Use
 ```bash
 # Check what's using the port
-lsof -i :8181  # or :8080
+lsof -i :8181
 
 # Kill the process or use a different port
 kill -9 <PID>

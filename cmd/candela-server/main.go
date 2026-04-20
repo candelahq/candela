@@ -87,6 +87,7 @@ type Config struct {
 		ProjectID  string `yaml:"project_id"`
 		DatabaseID string `yaml:"database_id"` // e.g. "candela" or "(default)"
 	} `yaml:"firestore"`
+	Pricing costcalc.PricingConfig `yaml:"pricing"`
 }
 
 func main() {
@@ -111,8 +112,11 @@ func main() {
 	defer closeFn()
 	slog.Info("storage initialized", "backend", cfg.Storage.Backend, "sinks", len(writers))
 
-	// Initialize cost calculator.
+	// Initialize cost calculator with built-in defaults + config overrides.
 	calc := costcalc.New()
+	if cfg.Pricing.DiscountPercent > 0 || len(cfg.Pricing.Models) > 0 {
+		calc.LoadFromConfig(cfg.Pricing)
+	}
 
 	// Start the in-process span processor (fan-out to all writers).
 	proc := processor.New(writers, calc, cfg.Worker.BatchSize)

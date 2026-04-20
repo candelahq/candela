@@ -40,7 +40,7 @@ The server defaults to **DuckDB** and listens on the port from `config.yaml` (de
 nix develop -c go run ./cmd/candela-server
 ```
 
-Verify it's running: `curl http://localhost:8181/healthz` to verify it's running.
+Verify it's running: `curl http://localhost:8181/healthz`
 
 ### 3. Running the UI
 The web interface is a Next.js 16 app in `ui/`.

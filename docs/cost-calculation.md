@@ -1,157 +1,166 @@
 # 💰 Cost Calculation Engine
 
-Candela provides real-time cost tracking for every LLM call. The `pkg/costcalc` package maintains a pricing table and calculates USD costs from token usage.
+Candela calculates the USD cost of every LLM API call in real-time, enabling budget tracking, threshold alerts, and per-user reporting.
 
-## How Costs Flow Through the System
+## Core Principle
 
-```
-1. LLM Call (via Proxy or OTel)
-         │
-2. Token extraction (from response body or span attributes)
-         │
-3. Cost calculation (costcalc.Calculate)
-         │
-4. Enrichment ──┬── Proxy: writes cost into span.GenAI.CostUSD
-                └── Collector: writes cost as gen_ai.usage.cost_usd attribute
-         │
-5. Storage (DuckDB/SQLite/BigQuery gen_ai_cost_usd column)
-         │
-6. Display ──┬── Dashboard: total cost, cost-over-time chart
-             ├── Trace detail: per-span cost breakdown
-             └── Budget enforcement: deduct from user budget
-```
+> **$0.00 is only valid for local models.** Every cloud model reachable through the proxy has real pricing. An unknown cloud model is a gap — the server logs a `⚠️ missing pricing` warning so operators can add it.
 
-### Two Enrichment Points
-
-Cost is calculated in **two places**, depending on the ingestion path:
-
-| Path | Where | When |
-|------|-------|------|
-| **Proxy Mode** | `pkg/proxy/proxy.go` → `buildSpan()` | After upstream response is parsed |
-| **Collector Mode** | `collector/processors/genaiprocessor` | In the OTel pipeline before export |
-| **Processor (fallback)** | `pkg/processor/processor.go` → `flush()` | During batch flush, if cost is still $0 |
-
-The processor applies cost calculation as a **safety net** — if the proxy or collector already set the cost, the processor does not override it.
-
----
-
-## Pricing Table
-
-The calculator ships with built-in pricing for common models:
-
-### Google
-
-| Model | Input ($/1M tokens) | Output ($/1M tokens) |
-|-------|--------------------:|---------------------:|
-| `gemini-2.0-flash` | $0.10 | $0.40 |
-| `gemini-2.0-pro` | $1.25 | $10.00 |
-| `gemini-1.5-flash` | $0.075 | $0.30 |
-| `gemini-1.5-pro` | $1.25 | $5.00 |
-
-### OpenAI
-
-| Model | Input ($/1M tokens) | Output ($/1M tokens) |
-|-------|--------------------:|---------------------:|
-| `gpt-4o` | $2.50 | $10.00 |
-| `gpt-4o-mini` | $0.15 | $0.60 |
-| `gpt-4-turbo` | $10.00 | $30.00 |
-| `gpt-3.5-turbo` | $0.50 | $1.50 |
-| `o1` | $15.00 | $60.00 |
-| `o1-mini` | $3.00 | $12.00 |
-
-### Anthropic (via Vertex AI)
-
-| Model | Input ($/1M tokens) | Output ($/1M tokens) |
-|-------|--------------------:|---------------------:|
-| `claude-sonnet-4-20250514` | $3.00 | $15.00 |
-| `claude-haiku-3-5-20241022` | $0.80 | $4.00 |
-| `claude-3-5-sonnet-20241022` | $3.00 | $15.00 |
-| `claude-3-opus-20240229` | $15.00 | $75.00 |
-
-### Local Models
-
-All local models (provider = `local`) return **$0.00** — they run on your hardware with no API cost.
-
----
-
-## Cost Formula
+## How Cost Is Calculated
 
 ```
-cost = (input_tokens / 1,000,000 × input_per_million)
-     + (output_tokens / 1,000,000 × output_per_million)
-```
-
-Example: `gpt-4o` with 1,500 input tokens and 500 output tokens:
-```
-cost = (1500 / 1M × $2.50) + (500 / 1M × $10.00)
-     = $0.00375 + $0.005
-     = $0.00875
+cost = (input_tokens / 1,000,000 × input_rate)
+     + (output_tokens / 1,000,000 × output_rate)
+     × (1 - model_discount)     # optional per-model discount
+     × (1 - global_discount)    # optional enterprise-wide discount
 ```
 
 ---
 
-## Model Matching
+## Pricing Resolution Order
 
-The calculator uses a two-pass lookup strategy:
+When a model call completes, the calculator resolves pricing in this order:
 
-1. **Exact match** by `provider/model` key (e.g., `openai/gpt-4o`)
-2. **Provider-agnostic fallback** — if the exact key misses, search for any entry ending with `/model`
+```
+1. Config overrides (exact provider/model match)     → use it
+2. Built-in defaults (exact provider/model match)    → use it
+3. Provider-agnostic match (model name only)         → use it
+4. Provider is "local"?                              → $0.00 (correct)
+5. Otherwise                                         → $0.00 + WARNING LOG
+```
 
-This means `anthropic/claude-sonnet-4-20250514` will match even if the request comes through the `gemini-oai` provider route, as long as the model name matches.
+Step 3 handles cases like `gemini-oai/gemini-2.5-pro` matching the `google/gemini-2.5-pro` default pricing.
 
-If no match is found, the cost is **$0.00** — the span is still captured, just without cost data.
+Step 5 means there's a gap — the model is missing from both the config and built-in defaults. Check the server logs for:
+
+```
+⚠️ missing pricing for cloud model — cost will be $0.00 (inaccurate)
+  provider=openai model=some-new-model input_tokens=1500 output_tokens=300
+```
 
 ---
 
-## Adding or Updating Pricing
+## Built-In Default Pricing
 
-### At Build Time
+The calculator ships with built-in list prices for **all cloud models** reachable through the Candela proxy (OpenAI, Google, Anthropic). These are standard list prices — not negotiated rates.
 
-Edit `pkg/costcalc/calculator.go` → `loadDefaults()`:
+See the current pricing table in [`pkg/costcalc/calculator.go` → `loadDefaults()`](../pkg/costcalc/calculator.go) for exact rates.
 
-```go
-func (c *Calculator) loadDefaults() {
-    defaults := []ModelPricing{
-        // Add new models here:
-        {Provider: "google", Model: "gemini-2.5-pro", InputPerMillion: 1.25, OutputPerMillion: 10.00},
-        {Provider: "google", Model: "gemini-2.5-flash", InputPerMillion: 0.15, OutputPerMillion: 0.60},
-        {Provider: "openai", Model: "o3-mini", InputPerMillion: 1.10, OutputPerMillion: 4.40},
-        // ...
-    }
-}
-```
-
-### At Runtime
-
-The `Calculator` is thread-safe and supports runtime pricing updates:
-
-```go
-calc := costcalc.New()
-
-// Add pricing for a new model
-calc.SetPricing(costcalc.ModelPricing{
-    Provider:         "anthropic",
-    Model:            "claude-opus-4-20250514",
-    InputPerMillion:  15.00,
-    OutputPerMillion: 75.00,
-})
-```
-
-> [!TIP]
-> A future enhancement could load pricing from a configuration file or remote endpoint, enabling pricing updates without code changes.
+**Coverage:**
+- **Google**: Gemini 3.1, 2.5 (Pro/Flash/Flash-Lite), 2.0, 1.5
+- **OpenAI**: GPT-5.4 family, GPT-4o, reasoning models (o1/o3)
+- **Anthropic**: Claude 4.7/4.6/4.5, Claude 4 (Vertex AI IDs), Claude 3.5 legacy
+- **Local**: Always $0.00 — runs on your hardware
 
 ---
 
-## Accuracy Considerations
+## Configuring Custom Pricing
 
-| Factor | Impact | Notes |
-|--------|--------|-------|
-| **Stale pricing** | Medium | Pricing tables must be manually updated when providers change rates |
-| **Token counting** | Low | Token counts come from the provider's response — highly accurate |
-| **Streaming responses** | Low | Tokens are extracted from the final SSE `usage` chunk |
-| **Vertex AI pricing** | Medium | Vertex AI may have different pricing than direct API; current table uses direct API rates |
-| **Cached tokens** | Not tracked | Some providers offer cached token discounts; not currently differentiated |
-| **Prompt caching** | Not tracked | Anthropic/Google prompt caching discounts not yet modeled |
+For negotiated enterprise rates, volume discounts, or custom pricing, add a `pricing:` section to `config.yaml`:
+
+### Global Discount
+
+Apply a percentage discount to **all** model pricing:
+
+```yaml
+pricing:
+  discount_percent: 0.15  # 15% off all list prices
+```
+
+### Per-Model Overrides
+
+Override pricing for specific models (e.g., negotiated rates):
+
+```yaml
+pricing:
+  models:
+    - provider: openai
+      model: gpt-4o
+      input_per_million: 2.00     # negotiated rate (list: $2.50)
+      output_per_million: 8.00    # negotiated rate (list: $10.00)
+
+    - provider: google
+      model: gemini-2.5-pro
+      input_per_million: 1.00     # volume discount
+      output_per_million: 8.00
+```
+
+### Stacked Discounts
+
+Model-level and global discounts stack multiplicatively:
+
+```yaml
+pricing:
+  discount_percent: 0.10  # 10% enterprise-wide
+
+  models:
+    - provider: openai
+      model: gpt-4o
+      input_per_million: 2.50
+      output_per_million: 10.00
+      discount_percent: 0.20  # additional 20% on GPT-4o
+```
+
+Effective cost for GPT-4o: `base × 0.80 × 0.90 = base × 0.72` (28% total discount).
+
+---
+
+## Where Cost Is Calculated
+
+Cost enrichment happens at **two points** in the pipeline:
+
+### 1. Proxy Mode (real-time)
+
+When an LLM call completes through `/proxy/*`, the proxy extracts the token count from the provider's response and calls `calc.Calculate()` inline:
+
+```
+Client → Proxy → Upstream Provider → Response
+                                       ↓
+                               Extract tokens → Calculate cost → Build span
+```
+
+The proxy handles provider-specific token extraction:
+- **OpenAI**: `usage.prompt_tokens`, `usage.completion_tokens`
+- **Google Gemini**: `usageMetadata.promptTokenCount`, `usageMetadata.candidatesTokenCount`
+- **Anthropic**: `usage.input_tokens`, `usage.output_tokens`
+
+### 2. OTel Collector (pipeline enrichment)
+
+When spans arrive via OTLP (Agent Mode), the GenAI Processor enriches them before export:
+
+```
+Agent SDK → OTLP → Collector → GenAI Processor → Calculate cost → Export to Candela
+```
+
+The processor reads `gen_ai.usage.input_tokens` and `gen_ai.usage.output_tokens` from span attributes.
+
+---
+
+## Adding a New Model
+
+When a provider releases a new model:
+
+### Option A: Config Override (no redeploy)
+
+Add it to your `config.yaml`:
+
+```yaml
+pricing:
+  models:
+    - provider: openai
+      model: gpt-6
+      input_per_million: 5.00
+      output_per_million: 20.00
+```
+
+Restart the server. The new model will be priced correctly.
+
+### Option B: Update Built-In Defaults (permanent)
+
+1. Edit `pkg/costcalc/calculator.go` → `loadDefaults()`
+2. Add the new model with its list pricing
+3. Run tests: `nix develop -c go test ./pkg/costcalc -v`
+4. Deploy
 
 ---
 
@@ -159,8 +168,8 @@ calc.SetPricing(costcalc.ModelPricing{
 
 | File | Purpose |
 |------|---------|
-| `pkg/costcalc/calculator.go` | `Calculator` struct, pricing table, `Calculate()` method |
-| `pkg/costcalc/calculator_test.go` | Unit tests for cost calculation |
-| `pkg/proxy/proxy.go` | Calls `calc.Calculate()` in `buildSpan()` |
-| `pkg/processor/processor.go` | Fallback cost enrichment during batch flush |
+| `pkg/costcalc/calculator.go` | `Calculator`, `loadDefaults()`, `LoadFromConfig()`, `resolve()`, discount math |
+| `pkg/costcalc/calculator_test.go` | Unit tests for pricing, discounts, and overrides |
+| `pkg/proxy/proxy.go` | Token extraction from provider responses |
 | `collector/processors/genaiprocessor/processor.go` | OTel pipeline cost enrichment |
+| `cmd/candela-server/main.go` | Wiring `cfg.Pricing` → `calc.LoadFromConfig()` |

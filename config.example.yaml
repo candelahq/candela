@@ -78,11 +78,31 @@ proxy:
       # - id: codellama:13b
       #   provider: local
 
+# Pricing overrides.
+# Built-in defaults cover all cloud models at list prices.
+# Use this section for negotiated rates or enterprise discounts.
+pricing:
+  # Global discount applied to ALL model pricing (0.0 = none, 0.15 = 15% off).
+  discount_percent: 0.0
+
+  # Per-model overrides. These take priority over built-in defaults.
+  # Uncomment and adjust for negotiated enterprise rates:
+  # models:
+  #   - provider: openai
+  #     model: gpt-4o
+  #     input_per_million: 2.00     # negotiated rate (list: $2.50)
+  #     output_per_million: 8.00    # negotiated rate (list: $10.00)
+  #   - provider: google
+  #     model: gemini-2.5-pro
+  #     input_per_million: 1.00
+  #     output_per_million: 8.00
+  #     discount_percent: 0.10      # additional 10% off this model
+
 cors:
   # Origins allowed to make cross-origin requests.
   allowed_origins:
     - "http://localhost:3000"
-    - "http://localhost:8080"
+    - "http://localhost:8181"
 
 worker:
   batch_size: 100

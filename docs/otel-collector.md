@@ -126,7 +126,7 @@ The processor is idempotent — if `gen_ai.usage.cost_usd` is already present, i
 ```
 
 The default config (`collector/collector-config.yaml`) exports to:
-- **Candela backend** at `localhost:8080` (OTLP/gRPC, insecure)
+- **Candela backend** at `localhost:8181` (OTLP/gRPC, insecure)
 - **Debug output** (stdout, basic verbosity)
 
 ### Production
@@ -136,7 +136,7 @@ For production, update the export endpoint and optionally add Cloud Trace:
 ```yaml
 exporters:
   otlp/candela:
-    endpoint: "your-candela-server:8080"
+    endpoint: "your-candela-server:8181"
     tls:
       insecure: false
       # Or use mTLS / GCP auth
@@ -244,7 +244,7 @@ otelcol --config=collector/collector-config.yaml
 | Symptom | Cause | Fix |
 |---------|-------|-----|
 | No spans appearing in Candela | Collector not connected | Check `otlp/candela` endpoint and TLS settings |
-| Cost is $0.00 on all spans | Unknown model in pricing table | Add model to `pkg/costcalc/calculator.go` |
+| Cost is $0.00 on all spans | Unknown model in pricing table | Add model to `pricing:` config or `loadDefaults()` — check server logs for `⚠️ missing pricing` warnings |
 | `gen_ai.usage.cost_usd` missing | Span lacks `gen_ai.system` attribute | Ensure your SDK sets GenAI semantic conventions |
 | High memory usage | Batch too large | Reduce `send_batch_size` in batch processor config |
 | Connection refused on :4317 | Collector not running | Start with `./candela-collector --config=...` |

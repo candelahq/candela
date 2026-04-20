@@ -22,3 +22,9 @@ export const API_BASE_URL =
  * "DEFAULT_PROJECT_ID" in the codebase for future refactoring.
  */
 export const DEFAULT_PROJECT_ID = "default";
+
+/**
+ * Budget and Role-based access constants.
+ */
+export const BUDGET_ALERT_THRESHOLD = 80; // Show warning when > 80% used
+export const ADMIN_ROLE_ID = 2; // UserRole.ADMIN enum value

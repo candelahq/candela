@@ -162,27 +162,30 @@ test.describe("Team Leaderboard", () => {
       ]
     });
 
+    // Ensure data is loaded
+    const responsePromise = page.waitForResponse(res => res.url().includes("/candela.v1.DashboardService/GetTeamLeaderboard") && res.status() === 200);
     await page.goto("/admin/leaderboard");
+    await responsePromise;
 
     // Header and Subtitle (Standard Admin UI)
     await expect(page.locator(".admin-page-title")).toContainText("Team Leaderboard");
     await expect(page.locator(".admin-page-subtitle")).toBeVisible();
 
     // Check Rankings Table
-    const table = page.locator("table");
+    const table = page.getByRole("table");
     await expect(table).toBeVisible();
 
     // First Row (Alice)
     const row1 = table.locator("tbody tr").first();
-    await expect(row1.locator("text=#1")).toBeVisible();
-    await expect(row1.locator("text=/Alice/i")).toBeVisible();
-    await expect(row1.locator("text=$15.50")).toBeVisible();
-    await expect(row1.locator("text=gpt-4o")).toBeVisible();
+    await expect(row1).toContainText("#1");
+    await expect(row1).toContainText("Alice");
+    await expect(row1).toContainText("$15.50");
+    await expect(row1).toContainText("gpt-4o");
 
     // Second Row (Bob)
     const row2 = table.locator("tbody tr").nth(1);
-    await expect(row2.locator("text=#2")).toBeVisible();
-    await expect(row2.locator("text=/Bob/i")).toBeVisible();
-    await expect(row2.locator("text=$8.20")).toBeVisible();
+    await expect(row2).toContainText("#2");
+    await expect(row2).toContainText("Bob");
+    await expect(row2).toContainText("$8.20");
   });
 });

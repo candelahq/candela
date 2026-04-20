@@ -1,23 +1,11 @@
 "use client";
 
 import { useLeaderboard } from "@/hooks/useLeaderboard";
-import { useCurrentUser } from "@/hooks/useCurrentUser";
 import { TimeRangeSelector } from "@/components/TimeRangeSelector";
 import { ErrorBanner } from "@/components/ErrorBanner";
-import { redirect } from "next/navigation";
-import { useEffect } from "react";
 
 export default function LeaderboardPage() {
   const { rankings, loading, error, timeRange, setTimeRange, refresh } = useLeaderboard();
-  const { user, isAdmin, isLoading: authLoading } = useCurrentUser();
-
-  // Route protection - only redirect if definitively not an admin
-  if (!authLoading && user && !isAdmin) {
-    redirect("/");
-    return null;
-  }
-
-  if (authLoading) return null;
 
   return (
     <>

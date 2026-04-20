@@ -1,0 +1,6 @@
+path '/Users/ab/code/candela/ui' does not contain a 'flake.nix', searching up
+🕯️  Candela dev shell ready
+   Go:     go1.26.1
+   Buf:    1.67.0
+   Node:   v22.22.2
+   Python: 3.12.13

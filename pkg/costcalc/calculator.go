@@ -76,6 +76,8 @@ func (c *Calculator) key(provider, model string) string {
 func (c *Calculator) loadDefaults() {
 	defaults := []ModelPricing{
 		// Google
+		{Provider: "google", Model: "gemini-2.5-pro", InputPerMillion: 1.25, OutputPerMillion: 10.00},
+		{Provider: "google", Model: "gemini-2.5-flash", InputPerMillion: 0.15, OutputPerMillion: 0.60},
 		{Provider: "google", Model: "gemini-2.0-flash", InputPerMillion: 0.10, OutputPerMillion: 0.40},
 		{Provider: "google", Model: "gemini-2.0-pro", InputPerMillion: 1.25, OutputPerMillion: 10.00},
 		{Provider: "google", Model: "gemini-1.5-flash", InputPerMillion: 0.075, OutputPerMillion: 0.30},
@@ -88,9 +90,11 @@ func (c *Calculator) loadDefaults() {
 		{Provider: "openai", Model: "gpt-3.5-turbo", InputPerMillion: 0.50, OutputPerMillion: 1.50},
 		{Provider: "openai", Model: "o1", InputPerMillion: 15.00, OutputPerMillion: 60.00},
 		{Provider: "openai", Model: "o1-mini", InputPerMillion: 3.00, OutputPerMillion: 12.00},
+		{Provider: "openai", Model: "o3-mini", InputPerMillion: 1.10, OutputPerMillion: 4.40},
 
 		// Anthropic (via Vertex AI or direct)
 		{Provider: "anthropic", Model: "claude-sonnet-4-20250514", InputPerMillion: 3.00, OutputPerMillion: 15.00},
+		{Provider: "anthropic", Model: "claude-opus-4-20250514", InputPerMillion: 15.00, OutputPerMillion: 75.00},
 		{Provider: "anthropic", Model: "claude-haiku-3-5-20241022", InputPerMillion: 0.80, OutputPerMillion: 4.00},
 		{Provider: "anthropic", Model: "claude-3-5-sonnet-20241022", InputPerMillion: 3.00, OutputPerMillion: 15.00},
 		{Provider: "anthropic", Model: "claude-3-opus-20240229", InputPerMillion: 15.00, OutputPerMillion: 75.00},

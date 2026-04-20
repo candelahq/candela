@@ -440,10 +440,10 @@ func loadConfig() (*Config, error) {
 
 	data, err := os.ReadFile(cfgPath)
 	if err != nil {
-		// No config file — use defaults (DuckDB, port 8080).
+		// No config file — use defaults (DuckDB, port 8181).
 		slog.Warn("config file not found, using defaults", "path", cfgPath)
 		cfg := &Config{}
-		cfg.Server.Port = 8080
+		cfg.Server.Port = 8181
 		cfg.Storage.Backend = "duckdb"
 		return cfg, nil
 	}
@@ -454,7 +454,7 @@ func loadConfig() (*Config, error) {
 	}
 
 	if cfg.Server.Port == 0 {
-		cfg.Server.Port = 8080
+		cfg.Server.Port = 8181
 	}
 	if cfg.Storage.Backend == "" {
 		cfg.Storage.Backend = "duckdb"

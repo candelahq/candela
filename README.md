@@ -18,9 +18,11 @@ Candela offers a dual-mode ingestion strategy to fit any stage of your project:
 
 ### 1. Zero-Code Proxy Mode (Quick Start)
 Drop Candela into your existing app by just changing your `base_url`. No instrumentation needed.
-- **OpenAI**: `http://localhost:8080/proxy/openai/v1`
-- **Google Gemini**: `http://localhost:8080/proxy/google/`
-- **Anthropic (via Vertex AI)**: `http://localhost:8080/proxy/anthropic/`
+- **OpenAI**: `http://localhost:8181/proxy/openai/v1`
+- **Google Gemini**: `http://localhost:8181/proxy/google/`
+- **Anthropic (via Vertex AI)**: `http://localhost:8181/proxy/anthropic/`
+
+> **📍 Port Configuration**: Candela uses port `8181` when running with a config file (recommended), or `8080` when using defaults. See [Port Configuration](#-port-configuration) for details.
 
 ### 2. OTel-Native Agent Mode (Production)
 For deep observability into agent frameworks (**ADK**, **LangChain**, **CrewAI**), Candela ingests standard OTLP spans through a custom-built **OTel Collector distro**.
@@ -51,12 +53,14 @@ Ideal for local development. Uses **DuckDB** by default.
 # Clone and enter the nix shell (or ensure Go 1.26 is installed)
 nix develop
 
-# Start the Candela server (defaults to DuckDB + Port 8080)
-go run ./cmd/candela-server
+# Start the Candela server (defaults to DuckDB + Port 8181)
+nix develop -c go run ./cmd/candela-server
 
 # Start the UI (separate terminal)
 cd ui && pnpm install && pnpm run dev
 ```
+
+> **💡 Quick Start Tip**: Copy `config.example.yaml` to `config.yaml` to use port 8181 and enable all features.
 
 ### Option B: Docker Compose (Full Stack)
 Ideal for testing the full multi-service experience.
@@ -70,14 +74,16 @@ docker compose -f deploy/docker-compose.yml up
 
 ## 🛠️ Route an LLM Call
 
-Once Candela is running, point your favorite LLM client at the Candela proxy (Port 8080) to start capturing observability data instantly.
+Once Candela is running, point your favorite LLM client at the Candela proxy (Port 8181) to start capturing observability data instantly.
+
+> **🔧 Setup Required**: For Anthropic/Claude via Vertex AI, see [GCP Setup Guide](#-gcp-setup-for-anthropic) below.
 
 ### OpenAI Example
 ```python
 from openai import OpenAI
 
 client = OpenAI(
-    base_url="http://localhost:8080/proxy/openai/v1",
+    base_url="http://localhost:8181/proxy/openai/v1",
     api_key="sk-..."
 )
 
@@ -90,7 +96,7 @@ response = client.chat.completions.create(...)
 from anthropic import Anthropic
 
 client = Anthropic(
-    base_url="http://localhost:8080/proxy/anthropic",
+    base_url="http://localhost:8181/proxy/anthropic",
     api_key="YOUR_GCP_TOKEN" # Uses ADC for GCP authentication
 )
 
@@ -172,6 +178,31 @@ The processor fans out writes to **all configured writers** concurrently. Only o
 
 ---
 
+## 🔧 Port Configuration
+
+Candela uses port `8181` by default.
+
+| Setup | Port | When Used |
+|-------|------|-----------|
+| **Default** | `8181` | Running `go run ./cmd/candela-server` |
+| **Docker Compose** | `8181` | As specified in `docker-compose.yml` |
+
+### Quick Setup
+```bash
+# Copy example config to enable all features on port 8181
+cp config.example.yaml config.yaml
+
+# Or create minimal config
+cat > config.yaml << EOF
+server:
+  port: 8181
+storage:
+  backend: "duckdb"
+EOF
+```
+
+---
+
 ## ⚙️ Configuration
 
 Candela is configured via `config.yaml` (or `$CANDELA_CONFIG`):
@@ -179,7 +210,7 @@ Candela is configured via `config.yaml` (or `$CANDELA_CONFIG`):
 ```yaml
 server:
   host: "0.0.0.0"
-  port: 8080
+  port: 8181
 
 storage:
   backend: "duckdb"  # duckdb | sqlite | bigquery
@@ -196,7 +227,7 @@ storage:
 cors:
   allowed_origins:
     - "http://localhost:3000"
-    - "http://localhost:8080"
+    - "http://localhost:8181"
 
 sinks:
   pubsub:
@@ -232,7 +263,7 @@ pnpm run test:e2e      # run Playwright E2E tests (27+ tests)
 pnpm run test:e2e:ui   # Playwright interactive UI mode
 ```
 
-The UI communicates with the backend via **ConnectRPC v2** on `localhost:8080`. Pages gracefully handle offline backend state.
+The UI communicates with the backend via **ConnectRPC v2** on the configured port (`8181` with config file, `8080` without). Pages gracefully handle offline backend state.
 
 > [!TIP]
 > **Proto Generation**: We use **Buf Remote Generation**. Just run `buf generate` in the `proto/` directory—no local plugins required!
@@ -394,8 +425,135 @@ candela/
 ├── .github/workflows/ci.yml    # CI pipeline (Go + UI + Playwright)
 └── config.yaml                  # Server configuration
 ```
+
 ---
 
+## 🌩️ GCP Setup for Anthropic
+
+To use Claude models via Vertex AI, follow these steps:
+
+### 1. GCP Project Setup
+```bash
+# Install gcloud CLI if needed
+curl https://sdk.cloud.google.com | bash
+
+# Create a new project (or use existing)
+gcloud projects create YOUR-PROJECT-ID
+
+# Set as default project
+gcloud config set project YOUR-PROJECT-ID
+
+# Enable required APIs
+gcloud services enable \
+  aiplatform.googleapis.com \
+  compute.googleapis.com
+```
+
+### 2. Authentication
+```bash
+# Set up Application Default Credentials
+gcloud auth application-default login
+
+# Verify your credentials
+gcloud auth list
+```
+
+### 3. Enable Claude Models
+1. Go to [Vertex AI Model Garden](https://console.cloud.google.com/vertex-ai/model-garden)
+2. Search for "Claude"
+3. Enable Claude 3.5 Sonnet and Claude 3 Opus
+4. Accept Google's terms for Anthropic models
+
+### 4. Update Config
+```yaml
+# In your config.yaml
+proxy:
+  enabled: true
+  vertex_ai:
+    project_id: "YOUR-PROJECT-ID"  # Replace with your actual project
+    region: "us-east5"             # or us-central1, us-west1
+```
+
+### 5. Test Connection
+```bash
+# Start Candela
+go run ./cmd/candela-server
+
+# Test in another terminal
+curl -X POST http://localhost:8181/proxy/anthropic/v1/messages \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer test" \
+  -d '{
+    "model": "claude-3-51022",
+    "messages": [{"role": "user", "content": "Hello!"}],
+    "max_tokens": 100
+  }'
+```
+
+> **💡 Project ID Tips**:
+> - Use `gcloud config get project` to see your current project
+> - Project IDs must be globally unique (numbers/letters/hyphens only)
+> - Billing must be enabled for Vertex AI usage
+
+---
+
+## 🐛 Troubleshooting
+
+### Common Issues
+
+#### Port Already in Use
+```bash
+# Check what's using the port
+lsof -i :8181  # or :8080
+
+# Kill the process or use a different port
+kill -9 <PID>
+```
+
+#### Backend Not Starting
+```bash
+# Check if config file is valid
+go run ./cmd/candela-server --help
+
+# Verify with minimal config
+echo "server:\n  port: 8181" > test-config.yaml
+CANDELA_CONFIG=test-config.yaml go run ./cmd/candela-server
+```
+
+#### UI Can't Connect to Backend
+1. **Check backend is running**: Visit `http://localhost:8181/healthz`
+2. **Verify port configuration**: Backend and UI must use same port
+3. **Check CORS settings**: Add your UI URL to `cors.allowed_origins`
+
+#### Anthropic/Vertex AI Errors
+```bash
+# Verify ADC is working
+gcloud auth application-default print-access-token
+
+# Check project/region settings
+gcloud config list
+
+# Test Vertex AI access
+gcloud ai models list --region=us-east5
+```
+
+#### Permission Denied (GCP)
+```bash
+# Check IAM roles
+gcloud projects get-iam-policy YOUR-PROJECT-ID
+
+# Add required role if missing
+gcloud projects add-iam-policy-binding YOUR-PROJECT-ID \
+  --member="user:YOUR-EMAIL" \
+  --role="roles/aiplatform.user"
+```
+
+### Getting Help
+- **GitHub Issues**: [Report bugs](https://github.delahq/candela/issues)
+- **Documentation**: Check `docs/` directory for detailed guides
+- **Logs**: Run with `CANDELA_LOG_LEVEL=debug` for verbose output
+
+---
 ## 🤝 Contributing
 
 We are in early development! See [CONTRIBUTING.md](./CONTRIBUTING.md) for local setup instructions and architectural deep dives.

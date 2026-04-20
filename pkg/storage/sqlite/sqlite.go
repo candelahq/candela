@@ -94,11 +94,16 @@ func (s *Store) migrate() error {
 		`CREATE INDEX IF NOT EXISTS idx_spans_project_time ON spans(project_id, start_time)`,
 		`CREATE INDEX IF NOT EXISTS idx_spans_trace ON spans(trace_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_spans_kind ON spans(kind)`,
+		// Migration: add user_id column to existing tables.
+		`ALTER TABLE spans ADD COLUMN user_id TEXT DEFAULT ''`,
 	}
 
 	for _, q := range queries {
 		if _, err := s.db.Exec(q); err != nil {
-			return fmt.Errorf("executing migration: %w", err)
+			// Ignore "duplicate column" errors from migration ALTERs.
+			if !isDuplicateColumn(err) {
+				return fmt.Errorf("executing migration: %w", err)
+			}
 		}
 	}
 	return nil
@@ -335,6 +340,46 @@ func (s *Store) GetModelBreakdown(ctx context.Context, q storage.UsageQuery) ([]
 	return models, nil
 }
 
+func (s *Store) GetUserLeaderboard(ctx context.Context, q storage.UsageQuery, limit int) ([]storage.UserUsageSummary, error) {
+	if limit <= 0 {
+		limit = 20
+	}
+
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT user_id,
+			COUNT(*),
+			COALESCE(SUM(gen_ai_total_tokens), 0),
+			COALESCE(SUM(gen_ai_cost_usd), 0),
+			COALESCE(AVG(duration_ns), 0) / 1000000.0,
+			COALESCE(MAX(gen_ai_model), '') AS top_model
+		FROM spans
+		WHERE project_id = ? AND start_time >= ? AND start_time <= ?
+			AND user_id != ''
+		GROUP BY user_id
+		ORDER BY SUM(gen_ai_cost_usd) DESC
+		LIMIT ?
+	`, q.ProjectID, q.StartTime.Format(time.RFC3339Nano), q.EndTime.Format(time.RFC3339Nano), limit)
+	if err != nil {
+		return nil, fmt.Errorf("querying user leaderboard: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var users []storage.UserUsageSummary
+	for rows.Next() {
+		var u storage.UserUsageSummary
+		err := rows.Scan(&u.UserID, &u.CallCount, &u.TotalTokens,
+			&u.CostUSD, &u.AvgLatencyMs, &u.TopModel)
+		if err != nil {
+			return nil, fmt.Errorf("scanning user: %w", err)
+		}
+		users = append(users, u)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterating users: %w", err)
+	}
+	return users, nil
+}
+
 func (s *Store) Ping(ctx context.Context) error {
 	return s.db.PingContext(ctx)
 }
@@ -429,4 +474,23 @@ func buildTrace(traceID string, spans []storage.Span) *storage.Trace {
 	}
 	trace.Duration = trace.EndTime.Sub(trace.StartTime)
 	return trace
+}
+
+// isDuplicateColumn returns true if the error is a "duplicate column" error
+// from an ALTER TABLE ADD COLUMN migration that already ran.
+func isDuplicateColumn(err error) bool {
+	return err != nil && (contains(err.Error(), "duplicate column") || contains(err.Error(), "already exists"))
+}
+
+func contains(s, substr string) bool {
+	return len(s) >= len(substr) && (s == substr || len(s) > 0 && containsAt(s, substr))
+}
+
+func containsAt(s, substr string) bool {
+	for i := 0; i <= len(s)-len(substr); i++ {
+		if s[i:i+len(substr)] == substr {
+			return true
+		}
+	}
+	return false
 }

@@ -26,6 +26,7 @@ import (
 	"github.com/candelahq/candela/pkg/auth"
 	"github.com/candelahq/candela/pkg/connecthandlers"
 	"github.com/candelahq/candela/pkg/costcalc"
+	"github.com/candelahq/candela/pkg/notify"
 	"github.com/candelahq/candela/pkg/processor"
 	"github.com/candelahq/candela/pkg/proxy"
 	"github.com/candelahq/candela/pkg/storage"
@@ -255,6 +256,14 @@ func main() {
 				Providers: activeProviders,
 				ProjectID: cfg.Proxy.ProjectID,
 			}, proc, calc)
+
+			// Wire team-mode features if Firestore is available.
+			if userStore != nil {
+				llmProxy.SetUserStore(userStore)
+				llmProxy.SetBudgetChecker(notify.NewBudgetChecker(&notify.LogNotifier{}))
+				slog.Info("🔔 Budget deduction + notifications wired into proxy")
+			}
+
 			llmProxy.RegisterRoutes(mux)
 
 			var names []string

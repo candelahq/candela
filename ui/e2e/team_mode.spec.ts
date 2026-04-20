@@ -127,23 +127,37 @@ test.describe("Team Leaderboard", () => {
       users: [
         {
           userId: "u1",
+          user_id: "u1",
           email: "alice@test.com",
           displayName: "Alice",
+          display_name: "Alice",
           callCount: 500,
+          call_count: 500,
           totalTokens: 200000,
+          total_tokens: 200000,
           costUsd: 15.5,
+          cost_usd: 15.5,
           avgLatencyMs: 320,
-          topModel: "gpt-4o"
+          avg_latency_ms: 320,
+          topModel: "gpt-4o",
+          top_model: "gpt-4o"
         },
         {
           userId: "u2",
+          user_id: "u2",
           email: "bob@test.com",
           displayName: "Bob",
+          display_name: "Bob",
           callCount: 300,
+          call_count: 300,
           totalTokens: 100000,
+          total_tokens: 100000,
           costUsd: 8.2,
+          cost_usd: 8.2,
           avgLatencyMs: 450,
-          topModel: "claude-3-opus"
+          avg_latency_ms: 450,
+          topModel: "claude-3-opus",
+          top_model: "claude-3-opus"
         }
       ]
     });
@@ -161,14 +175,14 @@ test.describe("Team Leaderboard", () => {
     // First Row (Alice)
     const row1 = table.locator("tbody tr").first();
     await expect(row1.locator("text=#1")).toBeVisible();
-    await expect(row1.locator("text=Alice")).toBeVisible();
+    await expect(row1.locator("text=/Alice/i")).toBeVisible();
     await expect(row1.locator("text=$15.50")).toBeVisible();
     await expect(row1.locator("text=gpt-4o")).toBeVisible();
 
     // Second Row (Bob)
     const row2 = table.locator("tbody tr").nth(1);
     await expect(row2.locator("text=#2")).toBeVisible();
-    await expect(row2.locator("text=Bob")).toBeVisible();
+    await expect(row2.locator("text=/Bob/i")).toBeVisible();
     await expect(row2.locator("text=$8.20")).toBeVisible();
   });
 });

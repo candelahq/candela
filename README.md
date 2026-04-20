@@ -111,8 +111,11 @@ graph TD
 
     subgraph "candela-local"
         LM["LM Compat Listener (:1234)<br/>Unified /v1/models"]
+        SC[Span Capture]
         LP[Local Proxy]
         RP[Remote Proxy + Auth]
+        SP["SpanProcessor<br/>(Solo Mode)"]
+        SQLite[(traces.db)]
     end
 
     subgraph "Local Runtimes"
@@ -121,7 +124,7 @@ graph TD
         LMS["LM Studio (:1234)"]
     end
 
-    subgraph "Candela Cloud"
+    subgraph "Candela Cloud (Team Mode)"
         Server[Go Backend Server]
         Proxy[LLM API Proxy]
         Processor[Span Processor<br/>Fan-out to Writers]
@@ -136,7 +139,10 @@ graph TD
     end
 
     JB -->|/v1/models<br/>/v1/chat/completions| LM
-    LM -->|Local model| LP
+    LM -->|Local model| SC
+    SC --> LP
+    SC -.->|Capture| SP
+    SP --> SQLite
     LM -->|Remote model| RP
     LP --> Ollama
     LP -.-> VLLM
@@ -236,20 +242,82 @@ The UI communicates with the backend via **ConnectRPC v2** on `localhost:8080`. 
 ## 🕹️ candela-local — Local Development Proxy
 
 `candela-local` is an auth-injecting proxy + runtime manager for developer machines.
+It operates in three modes:
+
+### 🏠 Solo Mode (Zero-Config)
+
+Run local models with full observability — **no cloud account needed**.
+
+```yaml
+# ~/.candela.yaml
+runtime_backend: ollama
+```
+
+```bash
+candela-local   # starts on :8181 (proxy) + :1234 (LM compat)
+```
+
+- Local models via Ollama/vLLM on `:1234`
+- Every call traced to `~/.candela/traces.db` (SQLite)
+- Management UI at `http://localhost:8181/_local/`
+
+### ☁️ Solo + Cloud Mode (Direct Cloud)
+
+Call Gemini and Claude directly using your **Google identity** — no server deployment needed.
+
+```yaml
+# ~/.candela.yaml
+runtime_backend: ollama
+
+providers:
+  - name: google
+    models: [gemini-2.5-pro, gemini-2.0-flash]
+  - name: anthropic
+    models: [claude-sonnet-4-20250514]
+
+vertex_ai:
+  project: my-gcp-project
+```
+
+- Local + cloud models merged into `/v1/models`
+- Smart routing: local stays local, cloud goes direct to Vertex AI via ADC
+- All calls (local + cloud) traced to SQLite — full observability
+- Prerequisites: `gcloud auth application-default login`
+
+### 🌐 Team Mode (Governance + Budgets)
+
+Connect to a shared Candela server for **budget enforcement, RBAC, and team-wide cost tracking**.
+
+```yaml
+# ~/.candela.yaml
+runtime_backend: ollama
+remote: https://candela-xxx.a.run.app
+audience: "12345678.apps.googleusercontent.com"
+```
+
+- Local + cloud models merged into `/v1/models`
+- Smart routing: local models stay local, cloud models route through Candela server
+- OIDC auth injected automatically via ADC
+- Team-wide cost tracking, budget enforcement, and centralized governance
+
+> [!TIP]
+> See [docs/candela-local.md](docs/candela-local.md) for the full setup guide.
 
 ### Unified Model Discovery
 
-The LM-compatible listener on `:1234` merges **local** and **remote** models into a single `/v1/models` response:
+The LM-compatible listener on `:1234` merges **local**, **cloud**, and **remote** models into a single `/v1/models` response:
 
 ```bash
 # JetBrains, Cline, or any OpenAI-compatible client sees everything:
 curl http://localhost:1234/v1/models
 # → local: llama3.2:3b, mistral:7b (from Ollama)
-# → remote: gpt-4o, claude-3.5-sonnet (from Cloud Run)
+# → cloud: gemini-2.5-pro, claude-sonnet-4 (direct via ADC)  [Solo + Cloud]
+# → remote: gpt-4o (from Cloud Run)  [Team Mode]
 ```
 
 `/v1/chat/completions` automatically routes to the right backend:
 - **Local model** → Ollama/vLLM/LM Studio (no round-trip)
+- **Cloud model** → Vertex AI directly (via Google ADC)
 - **Remote model** → Cloud Run proxy (with OIDC auth injection)
 
 ### Runtime Management UI
@@ -259,7 +327,7 @@ Embedded management UI at `/_local/` for controlling local LLM runtimes:
 - **Runtime control** — Start/stop Ollama, vLLM, or LM Studio; health monitoring with auto-polling
 - **Model management** — List, load, unload, and **delete** models from disk
 - **Pull models** — Download models with real-time progress tracking and **cancel** support
-- **Model catalog** — Suggested models stored in SQLite (`local_model_catalog`), seeded with popular defaults
+- **Traces** — Recent LLM calls with tokens, cost, duration (Solo Mode)
 - **Backend discovery** — Auto-detect installed runtimes and show install hints
 - **State persistence** — Settings, pull history, and runtime state persisted to `~/.candela/state.db`
 
@@ -292,7 +360,13 @@ candela/
 ├── proto/                       # Protobuf definitions (Source of Truth)
 ├── gen/                         # Generated code (Go, TypeScript, Python)
 ├── cmd/candela-server/          # Server entry point
+├── cmd/candela-local/           # Local dev proxy + runtime manager
+│   ├── lm_handler.go            # Smart model routing (local ↔ cloud)
+│   ├── span_capture.go          # Request/response capture middleware
+│   ├── traces_handler.go        # /_local/api/traces REST endpoint
+│   └── ui/                      # Embedded management UI (vanilla JS)
 ├── pkg/
+│   ├── processor/               # Shared span processor (Solo + Server)
 │   ├── storage/                 # Storage interfaces (SpanWriter, SpanReader)
 │   │   ├── duckdb/              # DuckDB driver (default, OLAP-optimized)
 │   │   ├── sqlite/              # SQLite driver (lightweight)
@@ -318,8 +392,6 @@ candela/
 │   ├── e2e/                     # Playwright E2E tests (app + admin)
 │   └── playwright.config.ts     # Playwright config
 ├── .github/workflows/ci.yml    # CI pipeline (Go + UI + Playwright)
-├── cmd/candela-local/           # Local dev proxy + runtime manager
-│   └── ui/                      # Embedded management UI (vanilla JS)
 └── config.yaml                  # Server configuration
 ```
 ---

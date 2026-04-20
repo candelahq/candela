@@ -11,6 +11,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/candelahq/candela/pkg/costcalc"
+	"github.com/candelahq/candela/pkg/proxy"
 	"github.com/candelahq/candela/pkg/runtime"
 )
 
@@ -96,7 +98,7 @@ func setupLMHandler(t *testing.T, localModels []runtime.Model, remoteModels []op
 	}
 	t.Cleanup(func() { _ = mgr.Stop(context.Background()) })
 
-	h := newLMHandler(mgr, proxyTo(remoteSrv.URL), proxyTo(localSrv.URL))
+	h := newLMHandler(mgr, proxyTo(remoteSrv.URL), proxyTo(localSrv.URL), nil, nil, nil)
 
 	srv := httptest.NewServer(h)
 	t.Cleanup(srv.Close)
@@ -158,7 +160,7 @@ func TestLMHandler_Models_NoRuntime(t *testing.T) {
 
 	remoteSrv := mockRemoteServer(t, remoteModels)
 
-	h := newLMHandler(nil, proxyTo(remoteSrv.URL), nil)
+	h := newLMHandler(nil, proxyTo(remoteSrv.URL), nil, nil, nil, nil)
 	srv := httptest.NewServer(h)
 	defer srv.Close()
 
@@ -195,7 +197,7 @@ func TestLMHandler_Models_RemoteDown(t *testing.T) {
 	_ = mgr.Start(context.Background())
 	defer func() { _ = mgr.Stop(context.Background()) }()
 
-	h := newLMHandler(mgr, proxyTo(failSrv.URL), proxyTo(localSrv.URL))
+	h := newLMHandler(mgr, proxyTo(failSrv.URL), proxyTo(localSrv.URL), nil, nil, nil)
 	srv := httptest.NewServer(h)
 	defer srv.Close()
 
@@ -302,7 +304,7 @@ func TestLMHandler_Passthrough(t *testing.T) {
 	}))
 	defer remoteSrv.Close()
 
-	h := newLMHandler(nil, proxyTo(remoteSrv.URL), nil)
+	h := newLMHandler(nil, proxyTo(remoteSrv.URL), nil, nil, nil, nil)
 	srv := httptest.NewServer(h)
 	defer srv.Close()
 
@@ -380,7 +382,7 @@ func setupSoloLMHandler(t *testing.T, localModels []runtime.Model) *httptest.Ser
 	t.Cleanup(func() { _ = mgr.Stop(context.Background()) })
 
 	// Solo mode: nil remote proxy.
-	h := newLMHandler(mgr, nil, proxyTo(localSrv.URL))
+	h := newLMHandler(mgr, nil, proxyTo(localSrv.URL), nil, nil, nil)
 
 	srv := httptest.NewServer(h)
 	t.Cleanup(srv.Close)
@@ -472,5 +474,295 @@ func TestLMHandler_SoloMode_PassthroughNoPanic(t *testing.T) {
 	_ = json.NewDecoder(resp.Body).Decode(&result)
 	if result["error"] == "" {
 		t.Error("expected JSON error body")
+	}
+}
+
+func TestLMHandler_CloudModelsIncluded(t *testing.T) {
+	// Cloud models should appear in /v1/models alongside local models.
+	cloudModels := map[string]string{
+		"gemini-2.5-pro":           "gemini-oai",
+		"claude-sonnet-4-20250514": "anthropic",
+	}
+
+	h := newLMHandler(nil, nil, nil, nil, nil, cloudModels)
+	srv := httptest.NewServer(h)
+	defer srv.Close()
+
+	resp, err := http.Get(srv.URL + "/v1/models")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+
+	var result openaiModelList
+	_ = json.NewDecoder(resp.Body).Decode(&result)
+
+	if len(result.Data) != 2 {
+		t.Fatalf("got %d models, want 2", len(result.Data))
+	}
+
+	found := make(map[string]bool)
+	for _, m := range result.Data {
+		found[m.ID] = true
+	}
+	if !found["gemini-2.5-pro"] {
+		t.Error("missing gemini-2.5-pro in model list")
+	}
+	if !found["claude-sonnet-4-20250514"] {
+		t.Error("missing claude-sonnet-4-20250514 in model list")
+	}
+}
+
+func TestLMHandler_CloudChatRouting(t *testing.T) {
+	// Cloud model chat should route to the cloud proxy.
+	var receivedPath string
+	cloudUpstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		receivedPath = r.URL.Path
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"id":    "chatcmpl-cloud",
+			"model": "gemini-2.5-pro",
+			"choices": []map[string]any{
+				{"message": map[string]string{"role": "assistant", "content": "Hello from cloud!"}},
+			},
+			"usage": map[string]int{"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
+		})
+	}))
+	defer cloudUpstream.Close()
+
+	// Build a minimal cloud proxy pointing at our mock.
+	cloudModels := map[string]string{"gemini-2.5-pro": "gemini-oai"}
+
+	// Create a proxy.Proxy with the mock upstream.
+	calc := costcalc.New()
+	cp := proxy.New(proxy.Config{
+		Providers: []proxy.Provider{
+			{Name: "gemini-oai", UpstreamURL: cloudUpstream.URL},
+		},
+		ProjectID: "local",
+	}, nil, calc)
+
+	h := newLMHandler(nil, nil, nil, nil, cp, cloudModels)
+	srv := httptest.NewServer(h)
+	defer srv.Close()
+
+	body := `{"model": "gemini-2.5-pro", "messages": [{"role": "user", "content": "hi"}]}`
+	resp, err := http.Post(srv.URL+"/v1/chat/completions", "application/json", strings.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		respBody, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status = %d, want 200, body: %s", resp.StatusCode, respBody)
+	}
+
+	// Verify the proxy received the rewritten path.
+	if !strings.Contains(receivedPath, "/v1/chat/completions") {
+		t.Errorf("cloud proxy received path = %q, want .../v1/chat/completions", receivedPath)
+	}
+}
+
+func TestLMHandler_LocalPreference(t *testing.T) {
+	// If a model exists both locally and in cloud, local should take priority.
+	localSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"id":      "chatcmpl-local",
+			"model":   "llama3.2:3b",
+			"choices": []map[string]any{{"message": map[string]string{"role": "assistant", "content": "local response"}}},
+			"usage":   map[string]int{"prompt_tokens": 5, "completion_tokens": 3, "total_tokens": 8},
+		})
+	}))
+	defer localSrv.Close()
+
+	cloudModels := map[string]string{"llama3.2:3b": "gemini-oai"}
+
+	mock := &lmMockRuntime{models: []runtime.Model{
+		{ID: "llama3.2:3b"},
+	}}
+	mgr := runtime.NewManager(mock, runtime.ManagerConfig{HealthCheck: 10 * 1e9})
+	_ = mgr.Start(context.Background())
+	defer func() { _ = mgr.Stop(context.Background()) }()
+
+	localProxy := proxyTo(localSrv.URL)
+	h := newLMHandler(mgr, nil, localProxy, localProxy, nil, cloudModels)
+	srv := httptest.NewServer(h)
+	defer srv.Close()
+
+	// Prime the local model cache by calling /v1/models first.
+	modelsResp, err := http.Get(srv.URL + "/v1/models")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = modelsResp.Body.Close()
+
+	body := `{"model": "llama3.2:3b", "messages": [{"role": "user", "content": "hi"}]}`
+	resp, err := http.Post(srv.URL+"/v1/chat/completions", "application/json", strings.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+
+	var result map[string]any
+	_ = json.NewDecoder(resp.Body).Decode(&result)
+	if result["id"] != "chatcmpl-local" {
+		t.Errorf("got id = %v, want chatcmpl-local (local should take priority)", result["id"])
+	}
+}
+
+func TestLMHandler_CloudAndLocalModelsMerged(t *testing.T) {
+	// Verify local + cloud models all appear in /v1/models together.
+	localSrv := mockLocalServer(t)
+	cloudModels := map[string]string{
+		"gemini-2.5-pro": "gemini-oai",
+	}
+
+	localModels := []runtime.Model{{ID: "llama3.2:3b"}}
+	mock := &lmMockRuntime{models: localModels}
+	mgr := runtime.NewManager(mock, runtime.ManagerConfig{HealthCheck: 10 * 1e9})
+	_ = mgr.Start(context.Background())
+	defer func() { _ = mgr.Stop(context.Background()) }()
+
+	localProxy := proxyTo(localSrv.URL)
+	h := newLMHandler(mgr, nil, localProxy, nil, nil, cloudModels)
+	srv := httptest.NewServer(h)
+	defer srv.Close()
+
+	resp, err := http.Get(srv.URL + "/v1/models")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	var result openaiModelList
+	_ = json.NewDecoder(resp.Body).Decode(&result)
+
+	if len(result.Data) != 2 {
+		t.Fatalf("got %d models, want 2 (1 local + 1 cloud)", len(result.Data))
+	}
+
+	found := make(map[string]bool)
+	for _, m := range result.Data {
+		found[m.ID] = true
+	}
+	if !found["llama3.2:3b"] {
+		t.Error("missing local model llama3.2:3b")
+	}
+	if !found["gemini-2.5-pro"] {
+		t.Error("missing cloud model gemini-2.5-pro")
+	}
+}
+
+func TestLMHandler_CloudModelWhenProxyNil(t *testing.T) {
+	// If cloud models are configured but cloudProxy is nil (e.g. ADC failed),
+	// models should still appear in /v1/models but chat should 404.
+	cloudModels := map[string]string{"gemini-2.5-pro": "gemini-oai"}
+
+	h := newLMHandler(nil, nil, nil, nil, nil, cloudModels) // no cloudProxy
+	srv := httptest.NewServer(h)
+	defer srv.Close()
+
+	// Models should still list.
+	resp, err := http.Get(srv.URL + "/v1/models")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("models status = %d, want 200", resp.StatusCode)
+	}
+
+	// Chat should fall through to 404 since cloudProxy is nil.
+	body := `{"model": "gemini-2.5-pro", "messages": [{"role": "user", "content": "hi"}]}`
+	chatResp, err := http.Post(srv.URL+"/v1/chat/completions", "application/json", strings.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = chatResp.Body.Close() }()
+
+	if chatResp.StatusCode != http.StatusNotFound {
+		t.Errorf("chat status = %d, want 404 (cloud proxy is nil)", chatResp.StatusCode)
+	}
+}
+
+func TestLMHandler_UnknownModelSoloCloudMode(t *testing.T) {
+	// In solo+cloud mode, requesting a model that's neither local nor in
+	// cloudModels should return 404 (not panic or route incorrectly).
+	cloudModels := map[string]string{"gemini-2.5-pro": "gemini-oai"}
+
+	h := newLMHandler(nil, nil, nil, nil, nil, cloudModels)
+	srv := httptest.NewServer(h)
+	defer srv.Close()
+
+	body := `{"model": "gpt-4o", "messages": [{"role": "user", "content": "hi"}]}`
+	resp, err := http.Post(srv.URL+"/v1/chat/completions", "application/json", strings.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusNotFound {
+		t.Errorf("status = %d, want 404 for unknown model in solo+cloud mode", resp.StatusCode)
+	}
+
+	var result map[string]string
+	_ = json.NewDecoder(resp.Body).Decode(&result)
+	if result["error"] == "" {
+		t.Error("expected error message in response body")
+	}
+}
+
+func TestBuildCloudProxy_NoProject(t *testing.T) {
+	// buildCloudProxy should return nil when no project is configured
+	// and gcloud is unavailable.
+	cfg := Config{
+		Providers: []LocalProvider{{Name: "google", Models: []string{"gemini-2.5-pro"}}},
+		VertexAI:  VertexAIConfig{}, // no project
+	}
+
+	// This may return nil due to missing project or ADC — either is acceptable.
+	// The key test is that it doesn't panic.
+	cp, models := buildCloudProxy(cfg, nil)
+
+	// Without a valid project, we expect nil.
+	// (If running in a CI with gcloud configured, it may succeed — that's OK too.)
+	if cp == nil && len(models) > 0 {
+		t.Error("models returned without a proxy — should both be nil")
+	}
+}
+
+func TestBuildCloudProxy_UnknownProvider(t *testing.T) {
+	// Unknown provider names should be skipped without panic.
+	cfg := Config{
+		Providers: []LocalProvider{
+			{Name: "openai", Models: []string{"gpt-4o"}},         // unknown — skipped
+			{Name: "google", Models: []string{"gemini-2.5-pro"}}, // valid
+		},
+		VertexAI: VertexAIConfig{Project: "test-project"},
+	}
+
+	// This may fail on ADC in CI, but should not panic.
+	// The point is: unknown provider doesn't crash.
+	cp, models := buildCloudProxy(cfg, nil)
+
+	// If ADC not available, both nil — OK.
+	if cp != nil {
+		// openai should have been skipped, google kept.
+		if _, ok := models["gpt-4o"]; ok {
+			t.Error("openai provider should have been skipped")
+		}
+		if _, ok := models["gemini-2.5-pro"]; !ok {
+			t.Error("google provider should have been kept")
+		}
 	}
 }

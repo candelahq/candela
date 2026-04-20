@@ -150,8 +150,8 @@ test.describe("Team Leaderboard", () => {
 
     await page.goto("/admin/leaderboard");
 
-    await expect(page.locator("h1")).toContainText("Team Leaderboard");
-    await expect(page.locator("text=Admin Only")).toBeVisible();
+    await expect(page.locator(".admin-page-title")).toContainText("Team Leaderboard");
+    await expect(page.locator(".admin-page-subtitle")).toBeVisible();
 
     // Check Rankings
     await expect(page.locator("text=#1")).toBeVisible();

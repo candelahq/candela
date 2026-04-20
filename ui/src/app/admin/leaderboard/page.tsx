@@ -9,10 +9,13 @@ export default function LeaderboardPage() {
 
   return (
     <>
-      <header className="main-header">
-        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          <h1>Team Leaderboard</h1>
-          <span className="badge badge-info">Admin Only</span>
+    <div className="admin-page">
+      <div className="admin-page-header">
+        <div>
+          <h2 className="admin-page-title">
+            Team Leaderboard
+          </h2>
+          <p className="admin-page-subtitle">Ranked by total cost and usage efficiency</p>
         </div>
         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
           <TimeRangeSelector value={timeRange} onChange={setTimeRange} />
@@ -20,7 +23,7 @@ export default function LeaderboardPage() {
             🔄
           </button>
         </div>
-      </header>
+      </div>
 
       <div className="main-body">
         {error && (
@@ -115,6 +118,7 @@ export default function LeaderboardPage() {
           )}
         </div>
       </div>
+    </div>
 
       <style jsx>{`
         .skeleton {

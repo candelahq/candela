@@ -608,7 +608,7 @@ function renderTraces(data) {
         ${spans.map(s => `
           <tr class="trace-row ${s.status === 'error' ? 'trace-error' : ''}">
             <td class="trace-time">${formatTime(s.timestamp)}</td>
-            <td class="trace-model">${s.model || '—'}</td>
+            <td class="trace-model">${escapeHtml(s.model) || '—'}</td>
             <td class="trace-tokens">
               <span class="token-in" title="Input">${s.input_tokens || 0}</span>
               <span class="token-sep">→</span>
@@ -616,7 +616,7 @@ function renderTraces(data) {
             </td>
             <td class="trace-cost">${s.cost_usd > 0 ? '$' + s.cost_usd.toFixed(4) : '—'}</td>
             <td class="trace-duration">${(s.duration_ms || 0).toFixed(0)}ms</td>
-            <td class="trace-status"><span class="status-pill ${s.status}">${s.status}</span></td>
+            <td class="trace-status"><span class="status-pill ${escapeAttr(s.status)}">${escapeHtml(s.status)}</span></td>
           </tr>
         `).join('')}
       </tbody>

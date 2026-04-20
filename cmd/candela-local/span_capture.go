@@ -65,8 +65,9 @@ func (s *spanCapture) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if len(chatReq.Messages) > 0 {
 		last := chatReq.Messages[len(chatReq.Messages)-1]
 		inputContent = last.Content
-		if len(inputContent) > 500 {
-			inputContent = inputContent[:500] + "..."
+		if runeCount := len([]rune(inputContent)); runeCount > 500 {
+			runes := []rune(inputContent)
+			inputContent = string(runes[:500]) + "..."
 		}
 	}
 
@@ -114,8 +115,8 @@ func (s *spanCapture) buildSpan(model string, stream *bool, inputContent string,
 	}
 
 	span := storage.Span{
-		SpanID:    generateID(),
-		TraceID:   generateID(),
+		SpanID:    generateID(8),
+		TraceID:   generateID(16),
 		Name:      "chat " + model,
 		Kind:      storage.SpanKindLLM,
 		Status:    spanStatus,
@@ -139,15 +140,24 @@ func (s *spanCapture) buildSpan(model string, stream *bool, inputContent string,
 
 // parseSSEUsage extracts token usage from the final SSE data chunk.
 // Ollama and OpenAI-compatible servers include usage in the last chunk.
-// Uses bytes.Split to avoid string conversion of the entire response.
+// Iterates backwards using bytes.LastIndex to avoid allocating slices
+// for the entire response body.
 func parseSSEUsage(body []byte) (input, output, total int64) {
 	prefix := []byte("data: ")
 	done := []byte("[DONE]")
 
-	lines := bytes.Split(body, []byte("\n"))
-	// Walk backwards to find the last data line with usage.
-	for i := len(lines) - 1; i >= 0; i-- {
-		line := bytes.TrimSpace(lines[i])
+	// Walk backwards through newline-delimited lines.
+	for end := len(body); end > 0; {
+		nl := bytes.LastIndexByte(body[:end], '\n')
+		var line []byte
+		if nl >= 0 {
+			line = body[nl+1 : end]
+			end = nl
+		} else {
+			line = body[:end]
+			end = 0
+		}
+		line = bytes.TrimSpace(line)
 		if !bytes.HasPrefix(line, prefix) {
 			continue
 		}
@@ -192,9 +202,10 @@ func (r *responseCapture) Flush() {
 	}
 }
 
-// generateID returns a random 16-byte hex string for span/trace IDs.
-func generateID() string {
-	b := make([]byte, 16)
+// generateID returns a random hex string of the given byte size.
+// Use 8 for OTel SpanIDs (16 hex chars) and 16 for TraceIDs (32 hex chars).
+func generateID(size int) string {
+	b := make([]byte, size)
 	if _, err := rand.Read(b); err != nil {
 		// crypto/rand should never fail on supported platforms.
 		panic("crypto/rand failed: " + err.Error())

@@ -143,7 +143,9 @@ func main() {
 			slog.Warn("could not resolve home directory — observability disabled", "error", homeErr)
 		} else {
 			tracesDir := filepath.Join(home, ".candela")
-			_ = os.MkdirAll(tracesDir, 0o700)
+			if err := os.MkdirAll(tracesDir, 0o700); err != nil {
+				slog.Warn("failed to create traces directory", "path", tracesDir, "error", err)
+			}
 			tracesPath := filepath.Join(tracesDir, "traces.db")
 			traceStore, err := sqlitestore.New(sqlitestore.Config{Path: tracesPath})
 			if err != nil {

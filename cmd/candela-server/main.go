@@ -26,6 +26,7 @@ import (
 	"github.com/candelahq/candela/pkg/auth"
 	"github.com/candelahq/candela/pkg/connecthandlers"
 	"github.com/candelahq/candela/pkg/costcalc"
+	"github.com/candelahq/candela/pkg/processor"
 	"github.com/candelahq/candela/pkg/proxy"
 	"github.com/candelahq/candela/pkg/storage"
 	bqstore "github.com/candelahq/candela/pkg/storage/bigquery"
@@ -113,9 +114,9 @@ func main() {
 	calc := costcalc.New()
 
 	// Start the in-process span processor (fan-out to all writers).
-	processor := NewSpanProcessor(writers, calc, cfg.Worker.BatchSize)
-	go processor.Run(context.Background())
-	defer processor.Stop()
+	proc := processor.New(writers, calc, cfg.Worker.BatchSize)
+	go proc.Run(context.Background())
+	defer proc.Stop()
 
 	// Build the HTTP mux for ConnectRPC handlers.
 	mux := http.NewServeMux()
@@ -164,7 +165,7 @@ func main() {
 	mux.Handle(tracePath, traceH)
 
 	ingestionPath, ingestionH := candelav1connect.NewIngestionServiceHandler(
-		connecthandlers.NewIngestionHandlerDirect(processor))
+		connecthandlers.NewIngestionHandlerDirect(proc))
 	mux.Handle(ingestionPath, ingestionH)
 
 	dashboardPath, dashboardH := candelav1connect.NewDashboardServiceHandler(
@@ -253,7 +254,7 @@ func main() {
 			llmProxy = proxy.New(proxy.Config{
 				Providers: activeProviders,
 				ProjectID: cfg.Proxy.ProjectID,
-			}, processor, calc)
+			}, proc, calc)
 			llmProxy.RegisterRoutes(mux)
 
 			var names []string
@@ -373,7 +374,6 @@ func main() {
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	processor.Stop()
 	if lmSrv != nil {
 		if err := lmSrv.Shutdown(shutdownCtx); err != nil {
 			slog.Error("LM Studio listener shutdown error", "error", err)

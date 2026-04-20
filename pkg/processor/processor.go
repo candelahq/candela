@@ -1,4 +1,7 @@
-package main
+// Package processor provides a shared span processing pipeline that buffers
+// incoming spans and flushes them to one or more storage sinks in batches.
+// Used by both candela-server and candela-local for consistent span handling.
+package processor
 
 import (
 	"context"
@@ -22,10 +25,10 @@ type SpanProcessor struct {
 	once      sync.Once
 }
 
-// NewSpanProcessor creates a new in-process span processor.
+// New creates a new in-process span processor.
 // All provided writers receive every batch on flush.
-func NewSpanProcessor(writers []storage.SpanWriter, calc *costcalc.Calculator, batchSize int) *SpanProcessor {
-	if batchSize == 0 {
+func New(writers []storage.SpanWriter, calc *costcalc.Calculator, batchSize int) *SpanProcessor {
+	if batchSize <= 0 {
 		batchSize = 100
 	}
 	return &SpanProcessor{

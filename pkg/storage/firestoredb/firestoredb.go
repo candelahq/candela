@@ -583,9 +583,16 @@ func currentPeriodKey(periodType string) string {
 }
 
 // sanitizeID makes a generic string (like an email) safe for use as a
-// Firestore document ID by lowercasing and replacing slashes.
+// Firestore document ID by lowercasing, replacing slashes, and escaping
+// Firestore's reserved __.*__ pattern (IDs that start and end with double
+// underscores are reserved by Firestore and will cause writes to fail).
 func sanitizeID(id string) string {
-	return strings.ReplaceAll(strings.ToLower(id), "/", "_")
+	s := strings.ReplaceAll(strings.ToLower(id), "/", "_")
+	// Firestore reserves document IDs matching __.*__ (e.g. __user__@example.com).
+	if len(s) >= 4 && strings.HasPrefix(s, "__") && strings.HasSuffix(s, "__") {
+		s = "u_" + s
+	}
+	return s
 }
 
 // Ensure Store implements UserStore at compile time.

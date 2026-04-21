@@ -69,8 +69,8 @@ func (s *Store) CreateUser(ctx context.Context, user *storage.UserRecord) error 
 	if user.Email == "" {
 		return fmt.Errorf("firestoredb: email is required for user creation")
 	}
-	// Use lowercase email as the primary document ID for search efficiency and uniqueness.
-	user.ID = strings.ToLower(user.Email)
+	// Use lowercase and sanitized email as primary ID.
+	user.ID = sanitizeID(user.Email)
 	if user.CreatedAt.IsZero() {
 		user.CreatedAt = time.Now().UTC()
 	}
@@ -93,6 +93,7 @@ func (s *Store) CreateUser(ctx context.Context, user *storage.UserRecord) error 
 }
 
 func (s *Store) GetUser(ctx context.Context, id string) (*storage.UserRecord, error) {
+	id = sanitizeID(id)
 	snap, err := s.client.Collection(usersCol).Doc(id).Get(ctx)
 	if err != nil {
 		if status.Code(err) == codes.NotFound {
@@ -105,8 +106,7 @@ func (s *Store) GetUser(ctx context.Context, id string) (*storage.UserRecord, er
 
 func (s *Store) GetUserByEmail(ctx context.Context, email string) (*storage.UserRecord, error) {
 	// With email-as-ID, this becomes a O(1) direct document lookup.
-	id := strings.ToLower(email)
-	return s.GetUser(ctx, id)
+	return s.GetUser(ctx, email)
 }
 
 func (s *Store) GetUsers(ctx context.Context, ids []string) (map[string]*storage.UserRecord, error) {
@@ -116,7 +116,7 @@ func (s *Store) GetUsers(ctx context.Context, ids []string) (map[string]*storage
 
 	refs := make([]*firestore.DocumentRef, len(ids))
 	for i, id := range ids {
-		refs[i] = s.client.Collection(usersCol).Doc(id)
+		refs[i] = s.client.Collection(usersCol).Doc(sanitizeID(id))
 	}
 
 	snaps, err := s.client.GetAll(ctx, refs)
@@ -185,7 +185,8 @@ func (s *Store) ListUsers(ctx context.Context, statusFilter string, limit, offse
 }
 
 func (s *Store) UpdateUser(ctx context.Context, user *storage.UserRecord) error {
-	ref := s.client.Collection(usersCol).Doc(user.ID)
+	id := sanitizeID(user.ID)
+	ref := s.client.Collection(usersCol).Doc(id)
 	// Use the struct directly with MergeAll; the 'firestore' struct tags
 	// handle the mapping to snake_case automatically.
 	_, err := ref.Set(ctx, user, firestore.MergeAll)
@@ -196,6 +197,7 @@ func (s *Store) UpdateUser(ctx context.Context, user *storage.UserRecord) error 
 }
 
 func (s *Store) TouchLastSeen(ctx context.Context, id string) error {
+	id = sanitizeID(id)
 	ref := s.client.Collection(usersCol).Doc(id)
 	_, err := ref.Update(ctx, []firestore.Update{
 		{Path: "last_seen_at", Value: time.Now().UTC()},
@@ -215,7 +217,8 @@ func (s *Store) SetBudget(ctx context.Context, budget *storage.BudgetRecord) err
 	if budget.PeriodKey == "" {
 		budget.PeriodKey = currentPeriodKey(budget.PeriodType)
 	}
-	ref := s.client.Collection(usersCol).Doc(budget.UserID).
+	userID := sanitizeID(budget.UserID)
+	ref := s.client.Collection(usersCol).Doc(userID).
 		Collection(budgetsCol).Doc(budget.PeriodKey)
 	_, err := ref.Set(ctx, budget)
 	if err != nil {
@@ -226,6 +229,7 @@ func (s *Store) SetBudget(ctx context.Context, budget *storage.BudgetRecord) err
 
 func (s *Store) GetBudget(ctx context.Context, userID string) (*storage.BudgetRecord, error) {
 	periodKey := currentPeriodKey("monthly")
+	userID = sanitizeID(userID)
 	ref := s.client.Collection(usersCol).Doc(userID).
 		Collection(budgetsCol).Doc(periodKey)
 	snap, err := ref.Get(ctx)
@@ -240,6 +244,7 @@ func (s *Store) GetBudget(ctx context.Context, userID string) (*storage.BudgetRe
 
 func (s *Store) ResetSpend(ctx context.Context, userID string) error {
 	periodKey := currentPeriodKey("monthly")
+	userID = sanitizeID(userID)
 	ref := s.client.Collection(usersCol).Doc(userID).
 		Collection(budgetsCol).Doc(periodKey)
 	_, err := ref.Update(ctx, []firestore.Update{
@@ -263,7 +268,8 @@ func (s *Store) CreateGrant(ctx context.Context, grant *storage.GrantRecord) err
 	if grant.CreatedAt.IsZero() {
 		grant.CreatedAt = time.Now().UTC()
 	}
-	ref := s.client.Collection(usersCol).Doc(grant.UserID).
+	userID := sanitizeID(grant.UserID)
+	ref := s.client.Collection(usersCol).Doc(userID).
 		Collection(grantsCol).Doc(grant.ID)
 	_, err := ref.Create(ctx, grant)
 	if err != nil {
@@ -273,6 +279,7 @@ func (s *Store) CreateGrant(ctx context.Context, grant *storage.GrantRecord) err
 }
 
 func (s *Store) ListGrants(ctx context.Context, userID string, activeOnly bool) ([]*storage.GrantRecord, error) {
+	userID = sanitizeID(userID)
 	q := s.client.Collection(usersCol).Doc(userID).
 		Collection(grantsCol).OrderBy("expires_at", firestore.Asc)
 
@@ -302,6 +309,7 @@ func (s *Store) ListGrants(ctx context.Context, userID string, activeOnly bool) 
 }
 
 func (s *Store) RevokeGrant(ctx context.Context, userID, grantID string) error {
+	userID = sanitizeID(userID)
 	ref := s.client.Collection(usersCol).Doc(userID).
 		Collection(grantsCol).Doc(grantID)
 	_, err := ref.Update(ctx, []firestore.Update{
@@ -355,6 +363,7 @@ func (s *Store) DeductSpend(ctx context.Context, userID string, costUSD float64,
 	return s.client.RunTransaction(ctx, func(ctx context.Context, tx *firestore.Transaction) error {
 		// ── ALL READS FIRST (Firestore requirement) ──
 
+		userID = sanitizeID(userID)
 		// Read 1: Load active grants (earliest-expiring first).
 		grantsRef := s.client.Collection(usersCol).Doc(userID).
 			Collection(grantsCol)
@@ -433,6 +442,7 @@ func (s *Store) CheckRateLimit(ctx context.Context, userID string) (bool, int, i
 	}
 
 	// Window key: minute-level granularity.
+	userID = sanitizeID(userID)
 	windowKey := fmt.Sprintf("%s:%s", userID, time.Now().UTC().Format("2006-01-02T15:04"))
 	ref := s.client.Collection(rateLimitCol).Doc(windowKey)
 
@@ -477,7 +487,8 @@ func (s *Store) LogAction(ctx context.Context, entry *storage.AuditRecord) error
 	if entry.Timestamp.IsZero() {
 		entry.Timestamp = time.Now().UTC()
 	}
-	ref := s.client.Collection(usersCol).Doc(entry.UserID).
+	userID := sanitizeID(entry.UserID)
+	ref := s.client.Collection(usersCol).Doc(userID).
 		Collection(auditCol).Doc(entry.ID)
 	_, err := ref.Create(ctx, entry)
 	if err != nil {
@@ -490,6 +501,7 @@ func (s *Store) ListAuditLog(ctx context.Context, userID string, limit int) ([]*
 	if limit <= 0 {
 		limit = 50
 	}
+	userID = sanitizeID(userID)
 	q := s.client.Collection(usersCol).Doc(userID).
 		Collection(auditCol).
 		OrderBy("timestamp", firestore.Desc).
@@ -568,6 +580,12 @@ func currentPeriodKey(periodType string) string {
 	default:
 		return now.Format("2006-01")
 	}
+}
+
+// sanitizeID makes a generic string (like an email) safe for use as a
+// Firestore document ID by lowercasing and replacing slashes.
+func sanitizeID(id string) string {
+	return strings.ReplaceAll(strings.ToLower(id), "/", "_")
 }
 
 // Ensure Store implements UserStore at compile time.

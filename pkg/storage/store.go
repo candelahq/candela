@@ -324,36 +324,36 @@ type UserRecord struct {
 	ID          string    `json:"id" firestore:"id"`
 	Email       string    `json:"email" firestore:"email"`
 	DisplayName string    `json:"display_name,omitempty" firestore:"display_name,omitempty"`
-	Role        string    `json:"role" firestore:"role"`     // "developer" or "admin"
-	Status      string    `json:"status" firestore:"status"` // "provisioned", "active", "inactive"
-	CreatedAt   time.Time `json:"created_at" firestore:"created_at"`
-	LastSeenAt  time.Time `json:"last_seen_at" firestore:"last_seen_at"`
+	Role        string    `json:"role,omitempty" firestore:"role,omitempty"`     // "developer" or "admin"
+	Status      string    `json:"status,omitempty" firestore:"status,omitempty"` // "provisioned", "active", "inactive"
+	CreatedAt   time.Time `json:"created_at,omitempty" firestore:"created_at,omitempty"`
+	LastSeenAt  time.Time `json:"last_seen_at,omitempty" firestore:"last_seen_at,omitempty"`
 	RateLimit   int       `json:"rate_limit,omitempty" firestore:"rate_limit,omitempty"` // Requests/minute; 0 = default
 }
 
 // BudgetRecord is the Go representation of a user's recurring budget.
 type BudgetRecord struct {
 	UserID      string    `json:"user_id" firestore:"user_id"`
-	LimitUSD    float64   `json:"limit_usd" firestore:"limit_usd"`
-	SpentUSD    float64   `json:"spent_usd" firestore:"spent_usd"`
-	TokensUsed  int64     `json:"tokens_used" firestore:"tokens_used"`
-	PeriodType  string    `json:"period_type" firestore:"period_type"` // "monthly", "weekly", "quarterly"
-	PeriodKey   string    `json:"period_key" firestore:"period_key"`   // "2026-04", "2026-W15"
-	PeriodStart time.Time `json:"period_start" firestore:"period_start"`
-	PeriodEnd   time.Time `json:"period_end" firestore:"period_end"`
+	LimitUSD    float64   `json:"limit_usd,omitempty" firestore:"limit_usd,omitempty"`
+	SpentUSD    float64   `json:"spent_usd,omitempty" firestore:"spent_usd,omitempty"`
+	TokensUsed  int64     `json:"tokens_used,omitempty" firestore:"tokens_used,omitempty"`
+	PeriodType  string    `json:"period_type,omitempty" firestore:"period_type,omitempty"` // "monthly", "weekly", "quarterly"
+	PeriodKey   string    `json:"period_key,omitempty" firestore:"period_key,omitempty"`   // "2026-04", "2026-W15"
+	PeriodStart time.Time `json:"period_start,omitempty" firestore:"period_start,omitempty"`
+	PeriodEnd   time.Time `json:"period_end,omitempty" firestore:"period_end,omitempty"`
 }
 
 // GrantRecord is the Go representation of a one-time budget grant.
 type GrantRecord struct {
 	ID        string    `json:"id" firestore:"id"`
 	UserID    string    `json:"user_id" firestore:"user_id"`
-	AmountUSD float64   `json:"amount_usd" firestore:"amount_usd"`
-	SpentUSD  float64   `json:"spent_usd" firestore:"spent_usd"`
-	Reason    string    `json:"reason" firestore:"reason"`
-	GrantedBy string    `json:"granted_by" firestore:"granted_by"`
-	StartsAt  time.Time `json:"starts_at" firestore:"starts_at"`
-	ExpiresAt time.Time `json:"expires_at" firestore:"expires_at"`
-	CreatedAt time.Time `json:"created_at" firestore:"created_at"`
+	AmountUSD float64   `json:"amount_usd,omitempty" firestore:"amount_usd,omitempty"`
+	SpentUSD  float64   `json:"spent_usd,omitempty" firestore:"spent_usd,omitempty"`
+	Reason    string    `json:"reason,omitempty" firestore:"reason,omitempty"`
+	GrantedBy string    `json:"granted_by,omitempty" firestore:"granted_by,omitempty"`
+	StartsAt  time.Time `json:"starts_at,omitempty" firestore:"starts_at,omitempty"`
+	ExpiresAt time.Time `json:"expires_at,omitempty" firestore:"expires_at,omitempty"`
+	CreatedAt time.Time `json:"created_at,omitempty" firestore:"created_at,omitempty"`
 }
 
 // Remaining returns how much of this grant is still available.

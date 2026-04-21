@@ -164,7 +164,8 @@ func (c *Calculator) resolve(provider, model string) (ModelPricing, bool) {
 
 // rebuildFallback creates a deterministic lookup for model names without providers.
 // Priority: Overrides > Defaults. Tie-breaker: Alphabetical provider.
-// This MUST be called while holding a write lock.
+//
+// IMPORTANT: This MUST be called while holding a write lock on c.mu.
 func (c *Calculator) rebuildFallback() {
 	c.fallback = make(map[string]ModelPricing)
 

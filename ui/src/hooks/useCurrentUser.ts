@@ -2,8 +2,8 @@
 
 import { useCallback, useEffect, useReducer} from "react";
 import { userClient } from "@/lib/api";
-import type { User, UserBudget, BudgetGrant } from "@/gen/types/user_pb";
-import { UserRole } from "@/gen/types/user_pb";
+import type { User, UserBudget, BudgetGrant } from "@/gen/candela/types/user_pb";
+import { UserRole } from "@/gen/candela/types/user_pb";
 
 export interface CurrentUser {
   user: User | null;

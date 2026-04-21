@@ -17,7 +17,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file candela/v1/user_service.proto.
  */
 export const file_candela_v1_user_service: GenFile = /*@__PURE__*/
-  fileDesc("Ch1jYW5kZWxhL3YxL3VzZXJfc2VydmljZS5wcm90bxIKY2FuZGVsYS52MSL0AQoRQ3JlYXRlVXNlclJlcXVlc3QSFgoFZW1haWwYASABKAlCB7pIBHICYAESFAoMZGlzcGxheV9uYW1lGAIgASgJEiUKBHJvbGUYAyABKA4yFy5jYW5kZWxhLnR5cGVzLlVzZXJSb2xlEiwKEm1vbnRobHlfYnVkZ2V0X3VzZBgEIAEoAUIQGAG6SAsSCSkAAAAAAAAAABIoChBidWRnZXRfbGltaXRfdXNkGAUgASgBQg66SAsSCSkAAAAAAAAAABIyCg1idWRnZXRfcGVyaW9kGAYgASgOMhsuY2FuZGVsYS50eXBlcy5CdWRnZXRQZXJpb2QiYgoSQ3JlYXRlVXNlclJlc3BvbnNlEiEKBHVzZXIYASABKAsyEy5jYW5kZWxhLnR5cGVzLlVzZXISKQoGYnVkZ2V0GAIgASgLMhkuY2FuZGVsYS50eXBlcy5Vc2VyQnVkZ2V0InoKEExpc3RVc2Vyc1JlcXVlc3QSNAoKcGFnaW5hdGlvbhgBIAEoCzIgLmNhbmRlbGEudHlwZXMuUGFnaW5hdGlvblJlcXVlc3QSMAoNc3RhdHVzX2ZpbHRlchgCIAEoDjIZLmNhbmRlbGEudHlwZXMuVXNlclN0YXR1cyJuChFMaXN0VXNlcnNSZXNwb25zZRIiCgV1c2VycxgBIAMoCzITLmNhbmRlbGEudHlwZXMuVXNlchI1CgpwYWdpbmF0aW9uGAIgASgLMiEuY2FuZGVsYS50eXBlcy5QYWdpbmF0aW9uUmVzcG9uc2UiJQoOR2V0VXNlclJlcXVlc3QSEwoCaWQYASABKAlCB7pIBHICEAEikgEKD0dldFVzZXJSZXNwb25zZRIhCgR1c2VyGAEgASgLMhMuY2FuZGVsYS50eXBlcy5Vc2VyEikKBmJ1ZGdldBgCIAEoCzIZLmNhbmRlbGEudHlwZXMuVXNlckJ1ZGdldBIxCg1hY3RpdmVfZ3JhbnRzGAMgAygLMhouY2FuZGVsYS50eXBlcy5CdWRnZXRHcmFudCKUAgoRVXBkYXRlVXNlclJlcXVlc3QSEwoCaWQYASABKAlCB7pIBHICEAESFAoMZGlzcGxheV9uYW1lGAIgASgJEiUKBHJvbGUYAyABKA4yFy5jYW5kZWxhLnR5cGVzLlVzZXJSb2xlEh4KEm1vbnRobHlfYnVkZ2V0X3VzZBgEIAEoAUICGAESLwoLdXBkYXRlX21hc2sYBSABKAsyGi5nb29nbGUucHJvdG9idWYuRmllbGRNYXNrEigKEGJ1ZGdldF9saW1pdF91c2QYBiABKAFCDrpICxIJKQAAAAAAAAAAEjIKDWJ1ZGdldF9wZXJpb2QYByABKA4yGy5jYW5kZWxhLnR5cGVzLkJ1ZGdldFBlcmlvZCJiChJVcGRhdGVVc2VyUmVzcG9uc2USIQoEdXNlchgBIAEoCzITLmNhbmRlbGEudHlwZXMuVXNlchIpCgZidWRnZXQYAiABKAsyGS5jYW5kZWxhLnR5cGVzLlVzZXJCdWRnZXQiLAoVRGVhY3RpdmF0ZVVzZXJSZXF1ZXN0EhMKAmlkGAEgASgJQge6SARyAhABIhgKFkRlYWN0aXZhdGVVc2VyUmVzcG9uc2UiLAoVUmVhY3RpdmF0ZVVzZXJSZXF1ZXN0EhMKAmlkGAEgASgJQge6SARyAhABIjsKFlJlYWN0aXZhdGVVc2VyUmVzcG9uc2USIQoEdXNlchgBIAEoCzITLmNhbmRlbGEudHlwZXMuVXNlciKBAQoQU2V0QnVkZ2V0UmVxdWVzdBIYCgd1c2VyX2lkGAEgASgJQge6SARyAhABEiEKCWxpbWl0X3VzZBgCIAEoAUIOukgLEgkhAAAAAAAAAAASMAoLcGVyaW9kX3R5cGUYAyABKA4yGy5jYW5kZWxhLnR5cGVzLkJ1ZGdldFBlcmlvZCI+ChFTZXRCdWRnZXRSZXNwb25zZRIpCgZidWRnZXQYASABKAsyGS5jYW5kZWxhLnR5cGVzLlVzZXJCdWRnZXQiLAoQR2V0QnVkZ2V0UmVxdWVzdBIYCgd1c2VyX2lkGAEgASgJQge6SARyAhABIj4KEUdldEJ1ZGdldFJlc3BvbnNlEikKBmJ1ZGdldBgBIAEoCzIZLmNhbmRlbGEudHlwZXMuVXNlckJ1ZGdldCItChFSZXNldFNwZW5kUmVxdWVzdBIYCgd1c2VyX2lkGAEgASgJQge6SARyAhABIj8KElJlc2V0U3BlbmRSZXNwb25zZRIpCgZidWRnZXQYASABKAsyGS5jYW5kZWxhLnR5cGVzLlVzZXJCdWRnZXQi5wIKEkNyZWF0ZUdyYW50UmVxdWVzdBIYCgd1c2VyX2lkGAEgASgJQge6SARyAhABEiIKCmFtb3VudF91c2QYAiABKAFCDrpICxIJIQAAAAAAAAAAEhcKBnJlYXNvbhgDIAEoCUIHukgEcgIQARItCglzdGFydHNfYXQYBCABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEi4KCmV4cGlyZXNfYXQYBSABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wOpoBukiWARqTAQoaZ3JhbnQuZXhwaXJlc19hZnRlcl9zdGFydHMSImV4cGlyZXNfYXQgbXVzdCBiZSBhZnRlciBzdGFydHNfYXQaUSFoYXModGhpcy5zdGFydHNfYXQpIHx8ICFoYXModGhpcy5leHBpcmVzX2F0KSB8fCB0aGlzLmV4cGlyZXNfYXQgPiB0aGlzLnN0YXJ0c19hdCJAChNDcmVhdGVHcmFudFJlc3BvbnNlEikKBWdyYW50GAEgASgLMhouY2FuZGVsYS50eXBlcy5CdWRnZXRHcmFudCJCChFMaXN0R3JhbnRzUmVxdWVzdBIYCgd1c2VyX2lkGAEgASgJQge6SARyAhABEhMKC2FjdGl2ZV9vbmx5GAIgASgIIkAKEkxpc3RHcmFudHNSZXNwb25zZRIqCgZncmFudHMYASADKAsyGi5jYW5kZWxhLnR5cGVzLkJ1ZGdldEdyYW50IkkKElJldm9rZUdyYW50UmVxdWVzdBIYCgd1c2VyX2lkGAEgASgJQge6SARyAhABEhkKCGdyYW50X2lkGAIgASgJQge6SARyAhABIhUKE1Jldm9rZUdyYW50UmVzcG9uc2UiSgoTTGlzdEF1ZGl0TG9nUmVxdWVzdBIYCgd1c2VyX2lkGAEgASgJQge6SARyAhABEhkKBWxpbWl0GAIgASgFQgq6SAcaBRj0AygAIkIKFExpc3RBdWRpdExvZ1Jlc3BvbnNlEioKB2VudHJpZXMYASADKAsyGS5jYW5kZWxhLnR5cGVzLkF1ZGl0RW50cnkiFwoVR2V0Q3VycmVudFVzZXJSZXF1ZXN0IrYBChZHZXRDdXJyZW50VXNlclJlc3BvbnNlEiEKBHVzZXIYASABKAsyEy5jYW5kZWxhLnR5cGVzLlVzZXISKQoGYnVkZ2V0GAIgASgLMhkuY2FuZGVsYS50eXBlcy5Vc2VyQnVkZ2V0EjEKDWFjdGl2ZV9ncmFudHMYAyADKAsyGi5jYW5kZWxhLnR5cGVzLkJ1ZGdldEdyYW50EhsKE3RvdGFsX3JlbWFpbmluZ191c2QYBCABKAEiFAoSR2V0TXlCdWRnZXRSZXF1ZXN0IpABChNHZXRNeUJ1ZGdldFJlc3BvbnNlEikKBmJ1ZGdldBgBIAEoCzIZLmNhbmRlbGEudHlwZXMuVXNlckJ1ZGdldBIxCg1hY3RpdmVfZ3JhbnRzGAIgAygLMhouY2FuZGVsYS50eXBlcy5CdWRnZXRHcmFudBIbChN0b3RhbF9yZW1haW5pbmdfdXNkGAMgASgBMrEJCgtVc2VyU2VydmljZRJLCgpDcmVhdGVVc2VyEh0uY2FuZGVsYS52MS5DcmVhdGVVc2VyUmVxdWVzdBoeLmNhbmRlbGEudjEuQ3JlYXRlVXNlclJlc3BvbnNlEkgKCUxpc3RVc2VycxIcLmNhbmRlbGEudjEuTGlzdFVzZXJzUmVxdWVzdBodLmNhbmRlbGEudjEuTGlzdFVzZXJzUmVzcG9uc2USQgoHR2V0VXNlchIaLmNhbmRlbGEudjEuR2V0VXNlclJlcXVlc3QaGy5jYW5kZWxhLnYxLkdldFVzZXJSZXNwb25zZRJLCgpVcGRhdGVVc2VyEh0uY2FuZGVsYS52MS5VcGRhdGVVc2VyUmVxdWVzdBoeLmNhbmRlbGEudjEuVXBkYXRlVXNlclJlc3BvbnNlElcKDkRlYWN0aXZhdGVVc2VyEiEuY2FuZGVsYS52MS5EZWFjdGl2YXRlVXNlclJlcXVlc3QaIi5jYW5kZWxhLnYxLkRlYWN0aXZhdGVVc2VyUmVzcG9uc2USVwoOUmVhY3RpdmF0ZVVzZXISIS5jYW5kZWxhLnYxLlJlYWN0aXZhdGVVc2VyUmVxdWVzdBoiLmNhbmRlbGEudjEuUmVhY3RpdmF0ZVVzZXJSZXNwb25zZRJICglTZXRCdWRnZXQSHC5jYW5kZWxhLnYxLlNldEJ1ZGdldFJlcXVlc3QaHS5jYW5kZWxhLnYxLlNldEJ1ZGdldFJlc3BvbnNlEkgKCUdldEJ1ZGdldBIcLmNhbmRlbGEudjEuR2V0QnVkZ2V0UmVxdWVzdBodLmNhbmRlbGEudjEuR2V0QnVkZ2V0UmVzcG9uc2USSwoKUmVzZXRTcGVuZBIdLmNhbmRlbGEudjEuUmVzZXRTcGVuZFJlcXVlc3QaHi5jYW5kZWxhLnYxLlJlc2V0U3BlbmRSZXNwb25zZRJOCgtDcmVhdGVHcmFudBIeLmNhbmRlbGEudjEuQ3JlYXRlR3JhbnRSZXF1ZXN0Gh8uY2FuZGVsYS52MS5DcmVhdGVHcmFudFJlc3BvbnNlEksKCkxpc3RHcmFudHMSHS5jYW5kZWxhLnYxLkxpc3RHcmFudHNSZXF1ZXN0Gh4uY2FuZGVsYS52MS5MaXN0R3JhbnRzUmVzcG9uc2USTgoLUmV2b2tlR3JhbnQSHi5jYW5kZWxhLnYxLlJldm9rZUdyYW50UmVxdWVzdBofLmNhbmRlbGEudjEuUmV2b2tlR3JhbnRSZXNwb25zZRJRCgxMaXN0QXVkaXRMb2cSHy5jYW5kZWxhLnYxLkxpc3RBdWRpdExvZ1JlcXVlc3QaIC5jYW5kZWxhLnYxLkxpc3RBdWRpdExvZ1Jlc3BvbnNlElcKDkdldEN1cnJlbnRVc2VyEiEuY2FuZGVsYS52MS5HZXRDdXJyZW50VXNlclJlcXVlc3QaIi5jYW5kZWxhLnYxLkdldEN1cnJlbnRVc2VyUmVzcG9uc2USTgoLR2V0TXlCdWRnZXQSHi5jYW5kZWxhLnYxLkdldE15QnVkZ2V0UmVxdWVzdBofLmNhbmRlbGEudjEuR2V0TXlCdWRnZXRSZXNwb25zZUKlAQoOY29tLmNhbmRlbGEudjFCEFVzZXJTZXJ2aWNlUHJvdG9QAVo4Z2l0aHViLmNvbS9jYW5kZWxhaHEvY2FuZGVsYS9nZW4vZ28vY2FuZGVsYS92MTtjYW5kZWxhdjGiAgNDWFiqAgpDYW5kZWxhLlYxygIKQ2FuZGVsYVxWMeICFkNhbmRlbGFcVjFcR1BCTWV0YWRhdGHqAgtDYW5kZWxhOjpWMWIGcHJvdG8z", [file_buf_validate_validate, file_candela_types_common, file_candela_types_user, file_google_protobuf_field_mask, file_google_protobuf_timestamp]);
+  fileDesc("Ch1jYW5kZWxhL3YxL3VzZXJfc2VydmljZS5wcm90bxIKY2FuZGVsYS52MSKsAQoRQ3JlYXRlVXNlclJlcXVlc3QSFgoFZW1haWwYASABKAlCB7pIBHICYAESFAoMZGlzcGxheV9uYW1lGAIgASgJEiUKBHJvbGUYAyABKA4yFy5jYW5kZWxhLnR5cGVzLlVzZXJSb2xlEigKEGRhaWx5X2J1ZGdldF91c2QYBSABKAFCDrpICxIJKQAAAAAAAAAASgQIBBAFUhJtb250aGx5X2J1ZGdldF91c2QiYgoSQ3JlYXRlVXNlclJlc3BvbnNlEiEKBHVzZXIYASABKAsyEy5jYW5kZWxhLnR5cGVzLlVzZXISKQoGYnVkZ2V0GAIgASgLMhkuY2FuZGVsYS50eXBlcy5Vc2VyQnVkZ2V0InoKEExpc3RVc2Vyc1JlcXVlc3QSNAoKcGFnaW5hdGlvbhgBIAEoCzIgLmNhbmRlbGEudHlwZXMuUGFnaW5hdGlvblJlcXVlc3QSMAoNc3RhdHVzX2ZpbHRlchgCIAEoDjIZLmNhbmRlbGEudHlwZXMuVXNlclN0YXR1cyJuChFMaXN0VXNlcnNSZXNwb25zZRIiCgV1c2VycxgBIAMoCzITLmNhbmRlbGEudHlwZXMuVXNlchI1CgpwYWdpbmF0aW9uGAIgASgLMiEuY2FuZGVsYS50eXBlcy5QYWdpbmF0aW9uUmVzcG9uc2UiJQoOR2V0VXNlclJlcXVlc3QSEwoCaWQYASABKAlCB7pIBHICEAEikgEKD0dldFVzZXJSZXNwb25zZRIhCgR1c2VyGAEgASgLMhMuY2FuZGVsYS50eXBlcy5Vc2VyEikKBmJ1ZGdldBgCIAEoCzIZLmNhbmRlbGEudHlwZXMuVXNlckJ1ZGdldBIxCg1hY3RpdmVfZ3JhbnRzGAMgAygLMhouY2FuZGVsYS50eXBlcy5CdWRnZXRHcmFudCKWAQoRVXBkYXRlVXNlclJlcXVlc3QSEwoCaWQYASABKAlCB7pIBHICEAESFAoMZGlzcGxheV9uYW1lGAIgASgJEiUKBHJvbGUYAyABKA4yFy5jYW5kZWxhLnR5cGVzLlVzZXJSb2xlEi8KC3VwZGF0ZV9tYXNrGAQgASgLMhouZ29vZ2xlLnByb3RvYnVmLkZpZWxkTWFzayI3ChJVcGRhdGVVc2VyUmVzcG9uc2USIQoEdXNlchgBIAEoCzITLmNhbmRlbGEudHlwZXMuVXNlciIsChVEZWFjdGl2YXRlVXNlclJlcXVlc3QSEwoCaWQYASABKAlCB7pIBHICEAEiGAoWRGVhY3RpdmF0ZVVzZXJSZXNwb25zZSIsChVSZWFjdGl2YXRlVXNlclJlcXVlc3QSEwoCaWQYASABKAlCB7pIBHICEAEiOwoWUmVhY3RpdmF0ZVVzZXJSZXNwb25zZRIhCgR1c2VyGAEgASgLMhMuY2FuZGVsYS50eXBlcy5Vc2VyIkgKEURlbGV0ZVVzZXJSZXF1ZXN0EhMKAmlkGAEgASgJQge6SARyAhABEh4KDWNvbmZpcm1fZW1haWwYAiABKAlCB7pIBHICYAEiFAoSRGVsZXRlVXNlclJlc3BvbnNlIoEBChBTZXRCdWRnZXRSZXF1ZXN0EhgKB3VzZXJfaWQYASABKAlCB7pIBHICEAESIQoJbGltaXRfdXNkGAIgASgBQg66SAsSCSEAAAAAAAAAABIwCgtwZXJpb2RfdHlwZRgDIAEoDjIbLmNhbmRlbGEudHlwZXMuQnVkZ2V0UGVyaW9kIj4KEVNldEJ1ZGdldFJlc3BvbnNlEikKBmJ1ZGdldBgBIAEoCzIZLmNhbmRlbGEudHlwZXMuVXNlckJ1ZGdldCIsChBHZXRCdWRnZXRSZXF1ZXN0EhgKB3VzZXJfaWQYASABKAlCB7pIBHICEAEiPgoRR2V0QnVkZ2V0UmVzcG9uc2USKQoGYnVkZ2V0GAEgASgLMhkuY2FuZGVsYS50eXBlcy5Vc2VyQnVkZ2V0Ii0KEVJlc2V0U3BlbmRSZXF1ZXN0EhgKB3VzZXJfaWQYASABKAlCB7pIBHICEAEiPwoSUmVzZXRTcGVuZFJlc3BvbnNlEikKBmJ1ZGdldBgBIAEoCzIZLmNhbmRlbGEudHlwZXMuVXNlckJ1ZGdldCLnAgoSQ3JlYXRlR3JhbnRSZXF1ZXN0EhgKB3VzZXJfaWQYASABKAlCB7pIBHICEAESIgoKYW1vdW50X3VzZBgCIAEoAUIOukgLEgkhAAAAAAAAAAASFwoGcmVhc29uGAMgASgJQge6SARyAhABEi0KCXN0YXJ0c19hdBgEIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASLgoKZXhwaXJlc19hdBgFIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXA6mgG6SJYBGpMBChpncmFudC5leHBpcmVzX2FmdGVyX3N0YXJ0cxIiZXhwaXJlc19hdCBtdXN0IGJlIGFmdGVyIHN0YXJ0c19hdBpRIWhhcyh0aGlzLnN0YXJ0c19hdCkgfHwgIWhhcyh0aGlzLmV4cGlyZXNfYXQpIHx8IHRoaXMuZXhwaXJlc19hdCA+IHRoaXMuc3RhcnRzX2F0IkAKE0NyZWF0ZUdyYW50UmVzcG9uc2USKQoFZ3JhbnQYASABKAsyGi5jYW5kZWxhLnR5cGVzLkJ1ZGdldEdyYW50IkIKEUxpc3RHcmFudHNSZXF1ZXN0EhgKB3VzZXJfaWQYASABKAlCB7pIBHICEAESEwoLYWN0aXZlX29ubHkYAiABKAgiQAoSTGlzdEdyYW50c1Jlc3BvbnNlEioKBmdyYW50cxgBIAMoCzIaLmNhbmRlbGEudHlwZXMuQnVkZ2V0R3JhbnQiSQoSUmV2b2tlR3JhbnRSZXF1ZXN0EhgKB3VzZXJfaWQYASABKAlCB7pIBHICEAESGQoIZ3JhbnRfaWQYAiABKAlCB7pIBHICEAEiFQoTUmV2b2tlR3JhbnRSZXNwb25zZSJKChNMaXN0QXVkaXRMb2dSZXF1ZXN0EhgKB3VzZXJfaWQYASABKAlCB7pIBHICEAESGQoFbGltaXQYAiABKAVCCrpIBxoFGPQDKAAiQgoUTGlzdEF1ZGl0TG9nUmVzcG9uc2USKgoHZW50cmllcxgBIAMoCzIZLmNhbmRlbGEudHlwZXMuQXVkaXRFbnRyeSIXChVHZXRDdXJyZW50VXNlclJlcXVlc3QitgEKFkdldEN1cnJlbnRVc2VyUmVzcG9uc2USIQoEdXNlchgBIAEoCzITLmNhbmRlbGEudHlwZXMuVXNlchIpCgZidWRnZXQYAiABKAsyGS5jYW5kZWxhLnR5cGVzLlVzZXJCdWRnZXQSMQoNYWN0aXZlX2dyYW50cxgDIAMoCzIaLmNhbmRlbGEudHlwZXMuQnVkZ2V0R3JhbnQSGwoTdG90YWxfcmVtYWluaW5nX3VzZBgEIAEoASIUChJHZXRNeUJ1ZGdldFJlcXVlc3QikAEKE0dldE15QnVkZ2V0UmVzcG9uc2USKQoGYnVkZ2V0GAEgASgLMhkuY2FuZGVsYS50eXBlcy5Vc2VyQnVkZ2V0EjEKDWFjdGl2ZV9ncmFudHMYAiADKAsyGi5jYW5kZWxhLnR5cGVzLkJ1ZGdldEdyYW50EhsKE3RvdGFsX3JlbWFpbmluZ191c2QYAyABKAEy/gkKC1VzZXJTZXJ2aWNlEksKCkNyZWF0ZVVzZXISHS5jYW5kZWxhLnYxLkNyZWF0ZVVzZXJSZXF1ZXN0Gh4uY2FuZGVsYS52MS5DcmVhdGVVc2VyUmVzcG9uc2USSAoJTGlzdFVzZXJzEhwuY2FuZGVsYS52MS5MaXN0VXNlcnNSZXF1ZXN0Gh0uY2FuZGVsYS52MS5MaXN0VXNlcnNSZXNwb25zZRJCCgdHZXRVc2VyEhouY2FuZGVsYS52MS5HZXRVc2VyUmVxdWVzdBobLmNhbmRlbGEudjEuR2V0VXNlclJlc3BvbnNlEksKClVwZGF0ZVVzZXISHS5jYW5kZWxhLnYxLlVwZGF0ZVVzZXJSZXF1ZXN0Gh4uY2FuZGVsYS52MS5VcGRhdGVVc2VyUmVzcG9uc2USVwoORGVhY3RpdmF0ZVVzZXISIS5jYW5kZWxhLnYxLkRlYWN0aXZhdGVVc2VyUmVxdWVzdBoiLmNhbmRlbGEudjEuRGVhY3RpdmF0ZVVzZXJSZXNwb25zZRJXCg5SZWFjdGl2YXRlVXNlchIhLmNhbmRlbGEudjEuUmVhY3RpdmF0ZVVzZXJSZXF1ZXN0GiIuY2FuZGVsYS52MS5SZWFjdGl2YXRlVXNlclJlc3BvbnNlEksKCkRlbGV0ZVVzZXISHS5jYW5kZWxhLnYxLkRlbGV0ZVVzZXJSZXF1ZXN0Gh4uY2FuZGVsYS52MS5EZWxldGVVc2VyUmVzcG9uc2USSAoJU2V0QnVkZ2V0EhwuY2FuZGVsYS52MS5TZXRCdWRnZXRSZXF1ZXN0Gh0uY2FuZGVsYS52MS5TZXRCdWRnZXRSZXNwb25zZRJICglHZXRCdWRnZXQSHC5jYW5kZWxhLnYxLkdldEJ1ZGdldFJlcXVlc3QaHS5jYW5kZWxhLnYxLkdldEJ1ZGdldFJlc3BvbnNlEksKClJlc2V0U3BlbmQSHS5jYW5kZWxhLnYxLlJlc2V0U3BlbmRSZXF1ZXN0Gh4uY2FuZGVsYS52MS5SZXNldFNwZW5kUmVzcG9uc2USTgoLQ3JlYXRlR3JhbnQSHi5jYW5kZWxhLnYxLkNyZWF0ZUdyYW50UmVxdWVzdBofLmNhbmRlbGEudjEuQ3JlYXRlR3JhbnRSZXNwb25zZRJLCgpMaXN0R3JhbnRzEh0uY2FuZGVsYS52MS5MaXN0R3JhbnRzUmVxdWVzdBoeLmNhbmRlbGEudjEuTGlzdEdyYW50c1Jlc3BvbnNlEk4KC1Jldm9rZUdyYW50Eh4uY2FuZGVsYS52MS5SZXZva2VHcmFudFJlcXVlc3QaHy5jYW5kZWxhLnYxLlJldm9rZUdyYW50UmVzcG9uc2USUQoMTGlzdEF1ZGl0TG9nEh8uY2FuZGVsYS52MS5MaXN0QXVkaXRMb2dSZXF1ZXN0GiAuY2FuZGVsYS52MS5MaXN0QXVkaXRMb2dSZXNwb25zZRJXCg5HZXRDdXJyZW50VXNlchIhLmNhbmRlbGEudjEuR2V0Q3VycmVudFVzZXJSZXF1ZXN0GiIuY2FuZGVsYS52MS5HZXRDdXJyZW50VXNlclJlc3BvbnNlEk4KC0dldE15QnVkZ2V0Eh4uY2FuZGVsYS52MS5HZXRNeUJ1ZGdldFJlcXVlc3QaHy5jYW5kZWxhLnYxLkdldE15QnVkZ2V0UmVzcG9uc2VCmwEKDmNvbS5jYW5kZWxhLnYxQhBVc2VyU2VydmljZVByb3RvUAFaLmdpdGh1Yi5jb20vY2FuZGVsYWhxL2NhbmRlbGEvZ2VuL2dvL2NhbmRlbGEvdjGiAgNDWFiqAgpDYW5kZWxhLlYxygIKQ2FuZGVsYVxWMeICFkNhbmRlbGFcVjFcR1BCTWV0YWRhdGHqAgtDYW5kZWxhOjpWMWIGcHJvdG8z", [file_buf_validate_validate, file_candela_types_common, file_candela_types_user, file_google_protobuf_field_mask, file_google_protobuf_timestamp]);
 
 /**
  * @generated from message candela.v1.CreateUserRequest
@@ -39,22 +39,11 @@ export type CreateUserRequest = Message<"candela.v1.CreateUserRequest"> & {
   role: UserRole;
 
   /**
-   * Use budget_limit_usd instead
+   * Optional: set daily budget at creation
    *
-   * @generated from field: double monthly_budget_usd = 4 [deprecated = true];
-   * @deprecated
+   * @generated from field: double daily_budget_usd = 5;
    */
-  monthlyBudgetUsd: number;
-
-  /**
-   * @generated from field: double budget_limit_usd = 5;
-   */
-  budgetLimitUsd: number;
-
-  /**
-   * @generated from field: candela.types.BudgetPeriod budget_period = 6;
-   */
-  budgetPeriod: BudgetPeriod;
+  dailyBudgetUsd: number;
 };
 
 /**
@@ -74,7 +63,7 @@ export type CreateUserResponse = Message<"candela.v1.CreateUserResponse"> & {
   user?: User;
 
   /**
-   * Present if budget_limit_usd > 0
+   * Present if daily_budget_usd > 0
    *
    * @generated from field: candela.types.UserBudget budget = 2;
    */
@@ -198,29 +187,11 @@ export type UpdateUserRequest = Message<"candela.v1.UpdateUserRequest"> & {
   role: UserRole;
 
   /**
-   * Use budget_limit_usd instead
-   *
-   * @generated from field: double monthly_budget_usd = 4 [deprecated = true];
-   * @deprecated
-   */
-  monthlyBudgetUsd: number;
-
-  /**
    * Which fields to update
    *
-   * @generated from field: google.protobuf.FieldMask update_mask = 5;
+   * @generated from field: google.protobuf.FieldMask update_mask = 4;
    */
   updateMask?: FieldMask;
-
-  /**
-   * @generated from field: double budget_limit_usd = 6;
-   */
-  budgetLimitUsd: number;
-
-  /**
-   * @generated from field: candela.types.BudgetPeriod budget_period = 7;
-   */
-  budgetPeriod: BudgetPeriod;
 };
 
 /**
@@ -238,11 +209,6 @@ export type UpdateUserResponse = Message<"candela.v1.UpdateUserResponse"> & {
    * @generated from field: candela.types.User user = 1;
    */
   user?: User;
-
-  /**
-   * @generated from field: candela.types.UserBudget budget = 2;
-   */
-  budget?: UserBudget;
 };
 
 /**
@@ -317,6 +283,43 @@ export const ReactivateUserResponseSchema: GenMessage<ReactivateUserResponse> = 
   messageDesc(file_candela_v1_user_service, 11);
 
 /**
+ * @generated from message candela.v1.DeleteUserRequest
+ */
+export type DeleteUserRequest = Message<"candela.v1.DeleteUserRequest"> & {
+  /**
+   * @generated from field: string id = 1;
+   */
+  id: string;
+
+  /**
+   * Confirmation: must match user's email to prevent accidental deletion.
+   *
+   * @generated from field: string confirm_email = 2;
+   */
+  confirmEmail: string;
+};
+
+/**
+ * Describes the message candela.v1.DeleteUserRequest.
+ * Use `create(DeleteUserRequestSchema)` to create a new message.
+ */
+export const DeleteUserRequestSchema: GenMessage<DeleteUserRequest> = /*@__PURE__*/
+  messageDesc(file_candela_v1_user_service, 12);
+
+/**
+ * @generated from message candela.v1.DeleteUserResponse
+ */
+export type DeleteUserResponse = Message<"candela.v1.DeleteUserResponse"> & {
+};
+
+/**
+ * Describes the message candela.v1.DeleteUserResponse.
+ * Use `create(DeleteUserResponseSchema)` to create a new message.
+ */
+export const DeleteUserResponseSchema: GenMessage<DeleteUserResponse> = /*@__PURE__*/
+  messageDesc(file_candela_v1_user_service, 13);
+
+/**
  * @generated from message candela.v1.SetBudgetRequest
  */
 export type SetBudgetRequest = Message<"candela.v1.SetBudgetRequest"> & {
@@ -341,7 +344,7 @@ export type SetBudgetRequest = Message<"candela.v1.SetBudgetRequest"> & {
  * Use `create(SetBudgetRequestSchema)` to create a new message.
  */
 export const SetBudgetRequestSchema: GenMessage<SetBudgetRequest> = /*@__PURE__*/
-  messageDesc(file_candela_v1_user_service, 12);
+  messageDesc(file_candela_v1_user_service, 14);
 
 /**
  * @generated from message candela.v1.SetBudgetResponse
@@ -358,7 +361,7 @@ export type SetBudgetResponse = Message<"candela.v1.SetBudgetResponse"> & {
  * Use `create(SetBudgetResponseSchema)` to create a new message.
  */
 export const SetBudgetResponseSchema: GenMessage<SetBudgetResponse> = /*@__PURE__*/
-  messageDesc(file_candela_v1_user_service, 13);
+  messageDesc(file_candela_v1_user_service, 15);
 
 /**
  * @generated from message candela.v1.GetBudgetRequest
@@ -375,7 +378,7 @@ export type GetBudgetRequest = Message<"candela.v1.GetBudgetRequest"> & {
  * Use `create(GetBudgetRequestSchema)` to create a new message.
  */
 export const GetBudgetRequestSchema: GenMessage<GetBudgetRequest> = /*@__PURE__*/
-  messageDesc(file_candela_v1_user_service, 14);
+  messageDesc(file_candela_v1_user_service, 16);
 
 /**
  * @generated from message candela.v1.GetBudgetResponse
@@ -392,7 +395,7 @@ export type GetBudgetResponse = Message<"candela.v1.GetBudgetResponse"> & {
  * Use `create(GetBudgetResponseSchema)` to create a new message.
  */
 export const GetBudgetResponseSchema: GenMessage<GetBudgetResponse> = /*@__PURE__*/
-  messageDesc(file_candela_v1_user_service, 15);
+  messageDesc(file_candela_v1_user_service, 17);
 
 /**
  * @generated from message candela.v1.ResetSpendRequest
@@ -409,7 +412,7 @@ export type ResetSpendRequest = Message<"candela.v1.ResetSpendRequest"> & {
  * Use `create(ResetSpendRequestSchema)` to create a new message.
  */
 export const ResetSpendRequestSchema: GenMessage<ResetSpendRequest> = /*@__PURE__*/
-  messageDesc(file_candela_v1_user_service, 16);
+  messageDesc(file_candela_v1_user_service, 18);
 
 /**
  * @generated from message candela.v1.ResetSpendResponse
@@ -426,7 +429,7 @@ export type ResetSpendResponse = Message<"candela.v1.ResetSpendResponse"> & {
  * Use `create(ResetSpendResponseSchema)` to create a new message.
  */
 export const ResetSpendResponseSchema: GenMessage<ResetSpendResponse> = /*@__PURE__*/
-  messageDesc(file_candela_v1_user_service, 17);
+  messageDesc(file_candela_v1_user_service, 19);
 
 /**
  * @generated from message candela.v1.CreateGrantRequest
@@ -463,7 +466,7 @@ export type CreateGrantRequest = Message<"candela.v1.CreateGrantRequest"> & {
  * Use `create(CreateGrantRequestSchema)` to create a new message.
  */
 export const CreateGrantRequestSchema: GenMessage<CreateGrantRequest> = /*@__PURE__*/
-  messageDesc(file_candela_v1_user_service, 18);
+  messageDesc(file_candela_v1_user_service, 20);
 
 /**
  * @generated from message candela.v1.CreateGrantResponse
@@ -480,7 +483,7 @@ export type CreateGrantResponse = Message<"candela.v1.CreateGrantResponse"> & {
  * Use `create(CreateGrantResponseSchema)` to create a new message.
  */
 export const CreateGrantResponseSchema: GenMessage<CreateGrantResponse> = /*@__PURE__*/
-  messageDesc(file_candela_v1_user_service, 19);
+  messageDesc(file_candela_v1_user_service, 21);
 
 /**
  * @generated from message candela.v1.ListGrantsRequest
@@ -504,7 +507,7 @@ export type ListGrantsRequest = Message<"candela.v1.ListGrantsRequest"> & {
  * Use `create(ListGrantsRequestSchema)` to create a new message.
  */
 export const ListGrantsRequestSchema: GenMessage<ListGrantsRequest> = /*@__PURE__*/
-  messageDesc(file_candela_v1_user_service, 20);
+  messageDesc(file_candela_v1_user_service, 22);
 
 /**
  * @generated from message candela.v1.ListGrantsResponse
@@ -521,7 +524,7 @@ export type ListGrantsResponse = Message<"candela.v1.ListGrantsResponse"> & {
  * Use `create(ListGrantsResponseSchema)` to create a new message.
  */
 export const ListGrantsResponseSchema: GenMessage<ListGrantsResponse> = /*@__PURE__*/
-  messageDesc(file_candela_v1_user_service, 21);
+  messageDesc(file_candela_v1_user_service, 23);
 
 /**
  * @generated from message candela.v1.RevokeGrantRequest
@@ -543,7 +546,7 @@ export type RevokeGrantRequest = Message<"candela.v1.RevokeGrantRequest"> & {
  * Use `create(RevokeGrantRequestSchema)` to create a new message.
  */
 export const RevokeGrantRequestSchema: GenMessage<RevokeGrantRequest> = /*@__PURE__*/
-  messageDesc(file_candela_v1_user_service, 22);
+  messageDesc(file_candela_v1_user_service, 24);
 
 /**
  * @generated from message candela.v1.RevokeGrantResponse
@@ -556,7 +559,7 @@ export type RevokeGrantResponse = Message<"candela.v1.RevokeGrantResponse"> & {
  * Use `create(RevokeGrantResponseSchema)` to create a new message.
  */
 export const RevokeGrantResponseSchema: GenMessage<RevokeGrantResponse> = /*@__PURE__*/
-  messageDesc(file_candela_v1_user_service, 23);
+  messageDesc(file_candela_v1_user_service, 25);
 
 /**
  * @generated from message candela.v1.ListAuditLogRequest
@@ -580,7 +583,7 @@ export type ListAuditLogRequest = Message<"candela.v1.ListAuditLogRequest"> & {
  * Use `create(ListAuditLogRequestSchema)` to create a new message.
  */
 export const ListAuditLogRequestSchema: GenMessage<ListAuditLogRequest> = /*@__PURE__*/
-  messageDesc(file_candela_v1_user_service, 24);
+  messageDesc(file_candela_v1_user_service, 26);
 
 /**
  * @generated from message candela.v1.ListAuditLogResponse
@@ -597,7 +600,7 @@ export type ListAuditLogResponse = Message<"candela.v1.ListAuditLogResponse"> & 
  * Use `create(ListAuditLogResponseSchema)` to create a new message.
  */
 export const ListAuditLogResponseSchema: GenMessage<ListAuditLogResponse> = /*@__PURE__*/
-  messageDesc(file_candela_v1_user_service, 25);
+  messageDesc(file_candela_v1_user_service, 27);
 
 /**
  * @generated from message candela.v1.GetCurrentUserRequest
@@ -610,7 +613,7 @@ export type GetCurrentUserRequest = Message<"candela.v1.GetCurrentUserRequest"> 
  * Use `create(GetCurrentUserRequestSchema)` to create a new message.
  */
 export const GetCurrentUserRequestSchema: GenMessage<GetCurrentUserRequest> = /*@__PURE__*/
-  messageDesc(file_candela_v1_user_service, 26);
+  messageDesc(file_candela_v1_user_service, 28);
 
 /**
  * @generated from message candela.v1.GetCurrentUserResponse
@@ -644,7 +647,7 @@ export type GetCurrentUserResponse = Message<"candela.v1.GetCurrentUserResponse"
  * Use `create(GetCurrentUserResponseSchema)` to create a new message.
  */
 export const GetCurrentUserResponseSchema: GenMessage<GetCurrentUserResponse> = /*@__PURE__*/
-  messageDesc(file_candela_v1_user_service, 27);
+  messageDesc(file_candela_v1_user_service, 29);
 
 /**
  * @generated from message candela.v1.GetMyBudgetRequest
@@ -657,7 +660,7 @@ export type GetMyBudgetRequest = Message<"candela.v1.GetMyBudgetRequest"> & {
  * Use `create(GetMyBudgetRequestSchema)` to create a new message.
  */
 export const GetMyBudgetRequestSchema: GenMessage<GetMyBudgetRequest> = /*@__PURE__*/
-  messageDesc(file_candela_v1_user_service, 28);
+  messageDesc(file_candela_v1_user_service, 30);
 
 /**
  * @generated from message candela.v1.GetMyBudgetResponse
@@ -684,7 +687,7 @@ export type GetMyBudgetResponse = Message<"candela.v1.GetMyBudgetResponse"> & {
  * Use `create(GetMyBudgetResponseSchema)` to create a new message.
  */
 export const GetMyBudgetResponseSchema: GenMessage<GetMyBudgetResponse> = /*@__PURE__*/
-  messageDesc(file_candela_v1_user_service, 29);
+  messageDesc(file_candela_v1_user_service, 31);
 
 /**
  * UserService manages users, budgets, and grants.
@@ -753,6 +756,17 @@ export const UserService: GenService<{
     methodKind: "unary";
     input: typeof ReactivateUserRequestSchema;
     output: typeof ReactivateUserResponseSchema;
+  },
+  /**
+   * DeleteUser permanently removes an inactive user and all associated data.
+   * Only inactive users can be deleted (enforced server-side).
+   *
+   * @generated from rpc candela.v1.UserService.DeleteUser
+   */
+  deleteUser: {
+    methodKind: "unary";
+    input: typeof DeleteUserRequestSchema;
+    output: typeof DeleteUserResponseSchema;
   },
   /**
    * SetBudget configures a user's recurring budget.

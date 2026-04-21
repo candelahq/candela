@@ -6,7 +6,7 @@ import { useParams, useRouter } from "next/navigation";
 import { useTrace, kindLabel, kindColor } from "@/hooks/useTrace";
 import type { SpanNode } from "@/hooks/useTrace";
 import { ErrorBanner } from "@/components/ErrorBanner";
-import { SpanStatus } from "@/gen/types/trace_pb";
+import { SpanStatus } from "@/gen/candela/types/trace_pb";
 
 
 function ExpandablePre({ content, label }: { content: string; label: string }) {

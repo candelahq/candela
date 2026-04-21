@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { createClient } from "@connectrpc/connect";
 import { transport } from "@/lib/connect";
 import { ErrorBanner } from "@/components/ErrorBanner";
-import { ProjectService } from "@/gen/v1/project_service_pb";
+import { ProjectService } from "@/gen/candela/v1/project_service_pb";
 
 interface Project {
   id: string;

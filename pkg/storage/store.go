@@ -406,6 +406,9 @@ type UserStore interface {
 	// TouchLastSeen updates the user's last_seen_at timestamp.
 	TouchLastSeen(ctx context.Context, id string) error
 
+	// DeleteUser permanently removes a user and all subcollections.
+	DeleteUser(ctx context.Context, id string) error
+
 	// ── Budgets ──
 
 	// SetBudget creates or updates a user's recurring budget.

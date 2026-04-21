@@ -29,11 +29,12 @@ import (
 )
 
 const (
-	usersCol     = "users"
-	budgetsCol   = "budgets"
-	grantsCol    = "grants"
-	auditCol     = "audit"
-	rateLimitCol = "rate_limit"
+	usersCol       = "users"
+	budgetsCol     = "budgets"
+	grantsCol      = "grants"
+	auditCol       = "audit"
+	globalAuditCol = "global_audit"
+	rateLimitCol   = "rate_limit"
 
 	defaultRateLimit = 60 // requests/minute
 )
@@ -231,6 +232,8 @@ func (s *Store) DeleteUser(ctx context.Context, id string) error {
 	userRef := s.client.Collection(usersCol).Doc(id)
 
 	// Discover and delete all subcollections (Firestore doesn't cascade).
+	// Use a single BulkWriter across all subcollections for efficiency.
+	bw := s.client.BulkWriter(ctx)
 	collIter := userRef.Collections(ctx)
 	for {
 		collRef, err := collIter.Next()
@@ -238,32 +241,28 @@ func (s *Store) DeleteUser(ctx context.Context, id string) error {
 			break
 		}
 		if err != nil {
-			slog.WarnContext(ctx, "error listing subcollections during delete",
-				"user", id, "error", err)
-			break
+			bw.End()
+			return fmt.Errorf("firestoredb: listing subcollections: %w", err)
 		}
 
-		// Bulk-delete docs in this subcollection.
-		bw := s.client.BulkWriter(ctx)
-		docIter := collRef.Documents(ctx)
+		// Use DocumentRefs — we only need refs for deletion, not full snapshots.
+		docIter := collRef.DocumentRefs(ctx)
 		for {
-			doc, err := docIter.Next()
+			docRef, err := docIter.Next()
 			if err == iterator.Done {
 				break
 			}
 			if err != nil {
-				slog.WarnContext(ctx, "error iterating subcollection during delete",
-					"collection", collRef.ID, "error", err)
-				break
+				bw.End()
+				return fmt.Errorf("firestoredb: iterating subcollection %s: %w", collRef.ID, err)
 			}
-			if _, err := bw.Delete(doc.Ref); err != nil {
+			if _, err := bw.Delete(docRef); err != nil {
 				slog.WarnContext(ctx, "bulk delete enqueue failed",
-					"collection", collRef.ID, "doc", doc.Ref.ID, "error", err)
+					"collection", collRef.ID, "doc", docRef.ID, "error", err)
 			}
 		}
-		bw.Flush()
-		bw.End()
 	}
+	bw.End()
 
 	// Delete the user document.
 	if _, err := userRef.Delete(ctx); err != nil {
@@ -555,6 +554,21 @@ func (s *Store) LogAction(ctx context.Context, entry *storage.AuditRecord) error
 	_, err := ref.Create(ctx, entry)
 	if err != nil {
 		return fmt.Errorf("firestoredb: logging action: %w", err)
+	}
+	return nil
+}
+
+func (s *Store) LogGlobalAction(ctx context.Context, entry *storage.AuditRecord) error {
+	if entry.ID == "" {
+		entry.ID = uuid.New().String()
+	}
+	if entry.Timestamp.IsZero() {
+		entry.Timestamp = time.Now().UTC()
+	}
+	ref := s.client.Collection(globalAuditCol).Doc(entry.ID)
+	_, err := ref.Set(ctx, entry)
+	if err != nil {
+		return fmt.Errorf("firestoredb: logging global action: %w", err)
 	}
 	return nil
 }

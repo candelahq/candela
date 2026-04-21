@@ -182,6 +182,12 @@ func (s *integrationStore) LogAction(_ context.Context, a *storage.AuditRecord) 
 	return nil
 }
 
+func (s *integrationStore) LogGlobalAction(_ context.Context, a *storage.AuditRecord) error {
+	a.ID = fmt.Sprintf("global_audit_%d", len(s.audit["_global"])+1)
+	s.audit["_global"] = append(s.audit["_global"], a)
+	return nil
+}
+
 func (s *integrationStore) ListAuditLog(_ context.Context, userID string, limit int) ([]*storage.AuditRecord, error) {
 	return s.audit[userID], nil
 }

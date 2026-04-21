@@ -275,16 +275,19 @@ func (h *UserHandler) DeleteUser(
 			fmt.Errorf("confirmation email does not match user email"))
 	}
 
-	// Log audit BEFORE deletion so the entry exists in the subcollection
-	// at the time of write. Note: deletion below will remove this entry
-	// too, so we also emit a structured log for persistent audit trail.
+	// Persist audit to global collection (survives user deletion).
 	auditDetails := mustJSON(map[string]string{"email": user.Email})
-	h.logAudit(ctx, &storage.AuditRecord{
+	auditEntry := &storage.AuditRecord{
 		UserID:     user.ID,
 		ActorEmail: auth.EmailFromContext(ctx),
 		Action:     "delete_user",
 		Details:    auditDetails,
-	})
+	}
+	if err := h.store.LogGlobalAction(ctx, auditEntry); err != nil {
+		slog.WarnContext(ctx, "failed to write global audit log for delete_user",
+			"error", err,
+			"user_id", user.ID)
+	}
 	slog.InfoContext(ctx, "user deleted",
 		"user_id", user.ID,
 		"actor", auth.EmailFromContext(ctx),
@@ -691,13 +694,13 @@ func stringToPeriod(_ string) typespb.BudgetPeriod {
 	return typespb.BudgetPeriod_BUDGET_PERIOD_DAILY
 }
 
-// mustJSON marshals v to a JSON string, falling back to a JSON-safe
-// error string if marshalling fails.
+// mustJSON marshals v to a JSON string, falling back to a structured
+// JSON error object if marshalling fails.
 func mustJSON(v any) string {
 	b, err := json.Marshal(v)
 	if err != nil {
-		errMsg, _ := json.Marshal(fmt.Sprintf("%v", v))
-		return string(errMsg)
+		slog.Warn("failed to marshal data for audit log", "value", v, "error", err)
+		return `{"error":"failed to marshal audit details"}`
 	}
 	return string(b)
 }

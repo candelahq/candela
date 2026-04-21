@@ -333,27 +333,27 @@ type UserRecord struct {
 
 // BudgetRecord is the Go representation of a user's recurring budget.
 type BudgetRecord struct {
-	UserID      string    `json:"user_id"`
-	LimitUSD    float64   `json:"limit_usd"`
-	SpentUSD    float64   `json:"spent_usd"`
-	TokensUsed  int64     `json:"tokens_used"`
-	PeriodType  string    `json:"period_type"` // "monthly", "weekly", "quarterly"
-	PeriodKey   string    `json:"period_key"`  // "2026-04", "2026-W15"
-	PeriodStart time.Time `json:"period_start"`
-	PeriodEnd   time.Time `json:"period_end"`
+	UserID      string    `json:"user_id" firestore:"user_id"`
+	LimitUSD    float64   `json:"limit_usd" firestore:"limit_usd"`
+	SpentUSD    float64   `json:"spent_usd" firestore:"spent_usd"`
+	TokensUsed  int64     `json:"tokens_used" firestore:"tokens_used"`
+	PeriodType  string    `json:"period_type" firestore:"period_type"` // "monthly", "weekly", "quarterly"
+	PeriodKey   string    `json:"period_key" firestore:"period_key"`   // "2026-04", "2026-W15"
+	PeriodStart time.Time `json:"period_start" firestore:"period_start"`
+	PeriodEnd   time.Time `json:"period_end" firestore:"period_end"`
 }
 
 // GrantRecord is the Go representation of a one-time budget grant.
 type GrantRecord struct {
-	ID        string    `json:"id"`
-	UserID    string    `json:"user_id"`
-	AmountUSD float64   `json:"amount_usd"`
-	SpentUSD  float64   `json:"spent_usd"`
-	Reason    string    `json:"reason"`
-	GrantedBy string    `json:"granted_by"`
-	StartsAt  time.Time `json:"starts_at"`
-	ExpiresAt time.Time `json:"expires_at"`
-	CreatedAt time.Time `json:"created_at"`
+	ID        string    `json:"id" firestore:"id"`
+	UserID    string    `json:"user_id" firestore:"user_id"`
+	AmountUSD float64   `json:"amount_usd" firestore:"amount_usd"`
+	SpentUSD  float64   `json:"spent_usd" firestore:"spent_usd"`
+	Reason    string    `json:"reason" firestore:"reason"`
+	GrantedBy string    `json:"granted_by" firestore:"granted_by"`
+	StartsAt  time.Time `json:"starts_at" firestore:"starts_at"`
+	ExpiresAt time.Time `json:"expires_at" firestore:"expires_at"`
+	CreatedAt time.Time `json:"created_at" firestore:"created_at"`
 }
 
 // Remaining returns how much of this grant is still available.
@@ -363,12 +363,12 @@ func (g *GrantRecord) Remaining() float64 {
 
 // AuditRecord is the Go representation of an admin audit log entry.
 type AuditRecord struct {
-	ID         string    `json:"id"`
-	UserID     string    `json:"user_id"`
-	ActorEmail string    `json:"actor_email"`
-	Action     string    `json:"action"`
-	Details    string    `json:"details"`
-	Timestamp  time.Time `json:"timestamp"`
+	ID         string    `json:"id" firestore:"id"`
+	UserID     string    `json:"user_id" firestore:"user_id"`
+	ActorEmail string    `json:"actor_email" firestore:"actor_email"`
+	Action     string    `json:"action" firestore:"action"`
+	Details    string    `json:"details" firestore:"details"`
+	Timestamp  time.Time `json:"timestamp" firestore:"timestamp"`
 }
 
 // BudgetCheckResult is returned by CheckBudget.

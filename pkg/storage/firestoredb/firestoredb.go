@@ -143,7 +143,7 @@ func (s *Store) GetUsers(ctx context.Context, ids []string) (map[string]*storage
 func (s *Store) ListUsers(ctx context.Context, statusFilter string, limit, offset int) ([]*storage.UserRecord, int, error) {
 	q := s.client.Collection(usersCol).OrderBy(firestore.DocumentID, firestore.Asc)
 	if statusFilter != "" {
-		q = q.Where("Status", "==", statusFilter)
+		q = q.Where("status", "==", statusFilter)
 	}
 
 	// Efficient count via Firestore aggregation query.
@@ -186,18 +186,9 @@ func (s *Store) ListUsers(ctx context.Context, statusFilter string, limit, offse
 
 func (s *Store) UpdateUser(ctx context.Context, user *storage.UserRecord) error {
 	ref := s.client.Collection(usersCol).Doc(user.ID)
-	// Convert struct to map because Firestore MergeAll only supports map data.
-	asMap := map[string]any{
-		"ID":          user.ID,
-		"Email":       user.Email,
-		"DisplayName": user.DisplayName,
-		"Role":        user.Role,
-		"Status":      user.Status,
-		"CreatedAt":   user.CreatedAt,
-		"LastSeenAt":  user.LastSeenAt,
-		"RateLimit":   user.RateLimit,
-	}
-	_, err := ref.Set(ctx, asMap, firestore.MergeAll)
+	// Use the struct directly with MergeAll; the 'firestore' struct tags
+	// handle the mapping to snake_case automatically.
+	_, err := ref.Set(ctx, user, firestore.MergeAll)
 	if err != nil {
 		return fmt.Errorf("firestoredb: updating user: %w", err)
 	}
@@ -286,7 +277,7 @@ func (s *Store) ListGrants(ctx context.Context, userID string, activeOnly bool) 
 		Collection(grantsCol).OrderBy("expires_at", firestore.Asc)
 
 	if activeOnly {
-		q = q.Where("ExpiresAt", ">", time.Now().UTC())
+		q = q.Where("expires_at", ">", time.Now().UTC())
 	}
 
 	snaps, err := q.Documents(ctx).GetAll()
@@ -368,8 +359,8 @@ func (s *Store) DeductSpend(ctx context.Context, userID string, costUSD float64,
 		grantsRef := s.client.Collection(usersCol).Doc(userID).
 			Collection(grantsCol)
 		grantsSnaps, err := tx.Documents(grantsRef.
-			Where("ExpiresAt", ">", time.Now().UTC()).
-			OrderBy("ExpiresAt", firestore.Asc)).GetAll()
+			Where("expires_at", ">", time.Now().UTC()).
+			OrderBy("expires_at", firestore.Asc)).GetAll()
 		if err != nil {
 			return fmt.Errorf("firestoredb: loading grants in tx: %w", err)
 		}

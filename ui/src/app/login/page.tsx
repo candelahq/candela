@@ -27,7 +27,7 @@ export default function LoginPage() {
     try {
       await signIn();
     } catch (err) {
-      const message = err instanceof Error ? err.message : "Sign-in failed";
+      const message = err instanceof Error ? err.message.replace(/^Firebase: /, "") : "Sign-in failed";
       console.error("Sign-in error:", err);
       setError(message);
     } finally {

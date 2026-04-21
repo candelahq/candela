@@ -4,8 +4,8 @@ import { useCallback, useEffect, useReducer, useState } from "react";
 import { userClient } from "@/lib/api";
 import { HelpTip } from "@/components/Tooltip";
 import { useCreateUserValidation } from "@/hooks/useProtoValidation";
-import type { User } from "@/gen/types/user_pb";
-import { UserRole, UserStatus } from "@/gen/types/user_pb";
+import type { User, UserBudget } from "@/gen/types/user_pb";
+import { UserRole, UserStatus, BudgetPeriod } from "@/gen/types/user_pb";
 
 interface UsersState {
   users: User[];
@@ -57,11 +57,18 @@ export default function AdminUsersPage() {
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const { validate, getError, clearErrors } = useCreateUserValidation();
 
+  // Budget modal state
+  const [budgetModal, setBudgetModal] = useState<{ userId: string; email: string } | null>(null);
+  const [budgetForm, setBudgetForm] = useState({ limitUsd: 0, periodType: BudgetPeriod.MONTHLY });
+  const [currentBudget, setCurrentBudget] = useState<UserBudget | null>(null);
+  const [budgetLoading, setBudgetLoading] = useState(false);
+  const [budgetError, setBudgetError] = useState<string | null>(null);
+
   const fetchUsers = useCallback(async () => {
     dispatch({ type: "loading" });
     try {
       const resp = await userClient.listUsers({});
-      dispatch({ type: "success", users: resp.users, total: resp.pagination?.totalCount ?? 0 });
+      dispatch({ type: "success", users: resp.users, total: resp.pagination?.totalCount ?? resp.users.length });
     } catch (err: unknown) {
       dispatch({ type: "error", message: err instanceof Error ? err.message : "Failed to load users" });
     }
@@ -122,6 +129,45 @@ export default function AdminUsersPage() {
     }
   };
 
+  const openBudgetModal = async (userId: string, email: string) => {
+    setBudgetModal({ userId, email });
+    setBudgetError(null);
+    setBudgetLoading(true);
+    try {
+      const resp = await userClient.getBudget({ userId });
+      setCurrentBudget(resp.budget ?? null);
+      setBudgetForm({
+        limitUsd: resp.budget?.limitUsd ?? 0,
+        periodType: resp.budget?.periodType ?? BudgetPeriod.MONTHLY,
+      });
+    } catch {
+      setCurrentBudget(null);
+      setBudgetForm({ limitUsd: 0, periodType: BudgetPeriod.MONTHLY });
+    } finally {
+      setBudgetLoading(false);
+    }
+  };
+
+  const handleSetBudget = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!budgetModal) return;
+    setBudgetError(null);
+    setBudgetLoading(true);
+    try {
+      await userClient.setBudget({
+        userId: budgetModal.userId,
+        limitUsd: budgetForm.limitUsd,
+        periodType: budgetForm.periodType,
+      });
+      setBudgetModal(null);
+      fetchUsers();
+    } catch (err: unknown) {
+      setBudgetError(err instanceof Error ? err.message : "Failed to set budget");
+    } finally {
+      setBudgetLoading(false);
+    }
+  };
+
   return (
     <div className="admin-page">
       <div className="admin-page-header">
@@ -177,23 +223,32 @@ export default function AdminUsersPage() {
                         : "Never"}
                     </td>
                     <td>
-                      {user.status === 3 ? (
+                      <div className="action-btn-group">
                         <button
-                          className="btn btn-sm btn-success"
-                          onClick={() => handleReactivate(user.id)}
-                          disabled={actionLoading === user.id}
+                          className="btn btn-sm btn-ghost"
+                          onClick={() => openBudgetModal(user.id, user.email)}
+                          title="Manage budget"
                         >
-                          {actionLoading === user.id ? "..." : "Reactivate"}
+                          Budget
                         </button>
-                      ) : (
-                        <button
-                          className="btn btn-sm btn-danger"
-                          onClick={() => handleDeactivate(user.id)}
-                          disabled={actionLoading === user.id}
-                        >
-                          {actionLoading === user.id ? "..." : "Deactivate"}
-                        </button>
-                      )}
+                        {user.status === 3 ? (
+                          <button
+                            className="btn btn-sm btn-success"
+                            onClick={() => handleReactivate(user.id)}
+                            disabled={actionLoading === user.id}
+                          >
+                            {actionLoading === user.id ? "..." : "Reactivate"}
+                          </button>
+                        ) : (
+                          <button
+                            className="btn btn-sm btn-danger"
+                            onClick={() => handleDeactivate(user.id)}
+                            disabled={actionLoading === user.id}
+                          >
+                            {actionLoading === user.id ? "..." : "Deactivate"}
+                          </button>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 );
@@ -281,6 +336,88 @@ export default function AdminUsersPage() {
                 </button>
                 <button type="submit" className="btn btn-primary" id="submit-create-user">
                   Create User
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Budget Modal */}
+      {budgetModal && (
+        <div className="modal-overlay" onClick={() => setBudgetModal(null)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3>Manage Budget</h3>
+              <button className="modal-close" onClick={() => setBudgetModal(null)}>×</button>
+            </div>
+            <form onSubmit={handleSetBudget} className="modal-body">
+              <p className="text-muted" style={{ fontSize: "0.85rem", marginBottom: "16px" }}>
+                {budgetModal.email}
+              </p>
+
+              {currentBudget && (
+                <div className="budget-summary" style={{
+                  padding: "12px 16px",
+                  background: "var(--bg-tertiary)",
+                  borderRadius: "var(--radius-md)",
+                  marginBottom: "16px",
+                  fontSize: "0.85rem",
+                }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "6px" }}>
+                    <span className="text-muted">Current limit</span>
+                    <span>${currentBudget.limitUsd.toFixed(2)}</span>
+                  </div>
+                  <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "6px" }}>
+                    <span className="text-muted">Spent this period</span>
+                    <span>${currentBudget.spentUsd.toFixed(2)}</span>
+                  </div>
+                  <div style={{ display: "flex", justifyContent: "space-between" }}>
+                    <span className="text-muted">Remaining</span>
+                    <span style={{ fontWeight: 600 }}>
+                      ${(currentBudget.limitUsd - currentBudget.spentUsd).toFixed(2)}
+                    </span>
+                  </div>
+                </div>
+              )}
+
+              <div className="form-group">
+                <label htmlFor="budget-limit">
+                  Budget Limit (USD)
+                  <HelpTip text="Monthly spending cap. Set to 0 to remove the limit." />
+                </label>
+                <input
+                  id="budget-limit"
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={budgetForm.limitUsd}
+                  onChange={(e) => setBudgetForm({ ...budgetForm, limitUsd: Number(e.target.value) })}
+                  className="form-input"
+                  disabled={budgetLoading}
+                />
+              </div>
+              <div className="form-group">
+                <label htmlFor="budget-period">Period</label>
+                <select
+                  id="budget-period"
+                  value={budgetForm.periodType}
+                  onChange={(e) => setBudgetForm({ ...budgetForm, periodType: Number(e.target.value) })}
+                  className="form-input"
+                  disabled={budgetLoading}
+                >
+                  <option value={BudgetPeriod.MONTHLY}>Monthly</option>
+                  <option value={BudgetPeriod.WEEKLY}>Weekly</option>
+                  <option value={BudgetPeriod.QUARTERLY}>Quarterly</option>
+                </select>
+              </div>
+              {budgetError && <div className="form-error">{budgetError}</div>}
+              <div className="modal-actions">
+                <button type="button" className="btn btn-ghost" onClick={() => setBudgetModal(null)}>
+                  Cancel
+                </button>
+                <button type="submit" className="btn btn-primary" disabled={budgetLoading}>
+                  {budgetLoading ? "Saving..." : "Save Budget"}
                 </button>
               </div>
             </form>

@@ -146,34 +146,26 @@ func (s *Store) ListUsers(ctx context.Context, statusFilter string, limit, offse
 		q = q.Where("status", "==", statusFilter)
 	}
 
-	// Efficient count via Firestore aggregation query.
-	countQ := q.NewAggregationQuery().WithCount("total")
-	results, err := countQ.Get(ctx)
-	if err != nil {
-		return nil, 0, fmt.Errorf("firestoredb: counting users: %w", err)
-	}
-	total := 0
-	if countVal, ok := results["total"]; ok {
-		// The SDK returns the count as an interface{} — handle both
-		// int64 (production) and *firestorepb.Value (emulator) cases.
-		switch v := countVal.(type) {
-		case int64:
-			total = int(v)
-		default:
-			// Attempt fmt.Sprint fallback for any other wrapper type.
-			_, _ = fmt.Sscanf(fmt.Sprint(v), "%d", &total)
-		}
-	}
-
-	// Use native Offset + Limit for efficient pagination.
-	pageQ := q.Offset(offset).Limit(limit)
-	snaps, err := pageQ.Documents(ctx).GetAll()
+	// Get total count by fetching all document refs (lightweight — no field data).
+	allSnaps, err := q.Documents(ctx).GetAll()
 	if err != nil {
 		return nil, 0, fmt.Errorf("firestoredb: listing users: %w", err)
 	}
+	total := len(allSnaps)
 
-	users := make([]*storage.UserRecord, 0, len(snaps))
-	for _, snap := range snaps {
+	// Apply offset/limit to the full snapshot list.
+	start := offset
+	if start > total {
+		start = total
+	}
+	end := start + limit
+	if end > total {
+		end = total
+	}
+	pageSnaps := allSnaps[start:end]
+
+	users := make([]*storage.UserRecord, 0, len(pageSnaps))
+	for _, snap := range pageSnaps {
 		u, err := snapToUser(snap)
 		if err != nil {
 			slog.Warn("skipping malformed user doc", "id", snap.Ref.ID, "error", err)
@@ -187,9 +179,19 @@ func (s *Store) ListUsers(ctx context.Context, statusFilter string, limit, offse
 func (s *Store) UpdateUser(ctx context.Context, user *storage.UserRecord) error {
 	id := sanitizeID(user.ID)
 	ref := s.client.Collection(usersCol).Doc(id)
-	// Use the struct directly with MergeAll; the 'firestore' struct tags
-	// handle the mapping to snake_case automatically.
-	_, err := ref.Set(ctx, user, firestore.MergeAll)
+	// Use targeted updates for mutable fields only. This avoids the
+	// "MergeAll can only be specified with map data" error that occurs
+	// when passing a struct to Set with MergeAll.
+	updates := []firestore.Update{
+		{Path: "role", Value: user.Role},
+		{Path: "status", Value: user.Status},
+		{Path: "display_name", Value: user.DisplayName},
+		{Path: "rate_limit", Value: user.RateLimit},
+	}
+	if !user.LastSeenAt.IsZero() {
+		updates = append(updates, firestore.Update{Path: "last_seen_at", Value: user.LastSeenAt})
+	}
+	_, err := ref.Update(ctx, updates)
 	if err != nil {
 		return fmt.Errorf("firestoredb: updating user: %w", err)
 	}

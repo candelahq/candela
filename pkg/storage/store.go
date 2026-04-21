@@ -324,36 +324,36 @@ type UserRecord struct {
 	ID          string    `json:"id" firestore:"id"`
 	Email       string    `json:"email" firestore:"email"`
 	DisplayName string    `json:"display_name,omitempty" firestore:"display_name,omitempty"`
-	Role        string    `json:"role" firestore:"role"`     // "developer" or "admin"
-	Status      string    `json:"status" firestore:"status"` // "provisioned", "active", "inactive"
-	CreatedAt   time.Time `json:"created_at" firestore:"created_at"`
-	LastSeenAt  time.Time `json:"last_seen_at" firestore:"last_seen_at"`
+	Role        string    `json:"role,omitempty" firestore:"role,omitempty"`     // "developer" or "admin"
+	Status      string    `json:"status,omitempty" firestore:"status,omitempty"` // "provisioned", "active", "inactive"
+	CreatedAt   time.Time `json:"created_at,omitempty" firestore:"created_at,omitempty"`
+	LastSeenAt  time.Time `json:"last_seen_at,omitempty" firestore:"last_seen_at,omitempty"`
 	RateLimit   int       `json:"rate_limit,omitempty" firestore:"rate_limit,omitempty"` // Requests/minute; 0 = default
 }
 
 // BudgetRecord is the Go representation of a user's recurring budget.
 type BudgetRecord struct {
-	UserID      string    `json:"user_id"`
-	LimitUSD    float64   `json:"limit_usd"`
-	SpentUSD    float64   `json:"spent_usd"`
-	TokensUsed  int64     `json:"tokens_used"`
-	PeriodType  string    `json:"period_type"` // "monthly", "weekly", "quarterly"
-	PeriodKey   string    `json:"period_key"`  // "2026-04", "2026-W15"
-	PeriodStart time.Time `json:"period_start"`
-	PeriodEnd   time.Time `json:"period_end"`
+	UserID      string    `json:"user_id" firestore:"user_id"`
+	LimitUSD    float64   `json:"limit_usd,omitempty" firestore:"limit_usd,omitempty"`
+	SpentUSD    float64   `json:"spent_usd,omitempty" firestore:"spent_usd,omitempty"`
+	TokensUsed  int64     `json:"tokens_used,omitempty" firestore:"tokens_used,omitempty"`
+	PeriodType  string    `json:"period_type,omitempty" firestore:"period_type,omitempty"` // "monthly", "weekly", "quarterly"
+	PeriodKey   string    `json:"period_key,omitempty" firestore:"period_key,omitempty"`   // "2026-04", "2026-W15"
+	PeriodStart time.Time `json:"period_start,omitempty" firestore:"period_start,omitempty"`
+	PeriodEnd   time.Time `json:"period_end,omitempty" firestore:"period_end,omitempty"`
 }
 
 // GrantRecord is the Go representation of a one-time budget grant.
 type GrantRecord struct {
-	ID        string    `json:"id"`
-	UserID    string    `json:"user_id"`
-	AmountUSD float64   `json:"amount_usd"`
-	SpentUSD  float64   `json:"spent_usd"`
-	Reason    string    `json:"reason"`
-	GrantedBy string    `json:"granted_by"`
-	StartsAt  time.Time `json:"starts_at"`
-	ExpiresAt time.Time `json:"expires_at"`
-	CreatedAt time.Time `json:"created_at"`
+	ID        string    `json:"id" firestore:"id"`
+	UserID    string    `json:"user_id" firestore:"user_id"`
+	AmountUSD float64   `json:"amount_usd,omitempty" firestore:"amount_usd,omitempty"`
+	SpentUSD  float64   `json:"spent_usd,omitempty" firestore:"spent_usd,omitempty"`
+	Reason    string    `json:"reason,omitempty" firestore:"reason,omitempty"`
+	GrantedBy string    `json:"granted_by,omitempty" firestore:"granted_by,omitempty"`
+	StartsAt  time.Time `json:"starts_at,omitempty" firestore:"starts_at,omitempty"`
+	ExpiresAt time.Time `json:"expires_at,omitempty" firestore:"expires_at,omitempty"`
+	CreatedAt time.Time `json:"created_at,omitempty" firestore:"created_at,omitempty"`
 }
 
 // Remaining returns how much of this grant is still available.
@@ -363,12 +363,12 @@ func (g *GrantRecord) Remaining() float64 {
 
 // AuditRecord is the Go representation of an admin audit log entry.
 type AuditRecord struct {
-	ID         string    `json:"id"`
-	UserID     string    `json:"user_id"`
-	ActorEmail string    `json:"actor_email"`
-	Action     string    `json:"action"`
-	Details    string    `json:"details"`
-	Timestamp  time.Time `json:"timestamp"`
+	ID         string    `json:"id" firestore:"id"`
+	UserID     string    `json:"user_id" firestore:"user_id"`
+	ActorEmail string    `json:"actor_email" firestore:"actor_email"`
+	Action     string    `json:"action" firestore:"action"`
+	Details    string    `json:"details" firestore:"details"`
+	Timestamp  time.Time `json:"timestamp" firestore:"timestamp"`
 }
 
 // BudgetCheckResult is returned by CheckBudget.

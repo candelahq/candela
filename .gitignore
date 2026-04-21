@@ -3,6 +3,7 @@
 /candela-worker
 /candela-collector
 /candela-cli
+/candela-local
 
 # Generated code
 /gen/
@@ -49,6 +50,9 @@ __pycache__/
 *.pyc
 .venv/
 *.db
+*.db-shm
+*.db-wal
+*.db-journal
 *.duckdb
 *.duckdb.wal
 
@@ -58,6 +62,8 @@ __pycache__/
 .terraform/
 *.tfstate
 *.tfstate.backup
+tfplan
+*.tfplan
 
 # Firebase
 firebase.json

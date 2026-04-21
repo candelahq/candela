@@ -2028,10 +2028,27 @@ tr:hover .model-bar {
   transition: all 0.2s ease;
 }
 
-.login-button:hover {
+.login-button:hover:not(:disabled) {
   background: var(--bg-hover);
   border-color: var(--accent);
   box-shadow: 0 0 0 3px var(--accent-dim);
+}
+
+.login-button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.login-error {
+  padding: 10px 16px;
+  background: rgba(248, 113, 113, 0.1);
+  border: 1px solid rgba(248, 113, 113, 0.3);
+  border-radius: var(--radius-md);
+  color: var(--error);
+  font-size: 0.8rem;
+  text-align: center;
+  max-width: 320px;
+  animation: fadeIn 0.2s ease;
 }
 
 .google-icon {

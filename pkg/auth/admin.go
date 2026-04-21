@@ -19,6 +19,7 @@ var adminOnlyProcedures = map[string]bool{
 	"/candela.v1.UserService/UpdateUser":     true,
 	"/candela.v1.UserService/DeactivateUser": true,
 	"/candela.v1.UserService/ReactivateUser": true,
+	"/candela.v1.UserService/DeleteUser":     true,
 	"/candela.v1.UserService/SetBudget":      true,
 	"/candela.v1.UserService/GetBudget":      true,
 	"/candela.v1.UserService/ResetSpend":     true,

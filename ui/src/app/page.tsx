@@ -6,7 +6,7 @@ import { AreaChart } from "@/components/chart";
 import { TimeRangeSelector } from "@/components/TimeRangeSelector";
 import { ErrorBanner } from "@/components/ErrorBanner";
 import { SkeletonCard } from "@/components/SkeletonCard";
-import { SpanStatus } from "@/gen/types/trace_pb";
+import { SpanStatus } from "@/gen/candela/types/trace_pb";
 
 // ──────────────────────────────────────────
 // Status helpers

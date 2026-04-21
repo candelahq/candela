@@ -2,8 +2,8 @@
 
 import { useEffect, useReducer, useState } from "react";
 import { traceClient } from "@/lib/api";
-import type { Span } from "@/gen/types/trace_pb";
-import { SpanKind } from "@/gen/types/trace_pb";
+import type { Span } from "@/gen/candela/types/trace_pb";
+import { SpanKind } from "@/gen/candela/types/trace_pb";
 
 // ──────────────────────────────────────────
 // Types

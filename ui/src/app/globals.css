@@ -2085,3 +2085,170 @@ tr:hover .model-bar {
 @keyframes spin {
   to { transform: rotate(360deg); }
 }
+
+/* ──────────────────────────────────────────
+   Budget & Delete modal components
+   ────────────────────────────────────────── */
+
+.modal-subtitle {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  margin-bottom: 16px;
+}
+
+.budget-summary-card {
+  padding: 12px 16px;
+  background: var(--bg-tertiary);
+  border-radius: var(--radius-md);
+  margin-bottom: 16px;
+  font-size: 0.85rem;
+}
+
+.budget-summary-row {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+
+.budget-summary-row:last-child {
+  margin-bottom: 0;
+}
+
+.budget-remaining {
+  font-weight: 600;
+}
+
+.delete-modal-title {
+  color: var(--error);
+}
+
+.delete-warning-banner {
+  padding: 12px 16px;
+  background: rgba(248, 113, 113, 0.08);
+  border: 1px solid rgba(248, 113, 113, 0.2);
+  border-radius: var(--radius-md);
+  margin-bottom: 16px;
+  font-size: 0.85rem;
+  color: var(--error);
+}
+
+.admin-empty-state {
+  padding: 2rem;
+}
+
+/* ──────────────────────────────────────────
+   Grants modal components
+   ────────────────────────────────────────── */
+
+.modal-wide {
+  max-width: 600px;
+}
+
+.grants-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+}
+
+.grants-header .modal-subtitle {
+  margin-bottom: 0;
+}
+
+.grant-add-form {
+  padding: 16px;
+  background: var(--bg-tertiary);
+  border-radius: var(--radius-md);
+  margin-bottom: 16px;
+  border: 1px solid var(--border);
+}
+
+.grant-add-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.grants-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: 360px;
+  overflow-y: auto;
+}
+
+.grant-card {
+  padding: 14px 16px;
+  background: var(--bg-tertiary);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+  transition: border-color 0.15s ease;
+}
+
+.grant-card:hover {
+  border-color: var(--accent);
+}
+
+.grant-card-inactive {
+  opacity: 0.55;
+}
+
+.grant-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 6px;
+}
+
+.grant-amount {
+  font-size: 1.1rem;
+  font-weight: 700;
+  margin-right: 8px;
+}
+
+.grant-status-badge {
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 2px 8px;
+  border-radius: 999px;
+}
+
+.grant-active {
+  background: rgba(52, 211, 153, 0.12);
+  color: #34d399;
+}
+
+.grant-expired {
+  background: rgba(248, 113, 113, 0.1);
+  color: var(--error);
+}
+
+.grant-reason {
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+  margin-bottom: 6px;
+}
+
+.grant-meta {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  margin-bottom: 8px;
+}
+
+.grant-progress-bar {
+  height: 4px;
+  background: var(--bg-secondary);
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.grant-progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--accent), #a78bfa);
+  border-radius: 999px;
+  transition: width 0.3s ease;
+}

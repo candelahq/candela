@@ -21,6 +21,7 @@ import (
 
 	"cloud.google.com/go/firestore"
 	"github.com/google/uuid"
+	"google.golang.org/api/iterator"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
@@ -225,7 +226,52 @@ func (s *Store) TouchLastSeen(ctx context.Context, id string) error {
 	return nil
 }
 
-// ──────────────────────────────────────────
+func (s *Store) DeleteUser(ctx context.Context, id string) error {
+	id = sanitizeID(id)
+	userRef := s.client.Collection(usersCol).Doc(id)
+
+	// Discover and delete all subcollections (Firestore doesn't cascade).
+	collIter := userRef.Collections(ctx)
+	for {
+		collRef, err := collIter.Next()
+		if err == iterator.Done {
+			break
+		}
+		if err != nil {
+			slog.WarnContext(ctx, "error listing subcollections during delete",
+				"user", id, "error", err)
+			break
+		}
+
+		// Bulk-delete docs in this subcollection.
+		bw := s.client.BulkWriter(ctx)
+		docIter := collRef.Documents(ctx)
+		for {
+			doc, err := docIter.Next()
+			if err == iterator.Done {
+				break
+			}
+			if err != nil {
+				slog.WarnContext(ctx, "error iterating subcollection during delete",
+					"collection", collRef.ID, "error", err)
+				break
+			}
+			if _, err := bw.Delete(doc.Ref); err != nil {
+				slog.WarnContext(ctx, "bulk delete enqueue failed",
+					"collection", collRef.ID, "doc", doc.Ref.ID, "error", err)
+			}
+		}
+		bw.Flush()
+		bw.End()
+	}
+
+	// Delete the user document.
+	if _, err := userRef.Delete(ctx); err != nil {
+		return fmt.Errorf("firestoredb: deleting user: %w", err)
+	}
+	return nil
+}
+
 // Budgets
 // ──────────────────────────────────────────
 
@@ -244,7 +290,7 @@ func (s *Store) SetBudget(ctx context.Context, budget *storage.BudgetRecord) err
 }
 
 func (s *Store) GetBudget(ctx context.Context, userID string) (*storage.BudgetRecord, error) {
-	periodKey := currentPeriodKey("monthly")
+	periodKey := currentPeriodKey("daily")
 	userID = sanitizeID(userID)
 	ref := s.client.Collection(usersCol).Doc(userID).
 		Collection(budgetsCol).Doc(periodKey)
@@ -259,7 +305,7 @@ func (s *Store) GetBudget(ctx context.Context, userID string) (*storage.BudgetRe
 }
 
 func (s *Store) ResetSpend(ctx context.Context, userID string) error {
-	periodKey := currentPeriodKey("monthly")
+	periodKey := currentPeriodKey("daily")
 	userID = sanitizeID(userID)
 	ref := s.client.Collection(usersCol).Doc(userID).
 		Collection(budgetsCol).Doc(periodKey)
@@ -390,8 +436,8 @@ func (s *Store) DeductSpend(ctx context.Context, userID string, costUSD float64,
 			return fmt.Errorf("firestoredb: loading grants in tx: %w", err)
 		}
 
-		// Read 2: Load monthly budget.
-		periodKey := currentPeriodKey("monthly")
+		// Read 2: Load daily budget.
+		periodKey := currentPeriodKey("daily")
 		budgetRef := s.client.Collection(usersCol).Doc(userID).
 			Collection(budgetsCol).Doc(periodKey)
 		budgetSnap, err := tx.Get(budgetRef)
@@ -425,7 +471,7 @@ func (s *Store) DeductSpend(ctx context.Context, userID string, costUSD float64,
 			remaining -= deduct
 		}
 
-		// Write 2: Deduct remainder from monthly budget.
+		// Write 2: Deduct remainder from budget.
 		if remaining > 0 && budgetSnap != nil && budgetSnap.Exists() {
 			b, err := snapToBudget(budgetSnap)
 			if err != nil {
@@ -579,23 +625,9 @@ func snapToAudit(snap *firestore.DocumentSnapshot) (*storage.AuditRecord, error)
 	return &a, nil
 }
 
-// currentPeriodKey returns the period key for the current time.
-func currentPeriodKey(periodType string) string {
-	now := time.Now().UTC()
-	switch periodType {
-	case "weekly":
-		y, w := now.ISOWeek()
-		return fmt.Sprintf("%d-W%02d", y, w)
-	case "quarterly":
-		q := (int(now.Month())-1)/3 + 1
-		return fmt.Sprintf("%d-Q%d", now.Year(), q)
-	case "daily":
-		return now.Format("2006-01-02")
-	case "monthly":
-		fallthrough
-	default:
-		return now.Format("2006-01")
-	}
+// currentPeriodKey returns the daily period key for the current time.
+func currentPeriodKey(_ string) string {
+	return time.Now().UTC().Format("2006-01-02")
 }
 
 // sanitizeID makes a generic string (like an email) safe for use as a

@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useReducer, useState } from "react";
 import { userClient } from "@/lib/api";
 import { HelpTip } from "@/components/Tooltip";
-import type { AuditEntry } from "@/gen/types/user_pb";
+import type { AuditEntry } from "@/gen/candela/types/user_pb";
 
 interface AuditState {
   entries: AuditEntry[];

@@ -115,11 +115,8 @@ export function useUsage() {
               percentUsed: limit > 0 ? (spent / limit) * 100 : 0,
               periodType: {
                 0: "unspecified",
-                1: "monthly",
-                2: "weekly",
-                3: "quarterly",
-                4: "custom",
-              }[res.budget.periodType] || "monthly",
+                1: "daily",
+              }[res.budget.periodType] || "daily",
             } : null,
           }
         });

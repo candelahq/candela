@@ -3,7 +3,7 @@
 /* eslint-disable */
 // @ts-nocheck
 
-import { CreateGrantRequest, CreateGrantResponse, CreateUserRequest, CreateUserResponse, DeactivateUserRequest, DeactivateUserResponse, GetBudgetRequest, GetBudgetResponse, GetCurrentUserRequest, GetCurrentUserResponse, GetMyBudgetRequest, GetMyBudgetResponse, GetUserRequest, GetUserResponse, ListAuditLogRequest, ListAuditLogResponse, ListGrantsRequest, ListGrantsResponse, ListUsersRequest, ListUsersResponse, ReactivateUserRequest, ReactivateUserResponse, ResetSpendRequest, ResetSpendResponse, RevokeGrantRequest, RevokeGrantResponse, SetBudgetRequest, SetBudgetResponse, UpdateUserRequest, UpdateUserResponse } from "./user_service_pb.js";
+import { CreateGrantRequest, CreateGrantResponse, CreateUserRequest, CreateUserResponse, DeactivateUserRequest, DeactivateUserResponse, DeleteUserRequest, DeleteUserResponse, GetBudgetRequest, GetBudgetResponse, GetCurrentUserRequest, GetCurrentUserResponse, GetMyBudgetRequest, GetMyBudgetResponse, GetUserRequest, GetUserResponse, ListAuditLogRequest, ListAuditLogResponse, ListGrantsRequest, ListGrantsResponse, ListUsersRequest, ListUsersResponse, ReactivateUserRequest, ReactivateUserResponse, ResetSpendRequest, ResetSpendResponse, RevokeGrantRequest, RevokeGrantResponse, SetBudgetRequest, SetBudgetResponse, UpdateUserRequest, UpdateUserResponse } from "./user_service_pb.js";
 import { MethodKind } from "@bufbuild/protobuf";
 
 /**
@@ -80,6 +80,18 @@ export const UserService = {
       name: "ReactivateUser",
       I: ReactivateUserRequest,
       O: ReactivateUserResponse,
+      kind: MethodKind.Unary,
+    },
+    /**
+     * DeleteUser permanently removes an inactive user and all associated data.
+     * Only inactive users can be deleted (enforced server-side).
+     *
+     * @generated from rpc candela.v1.UserService.DeleteUser
+     */
+    deleteUser: {
+      name: "DeleteUser",
+      I: DeleteUserRequest,
+      O: DeleteUserResponse,
       kind: MethodKind.Unary,
     },
     /**

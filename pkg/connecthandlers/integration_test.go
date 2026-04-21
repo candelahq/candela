@@ -104,6 +104,14 @@ func (s *integrationStore) TouchLastSeen(_ context.Context, id string) error {
 	return nil
 }
 
+func (s *integrationStore) DeleteUser(_ context.Context, id string) error {
+	delete(s.users, id)
+	delete(s.budgets, id)
+	delete(s.grants, id)
+	delete(s.audit, id)
+	return nil
+}
+
 func (s *integrationStore) SetBudget(_ context.Context, b *storage.BudgetRecord) error {
 	s.budgets[b.UserID] = b
 	return nil
@@ -313,8 +321,8 @@ func TestIntegration_Validate_CreateUser_NegativeBudget(t *testing.T) {
 	client := startTestServerWithClient(t, store, "admin@test.com")
 
 	_, err := client.CreateUser(context.Background(), connect.NewRequest(&v1.CreateUserRequest{
-		Email:            "new@test.com",
-		MonthlyBudgetUsd: -10.0,
+		Email:          "new@test.com",
+		DailyBudgetUsd: -10.0,
 	}))
 	if err == nil {
 		t.Fatal("expected validation error for negative budget")

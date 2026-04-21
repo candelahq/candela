@@ -22,12 +22,12 @@ enum UserStatus {
 }
 
 // BudgetPeriod defines the recurrence interval for a budget.
+// Currently only daily budgets are supported.
 enum BudgetPeriod {
   BUDGET_PERIOD_UNSPECIFIED = 0;
-  BUDGET_PERIOD_MONTHLY = 1; // Resets 1st of each month
-  BUDGET_PERIOD_WEEKLY = 2; // Resets every Monday
-  BUDGET_PERIOD_QUARTERLY = 3; // Resets Jan/Apr/Jul/Oct
-  BUDGET_PERIOD_CUSTOM = 4; // Admin sets explicit start/end dates
+  BUDGET_PERIOD_DAILY = 1; // Resets at midnight UTC
+  reserved 2, 3, 4, 5;
+  reserved "BUDGET_PERIOD_MONTHLY", "BUDGET_PERIOD_WEEKLY", "BUDGET_PERIOD_QUARTERLY", "BUDGET_PERIOD_CUSTOM";
 }
 
 // User represents a developer or admin in the Candela platform.

@@ -7,7 +7,7 @@ import {
   CreateUserRequestSchema,
   SetBudgetRequestSchema,
   CreateGrantRequestSchema,
-} from "@/gen/v1/user_service_pb";
+} from "@/gen/candela/v1/user_service_pb";
 import type { GenMessage } from "@bufbuild/protobuf/codegenv2";
 import type { Message } from "@bufbuild/protobuf";
 
@@ -59,7 +59,7 @@ export function useCreateUserValidation() {
       email: string;
       displayName?: string;
       role?: number;
-      monthlyBudgetUsd?: number;
+      dailyBudgetUsd?: number;
     }) => {
       const errs = await validateMessage(CreateUserRequestSchema, values);
       setErrors(errs);

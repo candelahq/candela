@@ -22,12 +22,13 @@ import (
 // backed by a storage.UserStore (Firestore in production).
 type UserHandler struct {
 	candelav1connect.UnimplementedUserServiceHandler
-	store storage.UserStore
+	store                 storage.UserStore
+	defaultDailyBudgetUSD float64 // applied to new users when no explicit budget is set
 }
 
 // NewUserHandler creates a new UserHandler.
-func NewUserHandler(store storage.UserStore) *UserHandler {
-	return &UserHandler{store: store}
+func NewUserHandler(store storage.UserStore, defaultDailyBudgetUSD float64) *UserHandler {
+	return &UserHandler{store: store, defaultDailyBudgetUSD: defaultDailyBudgetUSD}
 }
 
 // logAudit writes an audit entry and logs a warning if it fails.
@@ -75,11 +76,15 @@ func (h *UserHandler) CreateUser(
 		User: userToProto(user),
 	}
 
-	// Optionally set an initial budget (daily by default).
-	if req.Msg.DailyBudgetUsd > 0 {
+	// Set initial daily budget: use explicit value, fall back to server default.
+	budgetUSD := req.Msg.DailyBudgetUsd
+	if budgetUSD == 0 && h.defaultDailyBudgetUSD > 0 {
+		budgetUSD = h.defaultDailyBudgetUSD
+	}
+	if budgetUSD > 0 {
 		budget := &storage.BudgetRecord{
 			UserID:     user.ID,
-			LimitUSD:   req.Msg.DailyBudgetUsd,
+			LimitUSD:   budgetUSD,
 			PeriodType: "daily",
 		}
 		if err := h.store.SetBudget(ctx, budget); err != nil {
@@ -487,6 +492,19 @@ func (h *UserHandler) GetCurrentUser(
 		}
 		if createErr := h.store.CreateUser(ctx, user); createErr != nil {
 			return nil, connect.NewError(connect.CodeInternal, createErr)
+		}
+
+		// Apply default daily budget to auto-provisioned users.
+		if h.defaultDailyBudgetUSD > 0 {
+			budget := &storage.BudgetRecord{
+				UserID:     user.ID,
+				LimitUSD:   h.defaultDailyBudgetUSD,
+				PeriodType: "daily",
+			}
+			if err := h.store.SetBudget(ctx, budget); err != nil {
+				slog.WarnContext(ctx, "failed to set default budget for auto-provisioned user",
+					"user_id", user.ID, "error", err)
+			}
 		}
 	}
 

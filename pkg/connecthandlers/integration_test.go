@@ -227,7 +227,7 @@ func startTestServer(t *testing.T, store *integrationStore) candelav1connect.Use
 
 	mux := http.NewServeMux()
 	path, handler := candelav1connect.NewUserServiceHandler(
-		connecthandlers.NewUserHandler(store),
+		connecthandlers.NewUserHandler(store, 0),
 		connect.WithInterceptors(validateInterceptor, adminInterceptor),
 	)
 	mux.Handle(path, handler)
@@ -275,7 +275,7 @@ func startTestServerWithClient(t *testing.T, store *integrationStore, email stri
 
 	mux := http.NewServeMux()
 	path, handler := candelav1connect.NewUserServiceHandler(
-		connecthandlers.NewUserHandler(store),
+		connecthandlers.NewUserHandler(store, 0),
 		connect.WithInterceptors(validateInterceptor, adminInterceptor),
 	)
 	mux.Handle(path, handler)

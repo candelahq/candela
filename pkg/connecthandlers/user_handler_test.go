@@ -243,7 +243,7 @@ func authedCtx(email string) context.Context {
 
 func TestUserHandler_CreateUser(t *testing.T) {
 	store := newMockUserStore()
-	handler := NewUserHandler(store)
+	handler := NewUserHandler(store, 0)
 	ctx := authedCtx("admin@example.com")
 
 	resp, err := handler.CreateUser(ctx, connect.NewRequest(&v1.CreateUserRequest{
@@ -264,7 +264,7 @@ func TestUserHandler_CreateUser(t *testing.T) {
 
 func TestUserHandler_CreateUser_WithBudget(t *testing.T) {
 	store := newMockUserStore()
-	handler := NewUserHandler(store)
+	handler := NewUserHandler(store, 0)
 	ctx := authedCtx("admin@example.com")
 
 	resp, err := handler.CreateUser(ctx, connect.NewRequest(&v1.CreateUserRequest{
@@ -282,9 +282,71 @@ func TestUserHandler_CreateUser_WithBudget(t *testing.T) {
 	}
 }
 
+func TestUserHandler_CreateUser_DefaultBudget(t *testing.T) {
+	store := newMockUserStore()
+	handler := NewUserHandler(store, 5.0) // $5 default
+	ctx := authedCtx("admin@example.com")
+
+	// Create user WITHOUT specifying a budget — should get $5 default.
+	resp, err := handler.CreateUser(ctx, connect.NewRequest(&v1.CreateUserRequest{
+		Email: "default@example.com",
+	}))
+	if err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+	if resp.Msg.Budget == nil {
+		t.Fatal("expected default budget to be set, got nil")
+	}
+	if resp.Msg.Budget.LimitUsd != 5.0 {
+		t.Errorf("default budget = %f, want 5.0", resp.Msg.Budget.LimitUsd)
+	}
+}
+
+func TestUserHandler_CreateUser_ExplicitOverridesDefault(t *testing.T) {
+	store := newMockUserStore()
+	handler := NewUserHandler(store, 5.0) // $5 default
+	ctx := authedCtx("admin@example.com")
+
+	// Explicit budget should override the default.
+	resp, err := handler.CreateUser(ctx, connect.NewRequest(&v1.CreateUserRequest{
+		Email:          "explicit@example.com",
+		DailyBudgetUsd: 20.0,
+	}))
+	if err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+	if resp.Msg.Budget == nil {
+		t.Fatal("expected budget to be set, got nil")
+	}
+	if resp.Msg.Budget.LimitUsd != 20.0 {
+		t.Errorf("budget = %f, want 20.0 (explicit override)", resp.Msg.Budget.LimitUsd)
+	}
+}
+
+func TestUserHandler_GetCurrentUser_AutoProvisionDefaultBudget(t *testing.T) {
+	store := newMockUserStore()
+	handler := NewUserHandler(store, 5.0) // $5 default
+	ctx := authedCtx("autoprov@example.com")
+
+	// GetCurrentUser auto-provisions new users — should also get the default budget.
+	resp, err := handler.GetCurrentUser(ctx, connect.NewRequest(&v1.GetCurrentUserRequest{}))
+	if err != nil {
+		t.Fatalf("GetCurrentUser: %v", err)
+	}
+	if resp.Msg.User == nil {
+		t.Fatal("expected user to be auto-provisioned")
+	}
+	if resp.Msg.Budget == nil {
+		t.Fatal("expected default budget on auto-provisioned user, got nil")
+	}
+	if resp.Msg.Budget.LimitUsd != 5.0 {
+		t.Errorf("auto-provisioned budget = %f, want 5.0", resp.Msg.Budget.LimitUsd)
+	}
+}
+
 func TestUserHandler_CreateUser_MissingEmail(t *testing.T) {
 	store := newMockUserStore()
-	handler := NewUserHandler(store)
+	handler := NewUserHandler(store, 0)
 	ctx := authedCtx("admin@example.com")
 
 	_, err := handler.CreateUser(ctx, connect.NewRequest(&v1.CreateUserRequest{
@@ -304,7 +366,7 @@ func TestUserHandler_CreateUser_MissingEmail(t *testing.T) {
 
 func TestUserHandler_CreateUser_DuplicateEmail(t *testing.T) {
 	store := newMockUserStore()
-	handler := NewUserHandler(store)
+	handler := NewUserHandler(store, 0)
 	ctx := authedCtx("admin@example.com")
 
 	// First creation succeeds.
@@ -333,7 +395,7 @@ func TestUserHandler_CreateUser_DuplicateEmail(t *testing.T) {
 
 func TestUserHandler_GetUser_NotFound(t *testing.T) {
 	store := newMockUserStore()
-	handler := NewUserHandler(store)
+	handler := NewUserHandler(store, 0)
 
 	_, err := handler.GetUser(context.Background(),
 		connect.NewRequest(&v1.GetUserRequest{Id: "nonexistent"}))
@@ -351,7 +413,7 @@ func TestUserHandler_GetUser_NotFound(t *testing.T) {
 
 func TestUserHandler_DeactivateAndReactivate(t *testing.T) {
 	store := newMockUserStore()
-	handler := NewUserHandler(store)
+	handler := NewUserHandler(store, 0)
 	ctx := authedCtx("admin@example.com")
 
 	// Create user.
@@ -384,7 +446,7 @@ func TestUserHandler_DeactivateAndReactivate(t *testing.T) {
 
 func TestUserHandler_BudgetLifecycle(t *testing.T) {
 	store := newMockUserStore()
-	handler := NewUserHandler(store)
+	handler := NewUserHandler(store, 0)
 	ctx := authedCtx("admin@example.com")
 
 	// Create user.
@@ -432,7 +494,7 @@ func TestUserHandler_BudgetLifecycle(t *testing.T) {
 
 func TestUserHandler_GrantLifecycle(t *testing.T) {
 	store := newMockUserStore()
-	handler := NewUserHandler(store)
+	handler := NewUserHandler(store, 0)
 	ctx := authedCtx("admin@example.com")
 
 	// Create user.
@@ -492,7 +554,7 @@ func TestUserHandler_GrantLifecycle(t *testing.T) {
 
 func TestUserHandler_AuditLog(t *testing.T) {
 	store := newMockUserStore()
-	handler := NewUserHandler(store)
+	handler := NewUserHandler(store, 0)
 	ctx := authedCtx("admin@example.com")
 
 	// Create user (triggers audit).
@@ -520,7 +582,7 @@ func TestUserHandler_AuditLog(t *testing.T) {
 
 func TestUserHandler_GetCurrentUser_AutoProvision(t *testing.T) {
 	store := newMockUserStore()
-	handler := NewUserHandler(store)
+	handler := NewUserHandler(store, 0)
 
 	// Authed as a new user who doesn't exist yet.
 	ctx := authedCtx("newuser@example.com")
@@ -547,7 +609,7 @@ func TestUserHandler_GetCurrentUser_AutoProvision(t *testing.T) {
 
 func TestUserHandler_GetCurrentUser_Unauthenticated(t *testing.T) {
 	store := newMockUserStore()
-	handler := NewUserHandler(store)
+	handler := NewUserHandler(store, 0)
 
 	_, err := handler.GetCurrentUser(context.Background(),
 		connect.NewRequest(&v1.GetCurrentUserRequest{}))
@@ -565,7 +627,7 @@ func TestUserHandler_GetCurrentUser_Unauthenticated(t *testing.T) {
 
 func TestUserHandler_ListUsers(t *testing.T) {
 	store := newMockUserStore()
-	handler := NewUserHandler(store)
+	handler := NewUserHandler(store, 0)
 	ctx := authedCtx("admin@example.com")
 
 	// Create 3 users.
@@ -620,7 +682,7 @@ func TestUserHandler_ListUsers(t *testing.T) {
 
 func TestUserHandler_UpdateUser_FieldMask(t *testing.T) {
 	store := newMockUserStore()
-	handler := NewUserHandler(store)
+	handler := NewUserHandler(store, 0)
 	ctx := authedCtx("admin@example.com")
 
 	createResp, _ := handler.CreateUser(ctx, connect.NewRequest(&v1.CreateUserRequest{
@@ -652,7 +714,7 @@ func TestUserHandler_UpdateUser_FieldMask(t *testing.T) {
 
 func TestUserHandler_GetMyBudget_Unauthenticated(t *testing.T) {
 	store := newMockUserStore()
-	handler := NewUserHandler(store)
+	handler := NewUserHandler(store, 0)
 
 	_, err := handler.GetMyBudget(context.Background(),
 		connect.NewRequest(&v1.GetMyBudgetRequest{}))
@@ -705,7 +767,7 @@ func TestStatusConversion(t *testing.T) {
 
 func TestUserHandler_DeleteUser_HappyPath(t *testing.T) {
 	store := newMockUserStore()
-	handler := NewUserHandler(store)
+	handler := NewUserHandler(store, 0)
 	ctx := authedCtx("admin@example.com")
 
 	// Create and deactivate user.
@@ -735,7 +797,7 @@ func TestUserHandler_DeleteUser_HappyPath(t *testing.T) {
 
 func TestUserHandler_DeleteUser_ActiveUserBlocked(t *testing.T) {
 	store := newMockUserStore()
-	handler := NewUserHandler(store)
+	handler := NewUserHandler(store, 0)
 	ctx := authedCtx("admin@example.com")
 
 	// Create user but DON'T deactivate.
@@ -762,7 +824,7 @@ func TestUserHandler_DeleteUser_ActiveUserBlocked(t *testing.T) {
 
 func TestUserHandler_DeleteUser_WrongEmailBlocked(t *testing.T) {
 	store := newMockUserStore()
-	handler := NewUserHandler(store)
+	handler := NewUserHandler(store, 0)
 	ctx := authedCtx("admin@example.com")
 
 	// Create and deactivate user.
@@ -824,7 +886,7 @@ func TestMustJSON_Fallback(t *testing.T) {
 
 func TestUserHandler_DeleteUser_GlobalAudit(t *testing.T) {
 	store := newMockUserStore()
-	handler := NewUserHandler(store)
+	handler := NewUserHandler(store, 0)
 	ctx := authedCtx("admin@example.com")
 
 	// Create and deactivate user.

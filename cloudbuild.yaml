@@ -6,7 +6,23 @@ steps:
       - 'us-central1-docker.pkg.dev/$PROJECT_ID/candela/candela-server:latest'
       - '-f'
       - 'deploy/Dockerfile.server'
+      - '--build-arg'
+      - 'NEXT_PUBLIC_FIREBASE_API_KEY=${_FIREBASE_API_KEY}'
+      - '--build-arg'
+      - 'NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN=${_FIREBASE_AUTH_DOMAIN}'
+      - '--build-arg'
+      - 'NEXT_PUBLIC_FIREBASE_PROJECT_ID=${_FIREBASE_PROJECT_ID}'
+      - '--build-arg'
+      - 'NEXT_PUBLIC_FIREBASE_APP_ID=${_FIREBASE_APP_ID}'
       - '.'
+
+substitutions:
+  # Set via Cloud Build trigger substitutions or --substitution flags.
+  # Values are required — builds will produce a non-functional login without them.
+  _FIREBASE_API_KEY: ''
+  _FIREBASE_AUTH_DOMAIN: ''
+  _FIREBASE_PROJECT_ID: ''
+  _FIREBASE_APP_ID: ''
 
 images:
   - 'us-central1-docker.pkg.dev/$PROJECT_ID/candela/candela-server:latest'

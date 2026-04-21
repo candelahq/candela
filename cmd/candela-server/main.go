@@ -88,6 +88,9 @@ type Config struct {
 		DatabaseID string `yaml:"database_id"` // e.g. "candela" or "(default)"
 	} `yaml:"firestore"`
 	Pricing costcalc.PricingConfig `yaml:"pricing"`
+	Users   struct {
+		DefaultDailyBudgetUSD float64 `yaml:"default_daily_budget_usd"` // auto-assigned to new users (0 = no default)
+	} `yaml:"users"`
 }
 
 func main() {
@@ -157,10 +160,12 @@ func main() {
 		validateInterceptor := validate.NewInterceptor()
 
 		userPath, userH := candelav1connect.NewUserServiceHandler(
-			connecthandlers.NewUserHandler(fStore),
+			connecthandlers.NewUserHandler(fStore, cfg.Users.DefaultDailyBudgetUSD),
 			connect.WithInterceptors(validateInterceptor, auth.AdminInterceptor(fStore)))
 		mux.Handle(userPath, userH)
-		slog.Info("UserService registered", "path", userPath, "admin_guard", true, "validation", true)
+		slog.Info("UserService registered", "path", userPath,
+			"admin_guard", true, "validation", true,
+			"default_daily_budget", cfg.Users.DefaultDailyBudgetUSD)
 	} else {
 		slog.Info("Firestore disabled — UserService not available, all users see all traces")
 	}

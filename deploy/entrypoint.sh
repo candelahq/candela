@@ -68,6 +68,9 @@ firestore:
 worker:
   batch_size: 100
   flush_interval: "2s"
+
+users:
+  default_daily_budget_usd: ${CANDELA_DEFAULT_DAILY_BUDGET:-5.00}
 EOF
 
 export CANDELA_CONFIG="$CONFIG_PATH"

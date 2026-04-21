@@ -107,6 +107,14 @@ func (m *mockUserStore) TouchLastSeen(_ context.Context, id string) error {
 	return nil
 }
 
+func (m *mockUserStore) DeleteUser(_ context.Context, id string) error {
+	delete(m.users, id)
+	delete(m.budgets, id)
+	delete(m.grants, id)
+	delete(m.audit, id)
+	return nil
+}
+
 func (m *mockUserStore) SetBudget(_ context.Context, b *storage.BudgetRecord) error {
 	m.budgets[b.UserID] = b
 	return nil
@@ -251,8 +259,8 @@ func TestUserHandler_CreateUser_WithBudget(t *testing.T) {
 	ctx := authedCtx("admin@example.com")
 
 	resp, err := handler.CreateUser(ctx, connect.NewRequest(&v1.CreateUserRequest{
-		Email:            "bob@example.com",
-		MonthlyBudgetUsd: 100.0,
+		Email:          "bob@example.com",
+		DailyBudgetUsd: 100.0,
 	}))
 	if err != nil {
 		t.Fatalf("CreateUser: %v", err)
@@ -380,7 +388,7 @@ func TestUserHandler_BudgetLifecycle(t *testing.T) {
 	setBudgetResp, err := handler.SetBudget(ctx, connect.NewRequest(&v1.SetBudgetRequest{
 		UserId:     userID,
 		LimitUsd:   200.0,
-		PeriodType: typespb.BudgetPeriod_BUDGET_PERIOD_MONTHLY,
+		PeriodType: typespb.BudgetPeriod_BUDGET_PERIOD_DAILY,
 	}))
 	if err != nil {
 		t.Fatalf("SetBudget: %v", err)
@@ -683,5 +691,108 @@ func TestStatusConversion(t *testing.T) {
 		if got := stringToStatus(tt.str); got != tt.proto {
 			t.Errorf("stringToStatus(%q) = %v, want %v", tt.str, got, tt.proto)
 		}
+	}
+}
+
+func TestUserHandler_DeleteUser_HappyPath(t *testing.T) {
+	store := newMockUserStore()
+	handler := NewUserHandler(store)
+	ctx := authedCtx("admin@example.com")
+
+	// Create and deactivate user.
+	createResp, _ := handler.CreateUser(ctx, connect.NewRequest(&v1.CreateUserRequest{
+		Email: "delete-me@example.com",
+	}))
+	userID := createResp.Msg.User.Id
+
+	_, _ = handler.DeactivateUser(ctx,
+		connect.NewRequest(&v1.DeactivateUserRequest{Id: userID}))
+
+	// Delete with correct email.
+	_, err := handler.DeleteUser(ctx, connect.NewRequest(&v1.DeleteUserRequest{
+		Id:           userID,
+		ConfirmEmail: "delete-me@example.com",
+	}))
+	if err != nil {
+		t.Fatalf("DeleteUser: %v", err)
+	}
+
+	// Verify user is gone.
+	_, err = store.GetUser(ctx, userID)
+	if err == nil {
+		t.Error("expected user to be deleted from store")
+	}
+}
+
+func TestUserHandler_DeleteUser_ActiveUserBlocked(t *testing.T) {
+	store := newMockUserStore()
+	handler := NewUserHandler(store)
+	ctx := authedCtx("admin@example.com")
+
+	// Create user but DON'T deactivate.
+	createResp, _ := handler.CreateUser(ctx, connect.NewRequest(&v1.CreateUserRequest{
+		Email: "active@example.com",
+	}))
+	userID := createResp.Msg.User.Id
+
+	_, err := handler.DeleteUser(ctx, connect.NewRequest(&v1.DeleteUserRequest{
+		Id:           userID,
+		ConfirmEmail: "active@example.com",
+	}))
+	if err == nil {
+		t.Fatal("expected error when deleting active user")
+	}
+	connectErr, ok := err.(*connect.Error)
+	if !ok {
+		t.Fatalf("expected *connect.Error, got %T", err)
+	}
+	if connectErr.Code() != connect.CodeFailedPrecondition {
+		t.Errorf("code = %v, want FailedPrecondition", connectErr.Code())
+	}
+}
+
+func TestUserHandler_DeleteUser_WrongEmailBlocked(t *testing.T) {
+	store := newMockUserStore()
+	handler := NewUserHandler(store)
+	ctx := authedCtx("admin@example.com")
+
+	// Create and deactivate user.
+	createResp, _ := handler.CreateUser(ctx, connect.NewRequest(&v1.CreateUserRequest{
+		Email: "target@example.com",
+	}))
+	userID := createResp.Msg.User.Id
+	_, _ = handler.DeactivateUser(ctx,
+		connect.NewRequest(&v1.DeactivateUserRequest{Id: userID}))
+
+	// Try to delete with wrong email.
+	_, err := handler.DeleteUser(ctx, connect.NewRequest(&v1.DeleteUserRequest{
+		Id:           userID,
+		ConfirmEmail: "wrong@example.com",
+	}))
+	if err == nil {
+		t.Fatal("expected error for mismatched confirm_email")
+	}
+	connectErr, ok := err.(*connect.Error)
+	if !ok {
+		t.Fatalf("expected *connect.Error, got %T", err)
+	}
+	if connectErr.Code() != connect.CodeInvalidArgument {
+		t.Errorf("code = %v, want InvalidArgument", connectErr.Code())
+	}
+}
+
+func TestPeriodConversion(t *testing.T) {
+	// All inputs map to daily.
+	if got := periodToString(typespb.BudgetPeriod_BUDGET_PERIOD_DAILY); got != "daily" {
+		t.Errorf("periodToString(DAILY) = %q, want %q", got, "daily")
+	}
+	if got := periodToString(typespb.BudgetPeriod_BUDGET_PERIOD_UNSPECIFIED); got != "daily" {
+		t.Errorf("periodToString(UNSPECIFIED) = %q, want %q", got, "daily")
+	}
+	if got := stringToPeriod("daily"); got != typespb.BudgetPeriod_BUDGET_PERIOD_DAILY {
+		t.Errorf("stringToPeriod(daily) = %v, want DAILY", got)
+	}
+	if got := stringToPeriod("anything"); got != typespb.BudgetPeriod_BUDGET_PERIOD_DAILY {
+		t.Errorf("stringToPeriod(anything) = %v, want DAILY", got)
 	}
 }

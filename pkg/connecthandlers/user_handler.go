@@ -2,6 +2,7 @@ package connecthandlers
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -74,12 +75,12 @@ func (h *UserHandler) CreateUser(
 		User: userToProto(user),
 	}
 
-	// Optionally set an initial budget.
-	if req.Msg.MonthlyBudgetUsd > 0 {
+	// Optionally set an initial budget (daily by default).
+	if req.Msg.DailyBudgetUsd > 0 {
 		budget := &storage.BudgetRecord{
 			UserID:     user.ID,
-			LimitUSD:   req.Msg.MonthlyBudgetUsd,
-			PeriodType: "monthly",
+			LimitUSD:   req.Msg.DailyBudgetUsd,
+			PeriodType: "daily",
 		}
 		if err := h.store.SetBudget(ctx, budget); err != nil {
 			return nil, connect.NewError(connect.CodeInternal, err)
@@ -91,7 +92,7 @@ func (h *UserHandler) CreateUser(
 		UserID:     user.ID,
 		ActorEmail: auth.EmailFromContext(ctx),
 		Action:     "create_user",
-		Details:    fmt.Sprintf(`{"email":%q}`, user.Email),
+		Details:    mustJSON(map[string]string{"email": user.Email}),
 	})
 
 	return connect.NewResponse(resp), nil
@@ -253,6 +254,49 @@ func (h *UserHandler) ReactivateUser(
 	}), nil
 }
 
+func (h *UserHandler) DeleteUser(
+	ctx context.Context,
+	req *connect.Request[v1.DeleteUserRequest],
+) (*connect.Response[v1.DeleteUserResponse], error) {
+	user, err := h.store.GetUser(ctx, req.Msg.Id)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeNotFound, err)
+	}
+
+	// Gate: only inactive users can be deleted.
+	if user.Status != storage.StatusInactive {
+		return nil, connect.NewError(connect.CodeFailedPrecondition,
+			fmt.Errorf("user must be deactivated before deletion"))
+	}
+
+	// Confirmation: email must match.
+	if user.Email != req.Msg.ConfirmEmail {
+		return nil, connect.NewError(connect.CodeInvalidArgument,
+			fmt.Errorf("confirmation email does not match user email"))
+	}
+
+	// Log audit BEFORE deletion so the entry exists in the subcollection
+	// at the time of write. Note: deletion below will remove this entry
+	// too, so we also emit a structured log for persistent audit trail.
+	auditDetails := mustJSON(map[string]string{"email": user.Email})
+	h.logAudit(ctx, &storage.AuditRecord{
+		UserID:     user.ID,
+		ActorEmail: auth.EmailFromContext(ctx),
+		Action:     "delete_user",
+		Details:    auditDetails,
+	})
+	slog.InfoContext(ctx, "user deleted",
+		"user_id", user.ID,
+		"actor", auth.EmailFromContext(ctx),
+		"details", auditDetails)
+
+	if err := h.store.DeleteUser(ctx, user.ID); err != nil {
+		return nil, connect.NewError(connect.CodeInternal, err)
+	}
+
+	return connect.NewResponse(&v1.DeleteUserResponse{}), nil
+}
+
 // ──────────────────────────────────────────
 // Admin — Budget management
 // ──────────────────────────────────────────
@@ -264,7 +308,7 @@ func (h *UserHandler) SetBudget(
 	budget := &storage.BudgetRecord{
 		UserID:     req.Msg.UserId,
 		LimitUSD:   req.Msg.LimitUsd,
-		PeriodType: periodToString(req.Msg.PeriodType),
+		PeriodType: "daily", // All budgets are daily.
 	}
 	if err := h.store.SetBudget(ctx, budget); err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
@@ -274,7 +318,7 @@ func (h *UserHandler) SetBudget(
 		UserID:     req.Msg.UserId,
 		ActorEmail: auth.EmailFromContext(ctx),
 		Action:     "set_budget",
-		Details:    fmt.Sprintf(`{"limit_usd":%.2f,"period":%q}`, req.Msg.LimitUsd, budget.PeriodType),
+		Details:    mustJSON(map[string]any{"limit_usd": req.Msg.LimitUsd, "period": "daily"}),
 	})
 
 	return connect.NewResponse(&v1.SetBudgetResponse{
@@ -342,7 +386,7 @@ func (h *UserHandler) CreateGrant(
 		UserID:     req.Msg.UserId,
 		ActorEmail: auth.EmailFromContext(ctx),
 		Action:     "create_grant",
-		Details:    fmt.Sprintf(`{"amount_usd":%.2f,"reason":%q}`, grant.AmountUSD, grant.Reason),
+		Details:    mustJSON(map[string]any{"amount_usd": grant.AmountUSD, "reason": grant.Reason}),
 	})
 
 	return connect.NewResponse(&v1.CreateGrantResponse{
@@ -381,7 +425,7 @@ func (h *UserHandler) RevokeGrant(
 		UserID:     req.Msg.UserId,
 		ActorEmail: auth.EmailFromContext(ctx),
 		Action:     "revoke_grant",
-		Details:    fmt.Sprintf(`{"grant_id":%q}`, req.Msg.GrantId),
+		Details:    mustJSON(map[string]string{"grant_id": req.Msg.GrantId}),
 	})
 
 	return connect.NewResponse(&v1.RevokeGrantResponse{}), nil
@@ -639,26 +683,21 @@ func stringToStatus(s string) typespb.UserStatus {
 	}
 }
 
-func periodToString(p typespb.BudgetPeriod) string {
-	switch p {
-	case typespb.BudgetPeriod_BUDGET_PERIOD_WEEKLY:
-		return "weekly"
-	case typespb.BudgetPeriod_BUDGET_PERIOD_QUARTERLY:
-		return "quarterly"
-	default:
-		return "monthly"
-	}
+func periodToString(_ typespb.BudgetPeriod) string {
+	return "daily" // All budgets are daily.
 }
 
-func stringToPeriod(s string) typespb.BudgetPeriod {
-	switch s {
-	case "weekly":
-		return typespb.BudgetPeriod_BUDGET_PERIOD_WEEKLY
-	case "quarterly":
-		return typespb.BudgetPeriod_BUDGET_PERIOD_QUARTERLY
-	case "monthly":
-		return typespb.BudgetPeriod_BUDGET_PERIOD_MONTHLY
-	default:
-		return typespb.BudgetPeriod_BUDGET_PERIOD_UNSPECIFIED
+func stringToPeriod(_ string) typespb.BudgetPeriod {
+	return typespb.BudgetPeriod_BUDGET_PERIOD_DAILY
+}
+
+// mustJSON marshals v to a JSON string, falling back to a JSON-safe
+// error string if marshalling fails.
+func mustJSON(v any) string {
+	b, err := json.Marshal(v)
+	if err != nil {
+		errMsg, _ := json.Marshal(fmt.Sprintf("%v", v))
+		return string(errMsg)
 	}
+	return string(b)
 }

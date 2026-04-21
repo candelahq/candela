@@ -32,6 +32,10 @@ service UserService {
   // ReactivateUser re-enables a previously deactivated user.
   rpc ReactivateUser(ReactivateUserRequest) returns (ReactivateUserResponse);
 
+  // DeleteUser permanently removes an inactive user and all associated data.
+  // Only inactive users can be deleted (enforced server-side).
+  rpc DeleteUser(DeleteUserRequest) returns (DeleteUserResponse);
+
   // ── Budget management (admin) ──
 
   // SetBudget configures a user's recurring budget.
@@ -76,12 +80,14 @@ message CreateUserRequest {
   string email = 1 [(buf.validate.field).string.email = true];
   string display_name = 2;
   candela.types.UserRole role = 3;
-  double monthly_budget_usd = 4 [(buf.validate.field).double.gte = 0]; // Optional: set budget at creation
+  reserved 4;
+  reserved "monthly_budget_usd";
+  double daily_budget_usd = 5 [(buf.validate.field).double.gte = 0]; // Optional: set daily budget at creation
 }
 
 message CreateUserResponse {
   candela.types.User user = 1;
-  candela.types.UserBudget budget = 2; // Present if monthly_budget_usd > 0
+  candela.types.UserBudget budget = 2; // Present if daily_budget_usd > 0
 }
 
 message ListUsersRequest {
@@ -128,6 +134,14 @@ message ReactivateUserRequest {
 message ReactivateUserResponse {
   candela.types.User user = 1;
 }
+
+message DeleteUserRequest {
+  string id = 1 [(buf.validate.field).string.min_len = 1];
+  // Confirmation: must match user's email to prevent accidental deletion.
+  string confirm_email = 2 [(buf.validate.field).string.email = true];
+}
+
+message DeleteUserResponse {}
 
 // ──────────────────────────────────────────────────
 // Admin — Budget management

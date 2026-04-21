@@ -144,7 +144,7 @@ func TestSetAndGetBudget(t *testing.T) {
 	budget := &storage.BudgetRecord{
 		UserID:     userID,
 		LimitUSD:   100.0,
-		PeriodType: "monthly",
+		PeriodType: "daily",
 	}
 	if err := s.SetBudget(ctx, budget); err != nil {
 		t.Fatalf("SetBudget: %v", err)
@@ -226,9 +226,9 @@ func TestCheckBudget(t *testing.T) {
 		t.Fatalf("CreateUser: %v", err)
 	}
 
-	// Set $100 monthly budget.
+	// Set $100 daily budget.
 	budget := &storage.BudgetRecord{
-		UserID: userID, LimitUSD: 100.0, PeriodType: "monthly",
+		UserID: userID, LimitUSD: 100.0, PeriodType: "daily",
 	}
 	if err := s.SetBudget(ctx, budget); err != nil {
 		t.Fatalf("SetBudget: %v", err)
@@ -279,9 +279,9 @@ func TestDeductSpend_GrantFirstWaterfall(t *testing.T) {
 		t.Fatalf("CreateUser: %v", err)
 	}
 
-	// Set $100 monthly budget.
+	// Set $100 daily budget.
 	budget := &storage.BudgetRecord{
-		UserID: userID, LimitUSD: 100.0, PeriodType: "monthly",
+		UserID: userID, LimitUSD: 100.0, PeriodType: "daily",
 	}
 	if err := s.SetBudget(ctx, budget); err != nil {
 		t.Fatalf("SetBudget: %v", err)
@@ -379,20 +379,16 @@ func TestAuditLog(t *testing.T) {
 }
 
 func TestCurrentPeriodKey(t *testing.T) {
-	// Just verify the format doesn't panic and returns something reasonable.
-	monthly := currentPeriodKey("monthly")
-	if len(monthly) != 7 { // "2026-04"
-		t.Errorf("monthly key = %q, expected format like 2026-04", monthly)
+	// All budgets are daily — verify the format is YYYY-MM-DD.
+	daily := currentPeriodKey("daily")
+	if len(daily) != 10 { // "2026-04-21"
+		t.Errorf("daily key = %q, expected format like 2026-04-21", daily)
 	}
 
-	weekly := currentPeriodKey("weekly")
-	if weekly == "" {
-		t.Error("weekly key should not be empty")
-	}
-
-	quarterly := currentPeriodKey("quarterly")
-	if quarterly == "" {
-		t.Error("quarterly key should not be empty")
+	// Any input should return daily format.
+	also := currentPeriodKey("anything")
+	if also != daily {
+		t.Errorf("expected same daily key for any input, got %q vs %q", also, daily)
 	}
 }
 
@@ -408,7 +404,7 @@ func TestResetSpend(t *testing.T) {
 	// Set budget with some spend.
 	budget := &storage.BudgetRecord{
 		UserID: userID, LimitUSD: 100.0, SpentUSD: 42.0,
-		TokensUsed: 5000, PeriodType: "monthly",
+		TokensUsed: 5000, PeriodType: "daily",
 	}
 	_ = s.SetBudget(ctx, budget)
 

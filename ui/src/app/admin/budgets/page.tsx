@@ -9,7 +9,7 @@ export default function AdminBudgetsPage() {
         <div>
           <h2 className="admin-page-title">
             Budgets & Grants
-            <HelpTip text="Configure spending limits and one-time grants. Grants are consumed before the monthly budget (grant-first waterfall)." />
+            <HelpTip text="Configure daily spending limits and one-time grants. Grants are consumed before the daily budget (grant-first waterfall)." />
           </h2>
           <p className="admin-page-subtitle">Select a user from the Users page to manage budgets</p>
         </div>
@@ -32,8 +32,8 @@ export default function AdminBudgetsPage() {
             <div className="budget-step-number">2</div>
             <div>
               <strong>Grant-First Waterfall</strong>
-              <HelpTip text="Active grants are consumed first. Once grants are depleted, spending comes from the monthly budget." />
-              <p className="text-muted">Spending deducts from active grants first, then monthly budget.</p>
+              <HelpTip text="Active grants are consumed first. Once grants are depleted, spending comes from the daily budget." />
+              <p className="text-muted">Spending deducts from active grants first, then daily budget.</p>
             </div>
           </div>
           <div className="budget-step">
@@ -47,8 +47,8 @@ export default function AdminBudgetsPage() {
             <div className="budget-step-number">4</div>
             <div>
               <strong>Period Reset</strong>
-              <HelpTip text="Monthly budgets reset at the start of each calendar month. Grants have their own expiry dates." />
-              <p className="text-muted">Monthly budgets auto-reset. Expired grants are no longer available.</p>
+              <HelpTip text="Daily budgets reset at midnight UTC. Grants have their own expiry dates." />
+              <p className="text-muted">Daily budgets auto-reset at midnight UTC. Expired grants are no longer available.</p>
             </div>
           </div>
         </div>

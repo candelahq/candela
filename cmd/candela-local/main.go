@@ -374,12 +374,18 @@ func main() {
 
 	// Build direct cloud proxy if providers are configured (solo + cloud mode).
 	var cloudProxy *proxy.Proxy
+	var cloudCalc *costcalc.Calculator
 	cloudModels := make(map[string]string)
 	if soloMode && len(cfg.Providers) > 0 {
 		cloudProxy, cloudModels = buildCloudProxy(*cfg, spanProc)
 	}
+	// Create a calc for pricing-based model filtering.
+	// Uses the same defaults as the cloud proxy's embedded calc.
+	if len(cloudModels) > 0 {
+		cloudCalc = costcalc.New()
+	}
 
-	lmH := newLMHandler(mgr, remoteProxy, runtimeLocalProxy, localHandler, cloudProxy, cloudModels)
+	lmH := newLMHandler(mgr, remoteProxy, runtimeLocalProxy, localHandler, cloudProxy, cloudModels, cloudCalc)
 	lmAddr := fmt.Sprintf("127.0.0.1:%d", lmPort)
 
 	// ── Graceful shutdown ──

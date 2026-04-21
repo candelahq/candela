@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/candelahq/candela/pkg/costcalc"
 	"github.com/candelahq/candela/pkg/proxy"
 	"github.com/candelahq/candela/pkg/runtime"
 )
@@ -27,13 +28,14 @@ type lmHandler struct {
 	localHandler http.Handler           // localProxy wrapped with optional span capture
 	cloudProxy   *proxy.Proxy           // direct cloud proxy (solo + cloud mode)
 	cloudModels  map[string]string      // model ID → provider name
+	calc         *costcalc.Calculator   // pricing calculator (for filtering unpriced models)
 
 	localModels sync.Map // model ID string → bool (cached for fast routing)
 }
 
 // newLMHandler creates a smart LM compat handler that merges local + remote + cloud
 // models and routes chat completions to the correct backend.
-func newLMHandler(mgr *runtime.Manager, remoteProxy, localProxy *httputil.ReverseProxy, localHandler http.Handler, cloudProxy *proxy.Proxy, cloudModels map[string]string) *lmHandler {
+func newLMHandler(mgr *runtime.Manager, remoteProxy, localProxy *httputil.ReverseProxy, localHandler http.Handler, cloudProxy *proxy.Proxy, cloudModels map[string]string, calc *costcalc.Calculator) *lmHandler {
 	if localHandler == nil && localProxy != nil {
 		localHandler = localProxy
 	}
@@ -47,6 +49,7 @@ func newLMHandler(mgr *runtime.Manager, remoteProxy, localProxy *httputil.Revers
 		localHandler: localHandler,
 		cloudProxy:   cloudProxy,
 		cloudModels:  cloudModels,
+		calc:         calc,
 	}
 }
 
@@ -112,8 +115,13 @@ func (h *lmHandler) serveModels(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// 2. Add direct cloud models.
+	// 2. Add direct cloud models (only if priced).
 	for modelID, providerName := range h.cloudModels {
+		if h.calc != nil && !h.calc.HasPricing(providerName, modelID) {
+			slog.Warn("⚠️ hiding cloud model from /v1/models — no pricing configured",
+				"model", modelID, "provider", providerName)
+			continue
+		}
 		merged = append(merged, openaiModel{
 			ID:      modelID,
 			Object:  "model",

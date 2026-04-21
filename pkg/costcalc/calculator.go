@@ -116,6 +116,19 @@ func (c *Calculator) SetGlobalDiscount(discount float64) {
 	c.globalDiscount = discount
 }
 
+// HasPricing returns true if a provider/model has pricing configured
+// (either via config override or built-in default). Local models always
+// return true since they are free by definition.
+func (c *Calculator) HasPricing(provider, model string) bool {
+	if strings.ToLower(provider) == "local" {
+		return true
+	}
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	_, ok := c.resolve(provider, model)
+	return ok
+}
+
 // resolve looks up pricing: config overrides first, then built-in defaults,
 // then provider-agnostic model name match as last resort.
 func (c *Calculator) resolve(provider, model string) (ModelPricing, bool) {

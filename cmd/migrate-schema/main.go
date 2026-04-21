@@ -11,10 +11,14 @@ import (
 )
 
 func main() {
-	projectID := flag.String("project", "austin-azra-sandbox-project", "GCP Project ID")
+	projectID := flag.String("project", "", "GCP Project ID (required)")
 	databaseID := flag.String("database", "candela", "Firestore Database ID")
 	dryRun := flag.Bool("dry-run", true, "If true, logs changes without applying them")
 	flag.Parse()
+
+	if *projectID == "" {
+		log.Fatal("--project flag is required")
+	}
 
 	ctx := context.Background()
 	client, err := firestore.NewClientWithDatabase(ctx, *projectID, *databaseID)
@@ -102,23 +106,18 @@ func migrateCollection(ctx context.Context, col *firestore.CollectionRef, mappin
 		}
 
 		if len(updates) > 0 {
+			// Append delete operations so the entire rename is a single atomic Update.
+			for _, k := range deletedFields {
+				updates = append(updates, firestore.Update{Path: k, Value: firestore.Delete})
+			}
+
 			count++
 			if dryRun {
 				fmt.Printf("[DRY-RUN] Would update %s: renaming %v\n", snap.Ref.Path, deletedFields)
 			} else {
-				// 1. Add new fields
 				_, err := snap.Ref.Update(ctx, updates)
 				if err != nil {
-					return fmt.Errorf("failed to add new fields to %s: %w", snap.Ref.ID, err)
-				}
-				// 2. Remove old fields
-				oldKeyUpdates := make([]firestore.Update, len(deletedFields))
-				for i, k := range deletedFields {
-					oldKeyUpdates[i] = firestore.Update{Path: k, Value: firestore.Delete}
-				}
-				_, err = snap.Ref.Update(ctx, oldKeyUpdates)
-				if err != nil {
-					return fmt.Errorf("failed to delete old fields from %s: %w", snap.Ref.ID, err)
+					return fmt.Errorf("failed to update %s: %w", snap.Ref.ID, err)
 				}
 				fmt.Printf("Updated %s: renamed %d fields\n", snap.Ref.Path, len(deletedFields))
 			}

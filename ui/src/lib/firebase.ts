@@ -14,7 +14,13 @@ const firebaseConfig = {
 
 function getFirebaseApp(): FirebaseApp | null {
   if (typeof window === "undefined") return null; // SSR/SSG — skip
-  if (!firebaseConfig.apiKey) return null; // Not configured
+  if (!firebaseConfig.apiKey) {
+    console.warn(
+      "[Candela] Firebase not configured — NEXT_PUBLIC_FIREBASE_API_KEY is missing. " +
+      "Auth will be disabled. Set Firebase env vars at build time."
+    );
+    return null;
+  }
   return getApps().length === 0 ? initializeApp(firebaseConfig) : getApps()[0];
 }
 

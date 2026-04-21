@@ -18,6 +18,17 @@ func TestSanitizeID(t *testing.T) {
 		{"user/test@example.com", "user_test@example.com"},
 		{"USER/TEST@example.com", "user_test@example.com"},
 		{"no_slash@example.com", "no_slash@example.com"},
+		// Firestore reserved __.*__ pattern (start+end with double underscores).
+		{"__user__@example.com", "__user__@example.com"}, // ends with .com, not __
+		{"__xx__", "u___xx__"},
+		{"____", "u_____"},
+		{"__admin__", "u___admin__"},
+		// Not reserved: only leading or only trailing double underscores.
+		{"__user@example.com", "__user@example.com"},
+		{"user@example__", "user@example__"},
+		// Too short to match __.*__ pattern.
+		{"__", "__"},
+		{"", ""},
 	}
 
 	for _, tt := range tests {

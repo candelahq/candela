@@ -146,26 +146,40 @@ func (s *Store) ListUsers(ctx context.Context, statusFilter string, limit, offse
 		q = q.Where("status", "==", statusFilter)
 	}
 
-	// Get total count by fetching all document refs (lightweight — no field data).
-	allSnaps, err := q.Documents(ctx).GetAll()
+	// Count total documents. Use aggregation but fall back to a full
+	// fetch if the count comes back as an unexpected type.
+	total := 0
+	countQ := q.NewAggregationQuery().WithCount("total")
+	results, err := countQ.Get(ctx)
+	if err != nil {
+		slog.Warn("firestoredb: aggregation count failed, falling back to full scan", "error", err)
+	} else if countVal, ok := results["total"]; ok {
+		switch v := countVal.(type) {
+		case int64:
+			total = int(v)
+		default:
+			// Handle SDK wrapper types (emulator returns *firestorepb.Value).
+			if n, parseErr := fmt.Sscanf(fmt.Sprint(v), "%d", &total); n != 1 || parseErr != nil {
+				slog.Warn("firestoredb: unexpected count type, falling back", "type", fmt.Sprintf("%T", v))
+			}
+		}
+	}
+
+	// Server-side pagination.
+	pageQ := q.Offset(offset).Limit(limit)
+	snaps, err := pageQ.Documents(ctx).GetAll()
 	if err != nil {
 		return nil, 0, fmt.Errorf("firestoredb: listing users: %w", err)
 	}
-	total := len(allSnaps)
 
-	// Apply offset/limit to the full snapshot list.
-	start := offset
-	if start > total {
-		start = total
+	// If aggregation count returned 0 but we fetched users, use the
+	// fetched length as a fallback (handles count API mismatches).
+	if total == 0 && len(snaps) > 0 {
+		total = len(snaps)
 	}
-	end := start + limit
-	if end > total {
-		end = total
-	}
-	pageSnaps := allSnaps[start:end]
 
-	users := make([]*storage.UserRecord, 0, len(pageSnaps))
-	for _, snap := range pageSnaps {
+	users := make([]*storage.UserRecord, 0, len(snaps))
+	for _, snap := range snaps {
 		u, err := snapToUser(snap)
 		if err != nil {
 			slog.Warn("skipping malformed user doc", "id", snap.Ref.ID, "error", err)

@@ -68,7 +68,7 @@ export default function AdminUsersPage() {
     dispatch({ type: "loading" });
     try {
       const resp = await userClient.listUsers({});
-      dispatch({ type: "success", users: resp.users, total: resp.pagination?.totalCount ?? resp.users.length });
+      dispatch({ type: "success", users: resp.users, total: resp.pagination?.totalCount ?? 0 });
     } catch (err: unknown) {
       dispatch({ type: "error", message: err instanceof Error ? err.message : "Failed to load users" });
     }
@@ -366,7 +366,7 @@ export default function AdminUsersPage() {
                 }}>
                   <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "6px" }}>
                     <span className="text-muted">Current limit</span>
-                    <span>${currentBudget.limitUsd.toFixed(2)}</span>
+                    <span>{currentBudget.limitUsd > 0 ? `$${currentBudget.limitUsd.toFixed(2)}` : "Unlimited"}</span>
                   </div>
                   <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "6px" }}>
                     <span className="text-muted">Spent this period</span>
@@ -375,7 +375,9 @@ export default function AdminUsersPage() {
                   <div style={{ display: "flex", justifyContent: "space-between" }}>
                     <span className="text-muted">Remaining</span>
                     <span style={{ fontWeight: 600 }}>
-                      ${(currentBudget.limitUsd - currentBudget.spentUsd).toFixed(2)}
+                      {currentBudget.limitUsd > 0
+                        ? `$${(currentBudget.limitUsd - currentBudget.spentUsd).toFixed(2)}`
+                        : "∞"}
                     </span>
                   </div>
                 </div>

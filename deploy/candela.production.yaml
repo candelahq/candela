@@ -1,0 +1,17 @@
+# candela.production.yaml
+# Copy this to ~/.candela.yaml to connect your local machine to the team production server.
+
+# The Cloud Run URL for your team deployment
+remote: https://candela-6y6kmipuda-uc.a.run.app
+
+# The IAP Client ID (Audience) for authentication
+audience: https://candela-6y6kmipuda-uc.a.run.app
+
+# Local proxy settings
+port: 8181
+
+# Local model runtime (for Hybrid Solo+Team mode)
+runtime_backend: ollama
+runtime_config:
+  host: 127.0.0.1
+  port: 11434

@@ -211,6 +211,15 @@ func (m *mockUserStore) LogAction(_ context.Context, entry *storage.AuditRecord)
 	return nil
 }
 
+func (m *mockUserStore) LogGlobalAction(_ context.Context, entry *storage.AuditRecord) error {
+	if entry.ID == "" {
+		entry.ID = fmt.Sprintf("global_audit_%d", len(m.audit["_global"])+1)
+	}
+	entry.Timestamp = time.Now().UTC()
+	m.audit["_global"] = append(m.audit["_global"], entry)
+	return nil
+}
+
 func (m *mockUserStore) ListAuditLog(_ context.Context, userID string, limit int) ([]*storage.AuditRecord, error) {
 	entries := m.audit[userID]
 	if limit > 0 && limit < len(entries) {
@@ -794,5 +803,71 @@ func TestPeriodConversion(t *testing.T) {
 	}
 	if got := stringToPeriod("anything"); got != typespb.BudgetPeriod_BUDGET_PERIOD_DAILY {
 		t.Errorf("stringToPeriod(anything) = %v, want DAILY", got)
+	}
+}
+
+func TestMustJSON_Success(t *testing.T) {
+	got := mustJSON(map[string]string{"email": "test@example.com"})
+	if got != `{"email":"test@example.com"}` {
+		t.Errorf("mustJSON = %q, want valid JSON", got)
+	}
+}
+
+func TestMustJSON_Fallback(t *testing.T) {
+	// Channels cannot be marshalled to JSON.
+	got := mustJSON(make(chan int))
+	expected := `{"error":"failed to marshal audit details"}`
+	if got != expected {
+		t.Errorf("mustJSON fallback = %q, want %q", got, expected)
+	}
+}
+
+func TestUserHandler_DeleteUser_GlobalAudit(t *testing.T) {
+	store := newMockUserStore()
+	handler := NewUserHandler(store)
+	ctx := authedCtx("admin@example.com")
+
+	// Create and deactivate user.
+	createResp, _ := handler.CreateUser(ctx, connect.NewRequest(&v1.CreateUserRequest{
+		Email: "audit-test@example.com",
+	}))
+	userID := createResp.Msg.User.Id
+
+	_, _ = handler.DeactivateUser(ctx,
+		connect.NewRequest(&v1.DeactivateUserRequest{Id: userID}))
+
+	// Delete user.
+	_, err := handler.DeleteUser(ctx, connect.NewRequest(&v1.DeleteUserRequest{
+		Id:           userID,
+		ConfirmEmail: "audit-test@example.com",
+	}))
+	if err != nil {
+		t.Fatalf("DeleteUser: %v", err)
+	}
+
+	// Verify global audit entry was written.
+	globalEntries := store.audit["_global"]
+	if len(globalEntries) == 0 {
+		t.Fatal("expected global audit entry for delete_user")
+	}
+
+	found := false
+	for _, entry := range globalEntries {
+		if entry.Action == "delete_user" && entry.UserID == userID {
+			found = true
+			if entry.ActorEmail != "admin@example.com" {
+				t.Errorf("actor_email = %q, want admin@example.com", entry.ActorEmail)
+			}
+			break
+		}
+	}
+	if !found {
+		t.Error("delete_user action not found in global audit log")
+	}
+
+	// Verify user-level audit is gone (deleted with user).
+	userEntries := store.audit[userID]
+	if len(userEntries) != 0 {
+		t.Errorf("expected user audit entries to be deleted, got %d", len(userEntries))
 	}
 }

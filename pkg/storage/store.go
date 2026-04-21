@@ -337,7 +337,7 @@ type BudgetRecord struct {
 	LimitUSD    float64   `json:"limit_usd,omitempty" firestore:"limit_usd,omitempty"`
 	SpentUSD    float64   `json:"spent_usd,omitempty" firestore:"spent_usd,omitempty"`
 	TokensUsed  int64     `json:"tokens_used,omitempty" firestore:"tokens_used,omitempty"`
-	PeriodType  string    `json:"period_type,omitempty" firestore:"period_type,omitempty"` // "monthly", "weekly", "quarterly"
+	PeriodType  string    `json:"period_type,omitempty" firestore:"period_type,omitempty"` // "daily"
 	PeriodKey   string    `json:"period_key,omitempty" firestore:"period_key,omitempty"`   // "2026-04", "2026-W15"
 	PeriodStart time.Time `json:"period_start,omitempty" firestore:"period_start,omitempty"`
 	PeriodEnd   time.Time `json:"period_end,omitempty" firestore:"period_end,omitempty"`
@@ -450,8 +450,13 @@ type UserStore interface {
 
 	// ── Audit ──
 
-	// LogAction records an admin action in the audit trail.
+	// LogAction records an admin action in the user's audit subcollection.
 	LogAction(ctx context.Context, entry *AuditRecord) error
+
+	// LogGlobalAction records an audit entry in a global collection that
+	// persists even after the target user is deleted. Use this for
+	// destructive actions like user deletion.
+	LogGlobalAction(ctx context.Context, entry *AuditRecord) error
 
 	// ListAuditLog returns the audit trail for a user.
 	ListAuditLog(ctx context.Context, userID string, limit int) ([]*AuditRecord, error)

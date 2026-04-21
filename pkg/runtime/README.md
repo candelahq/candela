@@ -102,10 +102,10 @@ parameter on `/api/generate` to pin or evict models from GPU memory.
 | Default port | `8000` |
 | Binary | `vllm` |
 | Model management | Single-model; requires restart to switch models |
-| API surface | OpenAI-compatible `/v1` only |
+| API surface | OpenAI-compatible `/v1` + `/health/ready` |
 
 vLLM is a **single-model** runtime. Loading a different model requires
-stopping and restarting the process with `--model <name>`. Callers should
+stopping and restarting the process with the new model. Callers should
 poll `Health()` after `LoadModel()` to wait for readiness.
 
 ### LM Studio (`pkg/runtime/lmstudio`)
@@ -115,7 +115,7 @@ poll `Health()` after `LoadModel()` to wait for readiness.
 | Default port | `1234` |
 | Binary | `lms` |
 | Model management | Via `lms` CLI (`lms load`, `lms unload`, `lms ls`) |
-| API surface | OpenAI-compatible `/v1` only |
+| API surface | OpenAI-compatible `/v1` + `/api/v1` management |
 
 LM Studio uses its `lms` CLI for lifecycle and model management.
 
@@ -178,7 +178,11 @@ UI (`/_local/`), showing install status and platform-specific install hints.
 // pkg/runtime/mybackend/mybackend.go
 package mybackend
 
-import "github.com/candelahq/candela/pkg/runtime"
+import (
+	"fmt"
+
+	"github.com/candelahq/candela/pkg/runtime"
+)
 
 func init() {
     runtime.Register("mybackend", func(cfg runtime.Config) (runtime.Runtime, error) {

@@ -169,8 +169,25 @@ type CompatModel struct {
 // GET /v1/models returns the configured model list.
 // POST /v1/chat/completions routes to the correct provider based on the model name.
 func (p *Proxy) RegisterCompatRoutes(mux *http.ServeMux, models []CompatModel) {
+	// Filter models: only surface models with known pricing.
+	// This ensures clients never discover a model that would show $0.00 cost.
+	var pricedModels []CompatModel
+	for _, m := range models {
+		if p.calc != nil && !p.calc.HasPricing(m.Provider, m.ID) {
+			slog.Warn("⚠️ hiding model from /v1/models — no pricing configured",
+				"model", m.ID, "provider", m.Provider)
+			continue
+		}
+		pricedModels = append(pricedModels, m)
+	}
+
+	if dropped := len(models) - len(pricedModels); dropped > 0 {
+		slog.Info("model list filtered by pricing availability",
+			"total", len(models), "visible", len(pricedModels), "hidden", dropped)
+	}
+
 	// Build the /v1/models response once at startup.
-	modelList := buildModelsResponse(models)
+	modelList := buildModelsResponse(pricedModels)
 
 	// GET /v1/models — return the configured model list (OpenAI-compatible).
 	mux.HandleFunc("GET /v1/models", func(w http.ResponseWriter, r *http.Request) {
@@ -185,8 +202,8 @@ func (p *Proxy) RegisterCompatRoutes(mux *http.ServeMux, models []CompatModel) {
 	})
 
 	// Build model→provider lookup.
-	modelToProvider := make(map[string]string, len(models))
-	for _, m := range models {
+	modelToProvider := make(map[string]string, len(pricedModels))
+	for _, m := range pricedModels {
 		modelToProvider[m.ID] = m.Provider
 	}
 

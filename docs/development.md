@@ -34,19 +34,19 @@ cd proto && buf generate
 This will populate `gen/go/` and `gen/ts/` (for the UI).
 
 ### 2. Running the Backend (Local Dev)
-The server defaults to **DuckDB** and uses the port from `config.yaml` (default **8080**).
+The server defaults to **DuckDB** and listens on the port from `config.yaml` (default **8181**).
 
 ```bash
-go run ./cmd/candela-server
+nix develop -c go run ./cmd/candela-server
 ```
 
-You can point your browser at `http://localhost:8181/healthz` to verify it's running.
+Verify it's running: `curl http://localhost:8181/healthz`
 
 ### 3. Running the UI
 The web interface is a Next.js 16 app in `ui/`.
 
 ```bash
-cd ui && npm install && npm run dev
+cd ui && pnpm install && pnpm run dev
 ```
 
 The UI will be available at `http://localhost:3000`.
@@ -55,12 +55,17 @@ The UI will be available at `http://localhost:3000`.
 We use standard Go testing. Candela includes integration tests for the Proxy and Storage backends.
 
 ```bash
-# Run all tests
-go test ./...
+# Run all tests (always use nix develop -c for toolchain access)
+nix develop -c go test ./...
 
-# Run proxy tests (requires internet for some providers, or mocks)
-go test ./pkg/proxy -v
+# With race detector and verbose output
+nix develop -c go test ./... -v -race -count=1
+
+# Run proxy tests
+nix develop -c go test ./pkg/proxy -v
 ```
+
+See [docs/testing.md](testing.md) for the full testing guide.
 
 ---
 
@@ -138,4 +143,87 @@ curl -X POST \
 **List Traces via `grpcurl`:**
 ```bash
 grpcurl -plaintext localhost:8181 candela.v1.TraceService/ListTraces
+```
+
+See [docs/api-reference.md](api-reference.md) for the full API reference.
+
+---
+
+## 🐛 Debugging
+
+### Log Level Control
+
+Candela uses Go's `slog` with JSON output. The default level is `INFO`. To enable debug logging:
+
+```go
+// In cmd/candela-server/main.go, change the handler options:
+logger := slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{
+    Level: slog.LevelDebug,  // Change from LevelInfo
+}))
+```
+
+Debug-level logs include:
+- Every proxied LLM call with model, tokens, cost, latency
+- Auth strategy evaluation (which strategy succeeded/failed)
+- Span processor flush events
+- Stream chunk translation details
+
+### IDE Debugger (GoLand / VS Code)
+
+Set the working directory to the repo root so `config.yaml` is found:
+
+```json
+// VS Code launch.json
+{
+  "type": "go",
+  "request": "launch",
+  "name": "Candela Server",
+  "program": "${workspaceFolder}/cmd/candela-server",
+  "cwd": "${workspaceFolder}"
+}
+```
+
+### Delve (CLI)
+
+```bash
+nix develop -c dlv debug ./cmd/candela-server
+```
+
+---
+
+## 🔥 Firestore Emulator
+
+For full-stack local dev with user management, run the Firestore emulator:
+
+```bash
+# Start the emulator (included in gcloud SDK via Nix)
+nix develop -c gcloud emulators firestore start --host-port=localhost:8282
+
+# In another terminal, set the emulator env var
+export FIRESTORE_EMULATOR_HOST=localhost:8282
+nix develop -c go run ./cmd/candela-server
+```
+
+With the emulator, Firestore operations (users, budgets, grants, audit) work locally without a GCP project.
+
+---
+
+## 🔄 Proto Generation
+
+Candela uses **Buf Remote Generation** — no local protoc plugins needed.
+
+```bash
+# Generate Go + TypeScript stubs
+cd proto && nix develop -c buf generate
+```
+
+This requires a `BUF_TOKEN` for remote generation. Options:
+- **CI**: Set as a GitHub Actions secret
+- **Local**: Add to `~/.netrc`: `machine buf.build login <user> password <token>`
+- **Local (env)**: `BUF_TOKEN=<token> buf generate`
+
+After generation, copy TS stubs to the UI:
+```bash
+cp -r gen/ts/candela/* ui/src/gen/
+rm -f ui/src/gen/types/bq_span_pb.ts  # BigQuery schema — server-only
 ```

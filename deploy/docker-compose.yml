@@ -1,23 +1,56 @@
-services:
-  # ClickHouse — trace/span storage
-  clickhouse:
-    image: clickhouse/clickhouse-server:24.12
-    ports:
-      - "8123:8123"   # HTTP interface
-      - "9000:9000"   # Native protocol
-    volumes:
-      - clickhouse_data:/var/lib/clickhouse
-    environment:
-      CLICKHOUSE_DB: candela
-      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1
-    healthcheck:
-      test: ["CMD", "clickhouse-client", "--query", "SELECT 1"]
-      interval: 5s
-      timeout: 3s
-      retries: 10
+# Candela Local Development Stack
+#
+# Usage:
+#   docker compose -f deploy/docker-compose.yml up
+#
+# This starts the Candela server with DuckDB storage.
+# For BigQuery or SQLite, update the config file.
 
-  # --- FUTURE SCALE (Commented out for Phase 1) ---
-  # Redis — span ingestion queue for high-scale environments
+services:
+  # Candela Server — Combined Go backend + Next.js UI
+  candela-server:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.server
+      args:
+        NEXT_PUBLIC_FIREBASE_API_KEY: ""
+        NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN: ""
+        NEXT_PUBLIC_FIREBASE_PROJECT_ID: ""
+        NEXT_PUBLIC_FIREBASE_APP_ID: ""
+    ports:
+      - "3000:3000"   # Next.js UI
+      - "8181:8181"   # Go backend API
+      - "1234:1234"   # LM Studio compat listener
+    environment:
+      CANDELA_STORAGE_BACKEND: duckdb
+      CANDELA_DEV_MODE: "true"
+      CANDELA_PROXY_ENABLED: "true"
+      CANDELA_LMSTUDIO_ENABLED: "true"
+    volumes:
+      - candela_data:/data
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://localhost:8181/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # --- Optional: OTel Collector ---
+  # Uncomment to run the custom collector for agent framework ingestion.
+  #
+  # candela-collector:
+  #   build:
+  #     context: ..
+  #     dockerfile: collector/Dockerfile  # You'll need to create this
+  #   ports:
+  #     - "4317:4317"   # OTLP gRPC
+  #     - "4318:4318"   # OTLP HTTP
+  #   volumes:
+  #     - ../collector/collector-config.yaml:/etc/otel/config.yaml:ro
+  #   depends_on:
+  #     candela-server:
+  #       condition: service_healthy
+
+  # --- Future: Redis queue for high-scale environments ---
   # redis:
   #   image: redis:7-alpine
   #   ports:
@@ -28,35 +61,5 @@ services:
   #     timeout: 3s
   #     retries: 5
 
-  # Candela Worker — separate span processor (redundant if using single-binary)
-  # candela-worker:
-  #   build:
-  #     context: ..
-  #     dockerfile: deploy/Dockerfile.worker
-  #   environment:
-  #     CANDELA_CONFIG: /app/config.yaml
-  #   volumes:
-  #     - ../config.yaml:/app/config.yaml:ro
-  #   depends_on:
-  #     clickhouse:
-  #       condition: service_healthy
-  #     redis:
-  #       condition: service_healthy
-
-  # Candela Server — ConnectRPC API
-  candela-server:
-    build:
-      context: ..
-      dockerfile: deploy/Dockerfile.server
-    ports:
-      - "8080:8080"
-    environment:
-      CANDELA_CONFIG: /app/config.yaml
-    volumes:
-      - ../config.yaml:/app/config.yaml:ro
-    depends_on:
-      clickhouse:
-        condition: service_healthy
-
 volumes:
-  clickhouse_data:
+  candela_data:

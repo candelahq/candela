@@ -87,6 +87,7 @@ type Config struct {
 		ProjectID  string `yaml:"project_id"`
 		DatabaseID string `yaml:"database_id"` // e.g. "candela" or "(default)"
 	} `yaml:"firestore"`
+	Pricing costcalc.PricingConfig `yaml:"pricing"`
 }
 
 func main() {
@@ -111,8 +112,11 @@ func main() {
 	defer closeFn()
 	slog.Info("storage initialized", "backend", cfg.Storage.Backend, "sinks", len(writers))
 
-	// Initialize cost calculator.
+	// Initialize cost calculator with built-in defaults + config overrides.
 	calc := costcalc.New()
+	if cfg.Pricing.DiscountPercent > 0 || len(cfg.Pricing.Models) > 0 {
+		calc.LoadFromConfig(cfg.Pricing)
+	}
 
 	// Start the in-process span processor (fan-out to all writers).
 	proc := processor.New(writers, calc, cfg.Worker.BatchSize)
@@ -440,10 +444,10 @@ func loadConfig() (*Config, error) {
 
 	data, err := os.ReadFile(cfgPath)
 	if err != nil {
-		// No config file — use defaults (DuckDB, port 8080).
+		// No config file — use defaults (DuckDB, port 8181).
 		slog.Warn("config file not found, using defaults", "path", cfgPath)
 		cfg := &Config{}
-		cfg.Server.Port = 8080
+		cfg.Server.Port = 8181
 		cfg.Storage.Backend = "duckdb"
 		return cfg, nil
 	}
@@ -454,7 +458,7 @@ func loadConfig() (*Config, error) {
 	}
 
 	if cfg.Server.Port == 0 {
-		cfg.Server.Port = 8080
+		cfg.Server.Port = 8181
 	}
 	if cfg.Storage.Backend == "" {
 		cfg.Storage.Backend = "duckdb"

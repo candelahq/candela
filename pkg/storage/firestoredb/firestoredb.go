@@ -286,7 +286,7 @@ func (s *Store) ListGrants(ctx context.Context, userID string, activeOnly bool) 
 		Collection(grantsCol).OrderBy("expires_at", firestore.Asc)
 
 	if activeOnly {
-		q = q.Where("expires_at", ">", time.Now().UTC())
+		q = q.Where("ExpiresAt", ">", time.Now().UTC())
 	}
 
 	snaps, err := q.Documents(ctx).GetAll()
@@ -368,8 +368,8 @@ func (s *Store) DeductSpend(ctx context.Context, userID string, costUSD float64,
 		grantsRef := s.client.Collection(usersCol).Doc(userID).
 			Collection(grantsCol)
 		grantsSnaps, err := tx.Documents(grantsRef.
-			Where("expires_at", ">", time.Now().UTC()).
-			OrderBy("expires_at", firestore.Asc)).GetAll()
+			Where("ExpiresAt", ">", time.Now().UTC()).
+			OrderBy("ExpiresAt", firestore.Asc)).GetAll()
 		if err != nil {
 			return fmt.Errorf("firestoredb: loading grants in tx: %w", err)
 		}

@@ -30,7 +30,9 @@ type Calculator struct {
 	mu             sync.RWMutex
 	defaults       map[string]ModelPricing // key: "provider/model" — built-in list prices
 	overrides      map[string]ModelPricing // key: "provider/model" — config overrides
+	fallback       map[string]ModelPricing // key: "model" — deterministic name-only match
 	globalDiscount float64                 // 0.0–1.0
+	loggedUnknown  sync.Map                // key: "provider/model" — track logged warnings
 }
 
 // New creates a Calculator with default pricing for all supported cloud models.
@@ -38,13 +40,15 @@ func New() *Calculator {
 	c := &Calculator{
 		defaults:  make(map[string]ModelPricing),
 		overrides: make(map[string]ModelPricing),
+		fallback:  make(map[string]ModelPricing),
 	}
 	c.loadDefaults()
+	c.rebuildFallback()
 	return c
 }
 
 // Calculate returns the estimated cost in USD for the given model and token counts.
-// Local models always return $0.00. Unknown cloud models log a warning and return $0.00.
+// Local models always return $0.00. Unknown cloud models log a warning (once) and return $0.00.
 func (c *Calculator) Calculate(provider, model string, inputTokens, outputTokens int64) float64 {
 	// Local models run on your hardware — no API cost.
 	if strings.ToLower(provider) == "local" {
@@ -56,12 +60,15 @@ func (c *Calculator) Calculate(provider, model string, inputTokens, outputTokens
 
 	p, ok := c.resolve(provider, model)
 	if !ok {
-		slog.Warn("⚠️ missing pricing for cloud model — cost will be $0.00 (inaccurate)",
-			"provider", provider,
-			"model", model,
-			"input_tokens", inputTokens,
-			"output_tokens", outputTokens,
-		)
+		key := c.key(provider, model)
+		if _, alreadyLogged := c.loggedUnknown.LoadOrStore(key, true); !alreadyLogged {
+			slog.Warn("⚠️ missing pricing for cloud model — cost will be $0.00 (inaccurate)",
+				"provider", provider,
+				"model", model,
+				"input_tokens", inputTokens,
+				"output_tokens", outputTokens,
+			)
+		}
 		return 0 // Unknown model — this is a gap, not a feature
 	}
 
@@ -92,6 +99,8 @@ func (c *Calculator) LoadFromConfig(cfg PricingConfig) {
 		c.overrides[c.key(p.Provider, p.Model)] = p
 	}
 
+	c.rebuildFallback()
+
 	if cfg.DiscountPercent > 0 {
 		slog.Info("💰 global pricing discount applied",
 			"discount", cfg.DiscountPercent)
@@ -107,6 +116,7 @@ func (c *Calculator) SetPricing(p ModelPricing) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.overrides[c.key(p.Provider, p.Model)] = p
+	c.rebuildFallback()
 }
 
 // SetGlobalDiscount sets the global discount percentage (0.0–1.0).
@@ -130,7 +140,7 @@ func (c *Calculator) HasPricing(provider, model string) bool {
 }
 
 // resolve looks up pricing: config overrides first, then built-in defaults,
-// then provider-agnostic model name match as last resort.
+// then precomputed provider-agnostic fallback.
 func (c *Calculator) resolve(provider, model string) (ModelPricing, bool) {
 	key := c.key(provider, model)
 
@@ -144,20 +154,48 @@ func (c *Calculator) resolve(provider, model string) (ModelPricing, bool) {
 		return p, true
 	}
 
-	// 3. Provider-agnostic fallback — match by model name alone.
-	// This handles cases like "gemini-oai/gemini-2.5-pro" matching "google/gemini-2.5-pro".
-	for _, m := range c.overrides {
-		if strings.EqualFold(m.Model, model) {
-			return m, true
-		}
-	}
-	for _, m := range c.defaults {
-		if strings.EqualFold(m.Model, model) {
-			return m, true
-		}
+	// 3. Precomputed provider-agnostic fallback (deterministic)
+	if p, ok := c.fallback[strings.ToLower(model)]; ok {
+		return p, true
 	}
 
 	return ModelPricing{}, false
+}
+
+// rebuildFallback creates a deterministic lookup for model names without providers.
+// Priority: Overrides > Defaults. Tie-breaker: Alphabetical provider.
+// This MUST be called while holding a write lock.
+func (c *Calculator) rebuildFallback() {
+	c.fallback = make(map[string]ModelPricing)
+
+	// Sort providers alphabetically to ensure deterministic selection when multiple
+	// providers offer the same model name.
+	process := func(source map[string]ModelPricing) {
+		// Group by model name
+		grouped := make(map[string][]ModelPricing)
+		for _, p := range source {
+			m := strings.ToLower(p.Model)
+			grouped[m] = append(grouped[m], p)
+		}
+
+		// For each model, select the first provider alphabetically
+		for m, ps := range grouped {
+			best := ps[0]
+			for _, p := range ps[1:] {
+				if strings.ToLower(p.Provider) < strings.ToLower(best.Provider) {
+					best = p
+				}
+			}
+			// Don't overwrite if a higher-priority source (e.g. Overrides) already set it.
+			if _, exists := c.fallback[m]; !exists {
+				c.fallback[m] = best
+			}
+		}
+	}
+
+	// Process Overrides first, then Defaults.
+	process(c.overrides)
+	process(c.defaults)
 }
 
 func (c *Calculator) key(provider, model string) string {

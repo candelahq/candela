@@ -16,11 +16,11 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"cloud.google.com/go/firestore"
 	"github.com/google/uuid"
-	"google.golang.org/api/iterator"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
@@ -66,9 +66,11 @@ func (s *Store) Close() error {
 // ──────────────────────────────────────────
 
 func (s *Store) CreateUser(ctx context.Context, user *storage.UserRecord) error {
-	if user.ID == "" {
-		user.ID = uuid.New().String()
+	if user.Email == "" {
+		return fmt.Errorf("firestoredb: email is required for user creation")
 	}
+	// Use lowercase email as the primary document ID for search efficiency and uniqueness.
+	user.ID = strings.ToLower(user.Email)
 	if user.CreatedAt.IsZero() {
 		user.CreatedAt = time.Now().UTC()
 	}
@@ -102,20 +104,9 @@ func (s *Store) GetUser(ctx context.Context, id string) (*storage.UserRecord, er
 }
 
 func (s *Store) GetUserByEmail(ctx context.Context, email string) (*storage.UserRecord, error) {
-	iter := s.client.Collection(usersCol).
-		Where("email", "==", email).
-		Limit(1).
-		Documents(ctx)
-	defer iter.Stop()
-
-	snap, err := iter.Next()
-	if err == iterator.Done {
-		return nil, fmt.Errorf("firestoredb: user email %s: %w", email, storage.ErrNotFound)
-	}
-	if err != nil {
-		return nil, fmt.Errorf("firestoredb: querying user by email: %w", err)
-	}
-	return snapToUser(snap)
+	// With email-as-ID, this becomes a O(1) direct document lookup.
+	id := strings.ToLower(email)
+	return s.GetUser(ctx, id)
 }
 
 func (s *Store) GetUsers(ctx context.Context, ids []string) (map[string]*storage.UserRecord, error) {
@@ -150,9 +141,9 @@ func (s *Store) GetUsers(ctx context.Context, ids []string) (map[string]*storage
 }
 
 func (s *Store) ListUsers(ctx context.Context, statusFilter string, limit, offset int) ([]*storage.UserRecord, int, error) {
-	q := s.client.Collection(usersCol).OrderBy("email", firestore.Asc)
+	q := s.client.Collection(usersCol).OrderBy(firestore.DocumentID, firestore.Asc)
 	if statusFilter != "" {
-		q = q.Where("status", "==", statusFilter)
+		q = q.Where("Status", "==", statusFilter)
 	}
 
 	// Efficient count via Firestore aggregation query.
@@ -195,7 +186,18 @@ func (s *Store) ListUsers(ctx context.Context, statusFilter string, limit, offse
 
 func (s *Store) UpdateUser(ctx context.Context, user *storage.UserRecord) error {
 	ref := s.client.Collection(usersCol).Doc(user.ID)
-	_, err := ref.Set(ctx, user, firestore.MergeAll)
+	// Convert struct to map because Firestore MergeAll only supports map data.
+	asMap := map[string]any{
+		"ID":          user.ID,
+		"Email":       user.Email,
+		"DisplayName": user.DisplayName,
+		"Role":        user.Role,
+		"Status":      user.Status,
+		"CreatedAt":   user.CreatedAt,
+		"LastSeenAt":  user.LastSeenAt,
+		"RateLimit":   user.RateLimit,
+	}
+	_, err := ref.Set(ctx, asMap, firestore.MergeAll)
 	if err != nil {
 		return fmt.Errorf("firestoredb: updating user: %w", err)
 	}
@@ -568,6 +570,8 @@ func currentPeriodKey(periodType string) string {
 	case "quarterly":
 		q := (int(now.Month())-1)/3 + 1
 		return fmt.Sprintf("%d-Q%d", now.Year(), q)
+	case "daily":
+		return now.Format("2006-01-02")
 	case "monthly":
 		fallthrough
 	default:

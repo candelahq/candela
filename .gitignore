@@ -52,6 +52,7 @@ __pycache__/
 *.db
 *.db-shm
 *.db-wal
+*.db-journal
 *.duckdb
 *.duckdb.wal
 
@@ -62,6 +63,7 @@ __pycache__/
 *.tfstate
 *.tfstate.backup
 tfplan
+*.tfplan
 
 # Firebase
 firebase.json

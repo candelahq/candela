@@ -187,9 +187,19 @@ func (s *Store) ListUsers(ctx context.Context, statusFilter string, limit, offse
 func (s *Store) UpdateUser(ctx context.Context, user *storage.UserRecord) error {
 	id := sanitizeID(user.ID)
 	ref := s.client.Collection(usersCol).Doc(id)
-	// Use the struct directly with MergeAll; the 'firestore' struct tags
-	// handle the mapping to snake_case automatically.
-	_, err := ref.Set(ctx, user, firestore.MergeAll)
+	// Use targeted updates for mutable fields only. This avoids the
+	// "MergeAll can only be specified with map data" error that occurs
+	// when passing a struct to Set with MergeAll.
+	updates := []firestore.Update{
+		{Path: "role", Value: user.Role},
+		{Path: "status", Value: user.Status},
+		{Path: "display_name", Value: user.DisplayName},
+		{Path: "rate_limit", Value: user.RateLimit},
+	}
+	if !user.LastSeenAt.IsZero() {
+		updates = append(updates, firestore.Update{Path: "last_seen_at", Value: user.LastSeenAt})
+	}
+	_, err := ref.Update(ctx, updates)
 	if err != nil {
 		return fmt.Errorf("firestoredb: updating user: %w", err)
 	}

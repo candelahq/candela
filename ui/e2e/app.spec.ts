@@ -28,6 +28,7 @@ test.describe("App Shell", () => {
   test("renders sidebar with navigation links", async ({ page }) => {
     await page.goto("/");
     await expect(page.locator(".sidebar-logo")).toHaveText("Candela");
+    await expect(page.locator(".nav-item").filter({ hasText: "Today" })).toBeVisible();
     await expect(page.locator(".nav-item").filter({ hasText: "Dashboard" })).toBeVisible();
     await expect(page.locator(".nav-item").filter({ hasText: "Traces" })).toBeVisible();
     await expect(page.locator(".nav-item").filter({ hasText: "Costs" })).toBeVisible();

@@ -2,7 +2,7 @@
 
 import { useTodayBudget, type TodayModelUsage } from "@/hooks/useTodayBudget";
 import { ErrorBanner } from "@/components/ErrorBanner";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 /** Format a number with k/M suffixes for large token counts. */
 function fmtTokens(n: number): string {
@@ -135,12 +135,19 @@ export default function TodayPage() {
     ? (data.totalInputTokens + data.totalOutputTokens)
     : 0;
 
+  // Use UTC to match the budget reset boundary (midnight UTC).
   const todayStr = new Date().toLocaleDateString(undefined, {
     weekday: "long",
     month: "long",
     day: "numeric",
     year: "numeric",
+    timeZone: "UTC",
   });
+
+  const sortedModels = useMemo(
+    () => [...(data?.models ?? [])].sort((a, b) => b.costUsd - a.costUsd),
+    [data?.models],
+  );
 
   return (
     <>
@@ -258,9 +265,9 @@ export default function TodayPage() {
             </div>
           ) : (
             <div className="today-model-list">
-              {[...(data?.models ?? [])]
-                .sort((a, b) => b.costUsd - a.costUsd)
-                .map((m) => <TokenBar key={`${m.provider}-${m.model}`} model={m} />)}
+              {sortedModels.map((m) => (
+                <TokenBar key={`${m.provider}-${m.model}`} model={m} />
+              ))}
             </div>
           )}
         </div>

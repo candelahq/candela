@@ -22,9 +22,13 @@ export default defineConfig({
     },
   ],
 
-  /* Start next dev server before running tests. */
+  /**
+   * Start Next.js with NODE_ENV=test so it loads .env.test instead of
+   * .env.local. This disables Firebase Auth, letting AuthGuard pass
+   * through and allowing Playwright to render pages without login.
+   */
   webServer: {
-    command: "npm run dev",
+    command: "NODE_ENV=test npm run dev",
     url: "http://localhost:3000",
     reuseExistingServer: !process.env.CI,
     timeout: 30_000,

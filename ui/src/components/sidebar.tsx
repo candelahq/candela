@@ -9,6 +9,7 @@ const navItems = [
   {
     section: "Observe",
     items: [
+      { href: "/today", label: "Today", icon: "🕯️" },
       { href: "/", label: "Dashboard", icon: "📊" },
       { href: "/traces", label: "Traces", icon: "🔍" },
       { href: "/usage", label: "My Usage", icon: "📈" },

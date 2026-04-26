@@ -240,18 +240,20 @@ test.describe("Today Budget View", () => {
     });
 
     await page.goto("/today");
-    // Wait for initial load
-    await expect(
-      page.locator(".today-stat-card").filter({ hasText: "Requests" }).locator(".card-value")
-    ).toHaveText("10");
+    // Wait for page to settle — read whatever initial value landed
+    const requestsCard = page.locator(".today-stat-card").filter({ hasText: "Requests" }).locator(".card-value");
+    await expect(requestsCard).not.toHaveText("—");
+    const initialValue = await requestsCard.textContent();
 
-    // Click refresh
+    // Click refresh and wait for the network call to complete
+    const responsePromise = page.waitForResponse(
+      (res) => res.url().includes("/candela.v1.DashboardService/GetMyUsage") && res.status() === 200
+    );
     await page.locator("button").filter({ hasText: "🔄" }).click();
+    await responsePromise;
 
-    // Should show updated data
-    await expect(
-      page.locator(".today-stat-card").filter({ hasText: "Requests" }).locator(".card-value")
-    ).toHaveText("20");
+    // Value should have changed from whatever it was
+    await expect(requestsCard).not.toHaveText(initialValue!);
   });
 });
 

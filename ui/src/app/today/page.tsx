@@ -18,7 +18,7 @@ function BudgetRing({ percent, spent, limit, remaining }: {
   limit: number;
   remaining: number;
 }) {
-  const [offset, setOffset] = useState(282.74); // 2 * PI * 45
+  const [offset, setOffset] = useState(2 * Math.PI * 45);
   const r = 45;
   const circumference = 2 * Math.PI * r;
 
@@ -155,7 +155,9 @@ export default function TodayPage() {
               Updated {data.fetchedAt.toLocaleTimeString()}
             </span>
           )}
-          <button className="btn" onClick={refresh} title="Refresh">🔄</button>
+          <button className="btn" onClick={refresh} title="Refresh" aria-label="Refresh data">
+            <span role="img" aria-hidden="true">🔄</span>
+          </button>
         </div>
       </header>
 
@@ -208,7 +210,7 @@ export default function TodayPage() {
         <div className="stats-grid animate-in" style={{ animationDelay: "0.08s", marginTop: 24 }}>
           <div className="card today-stat-card">
             <div className="card-title">Requests</div>
-            <div className="card-value">{loading && !data ? "—" : data?.totalCalls.toLocaleString()}</div>
+            <div className="card-value">{data ? data.totalCalls.toLocaleString() : "—"}</div>
             <div className="card-subtitle">API calls today</div>
           </div>
           <div className="card today-stat-card">
@@ -220,12 +222,12 @@ export default function TodayPage() {
           </div>
           <div className="card today-stat-card">
             <div className="card-title">Cost</div>
-            <div className="card-value">{loading && !data ? "—" : `$${data?.totalCostUsd.toFixed(4)}`}</div>
+            <div className="card-value">{data ? `$${data.totalCostUsd.toFixed(4)}` : "—"}</div>
             <div className="card-subtitle">Estimated USD today</div>
           </div>
           <div className="card today-stat-card">
             <div className="card-title">Avg Latency</div>
-            <div className="card-value">{loading && !data ? "—" : `${data?.avgLatencyMs.toFixed(0)}ms`}</div>
+            <div className="card-value">{data ? `${data.avgLatencyMs.toFixed(0)}ms` : "—"}</div>
             <div className="card-subtitle">Across all models</div>
           </div>
         </div>
@@ -256,7 +258,7 @@ export default function TodayPage() {
             </div>
           ) : (
             <div className="today-model-list">
-              {data?.models
+              {[...(data?.models ?? [])]
                 .sort((a, b) => b.costUsd - a.costUsd)
                 .map((m) => <TokenBar key={`${m.provider}-${m.model}`} model={m} />)}
             </div>

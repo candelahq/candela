@@ -150,9 +150,9 @@ sinks:
 sinks:
   otlp:
     enabled: true
-    endpoint: "http://localhost:4318"  # OTel Collector or backend
+    endpoint: "http://localhost:4318/v1/traces"  # OTel Collector or backend
     protocol: "http"                   # "http" (default) or "grpc" (planned)
-    compression: "gzip"               # "gzip" (default) or "none"
+    compression: "gzip"                # "gzip" (default) or "none"
     timeout_sec: 30
     required: false                    # fail startup if init fails
     headers:

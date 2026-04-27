@@ -1,6 +1,6 @@
 # Candela — Continuous Deployment
 #
-# Triggers on merge to main (after CI passes).
+# Triggers after CI completes successfully on main.
 # Builds the container via Cloud Build, then deploys to Cloud Run.
 #
 # Auth: Workload Identity Federation (keyless) — see terraform/github_wif.tf
@@ -14,14 +14,18 @@
 #   FIREBASE_AUTH_DOMAIN        — e.g., project.firebaseapp.com
 #   FIREBASE_PROJECT_ID         — Firebase project ID
 #   FIREBASE_APP_ID             — Firebase app ID
-#   BUF_TOKEN                   — Buf registry token for proto gen
 
 name: Deploy
 
 on:
-  push:
+  # Trigger after CI workflow completes successfully on main.
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
     branches: [main]
-  workflow_dispatch:      # Manual trigger for ad-hoc deploys
+
+  # Manual trigger for ad-hoc deploys (skips CI gate).
+  workflow_dispatch:
 
 # Cancel in-flight deploys when a new commit lands on main.
 concurrency:
@@ -36,15 +40,13 @@ env:
   IMAGE: us-central1-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/candela/candela-server
 
 jobs:
-  # ── Gate: CI must pass first ──
-  ci:
-    uses: ./.github/workflows/ci.yml
-    secrets: inherit
-
   # ── Build container image via Cloud Build ──
   build:
-    needs: ci
     runs-on: ubuntu-latest
+    # Only run if CI succeeded (or if manually triggered).
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      github.event.workflow_run.conclusion == 'success'
     outputs:
       image_tag: ${{ steps.meta.outputs.tag }}
 
@@ -54,8 +56,12 @@ jobs:
       - name: Compute image tag
         id: meta
         run: |
-          TAG="${GITHUB_SHA::8}"
-          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          if [ "${{ github.event_name }}" = "workflow_run" ]; then
+            SHA="${{ github.event.workflow_run.head_sha }}"
+          else
+            SHA="${GITHUB_SHA}"
+          fi
+          echo "tag=${SHA::8}" >> "$GITHUB_OUTPUT"
 
       - name: Authenticate to GCP
         uses: google-github-actions/auth@v2
@@ -83,7 +89,7 @@ jobs:
   deploy:
     needs: build
     runs-on: ubuntu-latest
-    environment: production       # GitHub Environment for deploy protection rules
+    environment: production       # GitHub Environment for optional deploy protection rules
 
     steps:
       - name: Authenticate to GCP

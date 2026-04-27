@@ -294,6 +294,9 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 		requestID = generateSpanID() + generateSpanID() // 32-char hex
 	}
 
+	// Accept session ID from candela-local (or other clients).
+	sessionID := r.Header.Get("X-Session-Id")
+
 	// Extract provider from path: /proxy/{provider}/v1/...
 	parts := strings.SplitN(strings.TrimPrefix(r.URL.Path, "/proxy/"), "/", 2)
 	if len(parts) < 2 {
@@ -406,9 +409,9 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 	cbAllow := p.breakers[providerName].AllowRequest()
 
 	if isStreaming && resp.StatusCode == http.StatusOK {
-		p.handleStreamingResponse(w, r, resp, provider, reqBody, startTime, ttfb, requestID, cbAllow)
+		p.handleStreamingResponse(w, r, resp, provider, reqBody, startTime, ttfb, requestID, sessionID, cbAllow)
 	} else {
-		p.handleStandardResponse(w, r, resp, provider, reqBody, startTime, ttfb, requestID, cbAllow)
+		p.handleStandardResponse(w, r, resp, provider, reqBody, startTime, ttfb, requestID, sessionID, cbAllow)
 	}
 }
 
@@ -436,6 +439,7 @@ func (p *Proxy) handleStandardResponse(
 	reqBody []byte, startTime time.Time,
 	ttfb time.Duration,
 	requestID string,
+	sessionID string,
 	cbAllow bool,
 ) {
 	// Read the full response.
@@ -476,7 +480,7 @@ func (p *Proxy) handleStandardResponse(
 
 	// Create observability span (async — don't block the response).
 	if cbAllow {
-		go p.createSpan(r.Context(), provider, reqBody, respBody, startTime, endTime, resp.StatusCode, ttfb, requestID)
+		go p.createSpan(r.Context(), provider, reqBody, respBody, startTime, endTime, resp.StatusCode, ttfb, requestID, sessionID)
 	} else {
 		slog.Debug("skipping span creation (circuit open)", "provider", provider.Name, "request_id", requestID)
 	}
@@ -488,6 +492,7 @@ func (p *Proxy) handleStreamingResponse(
 	reqBody []byte, startTime time.Time,
 	ttfb time.Duration,
 	requestID string,
+	sessionID string,
 	cbAllow bool,
 ) {
 	flusher, ok := w.(http.Flusher)
@@ -555,7 +560,7 @@ func (p *Proxy) handleStreamingResponse(
 
 	// Parse the accumulated stream to extract usage data.
 	if cbAllow {
-		go p.createStreamingSpan(r.Context(), provider, reqBody, streamBuffer.Bytes(), startTime, endTime, ttfb, ttft, requestID)
+		go p.createStreamingSpan(r.Context(), provider, reqBody, streamBuffer.Bytes(), startTime, endTime, ttfb, ttft, requestID, sessionID)
 	} else {
 		slog.Debug("skipping streaming span (circuit open)", "provider", provider.Name, "request_id", requestID)
 	}
@@ -567,6 +572,7 @@ func (p *Proxy) handleStreamingResponse(
 type spanParams struct {
 	provider      Provider
 	model         string
+	sessionID     string
 	inputContent  string
 	outputContent string
 	inputTokens   int64
@@ -622,6 +628,9 @@ func (p *Proxy) buildSpan(ctx context.Context, params spanParams) {
 		span.UserID = caller.ID
 	}
 
+	// Set session ID for conversation grouping.
+	span.SessionID = params.sessionID
+
 	if p.submitter != nil {
 		p.submitter.SubmitBatch([]storage.Span{span})
 	}
@@ -675,6 +684,7 @@ func (p *Proxy) createSpan(
 	statusCode int,
 	ttfb time.Duration,
 	requestID string,
+	sessionID string,
 ) {
 	model, inputContent := extractRequestInfo(provider.Name, reqBody)
 	outputContent, inputTokens, outputTokens := extractResponseInfo(provider.Name, respBody)
@@ -696,6 +706,7 @@ func (p *Proxy) createSpan(
 		status:        status,
 		ttfb:          ttfb,
 		requestID:     requestID,
+		sessionID:     sessionID,
 		namePrefix:    fmt.Sprintf("%s.chat", provider.Name),
 		extraAttrs: map[string]string{
 			"http.status": fmt.Sprintf("%d", statusCode),
@@ -710,6 +721,7 @@ func (p *Proxy) createStreamingSpan(
 	ttfb time.Duration,
 	ttft time.Duration,
 	requestID string,
+	sessionID string,
 ) {
 	model, inputContent := extractRequestInfo(provider.Name, reqBody)
 	outputContent, inputTokens, outputTokens := extractStreamingUsage(provider.Name, streamData)
@@ -726,6 +738,7 @@ func (p *Proxy) createStreamingSpan(
 		status:        storage.SpanStatusOK,
 		ttfb:          ttfb,
 		requestID:     requestID,
+		sessionID:     sessionID,
 		namePrefix:    fmt.Sprintf("%s.chat.stream", provider.Name),
 		extraAttrs: map[string]string{
 			"proxy.streaming": "true",

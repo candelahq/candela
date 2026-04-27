@@ -105,6 +105,7 @@ type spanRow struct {
 	OutputContent string        `bigquery:"gen_ai_output_content"`
 	Attributes    []AttributeKV `bigquery:"attributes"`
 	UserID        string        `bigquery:"user_id"`
+	SessionID     string        `bigquery:"session_id"`
 }
 
 func spanToRow(span storage.Span) spanRow {
@@ -123,6 +124,7 @@ func spanToRow(span storage.Span) spanRow {
 		Environment:   span.Environment,
 		ServiceName:   span.ServiceName,
 		UserID:        span.UserID,
+		SessionID:     span.SessionID,
 	}
 
 	if span.GenAI != nil {
@@ -161,6 +163,7 @@ func rowToSpan(row spanRow) storage.Span {
 		Environment:   row.Environment,
 		ServiceName:   row.ServiceName,
 		UserID:        row.UserID,
+		SessionID:     row.SessionID,
 	}
 
 	if row.GenAIModel != "" {

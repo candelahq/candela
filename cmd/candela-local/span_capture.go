@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/candelahq/candela/pkg/processor"
+	"github.com/candelahq/candela/pkg/session"
 	"github.com/candelahq/candela/pkg/storage"
 )
 
@@ -18,16 +19,17 @@ import (
 // request/response data to emit observability spans via the span processor.
 // Handles both streaming (SSE) and non-streaming OpenAI-format responses.
 type spanCapture struct {
-	next http.Handler
-	proc *processor.SpanProcessor
+	next     http.Handler
+	proc     *processor.SpanProcessor
+	resolver session.SessionResolver
 }
 
 // newSpanCapture creates a span-capturing middleware.
-func newSpanCapture(next http.Handler, proc *processor.SpanProcessor) http.Handler {
+func newSpanCapture(next http.Handler, proc *processor.SpanProcessor, resolver session.SessionResolver) http.Handler {
 	if proc == nil {
 		return next // no processor → passthrough
 	}
-	return &spanCapture{next: next, proc: proc}
+	return &spanCapture{next: next, proc: proc, resolver: resolver}
 }
 
 func (s *spanCapture) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -49,25 +51,45 @@ func (s *spanCapture) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	r.Body = io.NopCloser(bytes.NewReader(reqBody))
 	r.ContentLength = int64(len(reqBody))
 
-	// Parse request for model name and input content (extract early to avoid redundant unmarshal).
+	// Parse request for model name, input content, and raw messages.
 	var chatReq struct {
-		Model    string `json:"model"`
-		Stream   *bool  `json:"stream"`
-		Messages []struct {
-			Role    string `json:"role"`
-			Content string `json:"content"`
-		} `json:"messages"`
+		Model    string          `json:"model"`
+		Stream   *bool           `json:"stream"`
+		Messages json.RawMessage `json:"messages"`
 	}
 	_ = json.Unmarshal(reqBody, &chatReq)
 
+	// Decode messages for input content extraction.
+	var msgs []struct {
+		Role    string `json:"role"`
+		Content string `json:"content"`
+	}
+	_ = json.Unmarshal(chatReq.Messages, &msgs)
+
 	// Extract input content now to avoid re-parsing later.
 	var inputContent string
-	if len(chatReq.Messages) > 0 {
-		last := chatReq.Messages[len(chatReq.Messages)-1]
-		inputContent = last.Content
-		if runeCount := len([]rune(inputContent)); runeCount > 500 {
-			runes := []rune(inputContent)
+	if len(msgs) > 0 {
+		last := msgs[len(msgs)-1]
+		runes := []rune(last.Content)
+		if len(runes) > 500 {
 			inputContent = string(runes[:500]) + "..."
+		} else {
+			inputContent = last.Content
+		}
+	}
+
+	// Resolve session ID.
+	var sessionID string
+	if s.resolver != nil {
+		sessionID = s.resolver.Resolve(session.SessionInfo{
+			UserID:   r.Header.Get("X-User-Id"),
+			Model:    chatReq.Model,
+			Messages: chatReq.Messages, // pass raw JSON directly, no re-marshal
+			Headers:  r.Header,
+		})
+		// Inject header so downstream (lm_handler → remote proxy) can see it.
+		if sessionID != "" {
+			r.Header.Set("X-Session-Id", sessionID)
 		}
 	}
 
@@ -78,10 +100,10 @@ func (s *spanCapture) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	duration := time.Since(start)
 
 	// Build the span asynchronously to not block the response.
-	go s.buildSpan(chatReq.Model, chatReq.Stream, inputContent, rec.body.Bytes(), rec.statusCode, start, duration)
+	go s.buildSpan(chatReq.Model, chatReq.Stream, inputContent, rec.body.Bytes(), rec.statusCode, start, duration, sessionID)
 }
 
-func (s *spanCapture) buildSpan(model string, stream *bool, inputContent string, respBody []byte, statusCode int, start time.Time, duration time.Duration) {
+func (s *spanCapture) buildSpan(model string, stream *bool, inputContent string, respBody []byte, statusCode int, start time.Time, duration time.Duration, sessionID string) {
 	var inputTokens, outputTokens, totalTokens int64
 
 	isStreaming := stream != nil && *stream
@@ -124,6 +146,7 @@ func (s *spanCapture) buildSpan(model string, stream *bool, inputContent string,
 		EndTime:   start.Add(duration),
 		Duration:  duration,
 		ProjectID: "local",
+		SessionID: sessionID,
 		GenAI: &storage.GenAIAttributes{
 			Model:        model,
 			Provider:     "local",

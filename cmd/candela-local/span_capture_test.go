@@ -49,7 +49,7 @@ func TestSpanCapture_NonStreaming(t *testing.T) {
 	defer proc.Stop()
 
 	// Wrap upstream with span capture.
-	handler := newSpanCapture(proxyTo(upstream.URL), proc)
+	handler := newSpanCapture(proxyTo(upstream.URL), proc, nil)
 	srv := httptest.NewServer(handler)
 	defer srv.Close()
 
@@ -113,7 +113,7 @@ func TestSpanCapture_Passthrough(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	handler := newSpanCapture(proxyTo(upstream.URL), nil)
+	handler := newSpanCapture(proxyTo(upstream.URL), nil, nil)
 	srv := httptest.NewServer(handler)
 	defer srv.Close()
 
@@ -248,7 +248,7 @@ func TestSpanCapture_ErrorStatus(t *testing.T) {
 	go proc.Run(ctx)
 	defer proc.Stop()
 
-	handler := newSpanCapture(proxyTo(upstream.URL), proc)
+	handler := newSpanCapture(proxyTo(upstream.URL), proc, nil)
 	srv := httptest.NewServer(handler)
 	defer srv.Close()
 

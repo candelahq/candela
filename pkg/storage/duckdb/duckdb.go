@@ -75,7 +75,9 @@ func (s *Store) migrate() error {
 			gen_ai_input_content  VARCHAR DEFAULT '',
 			gen_ai_output_content VARCHAR DEFAULT '',
 
-			attributes STRUCT(key VARCHAR, value VARCHAR)[]
+			attributes STRUCT(key VARCHAR, value VARCHAR)[],
+
+			session_id     VARCHAR DEFAULT ''
 
 			-- No PRIMARY KEY: OLAP convention. Duplicates are rare and handled
 			-- at query time (or via periodic compaction). This keeps the Appender
@@ -87,6 +89,8 @@ func (s *Store) migrate() error {
 		`CREATE INDEX IF NOT EXISTS idx_spans_user ON spans(user_id)`,
 		// Migration: add user_id column to existing tables.
 		`ALTER TABLE spans ADD COLUMN IF NOT EXISTS user_id VARCHAR DEFAULT ''`,
+		// Migration: add session_id column for conversation tracking.
+		`ALTER TABLE spans ADD COLUMN IF NOT EXISTS session_id VARCHAR DEFAULT ''`,
 	}
 
 	for _, q := range queries {
@@ -141,6 +145,7 @@ func (s *Store) IngestSpans(ctx context.Context, spans []storage.Span) error {
 				genAI.CostUSD, genAI.Temperature, genAI.MaxTokens,
 				genAI.InputContent, genAI.OutputContent,
 				attrs,
+				span.SessionID,
 			); err != nil {
 				return fmt.Errorf("appending span %s: %w", span.SpanID, err)
 			}
@@ -159,7 +164,7 @@ func (s *Store) GetTrace(ctx context.Context, traceID string) (*storage.Trace, e
 			start_time, end_time, duration_ns, project_id, environment, service_name,
 			gen_ai_model, gen_ai_provider, gen_ai_input_tokens, gen_ai_output_tokens,
 			gen_ai_total_tokens, gen_ai_cost_usd, gen_ai_temperature, gen_ai_max_tokens,
-			gen_ai_input_content, gen_ai_output_content, attributes
+			gen_ai_input_content, gen_ai_output_content, attributes, session_id
 		FROM spans WHERE trace_id = ? ORDER BY start_time ASC
 	`, traceID)
 	if err != nil {
@@ -245,7 +250,7 @@ func (s *Store) SearchSpans(ctx context.Context, q storage.SpanQuery) (*storage.
 			start_time, end_time, duration_ns, project_id, environment, service_name,
 			gen_ai_model, gen_ai_provider, gen_ai_input_tokens, gen_ai_output_tokens,
 			gen_ai_total_tokens, gen_ai_cost_usd, gen_ai_temperature, gen_ai_max_tokens,
-			gen_ai_input_content, gen_ai_output_content, attributes
+			gen_ai_input_content, gen_ai_output_content, attributes, session_id
 		FROM spans
 		WHERE project_id = ? AND start_time >= ? AND start_time <= ?
 			AND (? = 0 OR kind = ?)
@@ -405,6 +410,7 @@ func scanSpans(rows *sql.Rows) ([]storage.Span, error) {
 			&genAI.CostUSD, &genAI.Temperature, &genAI.MaxTokens,
 			&genAI.InputContent, &genAI.OutputContent,
 			&attrsAny,
+			&span.SessionID,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("scanning span: %w", err)

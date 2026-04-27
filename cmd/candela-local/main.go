@@ -38,6 +38,7 @@ import (
 	"github.com/candelahq/candela/pkg/processor"
 	"github.com/candelahq/candela/pkg/proxy"
 	"github.com/candelahq/candela/pkg/runtime"
+	"github.com/candelahq/candela/pkg/session"
 	"github.com/candelahq/candela/pkg/storage"
 
 	// Register runtime backends.
@@ -365,11 +366,17 @@ func main() {
 		runtimeLocalProxy = buildLocalProxy(mgr.Runtime().Endpoint())
 	}
 
+	// Create the session resolver chain for conversation tracking.
+	sessionResolver := session.NewChainResolver(
+		session.NewHeaderResolver(""),              // Explicit X-Session-Id header wins.
+		session.NewUserMsgResolver(30*time.Minute), // Heuristic: first user message fingerprint.
+	)
+
 	// Build the smart LM handler.
 	// In solo mode with traces enabled, wrap local proxy with span capture.
 	var localHandler http.Handler
 	if runtimeLocalProxy != nil {
-		localHandler = newSpanCapture(runtimeLocalProxy, spanProc)
+		localHandler = newSpanCapture(runtimeLocalProxy, spanProc, sessionResolver)
 	}
 
 	// Build direct cloud proxy if providers are configured (solo + cloud mode).

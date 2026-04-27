@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"net/http"
+	"sort"
 	"sync"
 	"time"
 
@@ -149,7 +150,7 @@ func (u *UserMsgResolver) Resolve(info SessionInfo) string {
 }
 
 // evictLocked removes expired entries and, if still over cap, evicts the
-// oldest entries. Must be called with u.mu held.
+// oldest entries in a single sorted pass. Must be called with u.mu held.
 func (u *UserMsgResolver) evictLocked(now time.Time) {
 	// Phase 1: remove expired entries.
 	for fp, entry := range u.cache {
@@ -158,21 +159,30 @@ func (u *UserMsgResolver) evictLocked(now time.Time) {
 		}
 	}
 
-	// Phase 2: if still over cap, evict oldest.
+	// Phase 2: if still over cap, sort by lastAccess and evict oldest batch.
 	max := u.maxEntries
 	if max <= 0 {
 		max = 1000
 	}
-	for len(u.cache) >= max {
-		var oldestFP string
-		var oldestTime time.Time
-		for fp, entry := range u.cache {
-			if oldestFP == "" || entry.lastAccess.Before(oldestTime) {
-				oldestFP = fp
-				oldestTime = entry.lastAccess
-			}
-		}
-		delete(u.cache, oldestFP)
+	if len(u.cache) < max {
+		return
+	}
+
+	type fpEntry struct {
+		fp         string
+		lastAccess time.Time
+	}
+	entries := make([]fpEntry, 0, len(u.cache))
+	for fp, entry := range u.cache {
+		entries = append(entries, fpEntry{fp: fp, lastAccess: entry.lastAccess})
+	}
+	sort.Slice(entries, func(i, j int) bool {
+		return entries[i].lastAccess.Before(entries[j].lastAccess)
+	})
+	// Evict oldest entries to bring cache to 75% of max (avoid repeated eviction).
+	target := max * 3 / 4
+	for i := 0; i < len(entries) && len(u.cache) > target; i++ {
+		delete(u.cache, entries[i].fp)
 	}
 }
 

@@ -99,6 +99,8 @@ func (s *Store) migrate() error {
 		`CREATE INDEX IF NOT EXISTS idx_spans_kind ON spans(kind)`,
 		// Migration: add user_id column to existing tables.
 		`ALTER TABLE spans ADD COLUMN user_id TEXT DEFAULT ''`,
+		// Migration: add session_id column to existing tables.
+		`ALTER TABLE spans ADD COLUMN session_id TEXT DEFAULT ''`,
 	}
 
 	for _, q := range queries {

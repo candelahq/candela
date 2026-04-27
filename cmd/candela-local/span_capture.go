@@ -70,10 +70,11 @@ func (s *spanCapture) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	var inputContent string
 	if len(msgs) > 0 {
 		last := msgs[len(msgs)-1]
-		inputContent = last.Content
-		if runeCount := len([]rune(inputContent)); runeCount > 500 {
-			runes := []rune(inputContent)
+		runes := []rune(last.Content)
+		if len(runes) > 500 {
 			inputContent = string(runes[:500]) + "..."
+		} else {
+			inputContent = last.Content
 		}
 	}
 

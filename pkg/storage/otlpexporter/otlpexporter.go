@@ -103,7 +103,7 @@ func (w *Writer) Close() error {
 	if w.client == nil {
 		return nil
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), w.timeout)
 	defer cancel()
 	return w.client.Stop(ctx)
 }

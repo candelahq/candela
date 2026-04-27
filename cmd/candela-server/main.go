@@ -95,6 +95,7 @@ type Config struct {
 	Sinks struct {
 		OTLP struct {
 			Enabled     bool              `yaml:"enabled"`
+			Required    bool              `yaml:"required"`    // if true, fail startup on init error
 			Endpoint    string            `yaml:"endpoint"`    // e.g. "http://localhost:4318"
 			Protocol    string            `yaml:"protocol"`    // "http" (default) or "grpc"
 			Headers     map[string]string `yaml:"headers"`     // optional auth headers
@@ -471,8 +472,10 @@ func initStorage(cfg *Config) (storage.SpanReader, []storage.SpanWriter, func(),
 			TimeoutSec:  cfg.Sinks.OTLP.TimeoutSec,
 		})
 		if err != nil {
-			slog.Error("failed to initialize OTLP exporter", "error", err)
-			// Non-fatal: primary storage still works, just no OTLP export.
+			if cfg.Sinks.OTLP.Required {
+				return nil, nil, nil, fmt.Errorf("otlp exporter required but failed to initialize: %w", err)
+			}
+			slog.Error("failed to initialize OTLP exporter (non-fatal)", "error", err)
 		} else {
 			writers = append(writers, otlpW)
 			closers = append(closers, func() { _ = otlpW.Close() })

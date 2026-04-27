@@ -115,6 +115,7 @@ sinks:
   # Enables integration with Datadog, Grafana Tempo, Jaeger, Elastic, Honeycomb, etc.
   # otlp:
   #   enabled: true
+  #   required: false                    # If true, server fails to start on init error
   #   endpoint: "http://localhost:4318"  # OTel Collector OTLP/HTTP endpoint
   #   protocol: "http"                   # "http" (default) or "grpc"
   #   insecure: false                    # Skip TLS verification

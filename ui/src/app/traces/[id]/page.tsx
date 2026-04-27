@@ -72,8 +72,8 @@ function SpanRow({
   const widthPct = totalDurationMs > 0 ? Math.max((node.durationMs / totalDurationMs) * 100, 0.5) : 100;
   const color = kindColor(node.span.kind);
   const isError = node.span.status === SpanStatus.ERROR;
-  const costUsd = node.span.genAi?.costUsd ?? 0;
-  const tokens = Number(node.span.genAi?.totalTokens ?? 0);
+  const costUsd = node.subtreeCostUsd;
+  const tokens = node.subtreeTokens;
 
   return (
     <div

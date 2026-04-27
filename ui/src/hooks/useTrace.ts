@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useReducer, useState } from "react";
+import { useEffect, useMemo, useReducer, useState } from "react";
 import { traceClient } from "@/lib/api";
 import type { Span } from "@/gen/candela/types/trace_pb";
 import { SpanKind } from "@/gen/candela/types/trace_pb";
@@ -218,7 +218,7 @@ export function useTrace(traceId: string) {
   }, [traceId]);
 
   // Filter flatSpans to hide children of collapsed nodes
-  const visibleSpans = (() => {
+  const visibleSpans = useMemo(() => {
     const spans = state.trace?.flatSpans;
     if (!spans) return [];
     const result: SpanNode[] = [];
@@ -230,7 +230,7 @@ export function useTrace(traceId: string) {
       }
     });
     return result;
-  })();
+  }, [state.trace?.flatSpans, collapsedIds]);
 
   const selectedNode = state.trace?.flatSpans.find(
     (n) => n.span.spanId === selectedSpanId

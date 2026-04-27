@@ -364,9 +364,10 @@ test.describe("Trace Waterfall", () => {
     await expect(llmRow.locator(".waterfall-metric").filter({ hasText: "tok" })).toContainText("2,500");
     await expect(llmRow.locator(".waterfall-metric-cost")).toContainText("$0.0125");
 
-    // The root agent span has no genAi data, so no metrics should show
+    // Root agent span shows aggregated subtree metrics from its children
     const rootRow = page.locator(".waterfall-row").first();
-    await expect(rootRow.locator(".waterfall-metric")).toHaveCount(0);
+    await expect(rootRow.locator(".waterfall-metric").filter({ hasText: "tok" })).toContainText("2,500");
+    await expect(rootRow.locator(".waterfall-metric-cost")).toContainText("$0.0125");
   });
 
   test("shows expand/collapse chevron only on parent nodes", async ({ page }) => {

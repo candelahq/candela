@@ -33,6 +33,7 @@ import (
 	bqstore "github.com/candelahq/candela/pkg/storage/bigquery"
 	duckdbstore "github.com/candelahq/candela/pkg/storage/duckdb"
 	firestorestore "github.com/candelahq/candela/pkg/storage/firestoredb"
+	otlpexporter "github.com/candelahq/candela/pkg/storage/otlpexporter"
 	"github.com/candelahq/candela/pkg/storage/projectdb"
 	sqlitestore "github.com/candelahq/candela/pkg/storage/sqlite"
 )
@@ -91,6 +92,18 @@ type Config struct {
 	Users   struct {
 		DefaultDailyBudgetUSD float64 `yaml:"default_daily_budget_usd"` // auto-assigned to new users (0 = no default)
 	} `yaml:"users"`
+	Sinks struct {
+		OTLP struct {
+			Enabled     bool              `yaml:"enabled"`
+			Required    bool              `yaml:"required"`    // if true, fail startup on init error
+			Endpoint    string            `yaml:"endpoint"`    // e.g. "http://localhost:4318"
+			Protocol    string            `yaml:"protocol"`    // "http" (default) or "grpc"
+			Headers     map[string]string `yaml:"headers"`     // optional auth headers
+			Insecure    bool              `yaml:"insecure"`    // skip TLS verification
+			Compression string            `yaml:"compression"` // "gzip" (default) or "none"
+			TimeoutSec  int               `yaml:"timeout_sec"` // per-export timeout (default: 30)
+		} `yaml:"otlp"`
+	} `yaml:"sinks"`
 }
 
 func main() {
@@ -406,6 +419,10 @@ func main() {
 // initStorage creates the storage backend and returns a reader (for queries)
 // and a slice of writers (for the processor fan-out). The closeFn handles cleanup.
 func initStorage(cfg *Config) (storage.SpanReader, []storage.SpanWriter, func(), error) {
+	var reader storage.SpanReader
+	var writers []storage.SpanWriter
+	var closers []func()
+
 	switch cfg.Storage.Backend {
 	case "duckdb":
 		store, err := duckdbstore.New(duckdbstore.Config{
@@ -414,8 +431,9 @@ func initStorage(cfg *Config) (storage.SpanReader, []storage.SpanWriter, func(),
 		if err != nil {
 			return nil, nil, nil, err
 		}
-		// DuckDB implements both SpanReader and SpanWriter.
-		return store, []storage.SpanWriter{store}, func() { _ = store.Close() }, nil
+		reader = store
+		writers = append(writers, store)
+		closers = append(closers, func() { _ = store.Close() })
 	case "sqlite":
 		store, err := sqlitestore.New(sqlitestore.Config{
 			Path: cfg.Storage.SQLite.Path,
@@ -423,7 +441,9 @@ func initStorage(cfg *Config) (storage.SpanReader, []storage.SpanWriter, func(),
 		if err != nil {
 			return nil, nil, nil, err
 		}
-		return store, []storage.SpanWriter{store}, func() { _ = store.Close() }, nil
+		reader = store
+		writers = append(writers, store)
+		closers = append(closers, func() { _ = store.Close() })
 	case "bigquery":
 		store, err := bqstore.New(context.Background(), bqstore.Config{
 			ProjectID: cfg.Storage.BigQuery.ProjectID,
@@ -434,11 +454,43 @@ func initStorage(cfg *Config) (storage.SpanReader, []storage.SpanWriter, func(),
 		if err != nil {
 			return nil, nil, nil, err
 		}
-		// BigQuery implements both SpanReader and SpanWriter.
-		return store, []storage.SpanWriter{store}, func() { _ = store.Close() }, nil
+		reader = store
+		writers = append(writers, store)
+		closers = append(closers, func() { _ = store.Close() })
 	default:
 		return nil, nil, nil, fmt.Errorf("unknown storage backend: %s", cfg.Storage.Backend)
 	}
+
+	// Append optional OTLP export sink.
+	if cfg.Sinks.OTLP.Enabled {
+		otlpW, err := otlpexporter.New(context.Background(), otlpexporter.Config{
+			Endpoint:    cfg.Sinks.OTLP.Endpoint,
+			Protocol:    cfg.Sinks.OTLP.Protocol,
+			Headers:     cfg.Sinks.OTLP.Headers,
+			Insecure:    cfg.Sinks.OTLP.Insecure,
+			Compression: cfg.Sinks.OTLP.Compression,
+			TimeoutSec:  cfg.Sinks.OTLP.TimeoutSec,
+		})
+		if err != nil {
+			if cfg.Sinks.OTLP.Required {
+				return nil, nil, nil, fmt.Errorf("otlp exporter required but failed to initialize: %w", err)
+			}
+			slog.Error("failed to initialize OTLP exporter (non-fatal)", "error", err)
+		} else {
+			writers = append(writers, otlpW)
+			closers = append(closers, func() { _ = otlpW.Close() })
+			slog.Info("📡 OTLP export sink added to fan-out")
+		}
+	}
+
+	closeFn := func() {
+		// Reverse order: close sinks before primary storage.
+		for i := len(closers) - 1; i >= 0; i-- {
+			closers[i]()
+		}
+	}
+
+	return reader, writers, closeFn, nil
 }
 
 func loadConfig() (*Config, error) {

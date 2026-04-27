@@ -107,3 +107,19 @@ cors:
 worker:
   batch_size: 100
   flush_interval: "2s"
+
+# Optional export sinks — fan-out to external systems alongside primary storage.
+# These are write-only; the primary storage backend handles reads.
+sinks:
+  # OTLP export — send spans to any OpenTelemetry-compatible collector/backend.
+  # Enables integration with Datadog, Grafana Tempo, Jaeger, Elastic, Honeycomb, etc.
+  # otlp:
+  #   enabled: true
+  #   required: false                    # If true, server fails to start on init error
+  #   endpoint: "http://localhost:4318"  # OTel Collector OTLP/HTTP endpoint
+  #   protocol: "http"                   # "http" (default) or "grpc"
+  #   insecure: false                    # Skip TLS verification
+  #   compression: "gzip"               # "gzip" (default) or "none"
+  #   timeout_sec: 30                   # Per-export timeout in seconds
+  #   headers:                           # Optional auth headers
+  #     Authorization: "Bearer <token>"

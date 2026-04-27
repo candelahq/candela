@@ -93,6 +93,7 @@ type Span struct {
 	Environment   string            `json:"environment,omitempty"`
 	ServiceName   string            `json:"service_name,omitempty"`
 	UserID        string            `json:"user_id,omitempty"`
+	SessionID     string            `json:"session_id,omitempty"`
 }
 
 // TraceSummary is a lightweight summary for list views.
@@ -111,6 +112,7 @@ type TraceSummary struct {
 	PrimaryModel    string        `json:"primary_model"`
 	PrimaryProvider string        `json:"primary_provider"`
 	UserID          string        `json:"user_id,omitempty"`
+	SessionID       string        `json:"session_id,omitempty"`
 }
 
 // Trace is a complete trace with all spans.
@@ -127,6 +129,7 @@ type Trace struct {
 	RootSpanName string        `json:"root_span_name"`
 	Spans        []Span        `json:"spans"`
 	UserID       string        `json:"user_id,omitempty"`
+	SessionID    string        `json:"session_id,omitempty"`
 }
 
 // TraceQuery defines filters for listing traces.
@@ -144,6 +147,7 @@ type TraceQuery struct {
 	PageSize    int
 	PageToken   string
 	UserID      string // Filter by user (empty = all, for admins)
+	SessionID   string // Filter by session (empty = all)
 }
 
 // TraceResult is the paginated result of a trace query.

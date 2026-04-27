@@ -90,6 +90,8 @@ func (s *Store) migrate() error {
 
 			attributes_json TEXT DEFAULT '{}',
 
+			session_id     TEXT DEFAULT '',
+
 			PRIMARY KEY (trace_id, span_id)
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_spans_project_time ON spans(project_id, start_time)`,
@@ -167,7 +169,7 @@ func (s *Store) GetTrace(ctx context.Context, traceID string) (*storage.Trace, e
 			start_time, end_time, duration_ns, project_id, environment, service_name,
 			gen_ai_model, gen_ai_provider, gen_ai_input_tokens, gen_ai_output_tokens,
 			gen_ai_total_tokens, gen_ai_cost_usd, gen_ai_temperature, gen_ai_max_tokens,
-			gen_ai_input_content, gen_ai_output_content, attributes_json
+			gen_ai_input_content, gen_ai_output_content, attributes_json, session_id
 		FROM spans WHERE trace_id = ? ORDER BY start_time ASC
 	`, traceID)
 	if err != nil {
@@ -254,7 +256,7 @@ func (s *Store) SearchSpans(ctx context.Context, q storage.SpanQuery) (*storage.
 			start_time, end_time, duration_ns, project_id, environment, service_name,
 			gen_ai_model, gen_ai_provider, gen_ai_input_tokens, gen_ai_output_tokens,
 			gen_ai_total_tokens, gen_ai_cost_usd, gen_ai_temperature, gen_ai_max_tokens,
-			gen_ai_input_content, gen_ai_output_content, attributes_json
+			gen_ai_input_content, gen_ai_output_content, attributes_json, session_id
 		FROM spans
 		WHERE project_id = ? AND start_time >= ? AND start_time <= ?
 			AND (? = 0 OR kind = ?)
@@ -411,6 +413,7 @@ func scanSpans(rows *sql.Rows) ([]storage.Span, error) {
 			&genAI.CostUSD, &genAI.Temperature, &genAI.MaxTokens,
 			&genAI.InputContent, &genAI.OutputContent,
 			&attrsJSON,
+			&span.SessionID,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("scanning span: %w", err)

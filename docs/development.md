@@ -133,7 +133,7 @@ Forward traces to any OTel-compatible backend (Datadog, Grafana Tempo, Jaeger, e
 sinks:
   otlp:
     enabled: true
-    endpoint: "http://localhost:4318"
+    endpoint: "http://localhost:4318/v1/traces"
     compression: "gzip"  # default
 ```
 

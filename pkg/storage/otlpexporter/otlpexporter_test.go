@@ -1,6 +1,7 @@
 package otlpexporter
 
 import (
+	"compress/gzip"
 	"context"
 	"fmt"
 	"io"
@@ -197,7 +198,19 @@ func newOTLPTestServer(t *testing.T) (*httptest.Server, func() *coltracepb.Expor
 			http.NotFound(w, r)
 			return
 		}
-		body, err := io.ReadAll(r.Body)
+		var body []byte
+		var err error
+		if r.Header.Get("Content-Encoding") == "gzip" {
+			gr, gerr := gzip.NewReader(r.Body)
+			if gerr != nil {
+				http.Error(w, "gzip error", 400)
+				return
+			}
+			defer func() { _ = gr.Close() }()
+			body, err = io.ReadAll(gr)
+		} else {
+			body, err = io.ReadAll(r.Body)
+		}
 		if err != nil {
 			http.Error(w, "read error", 500)
 			return

@@ -37,6 +37,9 @@ func New(ctx context.Context, cfg Config) (*Writer, error) {
 	if cfg.Protocol == "" {
 		cfg.Protocol = "http"
 	}
+	if cfg.Compression == "" {
+		cfg.Compression = "gzip"
+	}
 	if cfg.TimeoutSec <= 0 {
 		cfg.TimeoutSec = 30
 	}
@@ -120,12 +123,13 @@ func newHTTPClient(cfg Config) (otlptrace.Client, error) {
 	}
 
 	switch cfg.Compression {
-	case "none", "":
-		// Default: no explicit compression option (library default).
+	case "none":
+		opts = append(opts, otlptracehttp.WithCompression(otlptracehttp.NoCompression))
 	case "gzip":
 		opts = append(opts, otlptracehttp.WithCompression(otlptracehttp.GzipCompression))
 	default:
-		slog.Warn("otlpexporter: unsupported compression type, defaulting to none", "type", cfg.Compression)
+		slog.Warn("otlpexporter: unsupported compression type, defaulting to gzip", "type", cfg.Compression)
+		opts = append(opts, otlptracehttp.WithCompression(otlptracehttp.GzipCompression))
 	}
 
 	return otlptracehttp.NewClient(opts...), nil

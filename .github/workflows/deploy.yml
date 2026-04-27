@@ -53,6 +53,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@main
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Generate proto stubs
+        env:
+          BUF_TOKEN: ${{ secrets.BUF_TOKEN }}
+        run: |
+          nix develop -c bash -c "cd proto && buf generate"
+
       - name: Compute image tag
         id: meta
         run: |

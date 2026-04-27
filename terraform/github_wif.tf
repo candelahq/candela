@@ -104,3 +104,10 @@ resource "google_service_account_iam_member" "github_act_as_compute" {
   role               = "roles/iam.serviceAccountUser"
   member             = "serviceAccount:${google_service_account.github_deploy.email}"
 }
+
+# Logging: stream Cloud Build logs during gcloud builds submit.
+resource "google_project_iam_member" "github_logging" {
+  project = var.project_id
+  role    = "roles/logging.viewer"
+  member  = "serviceAccount:${google_service_account.github_deploy.email}"
+}

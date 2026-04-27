@@ -43,18 +43,20 @@ type TraceStore interface {
                     │  Processor  │  ← batches spans, applies cost calc
                     └──────┬──────┘
                            │
-              ┌────────────┼────────────┐
-              ▼            ▼            ▼
-        ┌──────────┐ ┌──────────┐ ┌──────────┐
-        │  DuckDB  │ │ BigQuery │ │  Pub/Sub │
-        │ (Writer  │ │ (Writer  │ │ (Writer  │
-        │ + Reader)│ │ + Reader)│ │  Only)   │
-        └──────────┘ └──────────┘ └──────────┘
-              │            │
-              ▼            ▼
-        ┌──────────────────────┐
-        │   Dashboard / API    │  ← reads from one SpanReader
-        │  (ConnectRPC + REST) │
+              ┌────────────┼────────────┬────────────┐
+              ▼            ▼            ▼            ▼
+        ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐
+        │  DuckDB  │ │ BigQuery │ │  Pub/Sub │ │   OTLP   │
+        │ (Writer  │ │ (Writer  │ │ (Writer  │ │ (Writer  │
+        │ + Reader)│ │ + Reader)│ │  Only)   │ │  Only)   │
+        └──────────┘ └──────────┘ └──────────┘ └──────────┘
+              │            │                        │
+              ▼            ▼                        ▼
+        ┌──────────────────────┐          ┌──────────────────┐
+        │   Dashboard / API    │          │ External OTel    │
+        │  (ConnectRPC + REST) │          │ (Datadog, Tempo, │
+        │  ← reads from one   │          │  Jaeger, etc.)   │
+        │    SpanReader        │          └──────────────────┘
         └──────────────────────┘
 ```
 
@@ -130,6 +132,31 @@ sinks:
     enabled: true
     project_id: "my-gcp-project"
     topic: "candela-spans"
+```
+
+### OTLP Export (Sink Only)
+
+**Best for**: Forwarding Candela traces to any OpenTelemetry-compatible backend (Datadog, Grafana Tempo, Jaeger, Elastic, Honeycomb, New Relic, etc.).
+
+- **Driver**: `go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp`
+- **Wire format**: OTLP/HTTP protobuf with gzip compression (default)
+- **Semantic conventions**: Maps Candela GenAI fields to OTel `gen_ai.*` attributes
+- **Resource grouping**: Spans are grouped by `(ProjectID, ServiceName, Environment)` into separate `ResourceSpans`
+- **Per-export timeout**: Configurable (default 30s) to prevent blocking the processor fan-out
+- **Non-fatal by default**: If the endpoint is unreachable, primary storage still works. Set `required: true` to make it fatal.
+- **Note**: Write-only `SpanWriter` — does NOT implement `SpanReader`
+
+```yaml
+sinks:
+  otlp:
+    enabled: true
+    endpoint: "http://localhost:4318/v1/traces"  # OTel Collector or backend
+    protocol: "http"                   # "http" (default) or "grpc" (planned)
+    compression: "gzip"                # "gzip" (default) or "none"
+    timeout_sec: 30
+    required: false                    # fail startup if init fails
+    headers:
+      Authorization: "Bearer <token>"
 ```
 
 ## Schema Design

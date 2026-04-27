@@ -94,3 +94,11 @@ variable "vertex_ai_region" {
   type        = string
   default     = "us-east5"
 }
+
+# ── GitHub Actions CD ──
+
+variable "github_repo" {
+  description = "GitHub repository (owner/name) for Workload Identity Federation"
+  type        = string
+  default     = "candelahq/candela"
+}

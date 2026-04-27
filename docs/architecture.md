@@ -141,7 +141,7 @@ sinks:
 - **Driver**: `go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp`
 - **Wire format**: OTLP/HTTP protobuf with gzip compression (default)
 - **Semantic conventions**: Maps Candela GenAI fields to OTel `gen_ai.*` attributes
-- **Resource grouping**: Spans are grouped by `(ProjectID, ServiceName)` into separate `ResourceSpans`
+- **Resource grouping**: Spans are grouped by `(ProjectID, ServiceName, Environment)` into separate `ResourceSpans`
 - **Per-export timeout**: Configurable (default 30s) to prevent blocking the processor fan-out
 - **Non-fatal by default**: If the endpoint is unreachable, primary storage still works. Set `required: true` to make it fatal.
 - **Note**: Write-only `SpanWriter` — does NOT implement `SpanReader`

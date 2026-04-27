@@ -87,3 +87,15 @@ resource "google_project_iam_member" "github_storage" {
   role    = "roles/storage.admin"
   member  = "serviceAccount:${google_service_account.github_deploy.email}"
 }
+
+# Act as the Cloud Build default service account.
+# Cloud Build requires the caller to have serviceAccountUser on the build SA.
+data "google_project" "current" {
+  project_id = var.project_id
+}
+
+resource "google_service_account_iam_member" "github_act_as_cloudbuild" {
+  service_account_id = "projects/${var.project_id}/serviceAccounts/${data.google_project.current.number}@cloudbuild.gserviceaccount.com"
+  role               = "roles/iam.serviceAccountUser"
+  member             = "serviceAccount:${google_service_account.github_deploy.email}"
+}

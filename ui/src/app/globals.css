@@ -510,7 +510,7 @@ tr:hover td {
   position: relative;
   height: 24px;
   border-bottom: 1px solid var(--border-subtle);
-  margin-left: 260px;
+  margin-left: 420px;
   margin-right: 16px;
   background: repeating-linear-gradient(
     90deg,
@@ -559,13 +559,87 @@ tr:hover td {
 
 /* Span label (left side) */
 .waterfall-label {
-  width: 260px;
+  width: 300px;
   flex-shrink: 0;
   display: flex;
   align-items: center;
   gap: 6px;
   overflow: hidden;
   border-right: 1px solid var(--border-subtle);
+}
+
+/* Tree toggle (expand/collapse) */
+.tree-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: none;
+  background: none;
+  cursor: pointer;
+  flex-shrink: 0;
+  border-radius: 3px;
+  transition: background 0.1s ease;
+}
+
+.tree-toggle:hover {
+  background: var(--bg-hover);
+}
+
+.tree-chevron {
+  font-size: 8px;
+  color: var(--text-muted);
+  transition: transform 0.15s ease;
+  display: inline-block;
+}
+
+.tree-chevron-open {
+  transform: rotate(90deg);
+}
+
+.tree-leaf-spacer {
+  width: 16px;
+  flex-shrink: 0;
+}
+
+.tree-child-count {
+  font-size: 9px;
+  font-weight: 600;
+  color: var(--text-muted);
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  padding: 0 5px;
+  margin-left: 4px;
+  flex-shrink: 0;
+  line-height: 16px;
+}
+
+/* Inline metrics (tokens + cost per span) */
+.waterfall-metrics {
+  width: 120px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  justify-content: center;
+  padding: 0 8px;
+  gap: 1px;
+  border-right: 1px solid var(--border-subtle);
+}
+
+.waterfall-metric {
+  font-size: 10px;
+  font-family: 'SF Mono', monospace;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.waterfall-metric-cost {
+  color: var(--accent);
+  font-weight: 500;
 }
 
 .waterfall-connector {

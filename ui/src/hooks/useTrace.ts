@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useReducer, useState } from "react";
+import { useEffect, useMemo, useReducer, useState } from "react";
 import { traceClient } from "@/lib/api";
 import type { Span } from "@/gen/candela/types/trace_pb";
 import { SpanKind } from "@/gen/candela/types/trace_pb";
@@ -15,6 +15,10 @@ export interface SpanNode {
   depth: number;
   offsetMs: number;
   durationMs: number;
+  childCount: number; // Total descendants (recursive)
+  hasChildren: boolean;
+  subtreeCostUsd: number; // Cost of this span + all descendants
+  subtreeTokens: number; // Tokens of this span + all descendants
 }
 
 export interface TraceData {
@@ -82,6 +86,10 @@ function buildTree(spans: Span[], traceStartMs: number): SpanNode[] {
       depth: 0,
       offsetMs: tsToMs(span.startTime) - traceStartMs,
       durationMs: durationToMs(span.duration),
+      childCount: 0,
+      hasChildren: false,
+      subtreeCostUsd: span.genAi?.costUsd ?? 0,
+      subtreeTokens: Number(span.genAi?.totalTokens ?? 0),
     });
   }
 
@@ -94,13 +102,23 @@ function buildTree(spans: Span[], traceStartMs: number): SpanNode[] {
     }
   }
 
-  function setDepth(node: SpanNode, depth: number) {
+  // Set depth, child counts, and aggregate subtree metrics
+  function finalize(node: SpanNode, depth: number): number {
     node.depth = depth;
     node.children.sort((a, b) => a.offsetMs - b.offsetMs);
-    for (const child of node.children) setDepth(child, depth + 1);
+    node.hasChildren = node.children.length > 0;
+    let totalDescendants = 0;
+    for (const child of node.children) {
+      const descendants = finalize(child, depth + 1);
+      totalDescendants += 1 + descendants;
+      node.subtreeCostUsd += child.subtreeCostUsd;
+      node.subtreeTokens += child.subtreeTokens;
+    }
+    node.childCount = totalDescendants;
+    return totalDescendants;
   }
   roots.sort((a, b) => a.offsetMs - b.offsetMs);
-  for (const root of roots) setDepth(root, 0);
+  for (const root of roots) finalize(root, 0);
 
   return roots;
 }
@@ -156,6 +174,7 @@ export function useTrace(traceId: string) {
     error: null,
   });
   const [selectedSpanId, setSelectedSpanId] = useState<string | null>(null);
+  const [collapsedIds, setCollapsedIds] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     let cancelled = false;
@@ -198,12 +217,45 @@ export function useTrace(traceId: string) {
     return () => { cancelled = true; };
   }, [traceId]);
 
+  // Filter flatSpans to hide children of collapsed nodes
+  const visibleSpans = useMemo(() => {
+    const spans = state.trace?.flatSpans;
+    if (!spans) return [];
+    const result: SpanNode[] = [];
+    let skipDepth = -1;
+    spans.forEach((node) => {
+      if (skipDepth === -1 || node.depth <= skipDepth) {
+        skipDepth = collapsedIds.has(node.span.spanId) ? node.depth : -1;
+        result.push(node);
+      }
+    });
+    return result;
+  }, [state.trace?.flatSpans, collapsedIds]);
+
   const selectedNode = state.trace?.flatSpans.find(
     (n) => n.span.spanId === selectedSpanId
   );
 
   const toggleSpan = (spanId: string) =>
     setSelectedSpanId((prev) => (prev === spanId ? null : spanId));
+
+  const toggleCollapse = (spanId: string) =>
+    setCollapsedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(spanId)) next.delete(spanId);
+      else next.add(spanId);
+      return next;
+    });
+
+  const collapseAll = () => {
+    const ids = new Set<string>();
+    state.trace?.flatSpans.forEach((n) => {
+      if (n.hasChildren) ids.add(n.span.spanId);
+    });
+    setCollapsedIds(ids);
+  };
+
+  const expandAll = () => setCollapsedIds(new Set());
 
   return {
     trace: state.trace,
@@ -212,5 +264,10 @@ export function useTrace(traceId: string) {
     selectedSpanId,
     selectedNode,
     toggleSpan,
+    visibleSpans,
+    collapsedIds,
+    toggleCollapse,
+    collapseAll,
+    expandAll,
   };
 }

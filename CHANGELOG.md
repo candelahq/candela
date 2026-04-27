@@ -8,7 +8,7 @@ All notable changes to Candela are documented here, organized by development pha
 - New `pkg/storage/otlpexporter` package implementing `storage.SpanWriter`
 - Export Candela spans as standard OpenTelemetry traces via OTLP/HTTP
 - Maps GenAI fields to OTel `gen_ai.*` semantic conventions
-- Resource grouping by `(ProjectID, ServiceName)` per OTLP spec
+- Resource grouping by `(ProjectID, ServiceName, Environment)` per OTLP spec
 - Gzip compression by default, configurable per-export timeout
 - `sinks.otlp.required` flag for environments where export is mandatory
 - 25 tests: unit, integration (httptest OTLP receiver), config validation

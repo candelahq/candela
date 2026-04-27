@@ -2,7 +2,57 @@
 
 All notable changes to Candela are documented here, organized by development phase. PRs are merged to `main`.
 
+## Latest
+
+### OTLP SpanWriter — Universal Export Sink (#70)
+- New `pkg/storage/otlpexporter` package implementing `storage.SpanWriter`
+- Export Candela spans as standard OpenTelemetry traces via OTLP/HTTP
+- Maps GenAI fields to OTel `gen_ai.*` semantic conventions
+- Resource grouping by `(ProjectID, ServiceName, Environment)` per OTLP spec
+- Gzip compression by default, configurable per-export timeout
+- `sinks.otlp.required` flag for environments where export is mandatory
+- 25 tests: unit, integration (httptest OTLP receiver), config validation
+- Enables write-once-export-everywhere to Datadog, Grafana Tempo, Jaeger, Elastic, Honeycomb, etc.
+
+### Per-Conversation Session Tracking (#71)
+- Heuristic-based `SessionResolver` with message-prefix fingerprinting
+- SQLite-backed session state persistence across restarts
+- `X-Session-ID` header propagation to remote proxy
+
+### UI Enhancements (#73)
+- Collapsible trace tree with inline cost metrics
+
 ## Phase 4: Multi-User Platform ✅
+
+### Today Budget Dashboard (#66)
+- Real-time "Today" budget card with spend vs. limit visualization
+- UTC-consistent date boundaries for budget calculations
+
+### Configurable Default Daily Budget (#64)
+- Admin-configurable default daily budget for new users
+- Applied automatically at user creation via Firestore
+
+### Daily Budget Period + Delete User (#61, #62)
+- Migrate budget model from monthly to daily-only
+- User deletion with Firestore subcollection cleanup via `BulkWriter`
+- Global audit collection for persistent deletion logs
+- Review feedback: null-safety, `DocumentRefs` optimization
+
+### Admin Fixes (#60)
+- Fix user count aggregation, `UpdateUser` `MergeAll` struct bug
+- Budget UI spacing and display fixes
+
+### Auth & Storage Fixes (#55, #58, #59)
+- Migrate to email-as-ID and fix `MergeAll` struct serialization (#55)
+- Handle Firestore reserved `__.*__` document ID pattern (#58)
+- Pass Firebase build args to Docker, improve login error handling (#59)
+
+### Documentation (#54, #65)
+- Comprehensive documentation deep-dive: architecture, development, deployment, proxy, env-vars, testing, cost-calculation, security, budgets, user-management, otel-collector, candela-local (#54)
+- `pkg/runtime` README: interface contract, registry pattern, backend implementations (#65)
+
+### Housekeeping (#57)
+- Remove binaries and temp files from git tracking
 
 ### Team Mode Frontend Enhancements (#53)
 - Per-user usage attribution in trace views
@@ -101,6 +151,7 @@ All notable changes to Candela are documented here, organized by development pha
 - SQLite storage backend (CGO-free, lightweight)
 - BigQuery storage backend (serverless, time-partitioned)
 - Pub/Sub write-only sink for fan-out
+- OTLP export sink for universal OTel backend forwarding
 - CQRS interfaces: `SpanWriter`, `SpanReader`, `TraceStore`
 - CORS middleware with configurable origins
 - Structured logging with `slog` (JSON)

@@ -4,10 +4,10 @@ Candela uses a **Nix-first** development workflow. This ensures that every devel
 
 ## 📦 Prerequisites
 
-Ensure you have **Nix** with `flakes` enabled.
+Ensure you have **Nix** with `flakes` enabled. See [docs/nix-setup.md](nix-setup.md) for installation instructions, **direnv** auto-activation, and editor integration.
 
 ```bash
-# Enter the nix dev shell
+# Enter the nix dev shell (or use direnv for automatic activation)
 nix develop
 ```
 
@@ -125,6 +125,19 @@ storage:
     dataset: "candela"
     location: "US"
 ```
+
+### OTLP Export Sink
+Forward traces to any OTel-compatible backend (Datadog, Grafana Tempo, Jaeger, etc.) alongside your primary storage:
+
+```yaml
+sinks:
+  otlp:
+    enabled: true
+    endpoint: "http://localhost:4318/v1/traces"
+    compression: "gzip"  # default
+```
+
+See [docs/architecture.md](architecture.md) for full configuration options.
 
 ---
 

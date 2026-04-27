@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/candelahq/candela/pkg/processor"
+	"github.com/candelahq/candela/pkg/session"
 	"github.com/candelahq/candela/pkg/storage"
 )
 
@@ -18,16 +19,17 @@ import (
 // request/response data to emit observability spans via the span processor.
 // Handles both streaming (SSE) and non-streaming OpenAI-format responses.
 type spanCapture struct {
-	next http.Handler
-	proc *processor.SpanProcessor
+	next     http.Handler
+	proc     *processor.SpanProcessor
+	resolver session.SessionResolver
 }
 
 // newSpanCapture creates a span-capturing middleware.
-func newSpanCapture(next http.Handler, proc *processor.SpanProcessor) http.Handler {
+func newSpanCapture(next http.Handler, proc *processor.SpanProcessor, resolver session.SessionResolver) http.Handler {
 	if proc == nil {
 		return next // no processor → passthrough
 	}
-	return &spanCapture{next: next, proc: proc}
+	return &spanCapture{next: next, proc: proc, resolver: resolver}
 }
 
 func (s *spanCapture) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -71,6 +73,22 @@ func (s *spanCapture) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Resolve session ID.
+	var sessionID string
+	if s.resolver != nil {
+		msgsJSON, _ := json.Marshal(chatReq.Messages)
+		sessionID = s.resolver.Resolve(session.SessionInfo{
+			UserID:   r.Header.Get("X-User-Id"),
+			Model:    chatReq.Model,
+			Messages: msgsJSON,
+			Headers:  r.Header,
+		})
+		// Inject header so downstream (lm_handler → remote proxy) can see it.
+		if sessionID != "" {
+			r.Header.Set("X-Session-Id", sessionID)
+		}
+	}
+
 	// Capture response.
 	rec := &responseCapture{ResponseWriter: w}
 	s.next.ServeHTTP(rec, r)
@@ -78,10 +96,10 @@ func (s *spanCapture) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	duration := time.Since(start)
 
 	// Build the span asynchronously to not block the response.
-	go s.buildSpan(chatReq.Model, chatReq.Stream, inputContent, rec.body.Bytes(), rec.statusCode, start, duration)
+	go s.buildSpan(chatReq.Model, chatReq.Stream, inputContent, rec.body.Bytes(), rec.statusCode, start, duration, sessionID)
 }
 
-func (s *spanCapture) buildSpan(model string, stream *bool, inputContent string, respBody []byte, statusCode int, start time.Time, duration time.Duration) {
+func (s *spanCapture) buildSpan(model string, stream *bool, inputContent string, respBody []byte, statusCode int, start time.Time, duration time.Duration, sessionID string) {
 	var inputTokens, outputTokens, totalTokens int64
 
 	isStreaming := stream != nil && *stream
@@ -124,6 +142,7 @@ func (s *spanCapture) buildSpan(model string, stream *bool, inputContent string,
 		EndTime:   start.Add(duration),
 		Duration:  duration,
 		ProjectID: "local",
+		SessionID: sessionID,
 		GenAI: &storage.GenAIAttributes{
 			Model:        model,
 			Provider:     "local",

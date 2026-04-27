@@ -301,7 +301,7 @@ test.describe("Trace Waterfall", () => {
     // Summary bar
     await expect(page.locator(".trace-summary-value").first()).toBeVisible();
     await expect(page.locator(".trace-summary-item").filter({ hasText: "Duration" }).locator(".trace-summary-value")).toHaveText("1500ms");
-    await expect(page.locator("text=$0.0125")).toBeVisible();
+    await expect(page.locator(".trace-summary-item").filter({ hasText: "Cost" }).locator(".trace-summary-value")).toHaveText("$0.0125");
 
     // Waterfall rows
     await expect(page.locator(".waterfall-row")).toHaveCount(3);
@@ -353,6 +353,71 @@ test.describe("Trace Waterfall", () => {
     await expect(
       page.locator(".card-title").filter({ hasText: /unavailable|error/i })
     ).toBeVisible();
+  });
+
+  test("shows inline cost and token metrics in waterfall rows", async ({ page }) => {
+    await mockConnectRPC(page, "/candela.v1.TraceService/GetTrace", mockTrace);
+    await page.goto("/traces/abc123def456");
+
+    // The LLM span (span-llm) has 2500 tokens and $0.0125 cost
+    const llmRow = page.locator(".waterfall-row").nth(2);
+    await expect(llmRow.locator(".waterfall-metric").filter({ hasText: "tok" })).toContainText("2,500");
+    await expect(llmRow.locator(".waterfall-metric-cost")).toContainText("$0.0125");
+
+    // The root agent span has no genAi data, so no metrics should show
+    const rootRow = page.locator(".waterfall-row").first();
+    await expect(rootRow.locator(".waterfall-metric")).toHaveCount(0);
+  });
+
+  test("shows expand/collapse chevron only on parent nodes", async ({ page }) => {
+    await mockConnectRPC(page, "/candela.v1.TraceService/GetTrace", mockTrace);
+    await page.goto("/traces/abc123def456");
+
+    // Root span has 2 children → should have a toggle button
+    const rootRow = page.locator(".waterfall-row").first();
+    await expect(rootRow.locator(".tree-toggle")).toBeVisible();
+
+    // Child LLM span has no children → should have a leaf spacer, no toggle
+    const llmRow = page.locator(".waterfall-row").nth(2);
+    await expect(llmRow.locator(".tree-toggle")).toHaveCount(0);
+    await expect(llmRow.locator(".tree-leaf-spacer")).toHaveCount(1);
+  });
+
+  test("collapsing a parent hides children and shows child count", async ({ page }) => {
+    await mockConnectRPC(page, "/candela.v1.TraceService/GetTrace", mockTrace);
+    await page.goto("/traces/abc123def456");
+
+    // Initially all 3 spans visible
+    await expect(page.locator(".waterfall-row")).toHaveCount(3);
+
+    // Collapse the root span
+    await page.locator(".waterfall-row").first().locator(".tree-toggle").click();
+
+    // Only root should be visible now
+    await expect(page.locator(".waterfall-row")).toHaveCount(1);
+
+    // Child count badge should show "2"
+    await expect(page.locator(".tree-child-count")).toHaveText("2");
+
+    // Expand again
+    await page.locator(".waterfall-row").first().locator(".tree-toggle").click();
+    await expect(page.locator(".waterfall-row")).toHaveCount(3);
+    await expect(page.locator(".tree-child-count")).toHaveCount(0);
+  });
+
+  test("Collapse All hides all children, Expand All restores them", async ({ page }) => {
+    await mockConnectRPC(page, "/candela.v1.TraceService/GetTrace", mockTrace);
+    await page.goto("/traces/abc123def456");
+
+    await expect(page.locator(".waterfall-row")).toHaveCount(3);
+
+    // Click Collapse All
+    await page.locator("button").filter({ hasText: "Collapse" }).click();
+    await expect(page.locator(".waterfall-row")).toHaveCount(1);
+
+    // Click Expand All
+    await page.locator("button").filter({ hasText: "Expand" }).click();
+    await expect(page.locator(".waterfall-row")).toHaveCount(3);
   });
 });
 

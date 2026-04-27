@@ -126,6 +126,8 @@ func newHTTPClient(cfg Config) (otlptrace.Client, error) {
 		// Default: no explicit compression option (library default).
 	case "gzip":
 		opts = append(opts, otlptracehttp.WithCompression(otlptracehttp.GzipCompression))
+	default:
+		slog.Warn("otlpexporter: unsupported compression type, defaulting to none", "type", cfg.Compression)
 	}
 
 	return otlptracehttp.NewClient(opts...), nil

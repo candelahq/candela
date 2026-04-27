@@ -481,8 +481,9 @@ func initStorage(cfg *Config) (storage.SpanReader, []storage.SpanWriter, func(),
 	}
 
 	closeFn := func() {
-		for _, fn := range closers {
-			fn()
+		// Reverse order: close sinks before primary storage.
+		for i := len(closers) - 1; i >= 0; i-- {
+			closers[i]()
 		}
 	}
 

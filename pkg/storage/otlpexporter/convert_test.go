@@ -303,6 +303,72 @@ func TestSpansToResourceSpans_DefaultServiceName(t *testing.T) {
 	}
 }
 
+// --- PR review feedback tests ---
+
+func TestBuildAttributes_ZeroValuesEmitted(t *testing.T) {
+	// Temperature=0.0 and CostUSD=0.0 are valid settings — must be exported.
+	s := storage.Span{
+		GenAI: &storage.GenAIAttributes{
+			Provider:    "openai",
+			Model:       "gpt-4o",
+			Temperature: 0.0,
+			CostUSD:     0.0,
+			MaxTokens:   0,
+		},
+	}
+
+	attrs := buildAttributes(s)
+	attrMap := attrListToMap(attrs)
+
+	for _, key := range []string{
+		"gen_ai.request.temperature",
+		"gen_ai.usage.cost",
+		"gen_ai.request.max_tokens",
+	} {
+		if _, ok := attrMap[key]; !ok {
+			t.Errorf("zero-value attribute %q should be present when GenAI is non-nil", key)
+		}
+	}
+}
+
+func TestBuildAttributes_DuplicateKeyPrevention(t *testing.T) {
+	// If Attributes map contains a key that collides with a GenAI semconv key,
+	// the explicit GenAI value should win (pass-through is skipped).
+	s := storage.Span{
+		GenAI: &storage.GenAIAttributes{
+			Provider: "openai",
+		},
+		Attributes: map[string]string{
+			"gen_ai.system": "should-be-ignored",
+			"custom.key":    "should-be-kept",
+		},
+	}
+
+	attrs := buildAttributes(s)
+
+	// Count occurrences of gen_ai.system — should be exactly 1.
+	count := 0
+	for _, a := range attrs {
+		if a.Key == "gen_ai.system" {
+			count++
+			if sv, ok := a.Value.Value.(*commonpb.AnyValue_StringValue); ok {
+				if sv.StringValue != "openai" {
+					t.Errorf("gen_ai.system value = %q, want %q (explicit should win)", sv.StringValue, "openai")
+				}
+			}
+		}
+	}
+	if count != 1 {
+		t.Errorf("gen_ai.system appeared %d times, want exactly 1 (no duplicates)", count)
+	}
+
+	// custom.key should still be present.
+	attrMap := attrListToMap(attrs)
+	if _, ok := attrMap["custom.key"]; !ok {
+		t.Error("non-colliding custom attribute should be preserved")
+	}
+}
+
 // --- Test helpers ---
 
 func attrListToMap(attrs []*commonpb.KeyValue) map[string]*commonpb.KeyValue {

@@ -105,51 +105,52 @@ func buildResource(projectID, serviceName, environment string) *resourcepb.Resou
 
 // buildAttributes creates OTLP attributes from a Candela span,
 // mapping GenAI fields to OTel GenAI semantic convention keys.
+//
+// Numeric GenAI fields are always emitted when GenAI is non-nil
+// (zero is valid — e.g. Temperature=0.0 for deterministic, CostUSD=0.0 for free models).
+// Custom pass-through attributes that collide with explicit keys are skipped.
 func buildAttributes(s storage.Span) []*commonpb.KeyValue {
 	var attrs []*commonpb.KeyValue
+	setKeys := make(map[string]bool)
+
+	add := func(kv *commonpb.KeyValue) {
+		attrs = append(attrs, kv)
+		setKeys[kv.Key] = true
+	}
 
 	// GenAI semantic convention attributes.
 	if g := s.GenAI; g != nil {
 		if g.Provider != "" {
-			attrs = append(attrs, stringAttr("gen_ai.system", g.Provider))
+			add(stringAttr("gen_ai.system", g.Provider))
 		}
 		if g.Model != "" {
-			attrs = append(attrs, stringAttr("gen_ai.request.model", g.Model))
+			add(stringAttr("gen_ai.request.model", g.Model))
 		}
-		if g.InputTokens > 0 {
-			attrs = append(attrs, int64Attr("gen_ai.usage.input_tokens", g.InputTokens))
-		}
-		if g.OutputTokens > 0 {
-			attrs = append(attrs, int64Attr("gen_ai.usage.output_tokens", g.OutputTokens))
-		}
-		if g.TotalTokens > 0 {
-			attrs = append(attrs, int64Attr("gen_ai.usage.total_tokens", g.TotalTokens))
-		}
-		if g.CostUSD > 0 {
-			attrs = append(attrs, float64Attr("gen_ai.usage.cost", g.CostUSD))
-		}
-		if g.Temperature > 0 {
-			attrs = append(attrs, float64Attr("gen_ai.request.temperature", g.Temperature))
-		}
-		if g.MaxTokens > 0 {
-			attrs = append(attrs, int64Attr("gen_ai.request.max_tokens", g.MaxTokens))
-		}
+		// Always emit numeric fields — zero is a valid value.
+		add(int64Attr("gen_ai.usage.input_tokens", g.InputTokens))
+		add(int64Attr("gen_ai.usage.output_tokens", g.OutputTokens))
+		add(int64Attr("gen_ai.usage.total_tokens", g.TotalTokens))
+		add(float64Attr("gen_ai.usage.cost", g.CostUSD))
+		add(float64Attr("gen_ai.request.temperature", g.Temperature))
+		add(int64Attr("gen_ai.request.max_tokens", g.MaxTokens))
 		if g.InputContent != "" {
-			attrs = append(attrs, stringAttr("gen_ai.prompt", g.InputContent))
+			add(stringAttr("gen_ai.prompt", g.InputContent))
 		}
 		if g.OutputContent != "" {
-			attrs = append(attrs, stringAttr("gen_ai.completion", g.OutputContent))
+			add(stringAttr("gen_ai.completion", g.OutputContent))
 		}
 	}
 
 	// User identity.
 	if s.UserID != "" {
-		attrs = append(attrs, stringAttr("enduser.id", s.UserID))
+		add(stringAttr("enduser.id", s.UserID))
 	}
 
-	// Pass-through custom attributes.
+	// Pass-through custom attributes — skip keys already set above to avoid duplicates.
 	for k, v := range s.Attributes {
-		attrs = append(attrs, stringAttr(k, v))
+		if !setKeys[k] {
+			attrs = append(attrs, stringAttr(k, v))
+		}
 	}
 
 	return attrs

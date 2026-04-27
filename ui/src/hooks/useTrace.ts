@@ -218,18 +218,19 @@ export function useTrace(traceId: string) {
   }, [traceId]);
 
   // Filter flatSpans to hide children of collapsed nodes
-  const visibleSpans = state.trace?.flatSpans.filter((node) => {
-    // Walk up the tree: if any ancestor is collapsed, hide this node
-    let current = node.span.parentSpanId;
-    const allNodes = state.trace?.flatSpans;
-    if (!allNodes) return true;
-    while (current) {
-      if (collapsedIds.has(current)) return false;
-      const parent = allNodes.find((n) => n.span.spanId === current);
-      current = parent?.span.parentSpanId || "";
-    }
-    return true;
-  }) ?? [];
+  const visibleSpans = (() => {
+    const spans = state.trace?.flatSpans;
+    if (!spans) return [];
+    const result: SpanNode[] = [];
+    let skipDepth = -1;
+    spans.forEach((node) => {
+      if (skipDepth === -1 || node.depth <= skipDepth) {
+        skipDepth = collapsedIds.has(node.span.spanId) ? node.depth : -1;
+        result.push(node);
+      }
+    });
+    return result;
+  })();
 
   const selectedNode = state.trace?.flatSpans.find(
     (n) => n.span.spanId === selectedSpanId

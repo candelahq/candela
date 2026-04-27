@@ -71,3 +71,6 @@ firebase.json
 !firebase.example.json
 !.firebaserc.example
 .firebase/
+
+# Production config (contains project-specific values)
+deploy/config.production.yaml

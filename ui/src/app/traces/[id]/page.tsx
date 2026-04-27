@@ -57,17 +57,23 @@ function SpanRow({
   node,
   totalDurationMs,
   selected,
+  collapsed,
   onClick,
+  onToggleCollapse,
 }: {
   node: SpanNode;
   totalDurationMs: number;
   selected: boolean;
+  collapsed: boolean;
   onClick: () => void;
+  onToggleCollapse: () => void;
 }) {
   const leftPct = totalDurationMs > 0 ? (node.offsetMs / totalDurationMs) * 100 : 0;
   const widthPct = totalDurationMs > 0 ? Math.max((node.durationMs / totalDurationMs) * 100, 0.5) : 100;
   const color = kindColor(node.span.kind);
   const isError = node.span.status === SpanStatus.ERROR;
+  const costUsd = node.subtreeCostUsd;
+  const tokens = node.subtreeTokens;
 
   return (
     <div
@@ -77,7 +83,18 @@ function SpanRow({
       tabIndex={0}
     >
       <div className="waterfall-label" style={{ paddingLeft: node.depth * 20 + 8 }}>
-        <span className="waterfall-connector" />
+        {/* Expand/collapse toggle */}
+        {node.hasChildren ? (
+          <button
+            className="tree-toggle"
+            onClick={(e) => { e.stopPropagation(); onToggleCollapse(); }}
+            title={collapsed ? `Expand (${node.childCount} children)` : "Collapse"}
+          >
+            <span className={`tree-chevron ${collapsed ? "" : "tree-chevron-open"}`}>▶</span>
+          </button>
+        ) : (
+          <span className="tree-leaf-spacer" />
+        )}
         <span className="waterfall-kind" style={{ color, borderColor: color }}>
           {kindLabel(node.span.kind)}
         </span>
@@ -85,6 +102,23 @@ function SpanRow({
           {node.span.name}
         </span>
         {isError && <span className="badge badge-error" style={{ marginLeft: 6, fontSize: 10 }}>ERR</span>}
+        {collapsed && node.childCount > 0 && (
+          <span className="tree-child-count">{node.childCount}</span>
+        )}
+      </div>
+
+      {/* Inline metrics */}
+      <div className="waterfall-metrics">
+        {tokens > 0 && (
+          <span className="waterfall-metric" title="Tokens">
+            {tokens.toLocaleString()} tok
+          </span>
+        )}
+        {costUsd > 0 && (
+          <span className="waterfall-metric waterfall-metric-cost" title="Cost">
+            ${costUsd.toFixed(4)}
+          </span>
+        )}
       </div>
 
       <div className="waterfall-bar-container">
@@ -263,7 +297,8 @@ export default function TraceDetailPage() {
   const router = useRouter();
   const traceId = params.id as string;
 
-  const { trace, loading, error, selectedSpanId, selectedNode, toggleSpan } =
+  const { trace, loading, error, selectedSpanId, selectedNode, toggleSpan,
+    visibleSpans, collapsedIds, toggleCollapse, collapseAll, expandAll } =
     useTrace(traceId);
 
   return (
@@ -338,9 +373,25 @@ export default function TraceDetailPage() {
               <div className="waterfall-panel animate-in">
                 <div className="waterfall-header">
                   <span className="table-title">Span Waterfall</span>
-                  <span style={{ fontSize: 12, color: "var(--text-muted)" }}>
-                    {trace.totalDurationMs.toFixed(0)}ms total
-                  </span>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <button
+                      className="btn" style={{ padding: "3px 8px", fontSize: 11 }}
+                      onClick={collapseAll}
+                      title="Collapse all"
+                    >
+                      ⊟ Collapse
+                    </button>
+                    <button
+                      className="btn" style={{ padding: "3px 8px", fontSize: 11 }}
+                      onClick={expandAll}
+                      title="Expand all"
+                    >
+                      ⊞ Expand
+                    </button>
+                    <span style={{ fontSize: 12, color: "var(--text-muted)" }}>
+                      {trace.totalDurationMs.toFixed(0)}ms total
+                    </span>
+                  </div>
                 </div>
                 {/* Time ruler */}
                 <div className="waterfall-ruler">
@@ -360,13 +411,15 @@ export default function TraceDetailPage() {
                 </div>
                 {/* Span rows */}
                 <div className="waterfall-body">
-                  {trace.flatSpans.map((node) => (
+                  {visibleSpans.map((node) => (
                     <SpanRow
                       key={node.span.spanId}
                       node={node}
                       totalDurationMs={trace.totalDurationMs}
                       selected={node.span.spanId === selectedSpanId}
+                      collapsed={collapsedIds.has(node.span.spanId)}
                       onClick={() => toggleSpan(node.span.spanId)}
+                      onToggleCollapse={() => toggleCollapse(node.span.spanId)}
                     />
                   ))}
                 </div>

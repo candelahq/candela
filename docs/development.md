@@ -126,6 +126,19 @@ storage:
     location: "US"
 ```
 
+### OTLP Export Sink
+Forward traces to any OTel-compatible backend (Datadog, Grafana Tempo, Jaeger, etc.) alongside your primary storage:
+
+```yaml
+sinks:
+  otlp:
+    enabled: true
+    endpoint: "http://localhost:4318"
+    compression: "gzip"  # default
+```
+
+See [docs/architecture.md](architecture.md) for full configuration options.
+
 ---
 
 ## 📡 API Interaction

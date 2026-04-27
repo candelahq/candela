@@ -15,6 +15,8 @@ Use the Collector when you need:
 - **Custom attributes** — attach business context to spans (user, session, experiment)
 - **Dual-write** — export to Candela AND Google Cloud Trace simultaneously
 
+> **💡 Candela can also _export_ OTLP**: In addition to _receiving_ spans via the Collector, Candela can _forward_ its traces as standard OTLP to any OTel-compatible backend (Datadog, Grafana Tempo, Jaeger, etc.) using the built-in OTLP export sink. See [architecture.md](architecture.md#otlp-export-sink-only) for configuration.
+
 ---
 
 ## Architecture

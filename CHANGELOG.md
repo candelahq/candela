@@ -2,6 +2,26 @@
 
 All notable changes to Candela are documented here, organized by development phase. PRs are merged to `main`.
 
+## Latest
+
+### OTLP SpanWriter — Universal Export Sink (#70)
+- New `pkg/storage/otlpexporter` package implementing `storage.SpanWriter`
+- Export Candela spans as standard OpenTelemetry traces via OTLP/HTTP
+- Maps GenAI fields to OTel `gen_ai.*` semantic conventions
+- Resource grouping by `(ProjectID, ServiceName)` per OTLP spec
+- Gzip compression by default, configurable per-export timeout
+- `sinks.otlp.required` flag for environments where export is mandatory
+- 25 tests: unit, integration (httptest OTLP receiver), config validation
+- Enables write-once-export-everywhere to Datadog, Grafana Tempo, Jaeger, Elastic, Honeycomb, etc.
+
+### Per-Conversation Session Tracking (#71)
+- Heuristic-based `SessionResolver` with message-prefix fingerprinting
+- SQLite-backed session state persistence across restarts
+- `X-Session-ID` header propagation to remote proxy
+
+### UI Enhancements (#73)
+- Collapsible trace tree with inline cost metrics
+
 ## Phase 4: Multi-User Platform ✅
 
 ### Team Mode Frontend Enhancements (#53)
@@ -101,6 +121,7 @@ All notable changes to Candela are documented here, organized by development pha
 - SQLite storage backend (CGO-free, lightweight)
 - BigQuery storage backend (serverless, time-partitioned)
 - Pub/Sub write-only sink for fan-out
+- OTLP export sink for universal OTel backend forwarding
 - CQRS interfaces: `SpanWriter`, `SpanReader`, `TraceStore`
 - CORS middleware with configurable origins
 - Structured logging with `slog` (JSON)

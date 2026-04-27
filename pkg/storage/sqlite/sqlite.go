@@ -124,8 +124,8 @@ func (s *Store) IngestSpans(ctx context.Context, spans []storage.Span) error {
 		start_time, end_time, duration_ns, project_id, environment, service_name,
 		gen_ai_model, gen_ai_provider, gen_ai_input_tokens, gen_ai_output_tokens,
 		gen_ai_total_tokens, gen_ai_cost_usd, gen_ai_temperature, gen_ai_max_tokens,
-		gen_ai_input_content, gen_ai_output_content, attributes_json
-	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+		gen_ai_input_content, gen_ai_output_content, attributes_json, session_id
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
 	if err != nil {
 		return fmt.Errorf("preparing stmt: %w", err)
 	}
@@ -154,6 +154,7 @@ func (s *Store) IngestSpans(ctx context.Context, spans []storage.Span) error {
 			genAI.CostUSD, genAI.Temperature, genAI.MaxTokens,
 			genAI.InputContent, genAI.OutputContent,
 			string(attrsJSON),
+			span.SessionID,
 		)
 		if err != nil {
 			return fmt.Errorf("inserting span: %w", err)

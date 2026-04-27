@@ -292,3 +292,115 @@ func TestCacheSize(t *testing.T) {
 		t.Errorf("cache size should be 1 after one session, got %d", r.CacheSize())
 	}
 }
+
+func TestUserMsgResolver_MultiModalContent(t *testing.T) {
+	r := NewUserMsgResolver(30 * time.Minute)
+
+	// Multi-modal message: content is an array of objects (e.g., vision API).
+	msgs := json.RawMessage(`[
+		{"role": "system", "content": "You are helpful."},
+		{"role": "user", "content": [
+			{"type": "text", "text": "What is in this image?"},
+			{"type": "image_url", "image_url": {"url": "https://example.com/img.png"}}
+		]}
+	]`)
+
+	id1 := r.Resolve(SessionInfo{UserID: "alice", Messages: msgs})
+	if id1 == "" {
+		t.Error("multi-modal content should still produce a session ID")
+	}
+
+	// Same multi-modal message should match same session.
+	id2 := r.Resolve(SessionInfo{UserID: "alice", Messages: msgs})
+	if id1 != id2 {
+		t.Errorf("same multi-modal content should match same session, got %q and %q", id1, id2)
+	}
+}
+
+func TestUserMsgResolver_MultiModalVsString(t *testing.T) {
+	r := NewUserMsgResolver(30 * time.Minute)
+
+	// String content.
+	stringMsgs := makeMessages(
+		msg("system", "sys"),
+		msg("user", "What is in this image?"),
+	)
+
+	// Multi-modal content with same text.
+	multiMsgs := json.RawMessage(`[
+		{"role": "system", "content": "sys"},
+		{"role": "user", "content": [
+			{"type": "text", "text": "What is in this image?"}
+		]}
+	]`)
+
+	id1 := r.Resolve(SessionInfo{UserID: "alice", Messages: stringMsgs})
+	id2 := r.Resolve(SessionInfo{UserID: "alice", Messages: multiMsgs})
+
+	// String and array content should produce different sessions
+	// because the raw bytes differ.
+	if id1 == id2 {
+		t.Error("string vs multi-modal content should produce different sessions")
+	}
+}
+
+func TestUserMsgResolver_CacheEviction(t *testing.T) {
+	r := NewUserMsgResolver(30 * time.Minute)
+	r.maxEntries = 5 // small cap for testing
+
+	// Fill cache with 5 unique sessions.
+	for i := range 5 {
+		msgs := makeMessages(
+			msg("system", "sys"),
+			msg("user", "msg-"+string(rune('a'+i))),
+		)
+		r.Resolve(SessionInfo{UserID: "alice", Messages: msgs})
+	}
+
+	if r.CacheSize() != 5 {
+		t.Errorf("cache should have 5 entries, got %d", r.CacheSize())
+	}
+
+	// Add one more — should evict oldest to stay at 5.
+	newMsgs := makeMessages(
+		msg("system", "sys"),
+		msg("user", "msg-new"),
+	)
+	r.Resolve(SessionInfo{UserID: "alice", Messages: newMsgs})
+
+	if r.CacheSize() != 5 {
+		t.Errorf("cache should stay at 5 after eviction, got %d", r.CacheSize())
+	}
+}
+
+func TestUserMsgResolver_CacheEvictionPrefersTTL(t *testing.T) {
+	now := time.Now()
+	r := NewUserMsgResolver(30 * time.Minute)
+	r.maxEntries = 5
+	r.nowFunc = func() time.Time { return now }
+
+	// Add 5 sessions.
+	for i := range 5 {
+		msgs := makeMessages(
+			msg("system", "sys"),
+			msg("user", "msg-"+string(rune('a'+i))),
+		)
+		r.Resolve(SessionInfo{UserID: "alice", Messages: msgs})
+	}
+
+	// Age 3 of them past TTL.
+	r.nowFunc = func() time.Time { return now.Add(31 * time.Minute) }
+
+	// Adding a new session should first evict the 3 expired ones.
+	newMsgs := makeMessages(
+		msg("system", "sys"),
+		msg("user", "msg-new"),
+	)
+	r.Resolve(SessionInfo{UserID: "alice", Messages: newMsgs})
+
+	// The 3 expired + 2 remaining could be evicted down to maxEntries.
+	// Since all 5 were created at the same time, all expired → cache should be just 1 (the new one).
+	if r.CacheSize() != 1 {
+		t.Errorf("expired entries should be evicted, cache should be 1, got %d", r.CacheSize())
+	}
+}

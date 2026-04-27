@@ -51,21 +51,25 @@ func (s *spanCapture) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	r.Body = io.NopCloser(bytes.NewReader(reqBody))
 	r.ContentLength = int64(len(reqBody))
 
-	// Parse request for model name and input content (extract early to avoid redundant unmarshal).
+	// Parse request for model name, input content, and raw messages.
 	var chatReq struct {
-		Model    string `json:"model"`
-		Stream   *bool  `json:"stream"`
-		Messages []struct {
-			Role    string `json:"role"`
-			Content string `json:"content"`
-		} `json:"messages"`
+		Model    string          `json:"model"`
+		Stream   *bool           `json:"stream"`
+		Messages json.RawMessage `json:"messages"`
 	}
 	_ = json.Unmarshal(reqBody, &chatReq)
 
+	// Decode messages for input content extraction.
+	var msgs []struct {
+		Role    string `json:"role"`
+		Content string `json:"content"`
+	}
+	_ = json.Unmarshal(chatReq.Messages, &msgs)
+
 	// Extract input content now to avoid re-parsing later.
 	var inputContent string
-	if len(chatReq.Messages) > 0 {
-		last := chatReq.Messages[len(chatReq.Messages)-1]
+	if len(msgs) > 0 {
+		last := msgs[len(msgs)-1]
 		inputContent = last.Content
 		if runeCount := len([]rune(inputContent)); runeCount > 500 {
 			runes := []rune(inputContent)
@@ -76,11 +80,10 @@ func (s *spanCapture) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Resolve session ID.
 	var sessionID string
 	if s.resolver != nil {
-		msgsJSON, _ := json.Marshal(chatReq.Messages)
 		sessionID = s.resolver.Resolve(session.SessionInfo{
 			UserID:   r.Header.Get("X-User-Id"),
 			Model:    chatReq.Model,
-			Messages: msgsJSON,
+			Messages: chatReq.Messages, // pass raw JSON directly, no re-marshal
 			Headers:  r.Header,
 		})
 		// Inject header so downstream (lm_handler → remote proxy) can see it.

@@ -88,22 +88,25 @@ type sessionEntry struct {
 // if the message count grew since the last request with the same
 // fingerprint, it's the same session.
 type UserMsgResolver struct {
-	mu      sync.Mutex
-	cache   map[string]*sessionEntry // fingerprint → entry
-	ttl     time.Duration
-	nowFunc func() time.Time // for testing
+	mu         sync.Mutex
+	cache      map[string]*sessionEntry // fingerprint → entry
+	ttl        time.Duration
+	maxEntries int              // safety cap; 0 means 1000
+	nowFunc    func() time.Time // for testing
 }
 
 // NewUserMsgResolver creates a resolver with the given in-memory TTL.
 // Entries not accessed within the TTL are evicted lazily on next lookup.
+// The cache is capped at 1000 entries to prevent unbounded growth.
 func NewUserMsgResolver(ttl time.Duration) *UserMsgResolver {
 	if ttl <= 0 {
 		ttl = 30 * time.Minute
 	}
 	return &UserMsgResolver{
-		cache:   make(map[string]*sessionEntry),
-		ttl:     ttl,
-		nowFunc: time.Now,
+		cache:      make(map[string]*sessionEntry),
+		ttl:        ttl,
+		maxEntries: 1000,
+		nowFunc:    time.Now,
 	}
 }
 
@@ -132,6 +135,9 @@ func (u *UserMsgResolver) Resolve(info SessionInfo) string {
 		// Fall through to create new session.
 	}
 
+	// Evict stale entries + enforce max size before inserting.
+	u.evictLocked(now)
+
 	// New session.
 	id := uuid.NewString()
 	u.cache[fp] = &sessionEntry{
@@ -142,37 +148,74 @@ func (u *UserMsgResolver) Resolve(info SessionInfo) string {
 	return id
 }
 
+// evictLocked removes expired entries and, if still over cap, evicts the
+// oldest entries. Must be called with u.mu held.
+func (u *UserMsgResolver) evictLocked(now time.Time) {
+	// Phase 1: remove expired entries.
+	for fp, entry := range u.cache {
+		if now.Sub(entry.lastAccess) > u.ttl {
+			delete(u.cache, fp)
+		}
+	}
+
+	// Phase 2: if still over cap, evict oldest.
+	max := u.maxEntries
+	if max <= 0 {
+		max = 1000
+	}
+	for len(u.cache) >= max {
+		var oldestFP string
+		var oldestTime time.Time
+		for fp, entry := range u.cache {
+			if oldestFP == "" || entry.lastAccess.Before(oldestTime) {
+				oldestFP = fp
+				oldestTime = entry.lastAccess
+			}
+		}
+		delete(u.cache, oldestFP)
+	}
+}
+
 // fingerprint extracts the first user message from the messages array
 // and hashes it with the user ID to produce a stable conversation key.
+// Handles both string content and multi-modal content (array of objects)
+// per the OpenAI API spec.
 func (u *UserMsgResolver) fingerprint(info SessionInfo) (string, int) {
 	if len(info.Messages) == 0 {
 		return "", 0
 	}
 
 	var msgs []struct {
-		Role    string `json:"role"`
-		Content string `json:"content"`
+		Role    string          `json:"role"`
+		Content json.RawMessage `json:"content"`
 	}
 	if err := json.Unmarshal(info.Messages, &msgs); err != nil {
 		return "", 0
 	}
 
 	// Find the first user message.
-	var firstUserMsg string
+	var contentBytes []byte
 	for _, m := range msgs {
-		if m.Role == "user" {
-			firstUserMsg = m.Content
+		if m.Role == "user" && len(m.Content) > 0 {
+			// Try to unmarshal as a plain string first (common case).
+			var s string
+			if err := json.Unmarshal(m.Content, &s); err == nil {
+				contentBytes = []byte(s)
+			} else {
+				// Multi-modal content (array of objects): use raw JSON as fingerprint.
+				contentBytes = m.Content
+			}
 			break
 		}
 	}
-	if firstUserMsg == "" {
+	if len(contentBytes) == 0 {
 		return "", len(msgs)
 	}
 
 	h := sha256.New()
 	h.Write([]byte(info.UserID))
 	h.Write([]byte{0}) // separator
-	h.Write([]byte(firstUserMsg))
+	h.Write(contentBytes)
 
 	return hex.EncodeToString(h.Sum(nil)), len(msgs)
 }

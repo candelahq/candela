@@ -88,14 +88,19 @@ resource "google_project_iam_member" "github_storage" {
   member  = "serviceAccount:${google_service_account.github_deploy.email}"
 }
 
-# Act as the Cloud Build default service account.
 # Cloud Build requires the caller to have serviceAccountUser on the build SA.
-data "google_project" "current" {
-  project_id = var.project_id
-}
+# Uses data.google_project.current from cloud_run.tf for project number.
 
 resource "google_service_account_iam_member" "github_act_as_cloudbuild" {
   service_account_id = "projects/${var.project_id}/serviceAccounts/${data.google_project.current.number}@cloudbuild.gserviceaccount.com"
+  role               = "roles/iam.serviceAccountUser"
+  member             = "serviceAccount:${google_service_account.github_deploy.email}"
+}
+
+# Also act as the Compute Engine default SA — Cloud Build uses this as
+# its execution identity when no custom SA is specified.
+resource "google_service_account_iam_member" "github_act_as_compute" {
+  service_account_id = "projects/${var.project_id}/serviceAccounts/${data.google_project.current.number}-compute@developer.gserviceaccount.com"
   role               = "roles/iam.serviceAccountUser"
   member             = "serviceAccount:${google_service_account.github_deploy.email}"
 }

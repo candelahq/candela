@@ -9,8 +9,6 @@ import (
 	"github.com/candelahq/candela/pkg/storage"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"
-	// For gRPC support, uncomment:
-	// "go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
 )
 
 var _ storage.SpanWriter = (*Writer)(nil)

@@ -17,6 +17,11 @@ import (
 	tracepb "go.opentelemetry.io/proto/otlp/trace/v1"
 )
 
+const (
+	scopeName    = "candela"
+	scopeVersion = "1.0.0"
+)
+
 // spansToResourceSpans groups Candela spans by (ProjectID, ServiceName)
 // and builds the OTLP ResourceSpans hierarchy.
 func spansToResourceSpans(spans []storage.Span) []*tracepb.ResourceSpans {
@@ -59,8 +64,8 @@ func spansToResourceSpans(spans []storage.Span) []*tracepb.ResourceSpans {
 			Resource: buildResource(k.ProjectID, k.ServiceName, k.Environment),
 			ScopeSpans: []*tracepb.ScopeSpans{{
 				Scope: &commonpb.InstrumentationScope{
-					Name:    "candela",
-					Version: "1.0.0",
+					Name:    scopeName,
+					Version: scopeVersion,
 				},
 				Spans: protoSpans,
 			}},

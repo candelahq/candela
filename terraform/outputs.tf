@@ -41,3 +41,15 @@ output "firebase_config" {
     app_id      = google_firebase_web_app.candela_ui.app_id
   }
 }
+
+# ── GitHub Actions CD ──
+
+output "github_actions_secrets" {
+  description = "Values to set as GitHub repository secrets for the CD workflow"
+  value = {
+    GCP_PROJECT_ID          = var.project_id
+    GCP_REGION              = var.region
+    GCP_WIF_PROVIDER        = google_iam_workload_identity_pool_provider.github.name
+    GCP_WIF_SERVICE_ACCOUNT = google_service_account.github_deploy.email
+  }
+}

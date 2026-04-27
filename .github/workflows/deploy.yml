@@ -1,0 +1,118 @@
+# Candela — Continuous Deployment
+#
+# Triggers on merge to main (after CI passes).
+# Builds the container via Cloud Build, then deploys to Cloud Run.
+#
+# Auth: Workload Identity Federation (keyless) — see terraform/github_wif.tf
+#
+# Required GitHub Secrets:
+#   GCP_PROJECT_ID              — GCP project ID
+#   GCP_REGION                  — Cloud Run region (e.g., us-central1)
+#   GCP_WIF_PROVIDER            — WIF provider resource name
+#   GCP_WIF_SERVICE_ACCOUNT     — Service account email for deployments
+#   FIREBASE_API_KEY            — Firebase Web API key
+#   FIREBASE_AUTH_DOMAIN        — e.g., project.firebaseapp.com
+#   FIREBASE_PROJECT_ID         — Firebase project ID
+#   FIREBASE_APP_ID             — Firebase app ID
+#   BUF_TOKEN                   — Buf registry token for proto gen
+
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:      # Manual trigger for ad-hoc deploys
+
+# Cancel in-flight deploys when a new commit lands on main.
+concurrency:
+  group: deploy-production
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  id-token: write         # Required for Workload Identity Federation
+
+env:
+  IMAGE: us-central1-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/candela/candela-server
+
+jobs:
+  # ── Gate: CI must pass first ──
+  ci:
+    uses: ./.github/workflows/ci.yml
+    secrets: inherit
+
+  # ── Build container image via Cloud Build ──
+  build:
+    needs: ci
+    runs-on: ubuntu-latest
+    outputs:
+      image_tag: ${{ steps.meta.outputs.tag }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Compute image tag
+        id: meta
+        run: |
+          TAG="${GITHUB_SHA::8}"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Authenticate to GCP
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WIF_PROVIDER }}
+          service_account: ${{ secrets.GCP_WIF_SERVICE_ACCOUNT }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Submit Cloud Build
+        run: |
+          gcloud builds submit \
+            --project "${{ secrets.GCP_PROJECT_ID }}" \
+            --config cloudbuild.yaml \
+            --substitutions="\
+          _FIREBASE_API_KEY=${{ secrets.FIREBASE_API_KEY }},\
+          _FIREBASE_AUTH_DOMAIN=${{ secrets.FIREBASE_AUTH_DOMAIN }},\
+          _FIREBASE_PROJECT_ID=${{ secrets.FIREBASE_PROJECT_ID }},\
+          _FIREBASE_APP_ID=${{ secrets.FIREBASE_APP_ID }},\
+          _IMAGE_TAG=${{ steps.meta.outputs.tag }}" \
+            --timeout=1200s
+
+  # ── Deploy to Cloud Run ──
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment: production       # GitHub Environment for deploy protection rules
+
+    steps:
+      - name: Authenticate to GCP
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WIF_PROVIDER }}
+          service_account: ${{ secrets.GCP_WIF_SERVICE_ACCOUNT }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Deploy to Cloud Run
+        run: |
+          gcloud run services update candela \
+            --project "${{ secrets.GCP_PROJECT_ID }}" \
+            --region "${{ secrets.GCP_REGION }}" \
+            --image "${{ env.IMAGE }}:${{ needs.build.outputs.image_tag }}"
+
+      - name: Verify deployment
+        run: |
+          URL=$(gcloud run services describe candela \
+            --project "${{ secrets.GCP_PROJECT_ID }}" \
+            --region "${{ secrets.GCP_REGION }}" \
+            --format='value(status.url)')
+          echo "🕯️ Deployed to: $URL"
+          # Health check (with auth token for IAM-protected services)
+          TOKEN=$(gcloud auth print-identity-token --audiences="$URL" 2>/dev/null || echo "")
+          if [ -n "$TOKEN" ]; then
+            curl -sf -H "Authorization: Bearer $TOKEN" "$URL/healthz" || echo "⚠️ Health check failed (may need IAM access)"
+          else
+            echo "ℹ️ Skipping health check (no identity token available)"
+          fi

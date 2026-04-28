@@ -319,16 +319,20 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 	// actual cost deduction happens post-response via DeductSpend.
 	if p.users != nil {
 		if caller := auth.FromContext(r.Context()); caller != nil {
-			check, err := p.users.CheckBudget(r.Context(), caller.ID, 0)
+			budgetUserID := strings.ToLower(caller.Email)
+			if budgetUserID == "" {
+				budgetUserID = caller.ID
+			}
+			check, err := p.users.CheckBudget(r.Context(), budgetUserID, 0)
 			if err != nil {
 				slog.Warn("budget check failed, allowing request",
-					"user_id", caller.ID, "error", err)
+					"user_id", budgetUserID, "error", err)
 			} else if !check.Allowed {
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusPaymentRequired)
 				_, _ = w.Write([]byte(`{"error":{"message":"budget exhausted — contact your admin for a grant or budget increase","type":"insufficient_budget","code":402}}`))
 				slog.Info("blocked request: budget exhausted",
-					"user_id", caller.ID,
+					"user_id", budgetUserID,
 					"remaining_usd", check.RemainingUSD)
 				return
 			}
@@ -647,7 +651,11 @@ func (p *Proxy) buildSpan(ctx context.Context, params spanParams) {
 	}
 
 	// Set user ID from auth context for per-user attribution.
-	if caller := auth.FromContext(ctx); caller != nil {
+	// Use sanitized email (matching Firestore doc IDs) as the canonical ID.
+	// This ensures span user_id aligns with budget lookups and query filters.
+	if caller := auth.FromContext(ctx); caller != nil && caller.Email != "" {
+		span.UserID = strings.ToLower(caller.Email)
+	} else if caller != nil {
 		span.UserID = caller.ID
 	}
 

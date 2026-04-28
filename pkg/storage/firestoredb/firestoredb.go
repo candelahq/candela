@@ -476,9 +476,16 @@ func (s *Store) DeductSpend(ctx context.Context, userID string, costUSD float64,
 			if err != nil {
 				return err
 			}
+			// Proportionally attribute tokens based on the cost fraction
+			// absorbed by the budget (vs. grants). If $0.10 total and the
+			// budget absorbs $0.02, it gets 20% of the tokens.
+			budgetTokens := tokens
+			if costUSD > 0 {
+				budgetTokens = int64(float64(tokens) * (remaining / costUSD))
+			}
 			if err := tx.Update(budgetRef, []firestore.Update{
 				{Path: "spent_usd", Value: b.SpentUSD + remaining},
-				{Path: "tokens_used", Value: b.TokensUsed + tokens},
+				{Path: "tokens_used", Value: b.TokensUsed + budgetTokens},
 			}); err != nil {
 				return fmt.Errorf("firestoredb: deducting from budget: %w", err)
 			}

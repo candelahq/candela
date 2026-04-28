@@ -131,15 +131,23 @@ func TestProcessorBackPressure(t *testing.T) {
 		// The channel is 20 deep. Beyond that, Submit drops.
 		proc.Submit(testSpan(fmt.Sprintf("s%d", i)))
 	}
-	// Count how many actually made it.
+
+	// Verify the DroppedSpans counter matches reality.
+	reportedDropped := proc.DroppedSpans()
+	if reportedDropped == 0 {
+		t.Error("expected DroppedSpans() > 0 due to back-pressure")
+	}
+
+	// Count how many actually made it into the channel.
 	close(proc.spanCh)
 	received := 0
 	for range proc.spanCh {
 		received++
 	}
-	dropped := 30 - received
-	if dropped == 0 {
-		t.Error("expected some spans to be dropped due to back-pressure")
+	actualDropped := int64(30 - received)
+
+	if reportedDropped != actualDropped {
+		t.Errorf("DroppedSpans()=%d but actual dropped=%d", reportedDropped, actualDropped)
 	}
-	t.Logf("received=%d, dropped=%d (channel capacity=20)", received, dropped)
+	t.Logf("received=%d, dropped=%d (channel capacity=20)", received, actualDropped)
 }

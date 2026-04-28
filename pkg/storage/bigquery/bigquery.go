@@ -315,19 +315,13 @@ func (s *Store) IngestSpans(ctx context.Context, spans []storage.Span) error {
 	return nil
 }
 
-// Ping checks connectivity to BigQuery.
+// Ping checks connectivity to BigQuery by reading table metadata.
+// Uses a metadata read instead of a query job to avoid unnecessary cost
+// and latency on frequent health checks.
 func (s *Store) Ping(ctx context.Context) error {
-	q := s.client.Query(fmt.Sprintf("SELECT 1 FROM `%s` LIMIT 0", s.tableID))
-	job, err := q.Run(ctx)
+	_, err := s.client.Dataset(s.config.Dataset).Table(s.config.Table).Metadata(ctx)
 	if err != nil {
 		return fmt.Errorf("bigquery ping: %w", err)
-	}
-	status, err := job.Wait(ctx)
-	if err != nil {
-		return fmt.Errorf("bigquery ping wait: %w", err)
-	}
-	if status.Err() != nil {
-		return fmt.Errorf("bigquery ping: %w", status.Err())
 	}
 	return nil
 }
@@ -407,13 +401,41 @@ func (s *Store) QueryTraces(ctx context.Context, tq storage.TraceQuery) (*storag
 		traceIDs = append(traceIDs, row.TraceID)
 	}
 
+	if len(traceIDs) == 0 {
+		return &storage.TraceResult{Traces: nil, TotalCount: 0}, nil
+	}
+
+	// Batch-fetch all spans for the matched traces in a single query
+	// (avoids N+1: was 1 query per trace before).
+	batchQuery := fmt.Sprintf(`
+		SELECT * FROM %s
+		WHERE trace_id IN UNNEST(@traceIDs)
+		ORDER BY start_time ASC
+	`, quoteTable(s.tableID))
+
+	bq := s.client.Query(batchQuery)
+	bq.Parameters = []bigquery.QueryParameter{
+		{Name: "traceIDs", Value: traceIDs},
+	}
+
+	allSpans, err := s.querySpans(ctx, bq)
+	if err != nil {
+		return nil, fmt.Errorf("batch-fetching trace spans: %w", err)
+	}
+
+	// Group spans by trace ID, preserving the order from traceIDs.
+	spansByTrace := make(map[string][]storage.Span, len(traceIDs))
+	for _, span := range allSpans {
+		spansByTrace[span.TraceID] = append(spansByTrace[span.TraceID], span)
+	}
+
 	var traces []storage.TraceSummary
 	for _, tid := range traceIDs {
-		trace, err := s.GetTrace(ctx, tid)
-		if err != nil {
-			slog.Warn("skipping trace", "trace_id", tid, "error", err)
+		spans, ok := spansByTrace[tid]
+		if !ok || len(spans) == 0 {
 			continue
 		}
+		trace := buildTrace(tid, spans)
 		traces = append(traces, storage.TraceSummary{
 			TraceID:      trace.TraceID,
 			RootSpanName: trace.RootSpanName,
@@ -709,6 +731,7 @@ func buildTrace(traceID string, spans []storage.Span) *storage.Trace {
 }
 
 // quoteTable wraps a fully-qualified table ID in backticks for BigQuery SQL.
+// Escapes any embedded backticks to prevent SQL injection via config values.
 func quoteTable(tableID string) string {
-	return "`" + tableID + "`"
+	return "`" + strings.ReplaceAll(tableID, "`", "\\`") + "`"
 }

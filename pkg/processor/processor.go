@@ -6,6 +6,7 @@ package processor
 import (
 	"context"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"log/slog"
@@ -17,12 +18,13 @@ import (
 // SpanProcessor buffers incoming spans and flushes them to storage in batches.
 // Supports fan-out to multiple SpanWriter sinks (e.g. DuckDB + Pub/Sub).
 type SpanProcessor struct {
-	writers   []storage.SpanWriter
-	calc      *costcalc.Calculator
-	batchSize int
-	spanCh    chan storage.Span
-	done      chan struct{}
-	once      sync.Once
+	writers      []storage.SpanWriter
+	calc         *costcalc.Calculator
+	batchSize    int
+	spanCh       chan storage.Span
+	done         chan struct{}
+	once         sync.Once
+	droppedSpans atomic.Int64
 }
 
 // New creates a new in-process span processor.
@@ -45,7 +47,9 @@ func (p *SpanProcessor) Submit(span storage.Span) {
 	select {
 	case p.spanCh <- span:
 	default:
-		slog.Warn("span processor buffer full, dropping span")
+		dropped := p.droppedSpans.Add(1)
+		slog.Warn("span processor buffer full, dropping span",
+			"total_dropped", dropped)
 	}
 }
 
@@ -119,4 +123,9 @@ func (p *SpanProcessor) Stop() {
 	p.once.Do(func() {
 		close(p.done)
 	})
+}
+
+// DroppedSpans returns the total number of spans dropped due to buffer pressure.
+func (p *SpanProcessor) DroppedSpans() int64 {
+	return p.droppedSpans.Load()
 }

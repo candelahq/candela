@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"strings"
 
 	"github.com/candelahq/candela/pkg/auth"
 	"github.com/candelahq/candela/pkg/storage"
@@ -15,6 +16,9 @@ import (
 // This implements the access control rule:
 //   - Admins see all traces across the organization
 //   - Developers see only their own traces
+//
+// The returned ID is the sanitized email (matching Firestore doc IDs and
+// the user_id written to BQ spans by the proxy).
 //
 // If no UserStore is available (e.g. local dev without Firestore),
 // returns empty string (admin-like access).
@@ -37,13 +41,13 @@ func scopeUserID(ctx context.Context, users storage.UserStore) string {
 			slog.Warn("failed to look up user role, scoping to own ID",
 				"email", caller.Email, "error", err)
 		}
-		// Unknown user — scope to their own ID (conservative).
-		return caller.ID
+		// Unknown user — scope to sanitized email (matching proxy span attribution).
+		return strings.ToLower(caller.Email)
 	}
 
 	if record.Role == storage.RoleAdmin {
 		return "" // admins see everything
 	}
 
-	return caller.ID
+	return record.ID // Firestore doc ID = sanitized email
 }

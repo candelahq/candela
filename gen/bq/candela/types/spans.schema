@@ -84,6 +84,12 @@
   "description": "The developer who triggered this span."
  },
  {
+  "name": "session_id",
+  "type": "STRING",
+  "mode": "NULLABLE",
+  "description": "Conversation/session identifier for grouping related spans."
+ },
+ {
   "name": "gen_ai_model",
   "type": "STRING",
   "mode": "NULLABLE",

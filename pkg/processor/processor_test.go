@@ -151,3 +151,58 @@ func TestProcessorBackPressure(t *testing.T) {
 	}
 	t.Logf("received=%d, dropped=%d (channel capacity=20)", received, actualDropped)
 }
+
+func TestProcessorCostEnrichment(t *testing.T) {
+	w := &mockWriter{}
+	calc := costcalc.New()
+	proc := New([]storage.SpanWriter{w}, calc, 1) // batch size 1 = flush immediately
+
+	ctx, cancel := context.WithCancel(context.Background())
+	go proc.Run(ctx)
+
+	// Submit a span with zero cost — processor should enrich it.
+	span := testSpan("cost-enrich")
+	span.GenAI.CostUSD = 0
+	proc.Submit(span)
+
+	time.Sleep(500 * time.Millisecond)
+	cancel()
+	proc.Stop()
+
+	spans := w.allSpans()
+	if len(spans) == 0 {
+		t.Fatal("expected at least 1 span")
+	}
+	if spans[0].GenAI.CostUSD == 0 {
+		t.Error("expected cost to be enriched (non-zero) by processor")
+	}
+}
+
+func TestProcessorPreservesUserContext(t *testing.T) {
+	w := &mockWriter{}
+	calc := costcalc.New()
+	proc := New([]storage.SpanWriter{w}, calc, 1)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	go proc.Run(ctx)
+
+	span := testSpan("user-ctx")
+	span.UserID = "user-abc123"
+	span.SessionID = "session-xyz789"
+	proc.Submit(span)
+
+	time.Sleep(500 * time.Millisecond)
+	cancel()
+	proc.Stop()
+
+	spans := w.allSpans()
+	if len(spans) == 0 {
+		t.Fatal("expected at least 1 span")
+	}
+	if spans[0].UserID != "user-abc123" {
+		t.Errorf("UserID = %q, want user-abc123", spans[0].UserID)
+	}
+	if spans[0].SessionID != "session-xyz789" {
+		t.Errorf("SessionID = %q, want session-xyz789", spans[0].SessionID)
+	}
+}

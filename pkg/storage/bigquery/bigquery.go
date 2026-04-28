@@ -218,7 +218,7 @@ func (s *Store) ensureSchema(ctx context.Context) error {
 			Type:  bigquery.DayPartitioningType,
 		},
 		Clustering: &bigquery.Clustering{
-			Fields: []string{"project_id", "trace_id"},
+			Fields: []string{"project_id", "user_id", "trace_id"},
 		},
 	}
 	if err := table.Create(ctx, tableMeta); err != nil {
@@ -243,6 +243,10 @@ func (s *Store) ensureSchema(ctx context.Context) error {
 // evolveSchema compares the desired schema against the live table and adds
 // any missing columns. BigQuery supports additive schema changes (new nullable
 // columns) without requiring a full table rebuild.
+//
+// Limitation: this only detects missing top-level columns. Changes to nested
+// STRUCT fields (e.g. adding a field inside the "attributes" REPEATED STRUCT)
+// are not detected and must be handled manually or via a migration tool.
 func (s *Store) evolveSchema(ctx context.Context, table *bigquery.Table, desired bigquery.Schema) error {
 	md, err := table.Metadata(ctx)
 	if err != nil {
@@ -405,12 +409,15 @@ func (s *Store) QueryTraces(ctx context.Context, tq storage.TraceQuery) (*storag
 		return &storage.TraceResult{Traces: nil, TotalCount: 0}, nil
 	}
 
-	// Batch-fetch all spans for the matched traces in a single query
-	// (avoids N+1: was 1 query per trace before).
+	// Batch-fetch only the columns buildTrace needs (avoids scanning
+	// large text fields like gen_ai_input_content/gen_ai_output_content).
 	batchQuery := fmt.Sprintf(`
-		SELECT * FROM %s
+		SELECT span_id, trace_id, parent_span_id, name, kind, status,
+		       start_time, end_time, duration_ns, project_id, environment,
+		       gen_ai_total_tokens, gen_ai_cost_usd
+		FROM %s
 		WHERE trace_id IN UNNEST(@traceIDs)
-		ORDER BY start_time ASC
+		ORDER BY start_time ASC, span_id ASC
 	`, quoteTable(s.tableID))
 
 	bq := s.client.Query(batchQuery)

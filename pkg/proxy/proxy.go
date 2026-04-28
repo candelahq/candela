@@ -313,7 +313,10 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// ── Pre-flight budget check ──
-	// Block requests when the user has exhausted all funds (grants + budget).
+	// Soft gate: check if the user has *any* remaining budget (grants + base).
+	// We pass estimatedCostUSD=0 because we can't know the actual cost until
+	// after the upstream response. This blocks only fully-exhausted users;
+	// actual cost deduction happens post-response via DeductSpend.
 	if p.users != nil {
 		if caller := auth.FromContext(r.Context()); caller != nil {
 			check, err := p.users.CheckBudget(r.Context(), caller.ID, 0)

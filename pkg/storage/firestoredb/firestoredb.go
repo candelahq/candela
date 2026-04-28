@@ -16,6 +16,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"math"
 	"strings"
 	"time"
 
@@ -481,7 +482,7 @@ func (s *Store) DeductSpend(ctx context.Context, userID string, costUSD float64,
 			// budget absorbs $0.02, it gets 20% of the tokens.
 			budgetTokens := tokens
 			if costUSD > 0 {
-				budgetTokens = int64(float64(tokens) * (remaining / costUSD))
+				budgetTokens = int64(math.Round(float64(tokens) * (remaining / costUSD)))
 			}
 			if err := tx.Update(budgetRef, []firestore.Update{
 				{Path: "spent_usd", Value: b.SpentUSD + remaining},

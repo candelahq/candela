@@ -56,16 +56,11 @@ jobs:
         run: nix develop -c pnpm install
         working-directory: ui
 
-      - name: Generate TS proto stubs (Remote)
+      - name: Generate TS proto stubs
         env:
           BUF_TOKEN: ${{ secrets.BUF_TOKEN }}
         run: |
           nix develop -c bash -c "cd proto && buf generate"
-
-      - name: Copy generated types
-        run: |
-          cp -r gen/ts/candela/* ui/src/gen/
-          rm -f ui/src/gen/types/bq_span_pb.ts
 
       - name: Lint
         run: nix develop -c pnpm run lint
@@ -90,16 +85,11 @@ jobs:
         run: nix develop -c pnpm install
         working-directory: ui
 
-      - name: Generate TS proto stubs (Remote)
+      - name: Generate TS proto stubs
         env:
           BUF_TOKEN: ${{ secrets.BUF_TOKEN }}
         run: |
           nix develop -c bash -c "cd proto && buf generate"
-
-      - name: Copy generated types
-        run: |
-          cp -r gen/ts/candela/* ui/src/gen/
-          rm -f ui/src/gen/types/bq_span_pb.ts
 
       - name: Install Playwright browsers (Using Nix)
         run: nix develop -c pnpm exec playwright install --with-deps chromium

@@ -83,18 +83,47 @@ jobs:
       - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@v2
 
-      - name: Submit Cloud Build
+      - name: Submit Cloud Build (async)
+        id: build
         run: |
-          gcloud builds submit \
+          BUILD_OUTPUT=$(gcloud builds submit \
             --project "${{ secrets.GCP_PROJECT_ID }}" \
             --config cloudbuild.yaml \
+            --async \
             --substitutions="\
           _FIREBASE_API_KEY=${{ secrets.FIREBASE_API_KEY }},\
           _FIREBASE_AUTH_DOMAIN=${{ secrets.FIREBASE_AUTH_DOMAIN }},\
           _FIREBASE_PROJECT_ID=${{ secrets.FIREBASE_PROJECT_ID }},\
           _FIREBASE_APP_ID=${{ secrets.FIREBASE_APP_ID }},\
           _IMAGE_TAG=${{ steps.meta.outputs.tag }}" \
-            --timeout=1200s
+            --timeout=1200s 2>&1)
+          echo "$BUILD_OUTPUT"
+          BUILD_ID=$(echo "$BUILD_OUTPUT" | grep -oP 'builds/\K[a-f0-9-]+' | head -1)
+          echo "build_id=$BUILD_ID" >> "$GITHUB_OUTPUT"
+          echo "🕯️ Cloud Build submitted: $BUILD_ID"
+
+      - name: Wait for Cloud Build
+        run: |
+          echo "⏳ Waiting for build ${{ steps.build.outputs.build_id }}..."
+          while true; do
+            STATUS=$(gcloud builds describe "${{ steps.build.outputs.build_id }}" \
+              --project "${{ secrets.GCP_PROJECT_ID }}" \
+              --format='value(status)' 2>/dev/null)
+            case "$STATUS" in
+              SUCCESS)
+                echo "✅ Build succeeded"
+                break
+                ;;
+              FAILURE|TIMEOUT|CANCELLED|INTERNAL_ERROR)
+                echo "❌ Build failed with status: $STATUS"
+                exit 1
+                ;;
+              *)
+                echo "  status: $STATUS"
+                sleep 15
+                ;;
+            esac
+          done
 
   # ── Deploy to Cloud Run ──
   deploy:

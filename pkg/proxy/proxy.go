@@ -297,6 +297,11 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 	// Accept session ID from candela-local (or other clients).
 	sessionID := r.Header.Get("X-Session-Id")
 
+	// Accept end-user identity from candela-local. When the proxy is called
+	// via a service account, X-User-Id carries the real user's email so
+	// spans are attributed correctly for per-user dashboards.
+	userOverride := strings.ToLower(r.Header.Get("X-User-Id"))
+
 	// Extract provider from path: /proxy/{provider}/v1/...
 	parts := strings.SplitN(strings.TrimPrefix(r.URL.Path, "/proxy/"), "/", 2)
 	if len(parts) < 2 {
@@ -436,9 +441,9 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 	cbAllow := p.breakers[providerName].AllowRequest()
 
 	if isStreaming && resp.StatusCode == http.StatusOK {
-		p.handleStreamingResponse(w, r, resp, provider, reqBody, startTime, ttfb, requestID, sessionID, cbAllow)
+		p.handleStreamingResponse(w, r, resp, provider, reqBody, startTime, ttfb, requestID, sessionID, userOverride, cbAllow)
 	} else {
-		p.handleStandardResponse(w, r, resp, provider, reqBody, startTime, ttfb, requestID, sessionID, cbAllow)
+		p.handleStandardResponse(w, r, resp, provider, reqBody, startTime, ttfb, requestID, sessionID, userOverride, cbAllow)
 	}
 }
 
@@ -467,6 +472,7 @@ func (p *Proxy) handleStandardResponse(
 	ttfb time.Duration,
 	requestID string,
 	sessionID string,
+	userOverride string,
 	cbAllow bool,
 ) {
 	// Read the full response.
@@ -507,7 +513,7 @@ func (p *Proxy) handleStandardResponse(
 
 	// Create observability span (async — don't block the response).
 	if cbAllow {
-		go p.createSpan(context.WithoutCancel(r.Context()), provider, reqBody, respBody, startTime, endTime, resp.StatusCode, ttfb, requestID, sessionID)
+		go p.createSpan(context.WithoutCancel(r.Context()), provider, reqBody, respBody, startTime, endTime, resp.StatusCode, ttfb, requestID, sessionID, userOverride)
 	} else {
 		slog.Debug("skipping span creation (circuit open)", "provider", provider.Name, "request_id", requestID)
 	}
@@ -520,6 +526,7 @@ func (p *Proxy) handleStreamingResponse(
 	ttfb time.Duration,
 	requestID string,
 	sessionID string,
+	userOverride string,
 	cbAllow bool,
 ) {
 	flusher, ok := w.(http.Flusher)
@@ -587,7 +594,7 @@ func (p *Proxy) handleStreamingResponse(
 
 	// Parse the accumulated stream to extract usage data.
 	if cbAllow {
-		go p.createStreamingSpan(context.WithoutCancel(r.Context()), provider, reqBody, streamBuffer.Bytes(), startTime, endTime, ttfb, ttft, requestID, sessionID)
+		go p.createStreamingSpan(context.WithoutCancel(r.Context()), provider, reqBody, streamBuffer.Bytes(), startTime, endTime, ttfb, ttft, requestID, sessionID, userOverride)
 	} else {
 		slog.Debug("skipping streaming span (circuit open)", "provider", provider.Name, "request_id", requestID)
 	}
@@ -600,6 +607,7 @@ type spanParams struct {
 	provider      Provider
 	model         string
 	sessionID     string
+	userOverride  string // end-user email from X-User-Id header (candela-local)
 	inputContent  string
 	outputContent string
 	inputTokens   int64
@@ -650,13 +658,17 @@ func (p *Proxy) buildSpan(ctx context.Context, params spanParams) {
 		Attributes: attrs,
 	}
 
-	// Set user ID from auth context for per-user attribution.
-	// Use sanitized email (matching Firestore doc IDs) as the canonical ID.
-	// This ensures span user_id aligns with budget lookups and query filters.
-	if caller := auth.FromContext(ctx); caller != nil && caller.Email != "" {
-		span.UserID = strings.ToLower(caller.Email)
-	} else if caller != nil {
-		span.UserID = caller.ID
+	// Set user ID for per-user attribution.
+	// Priority: (1) X-User-Id header from candela-local (end-user email),
+	// (2) auth context email, (3) auth context UID.
+	if params.userOverride != "" {
+		span.UserID = params.userOverride
+	} else if caller := auth.FromContext(ctx); caller != nil {
+		if caller.Email != "" {
+			span.UserID = strings.ToLower(caller.Email)
+		} else {
+			span.UserID = caller.ID
+		}
 	}
 
 	// Set session ID for conversation grouping.
@@ -716,6 +728,7 @@ func (p *Proxy) createSpan(
 	ttfb time.Duration,
 	requestID string,
 	sessionID string,
+	userOverride string,
 ) {
 	model, inputContent := extractRequestInfo(provider.Name, reqBody)
 	outputContent, inputTokens, outputTokens := extractResponseInfo(provider.Name, respBody)
@@ -728,6 +741,7 @@ func (p *Proxy) createSpan(
 	p.buildSpan(ctx, spanParams{
 		provider:      provider,
 		model:         model,
+		userOverride:  userOverride,
 		inputContent:  inputContent,
 		outputContent: outputContent,
 		inputTokens:   inputTokens,
@@ -753,6 +767,7 @@ func (p *Proxy) createStreamingSpan(
 	ttft time.Duration,
 	requestID string,
 	sessionID string,
+	userOverride string,
 ) {
 	model, inputContent := extractRequestInfo(provider.Name, reqBody)
 	outputContent, inputTokens, outputTokens := extractStreamingUsage(provider.Name, streamData)
@@ -760,6 +775,7 @@ func (p *Proxy) createStreamingSpan(
 	p.buildSpan(ctx, spanParams{
 		provider:      provider,
 		model:         model,
+		userOverride:  userOverride,
 		inputContent:  inputContent,
 		outputContent: outputContent,
 		inputTokens:   inputTokens,

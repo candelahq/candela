@@ -41,8 +41,11 @@ func scopeUserID(ctx context.Context, users storage.UserStore) string {
 			slog.Warn("failed to look up user role, scoping to own ID",
 				"email", caller.Email, "error", err)
 		}
-		// Unknown user — scope to sanitized email (matching proxy span attribution).
-		return strings.ToLower(caller.Email)
+		// Unknown user — scope to sanitized email, falling back to user ID for safety.
+		if caller.Email != "" {
+			return strings.ToLower(caller.Email)
+		}
+		return caller.ID
 	}
 
 	if record.Role == storage.RoleAdmin {

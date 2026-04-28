@@ -459,3 +459,110 @@ func TestCircuitBreaker_SkipsSpanOnOpen(t *testing.T) {
 		t.Errorf("expected fewer than 6 spans (circuit should skip some), got %d", len(spans))
 	}
 }
+
+func TestUserIDOverride_XUserIdHeader(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprint(w, `{"content":[{"type":"text","text":"ok"}],"usage":{"input_tokens":1,"output_tokens":1}}`)
+	}))
+	defer upstream.Close()
+
+	submitter := &mockSubmitter{}
+	calc := costcalc.New()
+
+	p := New(Config{
+		Providers: []Provider{{Name: "anthropic", UpstreamURL: upstream.URL}},
+		ProjectID: "test",
+	}, submitter, calc)
+
+	mux := http.NewServeMux()
+	p.RegisterRoutes(mux)
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	// Send request WITH X-User-Id header (simulating candela-local).
+	req, _ := http.NewRequest("POST",
+		srv.URL+"/proxy/anthropic/v1/messages",
+		strings.NewReader(`{"model":"claude-sonnet-4-20250514","messages":[{"role":"user","content":"hi"}]}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer tok")
+	req.Header.Set("X-User-Id", "Ivan.Costa@Example.Com")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	_, _ = io.ReadAll(resp.Body)
+
+	// Wait for async span.
+	for i := 0; i < 50; i++ {
+		if len(submitter.getSpans()) > 0 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	spans := submitter.getSpans()
+	if len(spans) == 0 {
+		t.Fatal("expected span")
+	}
+
+	// X-User-Id should be lowercased and used as user_id.
+	if spans[0].UserID != "ivan.costa@example.com" {
+		t.Errorf("span UserID = %q, want %q", spans[0].UserID, "ivan.costa@example.com")
+	}
+}
+
+func TestUserIDOverride_FallbackWithoutHeader(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprint(w, `{"content":[{"type":"text","text":"ok"}],"usage":{"input_tokens":1,"output_tokens":1}}`)
+	}))
+	defer upstream.Close()
+
+	submitter := &mockSubmitter{}
+	calc := costcalc.New()
+
+	p := New(Config{
+		Providers: []Provider{{Name: "anthropic", UpstreamURL: upstream.URL}},
+		ProjectID: "test",
+	}, submitter, calc)
+
+	mux := http.NewServeMux()
+	p.RegisterRoutes(mux)
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	// Send request WITHOUT X-User-Id header and WITHOUT auth context.
+	req, _ := http.NewRequest("POST",
+		srv.URL+"/proxy/anthropic/v1/messages",
+		strings.NewReader(`{"model":"claude-sonnet-4-20250514","messages":[{"role":"user","content":"hi"}]}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer tok")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	_, _ = io.ReadAll(resp.Body)
+
+	// Wait for async span.
+	for i := 0; i < 50; i++ {
+		if len(submitter.getSpans()) > 0 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	spans := submitter.getSpans()
+	if len(spans) == 0 {
+		t.Fatal("expected span")
+	}
+
+	// Without X-User-Id and without auth context, UserID should be empty.
+	if spans[0].UserID != "" {
+		t.Errorf("span UserID = %q, want empty string", spans[0].UserID)
+	}
+}

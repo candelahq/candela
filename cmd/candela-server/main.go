@@ -339,10 +339,21 @@ func main() {
 	// Cloud Run service URL is the audience for Google ID tokens (candela-local).
 	cloudRunURL := os.Getenv("CLOUD_RUN_URL")
 
+	// Build a UserAuthorizer from the Firestore UserStore (if available).
+	// This restricts access to only registered users.
+	var userAuth auth.UserAuthorizer
+	if userStore != nil {
+		userAuth = func(ctx context.Context, email string) error {
+			_, err := userStore.GetUserByEmail(ctx, email)
+			return err
+		}
+	}
+
 	authedMux := auth.FirebaseAuthMiddleware(
 		corsMiddleware(mux, cfg.CORS.AllowedOrigins),
 		fbAuthClient,
 		cloudRunURL,
+		userAuth,
 		devMode,
 	)
 	if devMode {

@@ -9,7 +9,7 @@ import (
 )
 
 func TestFirebaseAuthMiddleware_DevMode(t *testing.T) {
-	handler := FirebaseAuthMiddleware(echoHandler(), nil, "", true)
+	handler := FirebaseAuthMiddleware(echoHandler(), nil, "", nil, true)
 	req := httptest.NewRequest("GET", "/api/data", nil)
 	rr := httptest.NewRecorder()
 
@@ -32,7 +32,7 @@ func TestFirebaseAuthMiddleware_DevMode(t *testing.T) {
 }
 
 func TestFirebaseAuthMiddleware_DevMode_AllPaths(t *testing.T) {
-	handler := FirebaseAuthMiddleware(echoHandler(), nil, "", true)
+	handler := FirebaseAuthMiddleware(echoHandler(), nil, "", nil, true)
 
 	paths := []string{
 		"/api/data",
@@ -65,7 +65,7 @@ func TestFirebaseAuthMiddleware_HealthCheckBypass(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok"))
 	})
-	handler := FirebaseAuthMiddleware(healthHandler, nil, "", false)
+	handler := FirebaseAuthMiddleware(healthHandler, nil, "", nil, false)
 
 	req := httptest.NewRequest("GET", "/healthz", nil)
 	rr := httptest.NewRecorder()
@@ -83,7 +83,7 @@ func TestFirebaseAuthMiddleware_HealthCheckBypass(t *testing.T) {
 
 func TestFirebaseAuthMiddleware_MissingHeader(t *testing.T) {
 	// No Firebase client, no Cloud Run audience — just test missing auth.
-	handler := FirebaseAuthMiddleware(echoHandler(), nil, "", false)
+	handler := FirebaseAuthMiddleware(echoHandler(), nil, "", nil, false)
 
 	req := httptest.NewRequest("GET", "/api/data", nil)
 	rr := httptest.NewRecorder()
@@ -106,7 +106,7 @@ func TestFirebaseAuthMiddleware_MissingHeader(t *testing.T) {
 
 func TestFirebaseAuthMiddleware_InvalidToken_NoValidators(t *testing.T) {
 	// With no Firebase client and no Cloud Run audience, any token is invalid.
-	handler := FirebaseAuthMiddleware(echoHandler(), nil, "", false)
+	handler := FirebaseAuthMiddleware(echoHandler(), nil, "", nil, false)
 
 	req := httptest.NewRequest("GET", "/api/data", nil)
 	req.Header.Set("Authorization", "Bearer some-random-token")
@@ -129,7 +129,7 @@ func TestFirebaseAuthMiddleware_InvalidToken_NoValidators(t *testing.T) {
 }
 
 func TestFirebaseAuthMiddleware_MalformedAuthHeader(t *testing.T) {
-	handler := FirebaseAuthMiddleware(echoHandler(), nil, "", false)
+	handler := FirebaseAuthMiddleware(echoHandler(), nil, "", nil, false)
 
 	tests := []struct {
 		name   string
@@ -187,7 +187,7 @@ func TestExtractBearerToken(t *testing.T) {
 
 func TestFirebaseAuthMiddleware_DevMode_IgnoresAuthHeader(t *testing.T) {
 	// In dev mode, even if an auth header is present, the synthetic user is used.
-	handler := FirebaseAuthMiddleware(echoHandler(), nil, "", true)
+	handler := FirebaseAuthMiddleware(echoHandler(), nil, "", nil, true)
 
 	req := httptest.NewRequest("GET", "/api/data", nil)
 	req.Header.Set("Authorization", "Bearer some-real-token")
@@ -216,7 +216,7 @@ func TestFirebaseAuthMiddleware_HealthzDoesNotInjectUser(t *testing.T) {
 			}
 			w.WriteHeader(http.StatusOK)
 		}),
-		nil, "", false,
+		nil, "", nil, false,
 	)
 
 	req := httptest.NewRequest("GET", "/healthz", nil)

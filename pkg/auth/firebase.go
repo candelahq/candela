@@ -13,6 +13,11 @@ import (
 	"google.golang.org/api/idtoken"
 )
 
+// UserAuthorizer checks if an email belongs to a registered user.
+// Returns nil if the user exists, or an error if not found / lookup fails.
+// Pass nil to allow all authenticated identities (dev mode, no Firestore).
+type UserAuthorizer func(ctx context.Context, email string) error
+
 // FirebaseAuthMiddleware validates Firebase ID tokens (from browser users) and
 // Google ID tokens (from candela-local / service accounts).
 //
@@ -20,9 +25,12 @@ import (
 //   - Browser: Firebase Auth → ID token in Authorization: Bearer header
 //   - candela-local: Cloud Run invoker IAM → Google ID token in Authorization header
 //
+// If userAuth is non-nil, authenticated users are verified against the user store.
+// Only registered users are allowed through; unknown identities receive 403.
+//
 // In dev mode (devMode=true), no validation is performed; a synthetic admin
 // user is injected instead.
-func FirebaseAuthMiddleware(next http.Handler, fbAuth *fbauth.Client, cloudRunAudience string, devMode bool) http.Handler {
+func FirebaseAuthMiddleware(next http.Handler, fbAuth *fbauth.Client, cloudRunAudience string, userAuth UserAuthorizer, devMode bool) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Skip auth for health checks.
 		if r.URL.Path == "/healthz" {
@@ -62,6 +70,9 @@ func FirebaseAuthMiddleware(next http.Handler, fbAuth *fbauth.Client, cloudRunAu
 					ID:    decoded.UID,
 					Email: strings.ToLower(email),
 				}
+				if !verifyRegistered(r.Context(), w, user, userAuth) {
+					return
+				}
 				slog.Debug("authenticated via Firebase",
 					"uid", user.ID, "email", user.Email, "path", r.URL.Path)
 				next.ServeHTTP(w, r.WithContext(NewContext(r.Context(), user)))
@@ -90,6 +101,9 @@ func FirebaseAuthMiddleware(next http.Handler, fbAuth *fbauth.Client, cloudRunAu
 					ID:    payload.Subject,
 					Email: strings.ToLower(email),
 				}
+				if !verifyRegistered(r.Context(), w, user, userAuth) {
+					return
+				}
 				slog.Debug("authenticated via Google ID token",
 					"uid", user.ID, "email", user.Email, "path", r.URL.Path)
 				next.ServeHTTP(w, r.WithContext(NewContext(r.Context(), user)))
@@ -103,6 +117,9 @@ func FirebaseAuthMiddleware(next http.Handler, fbAuth *fbauth.Client, cloudRunAu
 		// Validates via Google's userinfo endpoint.
 		user, err := validateAccessToken(r.Context(), token)
 		if err == nil {
+			if !verifyRegistered(r.Context(), w, user, userAuth) {
+				return
+			}
 			slog.Debug("authenticated via OAuth2 access token",
 				"uid", user.ID, "email", user.Email, "path", r.URL.Path)
 			next.ServeHTTP(w, r.WithContext(NewContext(r.Context(), user)))
@@ -112,6 +129,22 @@ func FirebaseAuthMiddleware(next http.Handler, fbAuth *fbauth.Client, cloudRunAu
 
 		writeError(w, http.StatusUnauthorized, "invalid authentication token")
 	})
+}
+
+// verifyRegistered checks if the authenticated user exists in the user store.
+// Returns true if the user is allowed (registered or no store configured).
+// Returns false and writes a 403 response if the user is not registered.
+func verifyRegistered(ctx context.Context, w http.ResponseWriter, user *User, userAuth UserAuthorizer) bool {
+	if userAuth == nil {
+		return true // no user store — allow all authenticated users
+	}
+	if err := userAuth(ctx, user.Email); err != nil {
+		slog.Warn("authenticated but not registered — access denied",
+			"email", user.Email, "uid", user.ID)
+		writeError(w, http.StatusForbidden, "user not registered — contact your admin")
+		return false
+	}
+	return true
 }
 
 // validateAccessToken validates a Google OAuth2 access token by calling

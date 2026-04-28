@@ -260,9 +260,12 @@ func (s *Store) evolveSchema(ctx context.Context, table *bigquery.Table, desired
 	}
 
 	// Find columns in desired schema that are missing from the live table.
+	// BigQuery requires new columns on existing tables to be NULLABLE;
+	// InferSchema marks Go string fields as REQUIRED, so we force NULLABLE here.
 	var missing bigquery.Schema
 	for _, field := range desired {
 		if !existing[field.Name] {
+			field.Required = false
 			missing = append(missing, field)
 		}
 	}

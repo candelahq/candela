@@ -104,6 +104,8 @@ message GetMyUsageResponse {
   // Budget context
   candela.types.UserBudget budget = 20;
   double total_remaining_usd = 21;
+  // Active grants (grants-first waterfall)
+  repeated candela.types.BudgetGrant active_grants = 22;
 }
 
 // ── Team Leaderboard ──

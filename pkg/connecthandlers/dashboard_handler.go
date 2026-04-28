@@ -205,6 +205,16 @@ func (h *DashboardHandler) GetMyUsage(
 		if err == nil && check != nil {
 			resp.TotalRemainingUsd = check.RemainingUSD
 		}
+
+		// Include active grants so the UI can show per-grant progress.
+		grants, grantErr := h.users.ListGrants(ctx, userID, true)
+		if grantErr != nil {
+			slog.Warn("failed to fetch grants for GetMyUsage", "user_id", userID, "error", grantErr)
+		} else {
+			for _, g := range grants {
+				resp.ActiveGrants = append(resp.ActiveGrants, grantToProto(g))
+			}
+		}
 	}
 
 	return connect.NewResponse(resp), nil

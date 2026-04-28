@@ -191,7 +191,8 @@ func rowToSpan(row spanRow) storage.Span {
 	return span
 }
 
-// ensureSchema creates the dataset and table if they don't exist.
+// ensureSchema creates the dataset and table if they don't exist,
+// and evolves the schema by adding any missing columns to existing tables.
 func (s *Store) ensureSchema(ctx context.Context) error {
 	dataset := s.client.Dataset(s.config.Dataset)
 
@@ -203,7 +204,7 @@ func (s *Store) ensureSchema(ctx context.Context) error {
 		}
 	}
 
-	// Create table if not exists.
+	// Infer the desired schema from the Go struct.
 	schema, err := bigquery.InferSchema(spanRow{})
 	if err != nil {
 		return fmt.Errorf("inferring schema: %w", err)
@@ -224,12 +225,67 @@ func (s *Store) ensureSchema(ctx context.Context) error {
 		if !strings.Contains(err.Error(), "Already Exists") {
 			return fmt.Errorf("creating table: %w", err)
 		}
+
+		// Table already exists — check for missing columns and add them.
+		if err := s.evolveSchema(ctx, table, schema); err != nil {
+			return fmt.Errorf("evolving schema: %w", err)
+		}
 	}
 
 	slog.Info("bigquery schema ready",
 		"project", s.config.ProjectID,
 		"dataset", s.config.Dataset,
 		"table", s.config.Table)
+
+	return nil
+}
+
+// evolveSchema compares the desired schema against the live table and adds
+// any missing columns. BigQuery supports additive schema changes (new nullable
+// columns) without requiring a full table rebuild.
+func (s *Store) evolveSchema(ctx context.Context, table *bigquery.Table, desired bigquery.Schema) error {
+	md, err := table.Metadata(ctx)
+	if err != nil {
+		return fmt.Errorf("reading table metadata: %w", err)
+	}
+
+	// Build set of existing column names.
+	existing := make(map[string]bool, len(md.Schema))
+	for _, field := range md.Schema {
+		existing[field.Name] = true
+	}
+
+	// Find columns in desired schema that are missing from the live table.
+	var missing bigquery.Schema
+	for _, field := range desired {
+		if !existing[field.Name] {
+			missing = append(missing, field)
+		}
+	}
+
+	if len(missing) == 0 {
+		return nil
+	}
+
+	// Build a new slice to avoid mutating md.Schema's backing array.
+	updatedSchema := make(bigquery.Schema, 0, len(md.Schema)+len(missing))
+	updatedSchema = append(updatedSchema, md.Schema...)
+	updatedSchema = append(updatedSchema, missing...)
+
+	var names []string
+	for _, f := range missing {
+		names = append(names, f.Name)
+	}
+	slog.Info("evolving BigQuery schema — adding missing columns",
+		"table", table.FullyQualifiedName(),
+		"columns", names)
+
+	_, err = table.Update(ctx, bigquery.TableMetadataToUpdate{
+		Schema: updatedSchema,
+	}, md.ETag)
+	if err != nil {
+		return fmt.Errorf("updating table schema: %w", err)
+	}
 
 	return nil
 }

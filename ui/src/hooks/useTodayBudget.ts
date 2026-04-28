@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useReducer } from "react";
 import { dashboardClient } from "@/lib/api";
 import { DEFAULT_PROJECT_ID } from "@/lib/constants";
-import { timestampFromDate } from "@bufbuild/protobuf/wkt";
+import { timestampDate, timestampFromDate } from "@bufbuild/protobuf/wkt";
 
 export interface TodayModelUsage {
   model: string;
@@ -13,6 +13,17 @@ export interface TodayModelUsage {
   outputTokens: number;
   costUsd: number;
   avgLatencyMs: number;
+}
+
+export interface TodayGrant {
+  id: string;
+  amountUsd: number;
+  spentUsd: number;
+  remainingUsd: number;
+  percentUsed: number;
+  reason: string;
+  grantedBy: string;
+  expiresAt: Date | null;
 }
 
 export interface TodayBudgetData {
@@ -29,6 +40,7 @@ export interface TodayBudgetData {
     percentUsed: number;
     periodType: string;
   } | null;
+  grants: TodayGrant[];
   /** When this data was last fetched */
   fetchedAt: Date;
 }
@@ -97,6 +109,22 @@ export function useTodayBudget() {
         const limit = res.budget?.limitUsd || 0;
         const spent = res.budget?.spentUsd || 0;
 
+        // Map active grants from proto response.
+        const grants: TodayGrant[] = (res.activeGrants ?? []).map((g) => {
+          const amt = g.amountUsd;
+          const sp = g.spentUsd;
+          return {
+            id: g.id,
+            amountUsd: amt,
+            spentUsd: sp,
+            remainingUsd: amt - sp,
+            percentUsed: amt > 0 ? (sp / amt) * 100 : 0,
+            reason: g.reason,
+            grantedBy: g.grantedBy,
+            expiresAt: g.expiresAt ? timestampDate(g.expiresAt) : null,
+          };
+        });
+
         dispatch({
           type: "success",
           data: {
@@ -124,6 +152,7 @@ export function useTodayBudget() {
                 1: "daily",
               }[res.budget.periodType] || "daily",
             } : null,
+            grants,
             fetchedAt: new Date(),
           },
         });

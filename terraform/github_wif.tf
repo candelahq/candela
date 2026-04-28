@@ -111,3 +111,12 @@ resource "google_project_iam_member" "github_logging" {
   role    = "roles/logging.viewer"
   member  = "serviceAccount:${google_service_account.github_deploy.email}"
 }
+
+# Cloud Build log viewer: required for gcloud builds submit to poll/stream
+# build output. Without this, submit succeeds but exits with error code 1
+# because it can't read from the default logs bucket.
+resource "google_project_iam_member" "github_cloudbuild_viewer" {
+  project = var.project_id
+  role    = "roles/cloudbuild.builds.viewer"
+  member  = "serviceAccount:${google_service_account.github_deploy.email}"
+}

@@ -1,7 +1,9 @@
 package auth
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -225,5 +227,120 @@ func TestFirebaseAuthMiddleware_HealthzDoesNotInjectUser(t *testing.T) {
 
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", rr.Code)
+	}
+}
+
+func TestVerifyRegistered_RegisteredUserAllowed(t *testing.T) {
+	// Mock: user exists in store.
+	authorizer := UserAuthorizer(func(_ context.Context, email string) error {
+		if email == "larry.david@example-corp.com" {
+			return nil
+		}
+		return fmt.Errorf("%w: %s", ErrNotRegistered, email)
+	})
+
+	user := &User{ID: "uid-larry", Email: "larry.david@example-corp.com"}
+	rr := httptest.NewRecorder()
+
+	allowed := verifyRegistered(context.Background(), rr, user, authorizer)
+	if !allowed {
+		t.Fatal("expected registered user to be allowed")
+	}
+	// No error response should have been written.
+	if rr.Body.Len() != 0 {
+		t.Errorf("expected empty body, got %q", rr.Body.String())
+	}
+}
+
+func TestVerifyRegistered_UnregisteredUserBlocked(t *testing.T) {
+	// Mock: user does NOT exist in store → ErrNotRegistered.
+	authorizer := UserAuthorizer(func(_ context.Context, email string) error {
+		return fmt.Errorf("%w: %s", ErrNotRegistered, email)
+	})
+
+	user := &User{ID: "uid-rando", Email: "mocha.joe@spite-store.com"}
+	rr := httptest.NewRecorder()
+
+	allowed := verifyRegistered(context.Background(), rr, user, authorizer)
+	if allowed {
+		t.Fatal("expected unregistered user to be blocked")
+	}
+	if rr.Code != http.StatusForbidden {
+		t.Errorf("status = %d, want 403", rr.Code)
+	}
+
+	var errResp map[string]string
+	body, _ := io.ReadAll(rr.Body)
+	if err := json.Unmarshal(body, &errResp); err != nil {
+		t.Fatalf("decode error: %v — body: %s", err, body)
+	}
+	if errResp["error"] != "user not registered — contact your admin" {
+		t.Errorf("error = %q, want user not registered message", errResp["error"])
+	}
+}
+
+func TestVerifyRegistered_TransientErrorReturns500(t *testing.T) {
+	// Mock: Firestore is down — transient error, NOT ErrNotRegistered.
+	// Legitimate users should NOT get 403 when the store is unreachable.
+	authorizer := UserAuthorizer(func(_ context.Context, _ string) error {
+		return fmt.Errorf("firestore: connection refused")
+	})
+
+	user := &User{ID: "uid-jeff", Email: "jeff.greene@example-corp.com"}
+	rr := httptest.NewRecorder()
+
+	allowed := verifyRegistered(context.Background(), rr, user, authorizer)
+	if allowed {
+		t.Fatal("expected transient error to block the request")
+	}
+	if rr.Code != http.StatusInternalServerError {
+		t.Errorf("status = %d, want 500", rr.Code)
+	}
+
+	var errResp map[string]string
+	body, _ := io.ReadAll(rr.Body)
+	if err := json.Unmarshal(body, &errResp); err != nil {
+		t.Fatalf("decode error: %v — body: %s", err, body)
+	}
+	if errResp["error"] != "internal server error" {
+		t.Errorf("error = %q, want internal server error", errResp["error"])
+	}
+}
+
+func TestVerifyRegistered_NilAuthorizerAllowsAll(t *testing.T) {
+	// When no UserAuthorizer is configured (e.g. dev mode, no Firestore),
+	// all authenticated users should be allowed.
+	user := &User{ID: "uid-leon", Email: "leon.black@example-corp.com"}
+	rr := httptest.NewRecorder()
+
+	allowed := verifyRegistered(context.Background(), rr, user, nil)
+	if !allowed {
+		t.Fatal("expected nil authorizer to allow all users")
+	}
+}
+
+func TestVerifyRegistered_ServiceAccountBlocked(t *testing.T) {
+	// Simulates a service account from another GCP project trying to access.
+	authorizer := UserAuthorizer(func(_ context.Context, email string) error {
+		// Only known team emails pass.
+		known := map[string]bool{
+			"larry.david@example-corp.com": true,
+			"jeff.greene@example-corp.com": true,
+		}
+		if known[email] {
+			return nil
+		}
+		return fmt.Errorf("%w: %s", ErrNotRegistered, email)
+	})
+
+	sa := &User{ID: "100000000000000000000", Email: "susie-bot@other-project.iam.gserviceaccount.com"}
+	rr := httptest.NewRecorder()
+
+	allowed := verifyRegistered(context.Background(), rr, sa, authorizer)
+	if allowed {
+		t.Fatal("expected external service account to be blocked")
+	}
+	if rr.Code != http.StatusForbidden {
+		t.Errorf("status = %d, want 403", rr.Code)
 	}
 }

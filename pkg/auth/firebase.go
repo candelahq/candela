@@ -3,6 +3,7 @@ package auth
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -13,8 +14,15 @@ import (
 	"google.golang.org/api/idtoken"
 )
 
+// ErrNotRegistered is the sentinel error that UserAuthorizer should return
+// (or wrap) when the email is not found in the user store. Any other error
+// is treated as a transient failure and results in a 500 instead of 403.
+var ErrNotRegistered = errors.New("user not registered")
+
 // UserAuthorizer checks if an email belongs to a registered user.
-// Returns nil if the user exists, or an error if not found / lookup fails.
+// Returns nil if the user exists.
+// Returns ErrNotRegistered (or a wrapped form) if the user does not exist.
+// Returns any other error for transient failures (database down, timeout, etc.).
 // Pass nil to allow all authenticated identities (dev mode, no Firestore).
 type UserAuthorizer func(ctx context.Context, email string) error
 
@@ -133,15 +141,22 @@ func FirebaseAuthMiddleware(next http.Handler, fbAuth *fbauth.Client, cloudRunAu
 
 // verifyRegistered checks if the authenticated user exists in the user store.
 // Returns true if the user is allowed (registered or no store configured).
-// Returns false and writes a 403 response if the user is not registered.
+// Returns false and writes an error response if the user is not registered (403)
+// or if the lookup fails with a transient error (500).
 func verifyRegistered(ctx context.Context, w http.ResponseWriter, user *User, userAuth UserAuthorizer) bool {
 	if userAuth == nil {
 		return true // no user store — allow all authenticated users
 	}
 	if err := userAuth(ctx, user.Email); err != nil {
-		slog.Warn("authenticated but not registered — access denied",
-			"email", user.Email, "uid", user.ID)
-		writeError(w, http.StatusForbidden, "user not registered — contact your admin")
+		if errors.Is(err, ErrNotRegistered) {
+			slog.Warn("authenticated but not registered — access denied",
+				"email", user.Email, "uid", user.ID)
+			writeError(w, http.StatusForbidden, "user not registered — contact your admin")
+		} else {
+			slog.Error("user authorization check failed — internal error",
+				"email", user.Email, "uid", user.ID, "error", err)
+			writeError(w, http.StatusInternalServerError, "internal server error")
+		}
 		return false
 	}
 	return true

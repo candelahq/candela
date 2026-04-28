@@ -300,7 +300,19 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 	// Accept end-user identity from candela-local. When the proxy is called
 	// via a service account, X-User-Id carries the real user's email so
 	// spans are attributed correctly for per-user dashboards.
-	userOverride := strings.ToLower(r.Header.Get("X-User-Id"))
+	//
+	// Security: only trust X-User-Id from service account callers
+	// (*.iam.gserviceaccount.com). Regular users cannot impersonate others.
+	caller := auth.FromContext(r.Context())
+	var userOverride string
+	if xuid := r.Header.Get("X-User-Id"); xuid != "" {
+		if caller != nil && strings.HasSuffix(caller.Email, ".iam.gserviceaccount.com") {
+			userOverride = strings.ToLower(xuid)
+		} else {
+			slog.Warn("X-User-Id header ignored — caller is not a service account",
+				"caller_email", auth.EmailFromContext(r.Context()), "attempted_override", xuid)
+		}
+	}
 
 	// Extract provider from path: /proxy/{provider}/v1/...
 	parts := strings.SplitN(strings.TrimPrefix(r.URL.Path, "/proxy/"), "/", 2)
@@ -323,11 +335,16 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 	// after the upstream response. This blocks only fully-exhausted users;
 	// actual cost deduction happens post-response via DeductSpend.
 	if p.users != nil {
-		if caller := auth.FromContext(r.Context()); caller != nil {
-			budgetUserID := strings.ToLower(caller.Email)
+		// Use userOverride (from X-User-Id) when present, so candela-local
+		// users get budget-checked against *their* identity, not the SA's.
+		budgetUserID := userOverride
+		if budgetUserID == "" && caller != nil {
+			budgetUserID = caller.Email
 			if budgetUserID == "" {
 				budgetUserID = caller.ID
 			}
+		}
+		if budgetUserID != "" {
 			check, err := p.users.CheckBudget(r.Context(), budgetUserID, 0)
 			if err != nil {
 				slog.Warn("budget check failed, allowing request",

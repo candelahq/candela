@@ -16,12 +16,12 @@ plugins:
     opt: paths=source_relative
   # TypeScript (ES) — message types
   - remote: buf.build/bufbuild/es
-    out: ../gen/ts
+    out: ../ui/src/gen
     opt: target=ts
     include_imports: true
   # TypeScript (ES) — ConnectRPC service stubs
   - remote: buf.build/connectrpc/es
-    out: ../gen/ts
+    out: ../ui/src/gen
     opt: target=ts
   # BigQuery schema generation from proto (local plugin)
   # Install: go install github.com/GoogleCloudPlatform/protoc-gen-bq-schema/v3@latest

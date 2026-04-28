@@ -338,6 +338,11 @@ func TestDeductSpend_GrantFirstWaterfall(t *testing.T) {
 	if b.SpentUSD != 5.0 {
 		t.Errorf("budget spent after second deduct = %f, want 5.0", b.SpentUSD)
 	}
+	// Token attribution: $10 cost, $5 from grant2, $5 from budget.
+	// Budget absorbed 50% of the cost, so should get 50% of 500 tokens = 250.
+	if b.TokensUsed != 250 {
+		t.Errorf("budget tokens after proportional split = %d, want 250 (50%% of 500)", b.TokensUsed)
+	}
 }
 
 func TestAuditLog(t *testing.T) {

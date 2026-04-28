@@ -1,6 +1,6 @@
 "use client";
 
-import { useTodayBudget, type TodayModelUsage } from "@/hooks/useTodayBudget";
+import { useTodayBudget, type TodayModelUsage, type TodayGrant } from "@/hooks/useTodayBudget";
 import { ErrorBanner } from "@/components/ErrorBanner";
 import { useEffect, useMemo, useState } from "react";
 
@@ -128,6 +128,55 @@ function TokenBar({ model }: { model: TodayModelUsage }) {
   );
 }
 
+/** Card showing a single grant's progress. */
+function GrantCard({ grant }: { grant: TodayGrant }) {
+  const pct = Math.min(grant.percentUsed, 100);
+  const color =
+    pct >= 100 ? "var(--error)" :
+    pct >= 80 ? "var(--warning)" :
+    "var(--accent)";
+
+  return (
+    <div className="today-grant-card">
+      <div className="today-grant-header">
+        <span className="today-grant-reason">{grant.reason || "Grant"}</span>
+        {grant.expiresAt && (
+          <span className="today-grant-expiry">
+            Expires {grant.expiresAt.toLocaleDateString(undefined, { month: "short", day: "numeric" })}
+          </span>
+        )}
+      </div>
+      <div className="today-grant-bar-wrap" role="progressbar"
+           aria-valuenow={pct} aria-valuemin={0} aria-valuemax={100}
+           aria-label={`${grant.reason || "Grant"}: ${pct.toFixed(0)}% used`}>
+        <div className="today-grant-bar-fill" style={{ width: `${pct}%`, background: color }} />
+      </div>
+      <div className="today-grant-stats">
+        <span className="today-grant-stat">
+          <span className="today-grant-stat-label">Used</span>
+          <span className="today-grant-stat-value">${grant.spentUsd.toFixed(2)}</span>
+        </span>
+        <span className="today-grant-stat">
+          <span className="today-grant-stat-label">Left</span>
+          <span className="today-grant-stat-value" style={{ color: grant.remainingUsd <= 0 ? "var(--error)" : "var(--success)" }}>
+            ${Math.max(0, grant.remainingUsd).toFixed(2)}
+          </span>
+        </span>
+        <span className="today-grant-stat">
+          <span className="today-grant-stat-label">Total</span>
+          <span className="today-grant-stat-value">${grant.amountUsd.toFixed(2)}</span>
+        </span>
+        {grant.grantedBy && (
+          <span className="today-grant-stat">
+            <span className="today-grant-stat-label">By</span>
+            <span className="today-grant-stat-value today-grant-by">{grant.grantedBy.split("@")[0]}</span>
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function TodayPage() {
   const { data, loading, error, refresh } = useTodayBudget();
 
@@ -238,6 +287,21 @@ export default function TodayPage() {
             <div className="card-subtitle">Across all models</div>
           </div>
         </div>
+
+        {/* Active Grants */}
+        {!loading && data && data.grants.length > 0 && (
+          <div className="table-container animate-in" style={{ animationDelay: "0.12s", marginTop: 24 }}>
+            <div className="table-header">
+              <span className="table-title">Active Grants</span>
+              <span className="today-grant-count">{data.grants.length} active</span>
+            </div>
+            <div className="today-grant-list">
+              {data.grants.map((g) => (
+                <GrantCard key={g.id} grant={g} />
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* Per-Model Token Breakdown */}
         <div className="table-container animate-in" style={{ animationDelay: "0.15s", marginTop: 24 }}>
@@ -531,6 +595,85 @@ export default function TodayPage() {
         @keyframes shimmer {
           0% { background-position: 200% 0; }
           100% { background-position: -200% 0; }
+        }
+
+        /* ── Grant Cards ── */
+        .today-grant-list {
+          padding: 8px 0;
+        }
+        .today-grant-card {
+          padding: 16px 20px;
+          border-bottom: 1px solid var(--border-subtle);
+          transition: background 0.15s;
+        }
+        .today-grant-card:last-child {
+          border-bottom: none;
+        }
+        .today-grant-card:hover {
+          background: var(--bg-hover);
+        }
+        .today-grant-header {
+          display: flex;
+          justify-content: space-between;
+          align-items: baseline;
+          margin-bottom: 10px;
+        }
+        .today-grant-reason {
+          font-size: 13px;
+          font-weight: 600;
+          color: var(--text-primary);
+        }
+        .today-grant-expiry {
+          font-size: 11px;
+          color: var(--text-muted);
+          padding: 2px 8px;
+          background: var(--bg-tertiary);
+          border-radius: 4px;
+        }
+        .today-grant-bar-wrap {
+          height: 6px;
+          background: var(--bg-tertiary);
+          border-radius: 3px;
+          overflow: hidden;
+          margin-bottom: 10px;
+        }
+        .today-grant-bar-fill {
+          height: 100%;
+          border-radius: 3px;
+          transition: width 0.8s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+        .today-grant-stats {
+          display: flex;
+          gap: 20px;
+        }
+        .today-grant-stat {
+          display: flex;
+          flex-direction: column;
+          gap: 1px;
+        }
+        .today-grant-stat-label {
+          font-size: 10px;
+          font-weight: 600;
+          text-transform: uppercase;
+          letter-spacing: 0.04em;
+          color: var(--text-muted);
+        }
+        .today-grant-stat-value {
+          font-size: 13px;
+          font-weight: 600;
+          color: var(--text-primary);
+          font-variant-numeric: tabular-nums;
+        }
+        .today-grant-by {
+          font-weight: 500;
+          color: var(--text-muted);
+        }
+        .today-grant-count {
+          font-size: 11px;
+          color: var(--text-muted);
+          padding: 2px 8px;
+          background: var(--bg-tertiary);
+          border-radius: 4px;
         }
       `}</style>
     </>

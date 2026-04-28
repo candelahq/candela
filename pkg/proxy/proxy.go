@@ -312,6 +312,29 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// ── Pre-flight budget check ──
+	// Soft gate: check if the user has *any* remaining budget (grants + base).
+	// We pass estimatedCostUSD=0 because we can't know the actual cost until
+	// after the upstream response. This blocks only fully-exhausted users;
+	// actual cost deduction happens post-response via DeductSpend.
+	if p.users != nil {
+		if caller := auth.FromContext(r.Context()); caller != nil {
+			check, err := p.users.CheckBudget(r.Context(), caller.ID, 0)
+			if err != nil {
+				slog.Warn("budget check failed, allowing request",
+					"user_id", caller.ID, "error", err)
+			} else if !check.Allowed {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusPaymentRequired)
+				_, _ = w.Write([]byte(`{"error":{"message":"budget exhausted — contact your admin for a grant or budget increase","type":"insufficient_budget","code":402}}`))
+				slog.Info("blocked request: budget exhausted",
+					"user_id", caller.ID,
+					"remaining_usd", check.RemainingUSD)
+				return
+			}
+		}
+	}
+
 	// Handle GET /v1/models — return synthetic model list for OpenAI-compatible clients.
 	if r.Method == http.MethodGet && strings.HasSuffix(upstreamPath, "/models") {
 		w.Header().Set("Content-Type", "application/json")
@@ -480,7 +503,7 @@ func (p *Proxy) handleStandardResponse(
 
 	// Create observability span (async — don't block the response).
 	if cbAllow {
-		go p.createSpan(r.Context(), provider, reqBody, respBody, startTime, endTime, resp.StatusCode, ttfb, requestID, sessionID)
+		go p.createSpan(context.WithoutCancel(r.Context()), provider, reqBody, respBody, startTime, endTime, resp.StatusCode, ttfb, requestID, sessionID)
 	} else {
 		slog.Debug("skipping span creation (circuit open)", "provider", provider.Name, "request_id", requestID)
 	}
@@ -560,7 +583,7 @@ func (p *Proxy) handleStreamingResponse(
 
 	// Parse the accumulated stream to extract usage data.
 	if cbAllow {
-		go p.createStreamingSpan(r.Context(), provider, reqBody, streamBuffer.Bytes(), startTime, endTime, ttfb, ttft, requestID, sessionID)
+		go p.createStreamingSpan(context.WithoutCancel(r.Context()), provider, reqBody, streamBuffer.Bytes(), startTime, endTime, ttfb, ttft, requestID, sessionID)
 	} else {
 		slog.Debug("skipping streaming span (circuit open)", "provider", provider.Name, "request_id", requestID)
 	}

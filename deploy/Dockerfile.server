@@ -29,8 +29,8 @@ RUN pnpm install --frozen-lockfile
 # Copy UI source and build.
 COPY ui/ ./
 
-# Copy generated proto types (needed for build).
-COPY gen/ts/ ../gen/ts/
+# Proto stubs are generated into ui/src/gen/ by `cd proto && buf generate`.
+# They are included by the `COPY ui/ ./` step above.
 
 # Build standalone output.
 # NEXT_PUBLIC_API_URL="" makes the client use relative URLs (same origin).

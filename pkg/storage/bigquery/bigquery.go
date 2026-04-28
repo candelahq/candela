@@ -191,7 +191,8 @@ func rowToSpan(row spanRow) storage.Span {
 	return span
 }
 
-// ensureSchema creates the dataset and table if they don't exist.
+// ensureSchema creates the dataset and table if they don't exist,
+// and evolves the schema by adding any missing columns to existing tables.
 func (s *Store) ensureSchema(ctx context.Context) error {
 	dataset := s.client.Dataset(s.config.Dataset)
 
@@ -203,7 +204,7 @@ func (s *Store) ensureSchema(ctx context.Context) error {
 		}
 	}
 
-	// Create table if not exists.
+	// Infer the desired schema from the Go struct.
 	schema, err := bigquery.InferSchema(spanRow{})
 	if err != nil {
 		return fmt.Errorf("inferring schema: %w", err)
@@ -217,12 +218,17 @@ func (s *Store) ensureSchema(ctx context.Context) error {
 			Type:  bigquery.DayPartitioningType,
 		},
 		Clustering: &bigquery.Clustering{
-			Fields: []string{"project_id", "trace_id"},
+			Fields: []string{"project_id", "user_id", "trace_id"},
 		},
 	}
 	if err := table.Create(ctx, tableMeta); err != nil {
 		if !strings.Contains(err.Error(), "Already Exists") {
 			return fmt.Errorf("creating table: %w", err)
+		}
+
+		// Table already exists — check for missing columns and add them.
+		if err := s.evolveSchema(ctx, table, schema); err != nil {
+			return fmt.Errorf("evolving schema: %w", err)
 		}
 	}
 
@@ -230,6 +236,60 @@ func (s *Store) ensureSchema(ctx context.Context) error {
 		"project", s.config.ProjectID,
 		"dataset", s.config.Dataset,
 		"table", s.config.Table)
+
+	return nil
+}
+
+// evolveSchema compares the desired schema against the live table and adds
+// any missing columns. BigQuery supports additive schema changes (new nullable
+// columns) without requiring a full table rebuild.
+//
+// Limitation: this only detects missing top-level columns. Changes to nested
+// STRUCT fields (e.g. adding a field inside the "attributes" REPEATED STRUCT)
+// are not detected and must be handled manually or via a migration tool.
+func (s *Store) evolveSchema(ctx context.Context, table *bigquery.Table, desired bigquery.Schema) error {
+	md, err := table.Metadata(ctx)
+	if err != nil {
+		return fmt.Errorf("reading table metadata: %w", err)
+	}
+
+	// Build set of existing column names.
+	existing := make(map[string]bool, len(md.Schema))
+	for _, field := range md.Schema {
+		existing[field.Name] = true
+	}
+
+	// Find columns in desired schema that are missing from the live table.
+	var missing bigquery.Schema
+	for _, field := range desired {
+		if !existing[field.Name] {
+			missing = append(missing, field)
+		}
+	}
+
+	if len(missing) == 0 {
+		return nil
+	}
+
+	// Build a new slice to avoid mutating md.Schema's backing array.
+	updatedSchema := make(bigquery.Schema, 0, len(md.Schema)+len(missing))
+	updatedSchema = append(updatedSchema, md.Schema...)
+	updatedSchema = append(updatedSchema, missing...)
+
+	var names []string
+	for _, f := range missing {
+		names = append(names, f.Name)
+	}
+	slog.Info("evolving BigQuery schema — adding missing columns",
+		"table", table.FullyQualifiedName(),
+		"columns", names)
+
+	_, err = table.Update(ctx, bigquery.TableMetadataToUpdate{
+		Schema: updatedSchema,
+	}, md.ETag)
+	if err != nil {
+		return fmt.Errorf("updating table schema: %w", err)
+	}
 
 	return nil
 }
@@ -259,19 +319,13 @@ func (s *Store) IngestSpans(ctx context.Context, spans []storage.Span) error {
 	return nil
 }
 
-// Ping checks connectivity to BigQuery.
+// Ping checks connectivity to BigQuery by reading table metadata.
+// Uses a metadata read instead of a query job to avoid unnecessary cost
+// and latency on frequent health checks.
 func (s *Store) Ping(ctx context.Context) error {
-	q := s.client.Query(fmt.Sprintf("SELECT 1 FROM `%s` LIMIT 0", s.tableID))
-	job, err := q.Run(ctx)
+	_, err := s.client.Dataset(s.config.Dataset).Table(s.config.Table).Metadata(ctx)
 	if err != nil {
 		return fmt.Errorf("bigquery ping: %w", err)
-	}
-	status, err := job.Wait(ctx)
-	if err != nil {
-		return fmt.Errorf("bigquery ping wait: %w", err)
-	}
-	if status.Err() != nil {
-		return fmt.Errorf("bigquery ping: %w", status.Err())
 	}
 	return nil
 }
@@ -351,13 +405,44 @@ func (s *Store) QueryTraces(ctx context.Context, tq storage.TraceQuery) (*storag
 		traceIDs = append(traceIDs, row.TraceID)
 	}
 
+	if len(traceIDs) == 0 {
+		return &storage.TraceResult{Traces: nil, TotalCount: 0}, nil
+	}
+
+	// Batch-fetch only the columns buildTrace needs (avoids scanning
+	// large text fields like gen_ai_input_content/gen_ai_output_content).
+	batchQuery := fmt.Sprintf(`
+		SELECT span_id, trace_id, parent_span_id, name, kind, status,
+		       start_time, end_time, duration_ns, project_id, environment,
+		       gen_ai_total_tokens, gen_ai_cost_usd
+		FROM %s
+		WHERE trace_id IN UNNEST(@traceIDs)
+		ORDER BY start_time ASC, span_id ASC
+	`, quoteTable(s.tableID))
+
+	bq := s.client.Query(batchQuery)
+	bq.Parameters = []bigquery.QueryParameter{
+		{Name: "traceIDs", Value: traceIDs},
+	}
+
+	allSpans, err := s.querySpans(ctx, bq)
+	if err != nil {
+		return nil, fmt.Errorf("batch-fetching trace spans: %w", err)
+	}
+
+	// Group spans by trace ID, preserving the order from traceIDs.
+	spansByTrace := make(map[string][]storage.Span, len(traceIDs))
+	for _, span := range allSpans {
+		spansByTrace[span.TraceID] = append(spansByTrace[span.TraceID], span)
+	}
+
 	var traces []storage.TraceSummary
 	for _, tid := range traceIDs {
-		trace, err := s.GetTrace(ctx, tid)
-		if err != nil {
-			slog.Warn("skipping trace", "trace_id", tid, "error", err)
+		spans, ok := spansByTrace[tid]
+		if !ok || len(spans) == 0 {
 			continue
 		}
+		trace := buildTrace(tid, spans)
 		traces = append(traces, storage.TraceSummary{
 			TraceID:      trace.TraceID,
 			RootSpanName: trace.RootSpanName,
@@ -653,6 +738,7 @@ func buildTrace(traceID string, spans []storage.Span) *storage.Trace {
 }
 
 // quoteTable wraps a fully-qualified table ID in backticks for BigQuery SQL.
+// Escapes any embedded backticks to prevent SQL injection via config values.
 func quoteTable(tableID string) string {
-	return "`" + tableID + "`"
+	return "`" + strings.ReplaceAll(tableID, "`", "\\`") + "`"
 }

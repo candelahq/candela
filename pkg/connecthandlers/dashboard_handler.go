@@ -192,6 +192,9 @@ func (h *DashboardHandler) GetMyUsage(
 
 	// Attach budget context if Firestore is available.
 	if h.users != nil {
+		// Fetch budget and grants in parallel-safe single-pass:
+		// one GetBudget + one ListGrants (instead of the previous
+		// GetBudget + CheckBudget + ListGrants which called ListGrants twice).
 		budget, err := h.users.GetBudget(ctx, userID)
 		if err == nil && budget != nil {
 			resp.Budget = &typespb.UserBudget{
@@ -201,10 +204,31 @@ func (h *DashboardHandler) GetMyUsage(
 				TokensUsed: budget.TokensUsed,
 			}
 		}
-		check, err := h.users.CheckBudget(ctx, userID, 0)
-		if err == nil && check != nil {
-			resp.TotalRemainingUsd = check.RemainingUSD
+
+		// Fetch active grants (single call — also used to compute remaining).
+		grants, grantErr := h.users.ListGrants(ctx, userID, true)
+		if grantErr != nil {
+			slog.Warn("failed to fetch grants for GetMyUsage", "user_id", userID, "error", grantErr)
+		} else {
+			for _, g := range grants {
+				resp.ActiveGrants = append(resp.ActiveGrants, grantToProto(g))
+			}
 		}
+
+		// Compute total remaining from budget + grants (avoids calling CheckBudget
+		// which internally calls ListGrants again).
+		var totalRemaining float64
+		if budget != nil {
+			budgetRemaining := budget.LimitUSD - budget.SpentUSD
+			if budgetRemaining < 0 {
+				budgetRemaining = 0
+			}
+			totalRemaining += budgetRemaining
+		}
+		for _, g := range grants {
+			totalRemaining += g.Remaining()
+		}
+		resp.TotalRemainingUsd = totalRemaining
 	}
 
 	return connect.NewResponse(resp), nil

@@ -5,6 +5,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -345,7 +346,15 @@ func main() {
 	if userStore != nil {
 		userAuth = func(ctx context.Context, email string) error {
 			_, err := userStore.GetUserByEmail(ctx, email)
-			return err
+			if err != nil {
+				// Distinguish "not found" from transient errors so the
+				// middleware can return 403 vs 500 appropriately.
+				if errors.Is(err, storage.ErrNotFound) {
+					return fmt.Errorf("%w: %s", auth.ErrNotRegistered, email)
+				}
+				return err // transient — will trigger 500
+			}
+			return nil
 		}
 	}
 

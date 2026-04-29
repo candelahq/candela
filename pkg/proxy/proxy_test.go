@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/candelahq/candela/pkg/auth"
 	"github.com/candelahq/candela/pkg/costcalc"
 	"github.com/candelahq/candela/pkg/storage"
 )
@@ -460,7 +461,7 @@ func TestCircuitBreaker_SkipsSpanOnOpen(t *testing.T) {
 	}
 }
 
-func TestUserIDOverride_XUserIdHeader(t *testing.T) {
+func TestUserIDOverride_XUserIdHeader_ServiceAccount(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = fmt.Fprint(w, `{"content":[{"type":"text","text":"ok"}],"usage":{"input_tokens":1,"output_tokens":1}}`)
@@ -477,16 +478,22 @@ func TestUserIDOverride_XUserIdHeader(t *testing.T) {
 
 	mux := http.NewServeMux()
 	p.RegisterRoutes(mux)
-	srv := httptest.NewServer(mux)
+
+	// Wrap with an auth context that looks like a service account.
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sa := &auth.User{ID: "sa-uid", Email: "candela-proxy@my-project.iam.gserviceaccount.com"}
+		mux.ServeHTTP(w, r.WithContext(auth.NewContext(r.Context(), sa)))
+	})
+	srv := httptest.NewServer(handler)
 	defer srv.Close()
 
-	// Send request WITH X-User-Id header (simulating candela-local).
+	// Send request WITH X-User-Id header (simulating candela-local via SA).
 	req, _ := http.NewRequest("POST",
 		srv.URL+"/proxy/anthropic/v1/messages",
 		strings.NewReader(`{"model":"claude-sonnet-4-20250514","messages":[{"role":"user","content":"hi"}]}`))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer tok")
-	req.Header.Set("X-User-Id", "Ivan.Costa@Example.Com")
+	req.Header.Set("X-User-Id", "Larry.David@Example.Com")
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -508,9 +515,71 @@ func TestUserIDOverride_XUserIdHeader(t *testing.T) {
 		t.Fatal("expected span")
 	}
 
-	// X-User-Id should be lowercased and used as user_id.
-	if spans[0].UserID != "ivan.costa@example.com" {
-		t.Errorf("span UserID = %q, want %q", spans[0].UserID, "ivan.costa@example.com")
+	// X-User-Id should be lowercased and used as user_id when caller is a SA.
+	if spans[0].UserID != "larry.david@example.com" {
+		t.Errorf("span UserID = %q, want %q", spans[0].UserID, "larry.david@example.com")
+	}
+}
+
+func TestUserIDOverride_IgnoredFromRegularUser(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprint(w, `{"content":[{"type":"text","text":"ok"}],"usage":{"input_tokens":1,"output_tokens":1}}`)
+	}))
+	defer upstream.Close()
+
+	submitter := &mockSubmitter{}
+	calc := costcalc.New()
+
+	p := New(Config{
+		Providers: []Provider{{Name: "anthropic", UpstreamURL: upstream.URL}},
+		ProjectID: "test",
+	}, submitter, calc)
+
+	mux := http.NewServeMux()
+	p.RegisterRoutes(mux)
+
+	// Wrap with an auth context that is a regular user (NOT a SA).
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		user := &auth.User{ID: "uid-funkhouser", Email: "funkhouser@example-corp.com"}
+		mux.ServeHTTP(w, r.WithContext(auth.NewContext(r.Context(), user)))
+	})
+	srv := httptest.NewServer(handler)
+	defer srv.Close()
+
+	// Regular user tries to impersonate someone else via X-User-Id — should be IGNORED.
+	req, _ := http.NewRequest("POST",
+		srv.URL+"/proxy/anthropic/v1/messages",
+		strings.NewReader(`{"model":"claude-sonnet-4-20250514","messages":[{"role":"user","content":"hi"}]}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer tok")
+	req.Header.Set("X-User-Id", "larry.david@example-corp.com")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	_, _ = io.ReadAll(resp.Body)
+
+	// Wait for async span.
+	for i := 0; i < 50; i++ {
+		if len(submitter.getSpans()) > 0 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	spans := submitter.getSpans()
+	if len(spans) == 0 {
+		t.Fatal("expected span")
+	}
+
+	// UserID should be the attacker's own email (from auth context),
+	// NOT the victim's email from X-User-Id.
+	if spans[0].UserID != "funkhouser@example-corp.com" {
+		t.Errorf("span UserID = %q, want %q (X-User-Id should be ignored for non-SA callers)",
+			spans[0].UserID, "funkhouser@example-corp.com")
 	}
 }
 

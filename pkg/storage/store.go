@@ -167,6 +167,7 @@ type SpanQuery struct {
 	NameContains string
 	PageSize     int
 	PageToken    string
+	UserID       string // Filter by user (empty = all, for admins)
 }
 
 // SpanResult is the paginated result of a span query.

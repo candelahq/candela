@@ -178,13 +178,19 @@ All backends share the same logical schema:
 | project_id | VARCHAR | STRING | TEXT |
 | environment | VARCHAR | STRING | TEXT |
 | service_name | VARCHAR | STRING | TEXT |
+| user_id | VARCHAR | STRING | TEXT |
 | gen_ai_model | VARCHAR | STRING | TEXT |
 | gen_ai_provider | VARCHAR | STRING | TEXT |
 | gen_ai_input_tokens | BIGINT | INT64 | INTEGER |
 | gen_ai_output_tokens | BIGINT | INT64 | INTEGER |
 | gen_ai_total_tokens | BIGINT | INT64 | INTEGER |
 | gen_ai_cost_usd | DOUBLE | FLOAT64 | REAL |
+| gen_ai_temperature | DOUBLE | FLOAT64 | REAL |
+| gen_ai_max_tokens | BIGINT | INT64 | INTEGER |
+| gen_ai_input_content | VARCHAR | STRING | TEXT |
+| gen_ai_output_content | VARCHAR | STRING | TEXT |
 | attributes | STRUCT[] | STRUCT[] | TEXT (JSON) |
+| session_id | VARCHAR | STRING | TEXT |
 
 ### Key Design Decisions
 

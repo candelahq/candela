@@ -297,9 +297,11 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 	// Accept session ID from candela-local (or other clients).
 	sessionID := r.Header.Get("X-Session-Id")
 
-	// Accept end-user identity from candela-local. When the proxy is called
-	// via a service account, X-User-Id carries the real user's email so
-	// spans are attributed correctly for per-user dashboards.
+	// ── Resolve effective end-user identity ──
+	// This is the single source of truth for "who is making this request"
+	// and is used for both budget enforcement and span attribution.
+	// Priority: (1) X-User-Id header from candela-local (real end-user
+	// behind a service account), (2) auth context email, (3) auth context UID.
 	//
 	// Security: only trust X-User-Id from service account callers
 	// (*.iam.gserviceaccount.com). Regular users cannot impersonate others.
@@ -311,6 +313,15 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 		} else {
 			slog.Warn("X-User-Id header ignored — caller is not a service account",
 				"caller_email", auth.EmailFromContext(r.Context()), "attempted_override", xuid)
+		}
+	}
+
+	effectiveUserID := userOverride
+	if effectiveUserID == "" && caller != nil {
+		if caller.Email != "" {
+			effectiveUserID = strings.ToLower(caller.Email)
+		} else {
+			effectiveUserID = caller.ID
 		}
 	}
 
@@ -334,30 +345,21 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 	// We pass estimatedCostUSD=0 because we can't know the actual cost until
 	// after the upstream response. This blocks only fully-exhausted users;
 	// actual cost deduction happens post-response via DeductSpend.
-	if p.users != nil {
-		// Use userOverride (from X-User-Id) when present, so candela-local
-		// users get budget-checked against *their* identity, not the SA's.
-		budgetUserID := userOverride
-		if budgetUserID == "" && caller != nil {
-			budgetUserID = caller.Email
-			if budgetUserID == "" {
-				budgetUserID = caller.ID
-			}
-		}
-		if budgetUserID != "" {
-			check, err := p.users.CheckBudget(r.Context(), budgetUserID, 0)
-			if err != nil {
-				slog.Warn("budget check failed, allowing request",
-					"user_id", budgetUserID, "error", err)
-			} else if !check.Allowed {
-				w.Header().Set("Content-Type", "application/json")
-				w.WriteHeader(http.StatusPaymentRequired)
-				_, _ = w.Write([]byte(`{"error":{"message":"budget exhausted — contact your admin for a grant or budget increase","type":"insufficient_budget","code":402}}`))
-				slog.Info("blocked request: budget exhausted",
-					"user_id", budgetUserID,
-					"remaining_usd", check.RemainingUSD)
-				return
-			}
+	// Uses effectiveUserID so budget is checked against the real end-user,
+	// not the service account in team mode.
+	if p.users != nil && effectiveUserID != "" {
+		check, err := p.users.CheckBudget(r.Context(), effectiveUserID, 0)
+		if err != nil {
+			slog.Warn("budget check failed, allowing request",
+				"user_id", effectiveUserID, "error", err)
+		} else if !check.Allowed {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusPaymentRequired)
+			_, _ = w.Write([]byte(`{"error":{"message":"budget exhausted — contact your admin for a grant or budget increase","type":"insufficient_budget","code":402}}`))
+			slog.Info("blocked request: budget exhausted",
+				"user_id", effectiveUserID,
+				"remaining_usd", check.RemainingUSD)
+			return
 		}
 	}
 
@@ -458,9 +460,9 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 	cbAllow := p.breakers[providerName].AllowRequest()
 
 	if isStreaming && resp.StatusCode == http.StatusOK {
-		p.handleStreamingResponse(w, r, resp, provider, reqBody, startTime, ttfb, requestID, sessionID, userOverride, cbAllow)
+		p.handleStreamingResponse(w, r, resp, provider, reqBody, startTime, ttfb, requestID, sessionID, effectiveUserID, cbAllow)
 	} else {
-		p.handleStandardResponse(w, r, resp, provider, reqBody, startTime, ttfb, requestID, sessionID, userOverride, cbAllow)
+		p.handleStandardResponse(w, r, resp, provider, reqBody, startTime, ttfb, requestID, sessionID, effectiveUserID, cbAllow)
 	}
 }
 
@@ -621,21 +623,21 @@ func (p *Proxy) handleStreamingResponse(
 // Both standard and streaming responses produce the same struct; the only
 // difference is how they parse the upstream response.
 type spanParams struct {
-	provider      Provider
-	model         string
-	sessionID     string
-	userOverride  string // end-user email from X-User-Id header (candela-local)
-	inputContent  string
-	outputContent string
-	inputTokens   int64
-	outputTokens  int64
-	startTime     time.Time
-	endTime       time.Time
-	status        storage.SpanStatus
-	ttfb          time.Duration
-	requestID     string
-	extraAttrs    map[string]string // streaming-specific, status code, etc.
-	namePrefix    string            // e.g. "openai.chat" or "openai.chat.stream"
+	provider        Provider
+	model           string
+	sessionID       string
+	effectiveUserID string // resolved end-user identity (X-User-Id > auth email > auth UID)
+	inputContent    string
+	outputContent   string
+	inputTokens     int64
+	outputTokens    int64
+	startTime       time.Time
+	endTime         time.Time
+	status          storage.SpanStatus
+	ttfb            time.Duration
+	requestID       string
+	extraAttrs      map[string]string // streaming-specific, status code, etc.
+	namePrefix      string            // e.g. "openai.chat" or "openai.chat.stream"
 }
 
 // buildSpan constructs a storage.Span from parsed parameters and submits it.
@@ -675,18 +677,8 @@ func (p *Proxy) buildSpan(ctx context.Context, params spanParams) {
 		Attributes: attrs,
 	}
 
-	// Set user ID for per-user attribution.
-	// Priority: (1) X-User-Id header from candela-local (end-user email),
-	// (2) auth context email, (3) auth context UID.
-	if params.userOverride != "" {
-		span.UserID = params.userOverride
-	} else if caller := auth.FromContext(ctx); caller != nil {
-		if caller.Email != "" {
-			span.UserID = strings.ToLower(caller.Email)
-		} else {
-			span.UserID = caller.ID
-		}
-	}
+	// Set user ID for per-user attribution (resolved once in handleProxy).
+	span.UserID = params.effectiveUserID
 
 	// Set session ID for conversation grouping.
 	span.SessionID = params.sessionID
@@ -756,20 +748,20 @@ func (p *Proxy) createSpan(
 	}
 
 	p.buildSpan(ctx, spanParams{
-		provider:      provider,
-		model:         model,
-		userOverride:  userOverride,
-		inputContent:  inputContent,
-		outputContent: outputContent,
-		inputTokens:   inputTokens,
-		outputTokens:  outputTokens,
-		startTime:     startTime,
-		endTime:       endTime,
-		status:        status,
-		ttfb:          ttfb,
-		requestID:     requestID,
-		sessionID:     sessionID,
-		namePrefix:    fmt.Sprintf("%s.chat", provider.Name),
+		provider:        provider,
+		model:           model,
+		effectiveUserID: userOverride,
+		inputContent:    inputContent,
+		outputContent:   outputContent,
+		inputTokens:     inputTokens,
+		outputTokens:    outputTokens,
+		startTime:       startTime,
+		endTime:         endTime,
+		status:          status,
+		ttfb:            ttfb,
+		requestID:       requestID,
+		sessionID:       sessionID,
+		namePrefix:      fmt.Sprintf("%s.chat", provider.Name),
 		extraAttrs: map[string]string{
 			"http.status": fmt.Sprintf("%d", statusCode),
 		},
@@ -790,20 +782,20 @@ func (p *Proxy) createStreamingSpan(
 	outputContent, inputTokens, outputTokens := extractStreamingUsage(provider.Name, streamData)
 
 	p.buildSpan(ctx, spanParams{
-		provider:      provider,
-		model:         model,
-		userOverride:  userOverride,
-		inputContent:  inputContent,
-		outputContent: outputContent,
-		inputTokens:   inputTokens,
-		outputTokens:  outputTokens,
-		startTime:     startTime,
-		endTime:       endTime,
-		status:        storage.SpanStatusOK,
-		ttfb:          ttfb,
-		requestID:     requestID,
-		sessionID:     sessionID,
-		namePrefix:    fmt.Sprintf("%s.chat.stream", provider.Name),
+		provider:        provider,
+		model:           model,
+		effectiveUserID: userOverride,
+		inputContent:    inputContent,
+		outputContent:   outputContent,
+		inputTokens:     inputTokens,
+		outputTokens:    outputTokens,
+		startTime:       startTime,
+		endTime:         endTime,
+		status:          storage.SpanStatusOK,
+		ttfb:            ttfb,
+		requestID:       requestID,
+		sessionID:       sessionID,
+		namePrefix:      fmt.Sprintf("%s.chat.stream", provider.Name),
 		extraAttrs: map[string]string{
 			"proxy.streaming": "true",
 			"llm.ttft_ms":     fmt.Sprintf("%d", ttft.Milliseconds()),

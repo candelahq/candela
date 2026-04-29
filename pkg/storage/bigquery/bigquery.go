@@ -374,6 +374,7 @@ func (s *Store) QueryTraces(ctx context.Context, tq storage.TraceQuery) (*storag
 		WHERE project_id = @projectID
 		  AND start_time >= @startTime
 		  AND start_time <= @endTime
+		  AND (@userID = '' OR user_id = @userID)
 		GROUP BY trace_id
 		ORDER BY earliest DESC
 		LIMIT @pageSize
@@ -384,6 +385,7 @@ func (s *Store) QueryTraces(ctx context.Context, tq storage.TraceQuery) (*storag
 		{Name: "projectID", Value: tq.ProjectID},
 		{Name: "startTime", Value: tq.StartTime},
 		{Name: "endTime", Value: tq.EndTime},
+		{Name: "userID", Value: tq.UserID},
 		{Name: "pageSize", Value: tq.PageSize},
 	}
 
@@ -475,6 +477,7 @@ func (s *Store) SearchSpans(ctx context.Context, sq storage.SpanQuery) (*storage
 		  AND (@kind = 0 OR kind = @kind)
 		  AND (@model = '' OR gen_ai_model = @model)
 		  AND (@nameContains = '' OR name LIKE CONCAT('%%', @escapedName, '%%'))
+		  AND (@userID = '' OR user_id = @userID)
 		ORDER BY start_time DESC
 		LIMIT @pageSize
 	`, quoteTable(s.tableID))
@@ -488,6 +491,7 @@ func (s *Store) SearchSpans(ctx context.Context, sq storage.SpanQuery) (*storage
 		{Name: "model", Value: sq.Model},
 		{Name: "nameContains", Value: sq.NameContains},
 		{Name: "escapedName", Value: storage.EscapeLike(sq.NameContains)},
+		{Name: "userID", Value: sq.UserID},
 		{Name: "pageSize", Value: sq.PageSize},
 	}
 

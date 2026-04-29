@@ -59,8 +59,10 @@ func AdminInterceptor(userStore storage.UserStore) connect.UnaryInterceptorFunc 
 					return nil, connect.NewError(connect.CodePermissionDenied,
 						fmt.Errorf("admin access required"))
 				}
+				slog.ErrorContext(ctx, "admin check: failed to look up user role",
+					"email", authUser.Email, "error", err)
 				return nil, connect.NewError(connect.CodeInternal,
-					fmt.Errorf("failed to look up user role: %w", err))
+					fmt.Errorf("internal error"))
 			}
 
 			if user.Role != storage.RoleAdmin {

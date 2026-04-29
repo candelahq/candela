@@ -164,7 +164,7 @@ func (s *Store) GetTrace(ctx context.Context, traceID string) (*storage.Trace, e
 			start_time, end_time, duration_ns, project_id, environment, service_name,
 			gen_ai_model, gen_ai_provider, gen_ai_input_tokens, gen_ai_output_tokens,
 			gen_ai_total_tokens, gen_ai_cost_usd, gen_ai_temperature, gen_ai_max_tokens,
-			gen_ai_input_content, gen_ai_output_content, attributes, session_id
+			gen_ai_input_content, gen_ai_output_content, attributes, user_id, session_id
 		FROM spans WHERE trace_id = ? ORDER BY start_time ASC
 	`, traceID)
 	if err != nil {
@@ -250,18 +250,20 @@ func (s *Store) SearchSpans(ctx context.Context, q storage.SpanQuery) (*storage.
 			start_time, end_time, duration_ns, project_id, environment, service_name,
 			gen_ai_model, gen_ai_provider, gen_ai_input_tokens, gen_ai_output_tokens,
 			gen_ai_total_tokens, gen_ai_cost_usd, gen_ai_temperature, gen_ai_max_tokens,
-			gen_ai_input_content, gen_ai_output_content, attributes, session_id
+			gen_ai_input_content, gen_ai_output_content, attributes, user_id, session_id
 		FROM spans
 		WHERE project_id = ? AND start_time >= ? AND start_time <= ?
 			AND (? = 0 OR kind = ?)
 			AND (? = '' OR gen_ai_model = ?)
 			AND (? = '' OR name LIKE '%' || ? || '%' ESCAPE '\')
+			AND (? = '' OR user_id = ?)
 		ORDER BY start_time DESC
 		LIMIT ?
 	`, q.ProjectID, q.StartTime, q.EndTime,
 		int(q.Kind), int(q.Kind),
 		q.Model, q.Model,
 		q.NameContains, storage.EscapeLike(q.NameContains),
+		q.UserID, q.UserID,
 		q.PageSize,
 	)
 	if err != nil {
@@ -410,6 +412,7 @@ func scanSpans(rows *sql.Rows) ([]storage.Span, error) {
 			&genAI.CostUSD, &genAI.Temperature, &genAI.MaxTokens,
 			&genAI.InputContent, &genAI.OutputContent,
 			&attrsAny,
+			&span.UserID,
 			&span.SessionID,
 		)
 		if err != nil {

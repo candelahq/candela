@@ -33,7 +33,8 @@ func (h *TraceHandler) GetTrace(
 ) (*connect.Response[v1.GetTraceResponse], error) {
 	trace, err := h.store.GetTrace(ctx, req.Msg.TraceId)
 	if err != nil {
-		return nil, connect.NewError(connect.CodeNotFound, err)
+		slog.Error("failed to get trace", "trace_id", req.Msg.TraceId, "error", err)
+		return nil, connect.NewError(connect.CodeNotFound, fmt.Errorf("trace not found"))
 	}
 
 	// Authorization gate: non-admin users may only view their own traces.
@@ -105,7 +106,7 @@ func (h *TraceHandler) ListTraces(
 
 	result, err := h.store.QueryTraces(ctx, q)
 	if err != nil {
-		return nil, connect.NewError(connect.CodeInternal, err)
+		return nil, internalError("failed to query traces", err)
 	}
 
 	var summaries []*typespb.TraceSummary
@@ -152,7 +153,7 @@ func (h *TraceHandler) SearchSpans(
 
 	result, err := h.store.SearchSpans(ctx, q)
 	if err != nil {
-		return nil, connect.NewError(connect.CodeInternal, err)
+		return nil, internalError("failed to search spans", err)
 	}
 
 	var spans []*typespb.Span

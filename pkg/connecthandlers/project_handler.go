@@ -2,6 +2,7 @@ package connecthandlers
 
 import (
 	"context"
+	"fmt"
 
 	connect "connectrpc.com/connect"
 	typespb "github.com/candelahq/candela/gen/go/candela/types"
@@ -30,7 +31,7 @@ func (h *ProjectHandler) CreateProject(
 		Description: req.Msg.Description,
 	})
 	if err != nil {
-		return nil, connect.NewError(connect.CodeInternal, err)
+		return nil, internalError("failed to create project", err)
 	}
 
 	return connect.NewResponse(&v1.CreateProjectResponse{
@@ -44,7 +45,7 @@ func (h *ProjectHandler) GetProject(
 ) (*connect.Response[v1.GetProjectResponse], error) {
 	p, err := h.store.GetProject(ctx, req.Msg.Id)
 	if err != nil {
-		return nil, connect.NewError(connect.CodeNotFound, err)
+		return nil, connect.NewError(connect.CodeNotFound, fmt.Errorf("project not found"))
 	}
 
 	return connect.NewResponse(&v1.GetProjectResponse{
@@ -66,7 +67,7 @@ func (h *ProjectHandler) ListProjects(
 
 	projects, total, err := h.store.ListProjects(ctx, limit, offset)
 	if err != nil {
-		return nil, connect.NewError(connect.CodeInternal, err)
+		return nil, internalError("failed to list projects", err)
 	}
 
 	pbProjects := make([]*typespb.Project, len(projects))
@@ -88,7 +89,7 @@ func (h *ProjectHandler) DeleteProject(
 	req *connect.Request[v1.DeleteProjectRequest],
 ) (*connect.Response[v1.DeleteProjectResponse], error) {
 	if err := h.store.DeleteProject(ctx, req.Msg.Id); err != nil {
-		return nil, connect.NewError(connect.CodeNotFound, err)
+		return nil, connect.NewError(connect.CodeNotFound, fmt.Errorf("project not found"))
 	}
 	return connect.NewResponse(&v1.DeleteProjectResponse{}), nil
 }
@@ -104,7 +105,7 @@ func (h *ProjectHandler) CreateAPIKey(
 		Name:      req.Msg.Name,
 	}, fullKey)
 	if err != nil {
-		return nil, connect.NewError(connect.CodeInternal, err)
+		return nil, internalError("failed to create API key", err)
 	}
 
 	return connect.NewResponse(&v1.CreateAPIKeyResponse{
@@ -119,7 +120,7 @@ func (h *ProjectHandler) ListAPIKeys(
 ) (*connect.Response[v1.ListAPIKeysResponse], error) {
 	keys, err := h.store.ListAPIKeys(ctx, req.Msg.ProjectId)
 	if err != nil {
-		return nil, connect.NewError(connect.CodeInternal, err)
+		return nil, internalError("failed to list API keys", err)
 	}
 
 	pbKeys := make([]*typespb.APIKey, len(keys))
@@ -138,7 +139,7 @@ func (h *ProjectHandler) RevokeAPIKey(
 	req *connect.Request[v1.RevokeAPIKeyRequest],
 ) (*connect.Response[v1.RevokeAPIKeyResponse], error) {
 	if err := h.store.RevokeAPIKey(ctx, req.Msg.Id); err != nil {
-		return nil, connect.NewError(connect.CodeNotFound, err)
+		return nil, connect.NewError(connect.CodeNotFound, fmt.Errorf("API key not found"))
 	}
 	return connect.NewResponse(&v1.RevokeAPIKeyResponse{}), nil
 }

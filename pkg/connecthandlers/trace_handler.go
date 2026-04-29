@@ -4,6 +4,7 @@ package connecthandlers
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"time"
 
 	connect "connectrpc.com/connect"
@@ -45,15 +46,15 @@ func (h *TraceHandler) GetTrace(
 			return nil, connect.NewError(connect.CodePermissionDenied,
 				fmt.Errorf("access denied"))
 		}
-		// If the trace has no user_id at all (legacy data), allow access —
-		// but log for visibility so we can backfill.
+		// If the trace has no user_id at all (legacy data), allow access
+		// but log for backfill visibility.
 		if traceOwner == "" {
 			caller := auth.FromContext(ctx)
-			email := ""
 			if caller != nil {
-				email = caller.Email
+				slog.Debug("legacy trace access: no user_id on trace",
+					"trace_id", req.Msg.TraceId,
+					"caller", caller.Email)
 			}
-			_ = email // available for future slog.Debug if needed
 		}
 	}
 
@@ -256,17 +257,19 @@ func traceSummaryToProto(t *storage.TraceSummary) *typespb.TraceSummary {
 // first span that has a user_id set. Returns "" if no span has a user_id
 // (legacy data ingested before per-user attribution was added).
 func traceUserID(t *storage.Trace) string {
-	// Prefer the root span's user_id (most authoritative).
+	var fallback string
 	for _, sp := range t.Spans {
-		if sp.ParentSpanID == "" && sp.UserID != "" {
+		if sp.UserID == "" {
+			continue
+		}
+		// Prefer the root span's user_id (most authoritative).
+		if sp.ParentSpanID == "" {
 			return sp.UserID
 		}
-	}
-	// Fallback: any span in the trace with a user_id.
-	for _, sp := range t.Spans {
-		if sp.UserID != "" {
-			return sp.UserID
+		// Fallback: the first span in the trace with a user_id.
+		if fallback == "" {
+			fallback = sp.UserID
 		}
 	}
-	return ""
+	return fallback
 }

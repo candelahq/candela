@@ -230,3 +230,57 @@ func TestBudgetGate_CheckErrorAllowsRequest(t *testing.T) {
 		t.Errorf("status = %d, want 200 (fail-open); body = %s", resp.StatusCode, body)
 	}
 }
+
+func TestBudgetGate_SkippedForServiceAccount(t *testing.T) {
+	// Service accounts bypass budget entirely — CheckBudget should NOT be called.
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprint(w, `{"content":[{"type":"text","text":"ok"}],"usage":{"input_tokens":1,"output_tokens":1}}`)
+	}))
+	defer upstream.Close()
+
+	submitter := &mockSubmitter{}
+	calc := costcalc.New()
+
+	p := New(Config{
+		Providers: []Provider{{Name: "anthropic", UpstreamURL: upstream.URL}},
+		ProjectID: "test",
+	}, submitter, calc)
+
+	// Wire in a store that returns "budget exhausted" — SA should bypass this.
+	p.SetUserStore(&budgetUserStore{
+		checkResult: &storage.BudgetCheckResult{
+			Allowed:      false,
+			RemainingUSD: 0,
+		},
+	})
+
+	mux := http.NewServeMux()
+	p.RegisterRoutes(mux)
+
+	// Inject a service account identity.
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sa := &auth.User{ID: "sa-uid", Email: "candela-proxy@my-project.iam.gserviceaccount.com"}
+		mux.ServeHTTP(w, r.WithContext(auth.NewContext(r.Context(), sa)))
+	})
+	srv := httptest.NewServer(handler)
+	defer srv.Close()
+
+	req, _ := http.NewRequest("POST",
+		srv.URL+"/proxy/anthropic/v1/messages",
+		strings.NewReader(`{"model":"claude-sonnet-4-20250514","messages":[{"role":"user","content":"hi"}]}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer tok")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	// SA should bypass budget → 200 OK, not 402.
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Errorf("status = %d, want 200 (SA bypasses budget); body = %s", resp.StatusCode, body)
+	}
+}

@@ -320,7 +320,10 @@ func TestVerifyRegistered_NilAuthorizerAllowsAll(t *testing.T) {
 }
 
 func TestVerifyRegistered_ServiceAccountBlocked(t *testing.T) {
-	// Simulates a service account from another GCP project trying to access.
+	// verifyRegistered itself blocks unknown service accounts when called
+	// directly. In production, the middleware skips verifyRegistered for SAs
+	// authenticated via Google ID token (Strategy 2) — but if a SA were to
+	// reach verifyRegistered through another path, it would still be rejected.
 	authorizer := UserAuthorizer(func(_ context.Context, email string) error {
 		// Only known team emails pass.
 		known := map[string]bool{

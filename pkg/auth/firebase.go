@@ -109,7 +109,13 @@ func FirebaseAuthMiddleware(next http.Handler, fbAuth *fbauth.Client, cloudRunAu
 					ID:    payload.Subject,
 					Email: strings.ToLower(email),
 				}
-				if !verifyRegistered(r.Context(), w, user, userAuth) {
+				// Service accounts (candela-local with SA credentials) are
+				// authorized by Cloud Run IAM — skip user-store registration
+				// check. User identity is resolved from the auth token.
+				if strings.HasSuffix(user.Email, ".gserviceaccount.com") {
+					slog.Info("service account authenticated — skipping registration check",
+						"email", user.Email, "path", r.URL.Path)
+				} else if !verifyRegistered(r.Context(), w, user, userAuth) {
 					return
 				}
 				slog.Debug("authenticated via Google ID token",

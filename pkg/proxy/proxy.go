@@ -298,28 +298,16 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 	sessionID := r.Header.Get("X-Session-Id")
 
 	// ── Resolve effective end-user identity ──
-	// This is the single source of truth for "who is making this request"
-	// and is used for both budget enforcement and span attribution.
-	// Priority: (1) X-User-Id header from candela-local (real end-user
-	// behind a service account), (2) auth context email, (3) auth context UID.
-	//
-	// Security: only trust X-User-Id from service account callers
-	// (*.iam.gserviceaccount.com). Regular users cannot impersonate others.
+	// Identity comes exclusively from the auth context (email or UID).
+	// candela-local users authenticate with their own ADC credentials,
+	// so the token carries their real email — no override header needed.
 	caller := auth.FromContext(r.Context())
-	var userOverride string
-	if xuid := r.Header.Get("X-User-Id"); xuid != "" {
-		if caller != nil && strings.HasSuffix(caller.Email, ".iam.gserviceaccount.com") {
-			userOverride = strings.ToLower(xuid)
-		} else {
-			slog.Warn("X-User-Id header ignored — caller is not a service account",
-				"caller_email", auth.EmailFromContext(r.Context()), "attempted_override", xuid)
-		}
-	}
-
-	effectiveUserID := userOverride
-	if effectiveUserID == "" && caller != nil {
+	var effectiveUserID string
+	var isServiceAccount bool
+	if caller != nil {
 		if caller.Email != "" {
 			effectiveUserID = strings.ToLower(caller.Email)
+			isServiceAccount = strings.HasSuffix(effectiveUserID, ".gserviceaccount.com")
 		} else {
 			effectiveUserID = caller.ID
 		}
@@ -345,9 +333,9 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 	// We pass estimatedCostUSD=0 because we can't know the actual cost until
 	// after the upstream response. This blocks only fully-exhausted users;
 	// actual cost deduction happens post-response via DeductSpend.
-	// Uses effectiveUserID so budget is checked against the real end-user,
-	// not the service account in team mode.
-	if p.users != nil && effectiveUserID != "" {
+	// Uses effectiveUserID so budget is checked against the real end-user.
+	// Service accounts have no budget entries — skip to avoid spurious warnings.
+	if p.users != nil && effectiveUserID != "" && !isServiceAccount {
 		check, err := p.users.CheckBudget(r.Context(), effectiveUserID, 0)
 		if err != nil {
 			slog.Warn("budget check failed, allowing request",
@@ -491,7 +479,7 @@ func (p *Proxy) handleStandardResponse(
 	ttfb time.Duration,
 	requestID string,
 	sessionID string,
-	userOverride string,
+	effectiveUserID string,
 	cbAllow bool,
 ) {
 	// Read the full response.
@@ -532,7 +520,7 @@ func (p *Proxy) handleStandardResponse(
 
 	// Create observability span (async — don't block the response).
 	if cbAllow {
-		go p.createSpan(context.WithoutCancel(r.Context()), provider, reqBody, respBody, startTime, endTime, resp.StatusCode, ttfb, requestID, sessionID, userOverride)
+		go p.createSpan(context.WithoutCancel(r.Context()), provider, reqBody, respBody, startTime, endTime, resp.StatusCode, ttfb, requestID, sessionID, effectiveUserID)
 	} else {
 		slog.Debug("skipping span creation (circuit open)", "provider", provider.Name, "request_id", requestID)
 	}
@@ -545,7 +533,7 @@ func (p *Proxy) handleStreamingResponse(
 	ttfb time.Duration,
 	requestID string,
 	sessionID string,
-	userOverride string,
+	effectiveUserID string,
 	cbAllow bool,
 ) {
 	flusher, ok := w.(http.Flusher)
@@ -613,7 +601,7 @@ func (p *Proxy) handleStreamingResponse(
 
 	// Parse the accumulated stream to extract usage data.
 	if cbAllow {
-		go p.createStreamingSpan(context.WithoutCancel(r.Context()), provider, reqBody, streamBuffer.Bytes(), startTime, endTime, ttfb, ttft, requestID, sessionID, userOverride)
+		go p.createStreamingSpan(context.WithoutCancel(r.Context()), provider, reqBody, streamBuffer.Bytes(), startTime, endTime, ttfb, ttft, requestID, sessionID, effectiveUserID)
 	} else {
 		slog.Debug("skipping streaming span (circuit open)", "provider", provider.Name, "request_id", requestID)
 	}
@@ -626,7 +614,7 @@ type spanParams struct {
 	provider        Provider
 	model           string
 	sessionID       string
-	effectiveUserID string // resolved end-user identity (X-User-Id > auth email > auth UID)
+	effectiveUserID string // resolved end-user identity (auth email > auth UID)
 	inputContent    string
 	outputContent   string
 	inputTokens     int64
@@ -688,7 +676,9 @@ func (p *Proxy) buildSpan(ctx context.Context, params spanParams) {
 	}
 
 	// Async budget deduction and notification.
-	if p.users != nil && span.UserID != "" && span.GenAI != nil && span.GenAI.CostUSD > 0 {
+	// Skip for service accounts — they have no budget entries.
+	isSA := strings.HasSuffix(span.UserID, ".gserviceaccount.com")
+	if p.users != nil && span.UserID != "" && !isSA && span.GenAI != nil && span.GenAI.CostUSD > 0 {
 		go func() {
 			ctx := context.Background()
 			if err := p.users.DeductSpend(ctx, span.UserID, span.GenAI.CostUSD, span.GenAI.TotalTokens); err != nil {
@@ -737,7 +727,7 @@ func (p *Proxy) createSpan(
 	ttfb time.Duration,
 	requestID string,
 	sessionID string,
-	userOverride string,
+	effectiveUserID string,
 ) {
 	model, inputContent := extractRequestInfo(provider.Name, reqBody)
 	outputContent, inputTokens, outputTokens := extractResponseInfo(provider.Name, respBody)
@@ -750,7 +740,7 @@ func (p *Proxy) createSpan(
 	p.buildSpan(ctx, spanParams{
 		provider:        provider,
 		model:           model,
-		effectiveUserID: userOverride,
+		effectiveUserID: effectiveUserID,
 		inputContent:    inputContent,
 		outputContent:   outputContent,
 		inputTokens:     inputTokens,
@@ -776,7 +766,7 @@ func (p *Proxy) createStreamingSpan(
 	ttft time.Duration,
 	requestID string,
 	sessionID string,
-	userOverride string,
+	effectiveUserID string,
 ) {
 	model, inputContent := extractRequestInfo(provider.Name, reqBody)
 	outputContent, inputTokens, outputTokens := extractStreamingUsage(provider.Name, streamData)
@@ -784,7 +774,7 @@ func (p *Proxy) createStreamingSpan(
 	p.buildSpan(ctx, spanParams{
 		provider:        provider,
 		model:           model,
-		effectiveUserID: userOverride,
+		effectiveUserID: effectiveUserID,
 		inputContent:    inputContent,
 		outputContent:   outputContent,
 		inputTokens:     inputTokens,

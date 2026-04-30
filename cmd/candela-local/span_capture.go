@@ -82,7 +82,6 @@ func (s *spanCapture) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	var sessionID string
 	if s.resolver != nil {
 		sessionID = s.resolver.Resolve(session.SessionInfo{
-			UserID:   r.Header.Get("X-User-Id"),
 			Model:    chatReq.Model,
 			Messages: chatReq.Messages, // pass raw JSON directly, no re-marshal
 			Headers:  r.Header,

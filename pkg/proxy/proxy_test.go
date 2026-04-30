@@ -461,7 +461,7 @@ func TestCircuitBreaker_SkipsSpanOnOpen(t *testing.T) {
 	}
 }
 
-func TestUserIDOverride_XUserIdHeader_ServiceAccount(t *testing.T) {
+func TestUserID_FromAuthContext(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = fmt.Fprint(w, `{"content":[{"type":"text","text":"ok"}],"usage":{"input_tokens":1,"output_tokens":1}}`)
@@ -479,21 +479,19 @@ func TestUserIDOverride_XUserIdHeader_ServiceAccount(t *testing.T) {
 	mux := http.NewServeMux()
 	p.RegisterRoutes(mux)
 
-	// Wrap with an auth context that looks like a service account.
+	// Wrap with an auth context (simulating a logged-in user).
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		sa := &auth.User{ID: "sa-uid", Email: "candela-proxy@my-project.iam.gserviceaccount.com"}
-		mux.ServeHTTP(w, r.WithContext(auth.NewContext(r.Context(), sa)))
+		user := &auth.User{ID: "uid-larry", Email: "Larry.David@Example.Com"}
+		mux.ServeHTTP(w, r.WithContext(auth.NewContext(r.Context(), user)))
 	})
 	srv := httptest.NewServer(handler)
 	defer srv.Close()
 
-	// Send request WITH X-User-Id header (simulating candela-local via SA).
 	req, _ := http.NewRequest("POST",
 		srv.URL+"/proxy/anthropic/v1/messages",
 		strings.NewReader(`{"model":"claude-sonnet-4-20250514","messages":[{"role":"user","content":"hi"}]}`))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer tok")
-	req.Header.Set("X-User-Id", "Larry.David@Example.Com")
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -515,13 +513,15 @@ func TestUserIDOverride_XUserIdHeader_ServiceAccount(t *testing.T) {
 		t.Fatal("expected span")
 	}
 
-	// X-User-Id should be lowercased and used as user_id when caller is a SA.
+	// Auth context email should be lowercased and used as user_id.
 	if spans[0].UserID != "larry.david@example.com" {
 		t.Errorf("span UserID = %q, want %q", spans[0].UserID, "larry.david@example.com")
 	}
 }
 
-func TestUserIDOverride_IgnoredFromRegularUser(t *testing.T) {
+func TestUserID_XUserIdHeaderIgnored(t *testing.T) {
+	// Regression test: X-User-Id header was removed. Even if a client
+	// sends it, the span UserID must come from the auth context only.
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = fmt.Fprint(w, `{"content":[{"type":"text","text":"ok"}],"usage":{"input_tokens":1,"output_tokens":1}}`)
@@ -539,7 +539,6 @@ func TestUserIDOverride_IgnoredFromRegularUser(t *testing.T) {
 	mux := http.NewServeMux()
 	p.RegisterRoutes(mux)
 
-	// Wrap with an auth context that is a regular user (NOT a SA).
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		user := &auth.User{ID: "uid-funkhouser", Email: "funkhouser@example-corp.com"}
 		mux.ServeHTTP(w, r.WithContext(auth.NewContext(r.Context(), user)))
@@ -547,13 +546,12 @@ func TestUserIDOverride_IgnoredFromRegularUser(t *testing.T) {
 	srv := httptest.NewServer(handler)
 	defer srv.Close()
 
-	// Regular user tries to impersonate someone else via X-User-Id — should be IGNORED.
 	req, _ := http.NewRequest("POST",
 		srv.URL+"/proxy/anthropic/v1/messages",
 		strings.NewReader(`{"model":"claude-sonnet-4-20250514","messages":[{"role":"user","content":"hi"}]}`))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer tok")
-	req.Header.Set("X-User-Id", "larry.david@example-corp.com")
+	req.Header.Set("X-User-Id", "attacker@evil.com") // should be ignored
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -562,7 +560,6 @@ func TestUserIDOverride_IgnoredFromRegularUser(t *testing.T) {
 	defer func() { _ = resp.Body.Close() }()
 	_, _ = io.ReadAll(resp.Body)
 
-	// Wait for async span.
 	for i := 0; i < 50; i++ {
 		if len(submitter.getSpans()) > 0 {
 			break
@@ -575,15 +572,14 @@ func TestUserIDOverride_IgnoredFromRegularUser(t *testing.T) {
 		t.Fatal("expected span")
 	}
 
-	// UserID should be the attacker's own email (from auth context),
-	// NOT the victim's email from X-User-Id.
+	// UserID must be from auth context, NOT the X-User-Id header.
 	if spans[0].UserID != "funkhouser@example-corp.com" {
-		t.Errorf("span UserID = %q, want %q (X-User-Id should be ignored for non-SA callers)",
+		t.Errorf("span UserID = %q, want %q (X-User-Id header must be ignored)",
 			spans[0].UserID, "funkhouser@example-corp.com")
 	}
 }
 
-func TestUserIDOverride_FallbackWithoutHeader(t *testing.T) {
+func TestUserID_EmptyWithoutAuthContext(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = fmt.Fprint(w, `{"content":[{"type":"text","text":"ok"}],"usage":{"input_tokens":1,"output_tokens":1}}`)
@@ -603,7 +599,7 @@ func TestUserIDOverride_FallbackWithoutHeader(t *testing.T) {
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
 
-	// Send request WITHOUT X-User-Id header and WITHOUT auth context.
+	// No auth context.
 	req, _ := http.NewRequest("POST",
 		srv.URL+"/proxy/anthropic/v1/messages",
 		strings.NewReader(`{"model":"claude-sonnet-4-20250514","messages":[{"role":"user","content":"hi"}]}`))
@@ -630,7 +626,7 @@ func TestUserIDOverride_FallbackWithoutHeader(t *testing.T) {
 		t.Fatal("expected span")
 	}
 
-	// Without X-User-Id and without auth context, UserID should be empty.
+	// Without auth context, UserID should be empty.
 	if spans[0].UserID != "" {
 		t.Errorf("span UserID = %q, want empty string", spans[0].UserID)
 	}

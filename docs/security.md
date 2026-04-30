@@ -81,13 +81,45 @@ Request → Auth Middleware → Admin Interceptor → Handler
 | **Grants** | `CreateGrant`, `ListGrants`, `RevokeGrant` |
 | **Audit** | `ListAuditLog` |
 
-#### Unguarded Services
-| Service | Why |
-|---------|-----|
-| `TraceService` | User-scoped filtering done at query layer (not interceptor) |
-| `DashboardService` | User-scoped filtering done at query layer |
-| `IngestionService` | Ingestion validated by project API key, not user identity |
+#### Unguarded Services (Data-Level Scoping)
+| Service | Scoping Method |
+|---------|----------------|
+| `TraceService` | `scopeUserID()` injects user filter into storage queries; `GetTrace` uses post-fetch auth gate |
+| `DashboardService` | `scopeUserID()` injects user filter into usage/model queries |
+| `IngestionService` | Write-only — validated by project API key, not user identity |
 | `ProjectService` | Currently unguarded (future: project-level RBAC) |
+
+---
+
+## Data Isolation — Per-User Trace Scoping
+
+Non-admin developers can only see their own traces and spans. This is enforced at two levels:
+
+### Query-Based Endpoints (ListTraces, SearchSpans, Dashboard)
+
+The `scopeUserID()` helper (`pkg/connecthandlers/scope.go`) determines the caller's identity:
+- **Admin** → returns `""` (empty string = no filter, sees all data)
+- **Developer** → returns sanitized email (e.g., `alice@example.com`)
+
+This value is injected into `TraceQuery.UserID`, `SpanQuery.UserID`, or `UsageQuery.UserID`. All storage backends (BigQuery, DuckDB, SQLite) apply the filter in SQL:
+
+```sql
+AND (? = '' OR user_id = ?)
+```
+
+### GetTrace (Direct Access by Trace ID)
+
+`GetTrace` cannot pre-filter because it queries by `trace_id`, not user. Instead, it uses a **post-fetch authorization gate**:
+
+1. Fetch the full trace from storage
+2. Extract the trace owner via `traceUserID()` — checks root span first, then falls back to any span with `user_id`
+3. Compare against `scopeUserID(ctx)`
+4. If mismatch → `PermissionDenied`
+5. If no `user_id` on any span (legacy data) → allow access, log for backfill visibility
+
+### Error Sanitization
+
+All handlers use `internalError()` (`pkg/connecthandlers/errors.go`) for storage failures. This logs the real error server-side via `slog.Error` and returns a generic `"internal error"` to clients, preventing leakage of SQL errors, file paths, or infrastructure details.
 
 ---
 
@@ -197,6 +229,8 @@ See [docs/user-management.md](user-management.md) for the full validation rule r
 | Token validation on all non-health endpoints | ✅ | 3-strategy waterfall |
 | Email claim normalization (lowercase) | ✅ | Prevents case-based identity bypass |
 | Admin role enforcement via ConnectRPC interceptor | ✅ | Per-RPC ACL |
+| Per-user trace/span data isolation | ✅ | `scopeUserID()` + `traceUserID()` auth gate |
+| Internal error message sanitization | ✅ | `internalError()` logs server-side, returns generic message |
 | Rate limiting per user | ✅ | `CheckRateLimit()` in `UserStore` |
 | Budget enforcement before proxy calls | ✅ | `CheckBudget()` pre-flight |
 | Secrets not baked into container images | ✅ | `entrypoint.sh` generates config from env vars |
@@ -218,5 +252,7 @@ See [docs/user-management.md](user-management.md) for the full validation rule r
 | `pkg/auth/firebase.go` | `FirebaseAuthMiddleware` — 3-strategy waterfall |
 | `pkg/auth/iap.go` | `IAPMiddleware` — Cloud IAP JWT validation (legacy) |
 | `pkg/auth/admin.go` | `AdminInterceptor` — ConnectRPC admin guard |
+| `pkg/connecthandlers/scope.go` | `scopeUserID()` — per-user data scoping helper |
+| `pkg/connecthandlers/errors.go` | `internalError()` — sanitized error responses |
 | `cmd/candela-server/main.go` | Middleware wiring, Firebase init, dev mode |
 | `cmd/candela-local/main.go` | ADC token injection for Team Mode |

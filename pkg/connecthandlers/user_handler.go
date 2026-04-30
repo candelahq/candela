@@ -59,8 +59,7 @@ func (h *UserHandler) CreateUser(
 		return nil, connect.NewError(connect.CodeAlreadyExists,
 			fmt.Errorf("user with email %q already exists", normalizedEmail))
 	} else if !errors.Is(err, storage.ErrNotFound) {
-		return nil, connect.NewError(connect.CodeInternal,
-			fmt.Errorf("failed to check existing user: %w", err))
+		return nil, internalError("failed to check existing user", err)
 	}
 
 	user := &storage.UserRecord{
@@ -69,7 +68,7 @@ func (h *UserHandler) CreateUser(
 		Role:        roleToString(req.Msg.Role),
 	}
 	if err := h.store.CreateUser(ctx, user); err != nil {
-		return nil, connect.NewError(connect.CodeInternal, err)
+		return nil, internalError("failed to create user", err)
 	}
 
 	resp := &v1.CreateUserResponse{
@@ -88,7 +87,7 @@ func (h *UserHandler) CreateUser(
 			PeriodType: "daily",
 		}
 		if err := h.store.SetBudget(ctx, budget); err != nil {
-			return nil, connect.NewError(connect.CodeInternal, err)
+			return nil, internalError("failed to set initial budget", err)
 		}
 		resp.Budget = budgetToProto(budget)
 	}
@@ -127,7 +126,7 @@ func (h *UserHandler) ListUsers(
 
 	users, total, err := h.store.ListUsers(ctx, statusFilter, limit, offset)
 	if err != nil {
-		return nil, connect.NewError(connect.CodeInternal, err)
+		return nil, internalError("failed to list users", err)
 	}
 
 	pbUsers := make([]*typespb.User, len(users))
@@ -156,16 +155,16 @@ func (h *UserHandler) GetUser(
 ) (*connect.Response[v1.GetUserResponse], error) {
 	user, err := h.store.GetUser(ctx, req.Msg.Id)
 	if err != nil {
-		return nil, connect.NewError(connect.CodeNotFound, err)
+		return nil, connect.NewError(connect.CodeNotFound, fmt.Errorf("user not found"))
 	}
 
 	budget, err := h.store.GetBudget(ctx, user.ID)
 	if err != nil {
-		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to get budget: %w", err))
+		return nil, internalError("failed to get budget", err)
 	}
 	grants, err := h.store.ListGrants(ctx, user.ID, true)
 	if err != nil {
-		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to list grants: %w", err))
+		return nil, internalError("failed to list grants", err)
 	}
 
 	pbGrants := make([]*typespb.BudgetGrant, len(grants))
@@ -186,7 +185,7 @@ func (h *UserHandler) UpdateUser(
 ) (*connect.Response[v1.UpdateUserResponse], error) {
 	user, err := h.store.GetUser(ctx, req.Msg.Id)
 	if err != nil {
-		return nil, connect.NewError(connect.CodeNotFound, err)
+		return nil, connect.NewError(connect.CodeNotFound, fmt.Errorf("user not found"))
 	}
 
 	// Apply updates based on field mask (or all fields if no mask).
@@ -205,7 +204,7 @@ func (h *UserHandler) UpdateUser(
 	}
 
 	if err := h.store.UpdateUser(ctx, user); err != nil {
-		return nil, connect.NewError(connect.CodeInternal, err)
+		return nil, internalError("failed to update user", err)
 	}
 
 	return connect.NewResponse(&v1.UpdateUserResponse{
@@ -219,11 +218,11 @@ func (h *UserHandler) DeactivateUser(
 ) (*connect.Response[v1.DeactivateUserResponse], error) {
 	user, err := h.store.GetUser(ctx, req.Msg.Id)
 	if err != nil {
-		return nil, connect.NewError(connect.CodeNotFound, err)
+		return nil, connect.NewError(connect.CodeNotFound, fmt.Errorf("user not found"))
 	}
 	user.Status = storage.StatusInactive
 	if err := h.store.UpdateUser(ctx, user); err != nil {
-		return nil, connect.NewError(connect.CodeInternal, err)
+		return nil, internalError("failed to deactivate user", err)
 	}
 
 	h.logAudit(ctx, &storage.AuditRecord{
@@ -241,11 +240,11 @@ func (h *UserHandler) ReactivateUser(
 ) (*connect.Response[v1.ReactivateUserResponse], error) {
 	user, err := h.store.GetUser(ctx, req.Msg.Id)
 	if err != nil {
-		return nil, connect.NewError(connect.CodeNotFound, err)
+		return nil, connect.NewError(connect.CodeNotFound, fmt.Errorf("user not found"))
 	}
 	user.Status = storage.StatusActive
 	if err := h.store.UpdateUser(ctx, user); err != nil {
-		return nil, connect.NewError(connect.CodeInternal, err)
+		return nil, internalError("failed to reactivate user", err)
 	}
 
 	h.logAudit(ctx, &storage.AuditRecord{
@@ -265,7 +264,7 @@ func (h *UserHandler) DeleteUser(
 ) (*connect.Response[v1.DeleteUserResponse], error) {
 	user, err := h.store.GetUser(ctx, req.Msg.Id)
 	if err != nil {
-		return nil, connect.NewError(connect.CodeNotFound, err)
+		return nil, connect.NewError(connect.CodeNotFound, fmt.Errorf("user not found"))
 	}
 
 	// Gate: only inactive users can be deleted.
@@ -299,7 +298,7 @@ func (h *UserHandler) DeleteUser(
 		"details", auditDetails)
 
 	if err := h.store.DeleteUser(ctx, user.ID); err != nil {
-		return nil, connect.NewError(connect.CodeInternal, err)
+		return nil, internalError("failed to delete user", err)
 	}
 
 	return connect.NewResponse(&v1.DeleteUserResponse{}), nil
@@ -319,7 +318,7 @@ func (h *UserHandler) SetBudget(
 		PeriodType: "daily", // All budgets are daily.
 	}
 	if err := h.store.SetBudget(ctx, budget); err != nil {
-		return nil, connect.NewError(connect.CodeInternal, err)
+		return nil, internalError("failed to set budget", err)
 	}
 
 	h.logAudit(ctx, &storage.AuditRecord{
@@ -340,7 +339,7 @@ func (h *UserHandler) GetBudget(
 ) (*connect.Response[v1.GetBudgetResponse], error) {
 	budget, err := h.store.GetBudget(ctx, req.Msg.UserId)
 	if err != nil {
-		return nil, connect.NewError(connect.CodeInternal, err)
+		return nil, internalError("failed to get budget", err)
 	}
 	return connect.NewResponse(&v1.GetBudgetResponse{
 		Budget: budgetToProto(budget),
@@ -352,7 +351,7 @@ func (h *UserHandler) ResetSpend(
 	req *connect.Request[v1.ResetSpendRequest],
 ) (*connect.Response[v1.ResetSpendResponse], error) {
 	if err := h.store.ResetSpend(ctx, req.Msg.UserId); err != nil {
-		return nil, connect.NewError(connect.CodeInternal, err)
+		return nil, internalError("failed to reset spend", err)
 	}
 
 	h.logAudit(ctx, &storage.AuditRecord{
@@ -363,7 +362,7 @@ func (h *UserHandler) ResetSpend(
 
 	budget, err := h.store.GetBudget(ctx, req.Msg.UserId)
 	if err != nil {
-		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to get budget after reset: %w", err))
+		return nil, internalError("failed to get budget after reset", err)
 	}
 	return connect.NewResponse(&v1.ResetSpendResponse{
 		Budget: budgetToProto(budget),
@@ -387,7 +386,7 @@ func (h *UserHandler) CreateGrant(
 		ExpiresAt: req.Msg.ExpiresAt.AsTime(),
 	}
 	if err := h.store.CreateGrant(ctx, grant); err != nil {
-		return nil, connect.NewError(connect.CodeInternal, err)
+		return nil, internalError("failed to create grant", err)
 	}
 
 	h.logAudit(ctx, &storage.AuditRecord{
@@ -408,7 +407,7 @@ func (h *UserHandler) ListGrants(
 ) (*connect.Response[v1.ListGrantsResponse], error) {
 	grants, err := h.store.ListGrants(ctx, req.Msg.UserId, req.Msg.ActiveOnly)
 	if err != nil {
-		return nil, connect.NewError(connect.CodeInternal, err)
+		return nil, internalError("failed to list grants", err)
 	}
 
 	pbGrants := make([]*typespb.BudgetGrant, len(grants))
@@ -426,7 +425,7 @@ func (h *UserHandler) RevokeGrant(
 	req *connect.Request[v1.RevokeGrantRequest],
 ) (*connect.Response[v1.RevokeGrantResponse], error) {
 	if err := h.store.RevokeGrant(ctx, req.Msg.UserId, req.Msg.GrantId); err != nil {
-		return nil, connect.NewError(connect.CodeInternal, err)
+		return nil, internalError("failed to revoke grant", err)
 	}
 
 	h.logAudit(ctx, &storage.AuditRecord{
@@ -449,7 +448,7 @@ func (h *UserHandler) ListAuditLog(
 ) (*connect.Response[v1.ListAuditLogResponse], error) {
 	entries, err := h.store.ListAuditLog(ctx, req.Msg.UserId, int(req.Msg.Limit))
 	if err != nil {
-		return nil, connect.NewError(connect.CodeInternal, err)
+		return nil, internalError("failed to list audit log", err)
 	}
 
 	pbEntries := make([]*typespb.AuditEntry, len(entries))
@@ -481,7 +480,7 @@ func (h *UserHandler) GetCurrentUser(
 		// Only auto-provision if the error is specifically "not found".
 		// Other errors (e.g., transient DB issues) should propagate.
 		if !errors.Is(err, storage.ErrNotFound) {
-			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to look up user: %w", err))
+			return nil, internalError("failed to look up user", err)
 		}
 
 		// Auto-provision on first login.
@@ -491,7 +490,7 @@ func (h *UserHandler) GetCurrentUser(
 			Status: storage.StatusActive,
 		}
 		if createErr := h.store.CreateUser(ctx, user); createErr != nil {
-			return nil, connect.NewError(connect.CodeInternal, createErr)
+			return nil, internalError("failed to auto-provision user", createErr)
 		}
 
 		// Apply default daily budget to auto-provisioned users.
@@ -515,15 +514,15 @@ func (h *UserHandler) GetCurrentUser(
 
 	budget, err := h.store.GetBudget(ctx, user.ID)
 	if err != nil {
-		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to get budget: %w", err))
+		return nil, internalError("failed to get budget", err)
 	}
 	grants, err := h.store.ListGrants(ctx, user.ID, true)
 	if err != nil {
-		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to list grants: %w", err))
+		return nil, internalError("failed to list grants", err)
 	}
 	check, err := h.store.CheckBudget(ctx, user.ID, 0)
 	if err != nil {
-		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to check budget: %w", err))
+		return nil, internalError("failed to check budget", err)
 	}
 
 	pbGrants := make([]*typespb.BudgetGrant, len(grants))
@@ -555,20 +554,20 @@ func (h *UserHandler) GetMyBudget(
 
 	user, err := h.store.GetUserByEmail(ctx, authUser.Email)
 	if err != nil {
-		return nil, connect.NewError(connect.CodeNotFound, err)
+		return nil, connect.NewError(connect.CodeNotFound, fmt.Errorf("user not found"))
 	}
 
 	budget, err := h.store.GetBudget(ctx, user.ID)
 	if err != nil {
-		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to get budget: %w", err))
+		return nil, internalError("failed to get budget", err)
 	}
 	grants, err := h.store.ListGrants(ctx, user.ID, true)
 	if err != nil {
-		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to list grants: %w", err))
+		return nil, internalError("failed to list grants", err)
 	}
 	check, err := h.store.CheckBudget(ctx, user.ID, 0)
 	if err != nil {
-		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to check budget: %w", err))
+		return nil, internalError("failed to check budget", err)
 	}
 
 	pbGrants := make([]*typespb.BudgetGrant, len(grants))

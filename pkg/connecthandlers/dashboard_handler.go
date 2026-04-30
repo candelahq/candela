@@ -53,7 +53,7 @@ func (h *DashboardHandler) GetUsageSummary(
 
 	summary, err := h.store.GetUsageSummary(ctx, q)
 	if err != nil {
-		return nil, connect.NewError(connect.CodeInternal, err)
+		return nil, internalError("failed to get usage summary", err)
 	}
 
 	return connect.NewResponse(&v1.GetUsageSummaryResponse{
@@ -86,7 +86,7 @@ func (h *DashboardHandler) GetModelBreakdown(
 
 	models, err := h.store.GetModelBreakdown(ctx, q)
 	if err != nil {
-		return nil, connect.NewError(connect.CodeInternal, err)
+		return nil, internalError("failed to get model breakdown", err)
 	}
 
 	var pbModels []*v1.ModelUsage
@@ -134,7 +134,7 @@ func (h *DashboardHandler) GetMyUsage(
 			if errors.Is(err, storage.ErrNotFound) {
 				return nil, connect.NewError(connect.CodeNotFound, fmt.Errorf("user not found"))
 			}
-			return nil, connect.NewError(connect.CodeInternal, err)
+			return nil, internalError("failed to look up user", err)
 		}
 		userID = user.ID
 	} else {
@@ -163,12 +163,12 @@ func (h *DashboardHandler) GetMyUsage(
 
 	summary, err := h.store.GetUsageSummary(ctx, q)
 	if err != nil {
-		return nil, connect.NewError(connect.CodeInternal, err)
+		return nil, internalError("failed to get usage summary", err)
 	}
 
 	models, err := h.store.GetModelBreakdown(ctx, q)
 	if err != nil {
-		return nil, connect.NewError(connect.CodeInternal, err)
+		return nil, internalError("failed to get model breakdown", err)
 	}
 
 	resp := &v1.GetMyUsageResponse{
@@ -270,7 +270,7 @@ func (h *DashboardHandler) GetTeamLeaderboard(
 
 	users, err := h.store.GetUserLeaderboard(ctx, q, limit)
 	if err != nil {
-		return nil, connect.NewError(connect.CodeInternal, err)
+		return nil, internalError("failed to get user leaderboard", err)
 	}
 
 	// Batch enrichment: collect IDs to avoid N+1 query pattern.

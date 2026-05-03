@@ -242,6 +242,28 @@ Send a message in the OpenCode TUI. You should see:
 
 ---
 
+## 🤖 Google ADK Integration
+
+Route [ADK](https://adk.dev/) agent LLM calls through Candela with one line:
+
+```python
+from google.adk.agents import Agent
+from google.adk.models import Gemini
+
+agent = Agent(
+    model=Gemini(
+        model="gemini-2.0-flash",
+        base_url="http://localhost:8080/proxy/google",  # → candela-sidecar
+    ),
+    name="my_agent",
+    instruction="You are a helpful assistant.",
+)
+```
+
+For full observability with unified OTel traces (agent DAG + proxy spans in one trace tree), see the complete [ADK Integration Guide](adk-integration.md).
+
+---
+
 ## 🛠️ Advanced Proxy Config
 
 Configuration is done via `config.yaml`:

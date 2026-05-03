@@ -161,10 +161,20 @@ service:
 
 ### Google ADK (Agent Development Kit)
 
-ADK emits OTel spans natively. Point its exporter at the Candela Collector:
+ADK emits OTel spans natively. For the complete integration guide — including proxy-mode trace correlation that nests proxy spans under ADK agent spans — see [ADK Integration](adk-integration.md).
+
+Quick setup using environment variables:
+
+```bash
+export OTEL_EXPORTER_OTLP_TRACES_ENDPOINT="http://localhost:4318/v1/traces"
+export OTEL_SERVICE_NAME="my-adk-agent"
+export OTEL_SEMCONV_STABILITY_OPT_IN="gen_ai_latest_experimental"
+adk web path/to/agent/
+```
+
+Or configure programmatically:
 
 ```python
-from google.adk import Agent
 import opentelemetry
 from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
 from opentelemetry.sdk.trace import TracerProvider
@@ -177,7 +187,10 @@ provider.add_span_processor(BatchSpanProcessor(exporter))
 opentelemetry.trace.set_tracer_provider(provider)
 
 # ADK will now emit spans to Candela
-agent = Agent(model="gemini-2.5-pro", ...)
+from google.adk.agents import Agent
+from google.adk.models import Gemini
+
+agent = Agent(model=Gemini(model="gemini-2.5-pro"), ...)
 ```
 
 ### LangChain

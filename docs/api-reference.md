@@ -262,15 +262,15 @@ grpcurl -plaintext -d '{}' localhost:8181 candela.v1.DashboardService/GetUsageSu
 
 ## Proto Generation
 
-```bash
-# Generate Go + TypeScript stubs
-cd proto && buf generate
+Proto definitions live in [`candelahq/candela-protos`](https://github.com/candelahq/candela-protos)
+and are published to BSR as [`buf.build/candelahq/protos`](https://buf.build/candelahq/protos).
 
-# Requires BUF_TOKEN for remote generation (CI provides this)
-# Locally, check .netrc or set BUF_TOKEN env var
+```bash
+# Generate Go + TypeScript stubs from BSR
+nix develop -c buf generate
 ```
 
 Output:
 - Go stubs → `gen/go/candela/`
-- TypeScript stubs → `gen/ts/candela/`
+- TypeScript stubs → `ui/src/gen/`
 - BigQuery schemas → `gen/bq/candela/`

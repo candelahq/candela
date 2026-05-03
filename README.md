@@ -266,7 +266,7 @@ pnpm run test:e2e:ui   # Playwright interactive UI mode
 The UI communicates with the backend via **ConnectRPC v2** on port `8181`. Pages gracefully handle offline backend state.
 
 > [!TIP]
-> **Proto Generation**: We use **Buf Remote Generation**. Just run `buf generate` in the `proto/` directory—no local plugins required!
+> **Proto Generation**: Proto definitions live in [`candelahq/candela-protos`](https://github.com/candelahq/candela-protos). Run `buf generate` from the repo root to regenerate stubs from BSR.
 
 ---
 
@@ -388,8 +388,8 @@ All features are accessible via **ConnectRPC** (`RuntimeService`) and the embedd
 
 ```
 candela/
-├── proto/                       # Protobuf definitions (Source of Truth)
-├── gen/                         # Generated code (Go, TypeScript, Python)
+├── buf.gen.yaml                 # Buf code gen config (pulls from BSR)
+├── gen/                         # Generated code (Go, TypeScript, BQ schema)
 ├── cmd/candela-server/          # Server entry point
 ├── cmd/candela-local/           # Local dev proxy + runtime manager
 │   ├── lm_handler.go            # Smart model routing (local ↔ cloud)

@@ -28,4 +28,4 @@ plugins:
   - local: protoc-gen-bq-schema
     out: gen/bq
 inputs:
-  - module: buf.build/candelahq/protos:v0.2.0
+  - module: buf.build/candelahq/protos:v0.2.1

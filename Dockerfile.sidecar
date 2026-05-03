@@ -1,0 +1,36 @@
+# ── candela-sidecar ──
+# Minimal production LLM proxy with Pub/Sub + OTLP span export.
+# Target: <5MB static binary on distroless.
+#
+# Build:  docker build -f Dockerfile.sidecar -t candela-sidecar .
+# Run:    docker run -p 8080:8080 -e GCP_PROJECT=my-project candela-sidecar
+
+FROM golang:1.26-alpine AS builder
+
+RUN apk add --no-cache ca-certificates git
+
+WORKDIR /app
+
+# Cache dependencies.
+COPY go.mod go.sum ./
+RUN go mod download
+
+# Copy source.
+COPY . .
+
+# Build static binary — CGO disabled, stripped, trimpath for reproducibility.
+RUN CGO_ENABLED=0 GOOS=linux go build \
+    -ldflags="-s -w" \
+    -trimpath \
+    -o /candela-sidecar \
+    ./cmd/candela-sidecar/
+
+# ── Runtime ──
+FROM gcr.io/distroless/static-debian12:nonroot
+
+COPY --from=builder /candela-sidecar /candela-sidecar
+
+# Default port (overridable via PORT env var).
+EXPOSE 8080
+
+ENTRYPOINT ["/candela-sidecar"]

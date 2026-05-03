@@ -14,6 +14,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -209,9 +210,14 @@ func (p *Proxy) RegisterCompatRoutes(mux *http.ServeMux, models []CompatModel) {
 
 	// POST /v1/chat/completions — route to provider based on model name in body.
 	mux.HandleFunc("POST /v1/chat/completions", func(w http.ResponseWriter, r *http.Request) {
-		body, err := io.ReadAll(io.LimitReader(r.Body, 10<<20))
+		body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 10<<20))
 		if err != nil {
-			http.Error(w, "failed to read request body", http.StatusBadRequest)
+			var maxErr *http.MaxBytesError
+			if errors.As(err, &maxErr) {
+				http.Error(w, "request body too large", http.StatusRequestEntityTooLarge)
+			} else {
+				http.Error(w, "failed to read request body", http.StatusBadRequest)
+			}
 			return
 		}
 		_ = r.Body.Close()
@@ -296,6 +302,11 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 
 	// Accept session ID from candela-local (or other clients).
 	sessionID := r.Header.Get("X-Session-Id")
+
+	// Extract W3C Trace Context for trace correlation with OTel-instrumented
+	// callers (e.g. Google ADK, LangChain). When present, the proxy span
+	// becomes a child of the caller's span in a unified trace tree.
+	traceCtx := parseTraceparent(r.Header.Get("Traceparent"))
 
 	// ── Resolve effective end-user identity ──
 	// Identity comes exclusively from the auth context (email or UID).
@@ -413,6 +424,18 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 	// Forward headers (auth, content-type, etc).
 	forwardHeaders(r, upstreamReq, providerName)
 
+	// Pre-generate the span ID that buildSpan will use for this proxy span.
+	// We need it now so the outgoing traceparent to the upstream LLM
+	// references the sidecar's span as its parent.
+	proxySpanID := generateSpanID()
+
+	// Inject an outgoing traceparent so the upstream LLM API (if it
+	// supports OTel) creates spans as children of the sidecar span.
+	if traceCtx != nil {
+		upstreamReq.Header.Set("Traceparent",
+			fmt.Sprintf("00-%s-%s-01", traceCtx.traceID, proxySpanID))
+	}
+
 	// --- ADC token injection ---
 	// If the provider has a TokenSource, replace the auth header with a fresh token.
 	if provider.TokenSource != nil {
@@ -448,9 +471,9 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 	cbAllow := p.breakers[providerName].AllowRequest()
 
 	if isStreaming && resp.StatusCode == http.StatusOK {
-		p.handleStreamingResponse(w, r, resp, provider, reqBody, startTime, ttfb, requestID, sessionID, effectiveUserID, cbAllow)
+		p.handleStreamingResponse(w, r, resp, provider, reqBody, startTime, ttfb, requestID, sessionID, effectiveUserID, cbAllow, traceCtx, proxySpanID)
 	} else {
-		p.handleStandardResponse(w, r, resp, provider, reqBody, startTime, ttfb, requestID, sessionID, effectiveUserID, cbAllow)
+		p.handleStandardResponse(w, r, resp, provider, reqBody, startTime, ttfb, requestID, sessionID, effectiveUserID, cbAllow, traceCtx, proxySpanID)
 	}
 }
 
@@ -481,11 +504,18 @@ func (p *Proxy) handleStandardResponse(
 	sessionID string,
 	effectiveUserID string,
 	cbAllow bool,
+	traceCtx *traceContext,
+	proxySpanID string,
 ) {
-	// Read the full response (capped at 50MB to prevent OOM from malicious upstreams).
-	respBody, err := io.ReadAll(io.LimitReader(resp.Body, 50<<20))
+	// Read the full response (reject if over 50MB to prevent OOM/truncation).
+	const respLimit = int64(50 << 20)
+	respBody, err := io.ReadAll(io.LimitReader(resp.Body, respLimit+1))
 	if err != nil {
 		http.Error(w, "failed to read upstream response", http.StatusBadGateway)
+		return
+	}
+	if int64(len(respBody)) > respLimit {
+		http.Error(w, "upstream response too large", http.StatusBadGateway)
 		return
 	}
 
@@ -520,7 +550,7 @@ func (p *Proxy) handleStandardResponse(
 
 	// Create observability span (async — don't block the response).
 	if cbAllow {
-		go p.createSpan(context.WithoutCancel(r.Context()), provider, reqBody, respBody, startTime, endTime, resp.StatusCode, ttfb, requestID, sessionID, effectiveUserID)
+		go p.createSpan(context.WithoutCancel(r.Context()), provider, reqBody, respBody, startTime, endTime, resp.StatusCode, ttfb, requestID, sessionID, effectiveUserID, traceCtx, proxySpanID)
 	} else {
 		slog.Debug("skipping span creation (circuit open)", "provider", provider.Name, "request_id", requestID)
 	}
@@ -535,6 +565,8 @@ func (p *Proxy) handleStreamingResponse(
 	sessionID string,
 	effectiveUserID string,
 	cbAllow bool,
+	traceCtx *traceContext,
+	proxySpanID string,
 ) {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
@@ -612,7 +644,7 @@ func (p *Proxy) handleStreamingResponse(
 
 	// Parse the accumulated stream to extract usage data.
 	if cbAllow {
-		go p.createStreamingSpan(context.WithoutCancel(r.Context()), provider, reqBody, streamBuffer.Bytes(), startTime, endTime, ttfb, ttft, requestID, sessionID, effectiveUserID)
+		go p.createStreamingSpan(context.WithoutCancel(r.Context()), provider, reqBody, streamBuffer.Bytes(), startTime, endTime, ttfb, ttft, requestID, sessionID, effectiveUserID, traceCtx, proxySpanID)
 	} else {
 		slog.Debug("skipping streaming span (circuit open)", "provider", provider.Name, "request_id", requestID)
 	}
@@ -637,6 +669,8 @@ type spanParams struct {
 	requestID       string
 	extraAttrs      map[string]string // streaming-specific, status code, etc.
 	namePrefix      string            // e.g. "openai.chat" or "openai.chat.stream"
+	traceCtx        *traceContext     // W3C trace context from caller (nil = generate new)
+	proxySpanID     string            // pre-generated span ID (for outgoing traceparent)
 }
 
 // buildSpan constructs a storage.Span from parsed parameters and submits it.
@@ -653,16 +687,26 @@ func (p *Proxy) buildSpan(ctx context.Context, params spanParams) {
 		attrs[k] = v
 	}
 
+	// Use caller's trace context if present (W3C Trace Context propagation).
+	// This nests the proxy span under the caller's OTel span.
+	traceID := generateTraceID()
+	parentSpanID := ""
+	if params.traceCtx != nil {
+		traceID = params.traceCtx.traceID
+		parentSpanID = params.traceCtx.parentSpanID
+	}
+
 	span := storage.Span{
-		SpanID:    generateSpanID(),
-		TraceID:   generateTraceID(),
-		Name:      params.namePrefix,
-		Kind:      storage.SpanKindLLM,
-		Status:    params.status,
-		StartTime: params.startTime,
-		EndTime:   params.endTime,
-		Duration:  params.endTime.Sub(params.startTime),
-		ProjectID: p.projectID,
+		SpanID:       params.proxySpanID,
+		TraceID:      traceID,
+		ParentSpanID: parentSpanID,
+		Name:         params.namePrefix,
+		Kind:         storage.SpanKindLLM,
+		Status:       params.status,
+		StartTime:    params.startTime,
+		EndTime:      params.endTime,
+		Duration:     params.endTime.Sub(params.startTime),
+		ProjectID:    p.projectID,
 		GenAI: &storage.GenAIAttributes{
 			Model:         params.model,
 			Provider:      params.provider.Name,
@@ -739,6 +783,8 @@ func (p *Proxy) createSpan(
 	requestID string,
 	sessionID string,
 	effectiveUserID string,
+	traceCtx *traceContext,
+	proxySpanID string,
 ) {
 	model, inputContent := extractRequestInfo(provider.Name, reqBody)
 	outputContent, inputTokens, outputTokens := extractResponseInfo(provider.Name, respBody)
@@ -763,6 +809,8 @@ func (p *Proxy) createSpan(
 		requestID:       requestID,
 		sessionID:       sessionID,
 		namePrefix:      fmt.Sprintf("%s.chat", provider.Name),
+		traceCtx:        traceCtx,
+		proxySpanID:     proxySpanID,
 		extraAttrs: map[string]string{
 			"http.status": fmt.Sprintf("%d", statusCode),
 		},
@@ -778,6 +826,8 @@ func (p *Proxy) createStreamingSpan(
 	requestID string,
 	sessionID string,
 	effectiveUserID string,
+	traceCtx *traceContext,
+	proxySpanID string,
 ) {
 	model, inputContent := extractRequestInfo(provider.Name, reqBody)
 	outputContent, inputTokens, outputTokens := extractStreamingUsage(provider.Name, streamData)
@@ -797,6 +847,8 @@ func (p *Proxy) createStreamingSpan(
 		requestID:       requestID,
 		sessionID:       sessionID,
 		namePrefix:      fmt.Sprintf("%s.chat.stream", provider.Name),
+		traceCtx:        traceCtx,
+		proxySpanID:     proxySpanID,
 		extraAttrs: map[string]string{
 			"proxy.streaming": "true",
 			"llm.ttft_ms":     fmt.Sprintf("%d", ttft.Milliseconds()),
@@ -812,6 +864,15 @@ func forwardHeaders(src *http.Request, dst *http.Request, provider string) {
 		if v := src.Header.Get(h); v != "" {
 			dst.Header.Set(h, v)
 		}
+	}
+
+	// W3C Trace Context — enables end-to-end distributed tracing.
+	// We forward Tracestate as-is, but Traceparent is NOT forwarded
+	// directly — instead, buildSpan constructs an updated traceparent
+	// with the sidecar's span ID as the new parent. This is handled
+	// after span ID generation. See setOutgoingTraceparent.
+	if v := src.Header.Get("Tracestate"); v != "" {
+		dst.Header.Set("Tracestate", v)
 	}
 
 	// Provider-specific headers.

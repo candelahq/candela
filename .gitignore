@@ -4,6 +4,7 @@
 /candela-collector
 /candela-cli
 /candela-local
+/candela-sidecar
 
 # Generated code
 /gen/

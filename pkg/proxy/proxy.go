@@ -359,8 +359,8 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Read the request body.
-	reqBody, err := io.ReadAll(r.Body)
+	// Read the request body (capped at 10MB to prevent OOM).
+	reqBody, err := io.ReadAll(io.LimitReader(r.Body, 10<<20))
 	if err != nil {
 		http.Error(w, "failed to read request body", http.StatusBadRequest)
 		return
@@ -482,8 +482,8 @@ func (p *Proxy) handleStandardResponse(
 	effectiveUserID string,
 	cbAllow bool,
 ) {
-	// Read the full response.
-	respBody, err := io.ReadAll(resp.Body)
+	// Read the full response (capped at 50MB to prevent OOM from malicious upstreams).
+	respBody, err := io.ReadAll(io.LimitReader(resp.Body, 50<<20))
 	if err != nil {
 		http.Error(w, "failed to read upstream response", http.StatusBadGateway)
 		return

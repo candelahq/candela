@@ -4,6 +4,31 @@ All notable changes to Candela are documented here, organized by development pha
 
 ## Latest
 
+### API Hardening & Proto Centralization (#113)
+
+**⚠️ Breaking Changes:**
+- `RuntimeStatus.status` (string) → `RuntimeStatus.state` (RuntimeState enum)
+- `LoadModelResponse.status` (string) → `LoadModelResponse.state` (ModelLoadState enum)
+- `PullModelResponse.status` field removed (async model)
+
+**Security & Validation:**
+- Proto source centralized to `candela-protos` repo, consumed via BSR v0.2.1
+- `buf.validate` constraints on all ProjectService fields (name, ID, description bounds)
+- IngestSpansRequest batch capped at 1000 spans (prevents OOM)
+- GenAI content fields capped at 1MB (prevents storage bombs)
+- PaginationRequest `page_size` bounded [0, 1000]
+- All ID fields bounded to 128 chars max
+- CODEOWNERS requiring platform-leads approval for proto changes
+
+**Testing:**
+- 25 proto validation unit tests (protovalidate, round-trip, field stability)
+- 8 integration tests (migration correctness, security hooks, BSR reference)
+
+**Infrastructure:**
+- Migrated from pre-commit to lefthook with security hooks (detect-private-key, check-merge-conflict)
+- `magic-nix-cache-action` for faster CI
+- `gofmt` scoped to staged files only
+
 ### OTLP SpanWriter — Universal Export Sink (#70)
 - New `pkg/storage/otlpexporter` package implementing `storage.SpanWriter`
 - Export Candela spans as standard OpenTelemetry traces via OTLP/HTTP

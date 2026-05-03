@@ -39,6 +39,46 @@ For deep observability into agent frameworks (**ADK**, **LangChain**, **CrewAI**
 - **📡 SSE Streaming Support**: Captures full streaming responses without interfering with user latency.
 - **📦 Single-Binary Edge-Ready**: In-process queuing and processing for low-overhead deployments.
 - **🔀 Fan-out Architecture**: CQRS-based design allows writing to multiple sinks simultaneously (e.g., DuckDB + Pub/Sub + OTLP export to Datadog/Tempo/Jaeger).
+- **🐳 Production Sidecar**: Minimal `candela-sidecar` binary (<5MB) for container environments — Pub/Sub + OTLP span export with ADC auth.
+
+---
+
+## 🐳 Sidecar: Production Container Deployment
+
+For **GKE, Cloud Run, or any container environment**, use the sidecar binary — a stripped-down proxy with zero local dependencies:
+
+```bash
+docker pull ghcr.io/candelahq/candela-sidecar:latest
+
+docker run -p 8080:8080 \
+  -e GCP_PROJECT=my-project \
+  -e VERTEX_REGION=us-central1 \
+  -e PUBSUB_TOPIC=candela-spans \
+  -e SPAN_FORMAT=proto \
+  -e PROVIDERS=google,anthropic \
+  ghcr.io/candelahq/candela-sidecar:latest
+```
+
+| Env Var | Default | Description |
+|---------|---------|-------------|
+| `PORT` | `8080` | HTTP listen port |
+| `GCP_PROJECT` | — | GCP project for Vertex AI + Pub/Sub |
+| `VERTEX_REGION` | `us-central1` | Vertex AI region |
+| `PROVIDERS` | all | Comma-separated: `openai,google,anthropic,gemini-oai` |
+| `PUBSUB_TOPIC` | — | Pub/Sub topic for span export |
+| `SPAN_FORMAT` | `proto` | `proto` (default, BQ-native) or `json` |
+| `OTLP_ENDPOINT` | — | OTLP/HTTP endpoint for universal export |
+| `OTLP_HEADERS` | — | Comma-separated `key=value` auth headers |
+| `CORS_ORIGINS` | `*` | Allowed CORS origins |
+
+**What's excluded** (keeps binary small): Firebase, SQLite, DuckDB, Firestore, ConnectRPC services, runtime management, Next.js UI.
+
+To publish a new release, tag with `sidecar-v*`:
+```bash
+git tag sidecar-v0.1.0
+git push --tags
+# → CI builds multi-arch image → ghcr.io/candelahq/candela-sidecar:v0.1.0
+```
 
 ---
 

@@ -370,8 +370,9 @@ func main() {
 	}
 
 	srv := &http.Server{
-		Addr:    addr,
-		Handler: h2c.NewHandler(authedMux, &http2.Server{}),
+		Addr:              addr,
+		Handler:           h2c.NewHandler(authedMux, &http2.Server{}),
+		ReadHeaderTimeout: 10 * time.Second,
 	}
 
 	// Graceful shutdown.

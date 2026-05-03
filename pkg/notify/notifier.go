@@ -55,9 +55,11 @@ type BudgetChecker struct {
 	channels   []storage.Notifier
 	thresholds []float64
 	// sent tracks notified thresholds per user per period.
-	// Key: "{userID}:{periodKey}:{threshold}"
-	sent map[string]bool
-	mu   sync.RWMutex
+	// Key: "{userID}:{threshold}"
+	// Resets when the period rolls over to prevent unbounded growth.
+	sent          map[string]bool
+	currentPeriod string
+	mu            sync.RWMutex
 }
 
 // NewBudgetChecker creates a checker with the given notification channels.
@@ -77,12 +79,20 @@ func (c *BudgetChecker) CheckAndNotify(ctx context.Context, userID, email, perio
 		return
 	}
 
+	// Reset tracking map on period rollover to prevent unbounded growth.
+	c.mu.Lock()
+	if c.currentPeriod != periodKey {
+		c.sent = make(map[string]bool)
+		c.currentPeriod = periodKey
+	}
+	c.mu.Unlock()
+
 	for _, threshold := range c.thresholds {
 		if ratio < threshold {
 			continue
 		}
 
-		key := fmt.Sprintf("%s:%s:%.2f", userID, periodKey, threshold)
+		key := fmt.Sprintf("%s:%.2f", userID, threshold)
 		c.mu.RLock()
 		alreadySent := c.sent[key]
 		c.mu.RUnlock()

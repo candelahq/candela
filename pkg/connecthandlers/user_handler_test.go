@@ -12,6 +12,7 @@ import (
 	v1 "github.com/candelahq/candela/gen/go/candela/v1"
 	"github.com/candelahq/candela/pkg/auth"
 	"github.com/candelahq/candela/pkg/storage"
+	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 // ──────────────────────────────────────────
@@ -509,6 +510,8 @@ func TestUserHandler_GrantLifecycle(t *testing.T) {
 		UserId:    userID,
 		AmountUsd: 50.0,
 		Reason:    "hackathon",
+		StartsAt:  timestamppb.New(now),
+		ExpiresAt: timestamppb.New(now.Add(24 * time.Hour)),
 	}))
 	if err != nil {
 		t.Fatalf("CreateGrant: %v", err)
@@ -684,6 +687,12 @@ func TestUserHandler_UpdateUser_FieldMask(t *testing.T) {
 	store := newMockUserStore()
 	handler := NewUserHandler(store, 0)
 	ctx := authedCtx("admin@example.com")
+
+	// Register the caller as admin so they can change roles (H16 fix).
+	_, _ = handler.CreateUser(ctx, connect.NewRequest(&v1.CreateUserRequest{
+		Email: "admin@example.com",
+		Role:  typespb.UserRole_USER_ROLE_ADMIN,
+	}))
 
 	createResp, _ := handler.CreateUser(ctx, connect.NewRequest(&v1.CreateUserRequest{
 		Email:       "mask@test.com",

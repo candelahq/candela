@@ -41,8 +41,8 @@ func (s *spanCapture) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	start := time.Now()
 
-	// Read and replay request body.
-	reqBody, err := io.ReadAll(r.Body)
+	// Read and replay request body (capped at 10MB).
+	reqBody, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 10<<20))
 	if err != nil {
 		s.next.ServeHTTP(w, r)
 		return
@@ -202,11 +202,15 @@ func parseSSEUsage(body []byte) (input, output, total int64) {
 }
 
 // responseCapture wraps ResponseWriter to buffer the response body.
+// Buffer is capped at 1MB to prevent OOM on large streaming responses.
 type responseCapture struct {
 	http.ResponseWriter
 	body       bytes.Buffer
 	statusCode int
+	capped     bool // true if we stopped buffering due to size
 }
+
+const maxCaptureBytes = 1 << 20 // 1MB
 
 func (r *responseCapture) WriteHeader(code int) {
 	r.statusCode = code
@@ -214,7 +218,18 @@ func (r *responseCapture) WriteHeader(code int) {
 }
 
 func (r *responseCapture) Write(b []byte) (int, error) {
-	r.body.Write(b) // buffer for span extraction
+	if !r.capped {
+		if r.body.Len()+len(b) > maxCaptureBytes {
+			// Write what fits, then stop buffering.
+			remaining := maxCaptureBytes - r.body.Len()
+			if remaining > 0 {
+				r.body.Write(b[:remaining])
+			}
+			r.capped = true
+		} else {
+			r.body.Write(b)
+		}
+	}
 	return r.ResponseWriter.Write(b)
 }
 

@@ -14,6 +14,20 @@ pre-commit:
     check-merge-conflict:
       glob: "*"
       run: "grep -rn '^<<<<<<< ' {staged_files} && exit 1 || exit 0"
+    check-json:
+      glob: "*.json"
+      run: "for f in {staged_files}; do python3 -m json.tool \"$f\" > /dev/null || exit 1; done"
+    end-of-file-fixer:
+      glob: "*.{go,yaml,yml,json,md,proto}"
+      run: |
+        fail=0
+        for f in {staged_files}; do
+          if [ -s "$f" ] && [ "$(tail -c1 "$f" | xxd -p)" != "0a" ]; then
+            echo "No newline at end of: $f"
+            fail=1
+          fi
+        done
+        exit $fail
     golangci-lint:
       glob: "*.go"
       run: golangci-lint run --timeout=5m

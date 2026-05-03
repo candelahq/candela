@@ -20,11 +20,10 @@ jobs:
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Generate proto (Remote)
-        env:
-          BUF_TOKEN: ${{ secrets.BUF_TOKEN }}
-        run: |
-          nix develop -c bash -c "cd proto && buf generate"
+      - uses: DeterminateSystems/magic-nix-cache-action@main
+
+      - name: Generate proto stubs (from BSR)
+        run: nix develop -c buf generate
 
       - name: Build
         run: nix develop -c go build ./...
@@ -52,15 +51,14 @@ jobs:
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
+      - uses: DeterminateSystems/magic-nix-cache-action@main
+
       - name: Install dependencies
         run: nix develop -c pnpm install
         working-directory: ui
 
-      - name: Generate TS proto stubs
-        env:
-          BUF_TOKEN: ${{ secrets.BUF_TOKEN }}
-        run: |
-          nix develop -c bash -c "cd proto && buf generate"
+      - name: Generate TS proto stubs (from BSR)
+        run: nix develop -c buf generate
 
       - name: Lint
         run: nix develop -c pnpm run lint
@@ -81,15 +79,14 @@ jobs:
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
+      - uses: DeterminateSystems/magic-nix-cache-action@main
+
       - name: Install dependencies
         run: nix develop -c pnpm install
         working-directory: ui
 
-      - name: Generate TS proto stubs
-        env:
-          BUF_TOKEN: ${{ secrets.BUF_TOKEN }}
-        run: |
-          nix develop -c bash -c "cd proto && buf generate"
+      - name: Generate TS proto stubs (from BSR)
+        run: nix develop -c buf generate
 
       - name: Install Playwright browsers (Using Nix)
         run: nix develop -c pnpm exec playwright install --with-deps chromium

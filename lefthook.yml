@@ -7,6 +7,13 @@ pre-commit:
     check-yaml:
       glob: "*.{yaml,yml}"
       run: "for f in {staged_files}; do yq '.' \"$f\" > /dev/null || exit 1; done"
+    detect-private-key:
+      glob: "*"
+      exclude: "lefthook.yml"
+      run: "grep -rn -- '-----BEGIN.*KEY-----' {staged_files} && exit 1 || exit 0"
+    check-merge-conflict:
+      glob: "*"
+      run: "grep -rn '^<<<<<<< ' {staged_files} && exit 1 || exit 0"
     golangci-lint:
       glob: "*.go"
       run: golangci-lint run --timeout=5m
@@ -18,7 +25,7 @@ pre-commit:
       run: go mod tidy -diff
     gofmt:
       glob: "*.go"
-      run: "test -z \"$(gofmt -l .)\""
+      run: "gofmt -l {staged_files} | grep . && exit 1 || exit 0"
     go-test:
       glob: "*.go"
       run: go test ./... -count=1 -timeout 30s

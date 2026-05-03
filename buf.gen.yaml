@@ -3,27 +3,29 @@ managed:
   enabled: true
   override:
     - file_option: go_package_prefix
-      module: buf.build/candelahq/candela
+      module: buf.build/candelahq/protos
       value: github.com/candelahq/candela/gen/go
 plugins:
   # Go protobuf
   - remote: buf.build/protocolbuffers/go
-    out: ../gen/go
+    out: gen/go
     opt: paths=source_relative
   # Go ConnectRPC
   - remote: buf.build/connectrpc/go
-    out: ../gen/go
+    out: gen/go
     opt: paths=source_relative
   # TypeScript (ES) — message types
   - remote: buf.build/bufbuild/es
-    out: ../ui/src/gen
+    out: ui/src/gen
     opt: target=ts
     include_imports: true
   # TypeScript (ES) — ConnectRPC service stubs
   - remote: buf.build/connectrpc/es
-    out: ../ui/src/gen
+    out: ui/src/gen
     opt: target=ts
   # BigQuery schema generation from proto (local plugin)
   # Install: go install github.com/GoogleCloudPlatform/protoc-gen-bq-schema/v3@latest
   - local: protoc-gen-bq-schema
-    out: ../gen/bq
+    out: gen/bq
+inputs:
+  - module: buf.build/candelahq/protos:v0.2.1

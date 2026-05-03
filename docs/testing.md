@@ -88,33 +88,29 @@ pnpm exec playwright test -g "should show budget gauge"
 
 ---
 
-## Pre-Commit Hooks
+## Lefthook Git Hooks
 
-The `.pre-commit-config.yaml` runs these checks on every `git commit`:
+The `lefthook.yml` runs these checks on every `git commit`:
 
 | Hook | What It Does | Blocks Commit? |
 |------|-------------|---------------|
-| `trailing-whitespace` | Removes trailing whitespace | Yes |
-| `end-of-file-fixer` | Ensures newline at end of file | Yes |
+| `trailing-whitespace` | Detects trailing whitespace | Yes |
 | `check-yaml` | Validates YAML syntax | Yes |
-| `check-json` | Validates JSON syntax | Yes |
-| `check-merge-conflict` | Detects merge conflict markers | Yes |
-| `detect-private-key` | Prevents committing secrets | Yes |
 | `golangci-lint` | Go linting (5min timeout) | Yes |
-| `buf-lint` | Protobuf linting | Yes |
-| `buf-format` | Auto-formats proto files | Yes |
-| `buf-breaking` | Detects breaking proto changes vs `main` | Yes |
 | `go-vet` | Go static analysis | Yes |
-| `go-mod-tidy` | Auto-tidies `go.mod` | Yes |
+| `go-mod-tidy` | Checks `go.mod` is tidy | Yes |
 | `gofmt` | Go formatting check | Yes |
 | `go-test` | Runs full test suite (30s timeout) | Yes |
+
+> [!NOTE]
+> Protobuf linting is handled in [`candelahq/candela-protos`](https://github.com/candelahq/candela-protos).
 
 > [!IMPORTANT]
 > Per project conventions, always run `git commit` inside the nix shell:
 > ```bash
 > nix develop -c git commit -m "feat: your message"
 > ```
-> This ensures pre-commit hooks have access to all required tools.
+> This ensures lefthook hooks have access to all required tools.
 
 ---
 

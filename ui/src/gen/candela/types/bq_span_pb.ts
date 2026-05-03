@@ -243,3 +243,4 @@ export type BqAttribute = Message<"candela.types.BqAttribute"> & {
  */
 export const BqAttributeSchema: GenMessage<BqAttribute> = /*@__PURE__*/
   messageDesc(file_candela_types_bq_span, 1);
+

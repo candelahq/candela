@@ -172,8 +172,8 @@ func TestRPC_GetHealth(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if resp.Msg.Status.Status != "running" {
-		t.Errorf("status = %q, want running", resp.Msg.Status.Status)
+	if resp.Msg.Status.State != v1.RuntimeState_RUNTIME_STATE_RUNNING {
+		t.Errorf("state = %v, want RUNNING", resp.Msg.Status.State)
 	}
 	if resp.Msg.Status.Backend != "mock" {
 		t.Errorf("backend = %q, want mock", resp.Msg.Status.Backend)
@@ -210,8 +210,8 @@ func TestRPC_LoadModel(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if resp.Msg.Status != "loaded" {
-		t.Errorf("status = %q, want loaded", resp.Msg.Status)
+	if resp.Msg.State != v1.ModelLoadState_MODEL_LOAD_STATE_LOADED {
+		t.Errorf("state = %v, want LOADED", resp.Msg.State)
 	}
 
 	mock.mu.Lock()
@@ -255,14 +255,12 @@ func TestRPC_UnloadModel(t *testing.T) {
 func TestRPC_PullModel(t *testing.T) {
 	client, mock := setupRPCHandler(t)
 
-	resp, err := client.PullModel(context.Background(),
+	_, err := client.PullModel(context.Background(),
 		connect.NewRequest(&v1.PullModelRequest{Model: "mistral:7b"}))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if resp.Msg.Status != "pulling" {
-		t.Errorf("status = %q, want pulling", resp.Msg.Status)
-	}
+	// PullModelResponse has no status field — pull is always async.
 
 	// Wait for async pull to complete.
 	for i := 0; i < 20; i++ {
@@ -321,8 +319,8 @@ func TestRPC_StartStopRuntime(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if stopResp.Msg.Status.Status != "stopped" {
-		t.Errorf("after stop: status = %q, want stopped", stopResp.Msg.Status.Status)
+	if stopResp.Msg.Status.State != v1.RuntimeState_RUNTIME_STATE_STOPPED {
+		t.Errorf("after stop: state = %v, want STOPPED", stopResp.Msg.Status.State)
 	}
 
 	// Start.
@@ -465,14 +463,12 @@ func TestPullModel_ActivePullsTracking(t *testing.T) {
 	h := newRuntimeHandler(mgr, nil, context.Background())
 
 	// Trigger a pull via the handler directly.
-	resp, err := h.PullModel(context.Background(),
+	_, err := h.PullModel(context.Background(),
 		connect.NewRequest(&v1.PullModelRequest{Model: "test-model:7b"}))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if resp.Msg.Status != "pulling" {
-		t.Errorf("status = %q, want pulling", resp.Msg.Status)
-	}
+	// PullModelResponse has no status field — pull is always async.
 
 	// ActivePulls should show the in-flight pull.
 	time.Sleep(50 * time.Millisecond)
@@ -521,24 +517,20 @@ func TestPullModel_DuplicateDetection(t *testing.T) {
 	h := newRuntimeHandler(mgr, nil, context.Background())
 
 	// First pull.
-	resp1, err := h.PullModel(context.Background(),
+	_, err := h.PullModel(context.Background(),
 		connect.NewRequest(&v1.PullModelRequest{Model: "dup-model"}))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if resp1.Msg.Status != "pulling" {
-		t.Errorf("first pull status = %q, want pulling", resp1.Msg.Status)
-	}
+	// PullModelResponse has no status field — first pull accepted.
 
 	// Second pull of same model — should return already_pulling.
-	resp2, err := h.PullModel(context.Background(),
+	_, err = h.PullModel(context.Background(),
 		connect.NewRequest(&v1.PullModelRequest{Model: "dup-model"}))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if resp2.Msg.Status != "already_pulling" {
-		t.Errorf("duplicate pull status = %q, want already_pulling", resp2.Msg.Status)
-	}
+	// PullModelResponse has no status field — duplicate pull is a no-op.
 
 	// Only one actual pull should have been triggered.
 	time.Sleep(100 * time.Millisecond)

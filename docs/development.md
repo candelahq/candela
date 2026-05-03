@@ -24,14 +24,16 @@ This will automatically install:
 ## 🏗️ Building & Running
 
 ### 1. Generating Protobuf Code
-Candela is proto-first. All service boundaries are defined in `proto/`.
+Candela is proto-first. All service boundaries are defined in
+[`candelahq/candela-protos`](https://github.com/candelahq/candela-protos)
+and published to BSR as `buf.build/candelahq/protos`.
 
 ```bash
-# From the root directory
-cd proto && buf generate
+# From the repo root (pulls protos from BSR)
+nix develop -c buf generate
 ```
 
-This will populate `gen/go/` and `gen/ts/` (for the UI).
+This will populate `gen/go/` and `ui/src/gen/` (for the UI).
 
 ### 2. Running the Backend (Local Dev)
 The server defaults to **DuckDB** and listens on the port from `config.yaml` (default **8181**).
@@ -223,20 +225,13 @@ With the emulator, Firestore operations (users, budgets, grants, audit) work loc
 
 ## 🔄 Proto Generation
 
-Candela uses **Buf Remote Generation** — no local protoc plugins needed.
+Protobuf definitions live in [`candelahq/candela-protos`](https://github.com/candelahq/candela-protos)
+and are published to BSR as [`buf.build/candelahq/protos`](https://buf.build/candelahq/protos).
 
 ```bash
-# Generate Go + TypeScript stubs
-cd proto && nix develop -c buf generate
+# Generate Go + TypeScript stubs from BSR
+nix develop -c buf generate
 ```
 
-This requires a `BUF_TOKEN` for remote generation. Options:
-- **CI**: Set as a GitHub Actions secret
-- **Local**: Add to `~/.netrc`: `machine buf.build login <user> password <token>`
-- **Local (env)**: `BUF_TOKEN=<token> buf generate`
-
-After generation, copy TS stubs to the UI:
-```bash
-cp -r gen/ts/candela/* ui/src/gen/
-rm -f ui/src/gen/types/bq_span_pb.ts  # BigQuery schema — server-only
-```
+This pulls the latest protos from BSR and generates code into `gen/go/` and `ui/src/gen/`.
+No local proto files or protoc plugins needed.

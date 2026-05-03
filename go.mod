@@ -4,11 +4,13 @@ go 1.26.0
 
 require (
 	buf.build/gen/go/bufbuild/protovalidate/protocolbuffers/go v1.36.11-20260209202127-80ab13bee0bf.1
+	buf.build/go/protovalidate v1.1.3
 	cloud.google.com/go/bigquery v1.75.0
 	cloud.google.com/go/firestore v1.21.0
 	connectrpc.com/connect v1.19.1
 	connectrpc.com/validate v0.6.0
 	firebase.google.com/go/v4 v4.19.0
+	github.com/GoogleCloudPlatform/protoc-gen-bq-schema v1.1.0
 	github.com/duckdb/duckdb-go/v2 v2.10501.0
 	github.com/google/uuid v1.6.0
 	go.opentelemetry.io/collector/component v1.54.0
@@ -30,7 +32,6 @@ require (
 )
 
 require (
-	buf.build/go/protovalidate v1.1.3 // indirect
 	cel.dev/expr v0.25.1 // indirect
 	cloud.google.com/go v0.123.0 // indirect
 	cloud.google.com/go/auth v0.20.0 // indirect

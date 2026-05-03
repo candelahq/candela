@@ -61,12 +61,14 @@
             # Git
             git
             gh
-            pre-commit
+            lefthook
           ];
 
           shellHook = ''
-            # Install pre-commit hooks (idempotent, silent).
-            pre-commit install --install-hooks > /dev/null 2>&1 || true
+            # Install lefthook git hooks (only if not already present)
+            if [ -d .git ] && ! grep -q 'LEFTHOOK' .git/hooks/pre-commit 2>/dev/null; then
+              lefthook install 2>/dev/null
+            fi
 
             echo "🕯️  Candela dev shell ready"
             echo "   Go:     $(go version | cut -d' ' -f3)"

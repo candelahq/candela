@@ -257,3 +257,4 @@ export const TraceService: GenService<{
   },
 }> = /*@__PURE__*/
   serviceDesc(file_candela_v1_trace_service, 0);
+

@@ -13,7 +13,7 @@ We are in the early stages of building a production-grade LLM observability plat
 
 ### 📋 Code Style
 - **Go**: We use `golangci-lint`. Ensure yours passes before opening a PR.
-- **Protobuf**: Always generate code via `buf generate` in the `proto/` directory.
+- **Protobuf**: Proto definitions live in [`candelahq/candela-protos`](https://github.com/candelahq/candela-protos). Run `buf generate` from the repo root to regenerate stubs.
 - **Commits**: We prefer [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/).
 
 ### 🧪 Testing

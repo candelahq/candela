@@ -93,9 +93,10 @@ func (c *Calculator) LoadFromConfig(cfg PricingConfig) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	c.globalDiscount = cfg.DiscountPercent
+	c.globalDiscount = clampDiscount(cfg.DiscountPercent)
 
 	for _, p := range cfg.Models {
+		p.DiscountPercent = clampDiscount(p.DiscountPercent)
 		c.overrides[c.key(p.Provider, p.Model)] = p
 	}
 
@@ -123,7 +124,18 @@ func (c *Calculator) SetPricing(p ModelPricing) {
 func (c *Calculator) SetGlobalDiscount(discount float64) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.globalDiscount = discount
+	c.globalDiscount = clampDiscount(discount)
+}
+
+// clampDiscount ensures a discount is within [0.0, 1.0].
+func clampDiscount(d float64) float64 {
+	if d < 0 {
+		return 0
+	}
+	if d > 1 {
+		return 1
+	}
+	return d
 }
 
 // HasPricing returns true if a provider/model has pricing configured

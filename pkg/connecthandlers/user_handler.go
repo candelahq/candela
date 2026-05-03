@@ -194,6 +194,22 @@ func (h *UserHandler) UpdateUser(
 		// No mask — update all mutable fields.
 		paths = []string{"display_name", "role"}
 	}
+
+	// Guard: role mutations require admin privileges to prevent escalation.
+	for _, p := range paths {
+		if p == "role" {
+			caller := auth.FromContext(ctx)
+			if caller != nil {
+				callerRecord, err := h.store.GetUserByEmail(ctx, caller.Email)
+				if err != nil || callerRecord.Role != storage.RoleAdmin {
+					return nil, connect.NewError(connect.CodePermissionDenied,
+						fmt.Errorf("only admins can modify user roles"))
+				}
+			}
+			break
+		}
+	}
+
 	for _, p := range paths {
 		switch p {
 		case "display_name":
@@ -312,6 +328,9 @@ func (h *UserHandler) SetBudget(
 	ctx context.Context,
 	req *connect.Request[v1.SetBudgetRequest],
 ) (*connect.Response[v1.SetBudgetResponse], error) {
+	if req.Msg.LimitUsd <= 0 {
+		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("budget limit must be positive"))
+	}
 	budget := &storage.BudgetRecord{
 		UserID:     req.Msg.UserId,
 		LimitUSD:   req.Msg.LimitUsd,
@@ -377,6 +396,15 @@ func (h *UserHandler) CreateGrant(
 	ctx context.Context,
 	req *connect.Request[v1.CreateGrantRequest],
 ) (*connect.Response[v1.CreateGrantResponse], error) {
+	if req.Msg.StartsAt == nil || req.Msg.ExpiresAt == nil {
+		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("starts_at and expires_at are required"))
+	}
+	if !req.Msg.ExpiresAt.AsTime().After(req.Msg.StartsAt.AsTime()) {
+		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("expires_at must be after starts_at"))
+	}
+	if req.Msg.AmountUsd <= 0 {
+		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("grant amount must be positive"))
+	}
 	grant := &storage.GrantRecord{
 		UserID:    req.Msg.UserId,
 		AmountUSD: req.Msg.AmountUsd,
@@ -446,7 +474,11 @@ func (h *UserHandler) ListAuditLog(
 	ctx context.Context,
 	req *connect.Request[v1.ListAuditLogRequest],
 ) (*connect.Response[v1.ListAuditLogResponse], error) {
-	entries, err := h.store.ListAuditLog(ctx, req.Msg.UserId, int(req.Msg.Limit))
+	limit := int(req.Msg.Limit)
+	if limit <= 0 || limit > 500 {
+		limit = 50
+	}
+	entries, err := h.store.ListAuditLog(ctx, req.Msg.UserId, limit)
 	if err != nil {
 		return nil, internalError("failed to list audit log", err)
 	}

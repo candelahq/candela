@@ -209,7 +209,7 @@ func (p *Proxy) RegisterCompatRoutes(mux *http.ServeMux, models []CompatModel) {
 
 	// POST /v1/chat/completions — route to provider based on model name in body.
 	mux.HandleFunc("POST /v1/chat/completions", func(w http.ResponseWriter, r *http.Request) {
-		body, err := io.ReadAll(r.Body)
+		body, err := io.ReadAll(io.LimitReader(r.Body, 10<<20))
 		if err != nil {
 			http.Error(w, "failed to read request body", http.StatusBadRequest)
 			return
@@ -557,7 +557,10 @@ func (p *Proxy) handleStreamingResponse(
 	}
 
 	// Tee the stream: forward to client AND buffer for observability.
+	// Buffer capped at 1MB to prevent OOM on large streaming responses.
 	var streamBuffer bytes.Buffer
+	const maxStreamCapture = 1 << 20 // 1MB
+	streamCapped := false
 	buf := make([]byte, 4096)
 	var ttft time.Duration
 	isFirstChunk := true
@@ -573,8 +576,16 @@ func (p *Proxy) handleStreamingResponse(
 			chunk := buf[:n]
 
 			// Buffer raw upstream data for observability (before translation).
-			if cbAllow {
-				streamBuffer.Write(chunk)
+			if cbAllow && !streamCapped {
+				if streamBuffer.Len()+n > maxStreamCapture {
+					remaining := maxStreamCapture - streamBuffer.Len()
+					if remaining > 0 {
+						streamBuffer.Write(chunk[:remaining])
+					}
+					streamCapped = true
+				} else {
+					streamBuffer.Write(chunk)
+				}
 			}
 
 			// Translate chunk if provider has a FormatTranslator.

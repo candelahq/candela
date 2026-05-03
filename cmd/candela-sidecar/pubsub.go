@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"sort"
 
 	"cloud.google.com/go/pubsub/v2"
 	"google.golang.org/protobuf/proto"
@@ -139,10 +140,16 @@ func (w *PubSubWriter) marshalProto(span storage.Span) ([]byte, error) {
 	}
 
 	if len(span.Attributes) > 0 {
-		for k, v := range span.Attributes {
+		keys := make([]string, 0, len(span.Attributes))
+		for k := range span.Attributes {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+
+		for _, k := range keys {
 			pb.Attributes = append(pb.Attributes, &typespb.Attribute{
 				Key:   k,
-				Value: &typespb.Attribute_StringValue{StringValue: v},
+				Value: &typespb.Attribute_StringValue{StringValue: span.Attributes[k]},
 			})
 		}
 	}

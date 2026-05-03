@@ -359,8 +359,8 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Read the request body (capped at 10MB to prevent OOM).
-	reqBody, err := io.ReadAll(io.LimitReader(r.Body, 10<<20))
+	// Read the request body (capped at 10MB — returns 413 if exceeded).
+	reqBody, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 10<<20))
 	if err != nil {
 		http.Error(w, "failed to read request body", http.StatusBadRequest)
 		return

@@ -116,7 +116,26 @@ func TestPubSubWriter_ProtoAttributes(t *testing.T) {
 	}
 
 	if len(pb.Attributes) != 2 {
-		t.Errorf("got %d attributes, want 2", len(pb.Attributes))
+		t.Fatalf("got %d attributes, want 2", len(pb.Attributes))
+	}
+
+	attrsMap := make(map[string]string)
+	for _, attr := range pb.Attributes {
+		if sv, ok := attr.Value.(*typespb.Attribute_StringValue); ok {
+			attrsMap[attr.Key] = sv.StringValue
+		}
+	}
+
+	if attrsMap["http.status"] != "200" {
+		t.Errorf(`expected attribute "http.status" to be "200", got %q`, attrsMap["http.status"])
+	}
+	if attrsMap["proxy.stream"] != "true" {
+		t.Errorf(`expected attribute "proxy.stream" to be "true", got %q`, attrsMap["proxy.stream"])
+	}
+
+	// Verify deterministic ordering (keys sorted alphabetically).
+	if pb.Attributes[0].Key != "http.status" {
+		t.Errorf("first attribute key = %q, want http.status (sorted)", pb.Attributes[0].Key)
 	}
 }
 

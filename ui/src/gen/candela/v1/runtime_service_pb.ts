@@ -2,8 +2,8 @@
 // @generated from file candela/v1/runtime_service.proto (package candela.v1, syntax proto3)
 /* eslint-disable */
 
-import type { GenFile, GenMessage, GenService } from "@bufbuild/protobuf/codegenv2";
-import { fileDesc, messageDesc, serviceDesc } from "@bufbuild/protobuf/codegenv2";
+import type { GenEnum, GenFile, GenMessage, GenService } from "@bufbuild/protobuf/codegenv2";
+import { enumDesc, fileDesc, messageDesc, serviceDesc } from "@bufbuild/protobuf/codegenv2";
 import type { Timestamp } from "@bufbuild/protobuf/wkt";
 import { file_google_protobuf_timestamp } from "@bufbuild/protobuf/wkt";
 import type { Message } from "@bufbuild/protobuf";
@@ -12,7 +12,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file candela/v1/runtime_service.proto.
  */
 export const file_candela_v1_runtime_service: GenFile = /*@__PURE__*/
-  fileDesc("CiBjYW5kZWxhL3YxL3J1bnRpbWVfc2VydmljZS5wcm90bxIKY2FuZGVsYS52MSKZAQoNUnVudGltZVN0YXR1cxIOCgZzdGF0dXMYASABKAkSDwoHYmFja2VuZBgCIAEoCRIQCghlbmRwb2ludBgDIAEoCRIWCg51cHRpbWVfc2Vjb25kcxgEIAEoARINCgVlcnJvchgFIAEoCRIuCgpjaGVja2VkX2F0GAYgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcCK6AQoMUnVudGltZU1vZGVsEgoKAmlkGAEgASgJEhIKCnNpemVfYnl0ZXMYAiABKAMSDgoGZmFtaWx5GAMgASgJEhIKCnBhcmFtZXRlcnMYBCABKAkSFAoMcXVhbnRpemF0aW9uGAUgASgJEg4KBmxvYWRlZBgGIAEoCBIRCglhdmFpbGFibGUYByABKAgSLQoJbGFzdF91c2VkGAggASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcCJZCgtCYWNrZW5kSW5mbxIMCgRuYW1lGAEgASgJEhEKCWluc3RhbGxlZBgCIAEoCBITCgtiaW5hcnlfcGF0aBgDIAEoCRIUCgxpbnN0YWxsX2hpbnQYBCABKAkiJgoTU3RhcnRSdW50aW1lUmVxdWVzdBIPCgdiYWNrZW5kGAEgASgJIkEKFFN0YXJ0UnVudGltZVJlc3BvbnNlEikKBnN0YXR1cxgBIAEoCzIZLmNhbmRlbGEudjEuUnVudGltZVN0YXR1cyIUChJTdG9wUnVudGltZVJlcXVlc3QiQAoTU3RvcFJ1bnRpbWVSZXNwb25zZRIpCgZzdGF0dXMYASABKAsyGS5jYW5kZWxhLnYxLlJ1bnRpbWVTdGF0dXMiEgoQR2V0SGVhbHRoUmVxdWVzdCJoChFHZXRIZWFsdGhSZXNwb25zZRIpCgZzdGF0dXMYASABKAsyGS5jYW5kZWxhLnYxLlJ1bnRpbWVTdGF0dXMSKAoGbW9kZWxzGAIgAygLMhguY2FuZGVsYS52MS5SdW50aW1lTW9kZWwiIQoQTG9hZE1vZGVsUmVxdWVzdBINCgVtb2RlbBgBIAEoCSIjChFMb2FkTW9kZWxSZXNwb25zZRIOCgZzdGF0dXMYASABKAkiIwoSVW5sb2FkTW9kZWxSZXF1ZXN0Eg0KBW1vZGVsGAEgASgJIhUKE1VubG9hZE1vZGVsUmVzcG9uc2UiEwoRTGlzdE1vZGVsc1JlcXVlc3QiPgoSTGlzdE1vZGVsc1Jlc3BvbnNlEigKBm1vZGVscxgBIAMoCzIYLmNhbmRlbGEudjEuUnVudGltZU1vZGVsIiEKEFB1bGxNb2RlbFJlcXVlc3QSDQoFbW9kZWwYASABKAkiIwoRUHVsbE1vZGVsUmVzcG9uc2USDgoGc3RhdHVzGAEgASgJIhUKE0xpc3RCYWNrZW5kc1JlcXVlc3QiUQoUTGlzdEJhY2tlbmRzUmVzcG9uc2USKQoIYmFja2VuZHMYASADKAsyFy5jYW5kZWxhLnYxLkJhY2tlbmRJbmZvEg4KBmFjdGl2ZRgCIAEoCSITChFSZXNldFN0YXRlUmVxdWVzdCIUChJSZXNldFN0YXRlUmVzcG9uc2UiIgoRQ2FuY2VsUHVsbFJlcXVlc3QSDQoFbW9kZWwYASABKAkiFAoSQ2FuY2VsUHVsbFJlc3BvbnNlIiMKEkRlbGV0ZU1vZGVsUmVxdWVzdBINCgVtb2RlbBgBIAEoCSIVChNEZWxldGVNb2RlbFJlc3BvbnNlImAKDENhdGFsb2dNb2RlbBIKCgJpZBgBIAEoCRIMCgRuYW1lGAIgASgJEhMKC2Rlc2NyaXB0aW9uGAMgASgJEhEKCXNpemVfaGludBgEIAEoCRIOCgZwaW5uZWQYBSABKAgiFAoSTGlzdENhdGFsb2dSZXF1ZXN0Ij8KE0xpc3RDYXRhbG9nUmVzcG9uc2USKAoGbW9kZWxzGAEgAygLMhguY2FuZGVsYS52MS5DYXRhbG9nTW9kZWwyuwcKDlJ1bnRpbWVTZXJ2aWNlElEKDFN0YXJ0UnVudGltZRIfLmNhbmRlbGEudjEuU3RhcnRSdW50aW1lUmVxdWVzdBogLmNhbmRlbGEudjEuU3RhcnRSdW50aW1lUmVzcG9uc2USTgoLU3RvcFJ1bnRpbWUSHi5jYW5kZWxhLnYxLlN0b3BSdW50aW1lUmVxdWVzdBofLmNhbmRlbGEudjEuU3RvcFJ1bnRpbWVSZXNwb25zZRJICglHZXRIZWFsdGgSHC5jYW5kZWxhLnYxLkdldEhlYWx0aFJlcXVlc3QaHS5jYW5kZWxhLnYxLkdldEhlYWx0aFJlc3BvbnNlEkgKCUxvYWRNb2RlbBIcLmNhbmRlbGEudjEuTG9hZE1vZGVsUmVxdWVzdBodLmNhbmRlbGEudjEuTG9hZE1vZGVsUmVzcG9uc2USTgoLVW5sb2FkTW9kZWwSHi5jYW5kZWxhLnYxLlVubG9hZE1vZGVsUmVxdWVzdBofLmNhbmRlbGEudjEuVW5sb2FkTW9kZWxSZXNwb25zZRJLCgpMaXN0TW9kZWxzEh0uY2FuZGVsYS52MS5MaXN0TW9kZWxzUmVxdWVzdBoeLmNhbmRlbGEudjEuTGlzdE1vZGVsc1Jlc3BvbnNlEkgKCVB1bGxNb2RlbBIcLmNhbmRlbGEudjEuUHVsbE1vZGVsUmVxdWVzdBodLmNhbmRlbGEudjEuUHVsbE1vZGVsUmVzcG9uc2USSwoKQ2FuY2VsUHVsbBIdLmNhbmRlbGEudjEuQ2FuY2VsUHVsbFJlcXVlc3QaHi5jYW5kZWxhLnYxLkNhbmNlbFB1bGxSZXNwb25zZRJOCgtEZWxldGVNb2RlbBIeLmNhbmRlbGEudjEuRGVsZXRlTW9kZWxSZXF1ZXN0Gh8uY2FuZGVsYS52MS5EZWxldGVNb2RlbFJlc3BvbnNlElEKDExpc3RCYWNrZW5kcxIfLmNhbmRlbGEudjEuTGlzdEJhY2tlbmRzUmVxdWVzdBogLmNhbmRlbGEudjEuTGlzdEJhY2tlbmRzUmVzcG9uc2USSwoKUmVzZXRTdGF0ZRIdLmNhbmRlbGEudjEuUmVzZXRTdGF0ZVJlcXVlc3QaHi5jYW5kZWxhLnYxLlJlc2V0U3RhdGVSZXNwb25zZRJOCgtMaXN0Q2F0YWxvZxIeLmNhbmRlbGEudjEuTGlzdENhdGFsb2dSZXF1ZXN0Gh8uY2FuZGVsYS52MS5MaXN0Q2F0YWxvZ1Jlc3BvbnNlQqgBCg5jb20uY2FuZGVsYS52MUITUnVudGltZVNlcnZpY2VQcm90b1ABWjhnaXRodWIuY29tL2NhbmRlbGFocS9jYW5kZWxhL2dlbi9nby9jYW5kZWxhL3YxO2NhbmRlbGF2MaICA0NYWKoCCkNhbmRlbGEuVjHKAgpDYW5kZWxhXFYx4gIWQ2FuZGVsYVxWMVxHUEJNZXRhZGF0YeoCC0NhbmRlbGE6OlYxYgZwcm90bzM", [file_google_protobuf_timestamp]);
+  fileDesc("CiBjYW5kZWxhL3YxL3J1bnRpbWVfc2VydmljZS5wcm90bxIKY2FuZGVsYS52MSKyAQoNUnVudGltZVN0YXR1cxInCgVzdGF0ZRgBIAEoDjIYLmNhbmRlbGEudjEuUnVudGltZVN0YXRlEg8KB2JhY2tlbmQYAiABKAkSEAoIZW5kcG9pbnQYAyABKAkSFgoOdXB0aW1lX3NlY29uZHMYBCABKAESDQoFZXJyb3IYBSABKAkSLgoKY2hlY2tlZF9hdBgGIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXAiugEKDFJ1bnRpbWVNb2RlbBIKCgJpZBgBIAEoCRISCgpzaXplX2J5dGVzGAIgASgDEg4KBmZhbWlseRgDIAEoCRISCgpwYXJhbWV0ZXJzGAQgASgJEhQKDHF1YW50aXphdGlvbhgFIAEoCRIOCgZsb2FkZWQYBiABKAgSEQoJYXZhaWxhYmxlGAcgASgIEi0KCWxhc3RfdXNlZBgIIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXAiWQoLQmFja2VuZEluZm8SDAoEbmFtZRgBIAEoCRIRCglpbnN0YWxsZWQYAiABKAgSEwoLYmluYXJ5X3BhdGgYAyABKAkSFAoMaW5zdGFsbF9oaW50GAQgASgJIiYKE1N0YXJ0UnVudGltZVJlcXVlc3QSDwoHYmFja2VuZBgBIAEoCSJBChRTdGFydFJ1bnRpbWVSZXNwb25zZRIpCgZzdGF0dXMYASABKAsyGS5jYW5kZWxhLnYxLlJ1bnRpbWVTdGF0dXMiFAoSU3RvcFJ1bnRpbWVSZXF1ZXN0IkAKE1N0b3BSdW50aW1lUmVzcG9uc2USKQoGc3RhdHVzGAEgASgLMhkuY2FuZGVsYS52MS5SdW50aW1lU3RhdHVzIhIKEEdldEhlYWx0aFJlcXVlc3QiaAoRR2V0SGVhbHRoUmVzcG9uc2USKQoGc3RhdHVzGAEgASgLMhkuY2FuZGVsYS52MS5SdW50aW1lU3RhdHVzEigKBm1vZGVscxgCIAMoCzIYLmNhbmRlbGEudjEuUnVudGltZU1vZGVsIiEKEExvYWRNb2RlbFJlcXVlc3QSDQoFbW9kZWwYASABKAkiPgoRTG9hZE1vZGVsUmVzcG9uc2USKQoFc3RhdGUYASABKA4yGi5jYW5kZWxhLnYxLk1vZGVsTG9hZFN0YXRlIiMKElVubG9hZE1vZGVsUmVxdWVzdBINCgVtb2RlbBgBIAEoCSIVChNVbmxvYWRNb2RlbFJlc3BvbnNlIhMKEUxpc3RNb2RlbHNSZXF1ZXN0Ij4KEkxpc3RNb2RlbHNSZXNwb25zZRIoCgZtb2RlbHMYASADKAsyGC5jYW5kZWxhLnYxLlJ1bnRpbWVNb2RlbCIhChBQdWxsTW9kZWxSZXF1ZXN0Eg0KBW1vZGVsGAEgASgJIhMKEVB1bGxNb2RlbFJlc3BvbnNlIhUKE0xpc3RCYWNrZW5kc1JlcXVlc3QiUQoUTGlzdEJhY2tlbmRzUmVzcG9uc2USKQoIYmFja2VuZHMYASADKAsyFy5jYW5kZWxhLnYxLkJhY2tlbmRJbmZvEg4KBmFjdGl2ZRgCIAEoCSITChFSZXNldFN0YXRlUmVxdWVzdCIUChJSZXNldFN0YXRlUmVzcG9uc2UiIgoRQ2FuY2VsUHVsbFJlcXVlc3QSDQoFbW9kZWwYASABKAkiFAoSQ2FuY2VsUHVsbFJlc3BvbnNlIiMKEkRlbGV0ZU1vZGVsUmVxdWVzdBINCgVtb2RlbBgBIAEoCSIVChNEZWxldGVNb2RlbFJlc3BvbnNlImAKDENhdGFsb2dNb2RlbBIKCgJpZBgBIAEoCRIMCgRuYW1lGAIgASgJEhMKC2Rlc2NyaXB0aW9uGAMgASgJEhEKCXNpemVfaGludBgEIAEoCRIOCgZwaW5uZWQYBSABKAgiFAoSTGlzdENhdGFsb2dSZXF1ZXN0Ij8KE0xpc3RDYXRhbG9nUmVzcG9uc2USKAoGbW9kZWxzGAEgAygLMhguY2FuZGVsYS52MS5DYXRhbG9nTW9kZWwqmAEKDFJ1bnRpbWVTdGF0ZRIdChlSVU5USU1FX1NUQVRFX1VOU1BFQ0lGSUVEEAASGQoVUlVOVElNRV9TVEFURV9TVE9QUEVEEAESGgoWUlVOVElNRV9TVEFURV9TVEFSVElORxACEhkKFVJVTlRJTUVfU1RBVEVfUlVOTklORxADEhcKE1JVTlRJTUVfU1RBVEVfRVJST1IQBCpuCg5Nb2RlbExvYWRTdGF0ZRIgChxNT0RFTF9MT0FEX1NUQVRFX1VOU1BFQ0lGSUVEEAASGwoXTU9ERUxfTE9BRF9TVEFURV9MT0FERUQQARIdChlNT0RFTF9MT0FEX1NUQVRFX1NUQVJUSU5HEAIyuwcKDlJ1bnRpbWVTZXJ2aWNlElEKDFN0YXJ0UnVudGltZRIfLmNhbmRlbGEudjEuU3RhcnRSdW50aW1lUmVxdWVzdBogLmNhbmRlbGEudjEuU3RhcnRSdW50aW1lUmVzcG9uc2USTgoLU3RvcFJ1bnRpbWUSHi5jYW5kZWxhLnYxLlN0b3BSdW50aW1lUmVxdWVzdBofLmNhbmRlbGEudjEuU3RvcFJ1bnRpbWVSZXNwb25zZRJICglHZXRIZWFsdGgSHC5jYW5kZWxhLnYxLkdldEhlYWx0aFJlcXVlc3QaHS5jYW5kZWxhLnYxLkdldEhlYWx0aFJlc3BvbnNlEkgKCUxvYWRNb2RlbBIcLmNhbmRlbGEudjEuTG9hZE1vZGVsUmVxdWVzdBodLmNhbmRlbGEudjEuTG9hZE1vZGVsUmVzcG9uc2USTgoLVW5sb2FkTW9kZWwSHi5jYW5kZWxhLnYxLlVubG9hZE1vZGVsUmVxdWVzdBofLmNhbmRlbGEudjEuVW5sb2FkTW9kZWxSZXNwb25zZRJLCgpMaXN0TW9kZWxzEh0uY2FuZGVsYS52MS5MaXN0TW9kZWxzUmVxdWVzdBoeLmNhbmRlbGEudjEuTGlzdE1vZGVsc1Jlc3BvbnNlEkgKCVB1bGxNb2RlbBIcLmNhbmRlbGEudjEuUHVsbE1vZGVsUmVxdWVzdBodLmNhbmRlbGEudjEuUHVsbE1vZGVsUmVzcG9uc2USSwoKQ2FuY2VsUHVsbBIdLmNhbmRlbGEudjEuQ2FuY2VsUHVsbFJlcXVlc3QaHi5jYW5kZWxhLnYxLkNhbmNlbFB1bGxSZXNwb25zZRJOCgtEZWxldGVNb2RlbBIeLmNhbmRlbGEudjEuRGVsZXRlTW9kZWxSZXF1ZXN0Gh8uY2FuZGVsYS52MS5EZWxldGVNb2RlbFJlc3BvbnNlElEKDExpc3RCYWNrZW5kcxIfLmNhbmRlbGEudjEuTGlzdEJhY2tlbmRzUmVxdWVzdBogLmNhbmRlbGEudjEuTGlzdEJhY2tlbmRzUmVzcG9uc2USSwoKUmVzZXRTdGF0ZRIdLmNhbmRlbGEudjEuUmVzZXRTdGF0ZVJlcXVlc3QaHi5jYW5kZWxhLnYxLlJlc2V0U3RhdGVSZXNwb25zZRJOCgtMaXN0Q2F0YWxvZxIeLmNhbmRlbGEudjEuTGlzdENhdGFsb2dSZXF1ZXN0Gh8uY2FuZGVsYS52MS5MaXN0Q2F0YWxvZ1Jlc3BvbnNlQqgBCg5jb20uY2FuZGVsYS52MUITUnVudGltZVNlcnZpY2VQcm90b1ABWjhnaXRodWIuY29tL2NhbmRlbGFocS9jYW5kZWxhL2dlbi9nby9jYW5kZWxhL3YxO2NhbmRlbGF2MaICA0NYWKoCCkNhbmRlbGEuVjHKAgpDYW5kZWxhXFYx4gIWQ2FuZGVsYVxWMVxHUEJNZXRhZGF0YeoCC0NhbmRlbGE6OlYxYgZwcm90bzM", [file_google_protobuf_timestamp]);
 
 /**
  * RuntimeStatus describes the current state of a runtime server.
@@ -21,11 +21,11 @@ export const file_candela_v1_runtime_service: GenFile = /*@__PURE__*/
  */
 export type RuntimeStatus = Message<"candela.v1.RuntimeStatus"> & {
   /**
-   * Current state: "stopped", "starting", "running", "error".
+   * Current lifecycle state.
    *
-   * @generated from field: string status = 1;
+   * @generated from field: candela.v1.RuntimeState state = 1;
    */
-  status: string;
+  state: RuntimeState;
 
   /**
    * Backend name: "ollama", "vllm", "lmstudio".
@@ -49,7 +49,7 @@ export type RuntimeStatus = Message<"candela.v1.RuntimeStatus"> & {
   uptimeSeconds: number;
 
   /**
-   * Error message if status is "error".
+   * Error message if state is RUNTIME_STATE_ERROR.
    *
    * @generated from field: string error = 5;
    */
@@ -308,11 +308,11 @@ export const LoadModelRequestSchema: GenMessage<LoadModelRequest> = /*@__PURE__*
  */
 export type LoadModelResponse = Message<"candela.v1.LoadModelResponse"> & {
   /**
-   * "loaded" (immediate) or "starting" (vLLM, async — poll GetHealth).
+   * Result of the load operation.
    *
-   * @generated from field: string status = 1;
+   * @generated from field: candela.v1.ModelLoadState state = 1;
    */
-  status: string;
+  state: ModelLoadState;
 };
 
 /**
@@ -404,15 +404,11 @@ export const PullModelRequestSchema: GenMessage<PullModelRequest> = /*@__PURE__*
   messageDesc(file_candela_v1_runtime_service, 15);
 
 /**
+ * The pull is always asynchronous. Poll GetHealth or ListModels for completion.
+ *
  * @generated from message candela.v1.PullModelResponse
  */
 export type PullModelResponse = Message<"candela.v1.PullModelResponse"> & {
-  /**
-   * Always "pulling" — the download runs asynchronously.
-   *
-   * @generated from field: string status = 1;
-   */
-  status: string;
 };
 
 /**
@@ -631,6 +627,76 @@ export const ListCatalogResponseSchema: GenMessage<ListCatalogResponse> = /*@__P
   messageDesc(file_candela_v1_runtime_service, 27);
 
 /**
+ * RuntimeState describes the lifecycle of a runtime server.
+ *
+ * @generated from enum candela.v1.RuntimeState
+ */
+export enum RuntimeState {
+  /**
+   * @generated from enum value: RUNTIME_STATE_UNSPECIFIED = 0;
+   */
+  UNSPECIFIED = 0,
+
+  /**
+   * @generated from enum value: RUNTIME_STATE_STOPPED = 1;
+   */
+  STOPPED = 1,
+
+  /**
+   * @generated from enum value: RUNTIME_STATE_STARTING = 2;
+   */
+  STARTING = 2,
+
+  /**
+   * @generated from enum value: RUNTIME_STATE_RUNNING = 3;
+   */
+  RUNNING = 3,
+
+  /**
+   * @generated from enum value: RUNTIME_STATE_ERROR = 4;
+   */
+  ERROR = 4,
+}
+
+/**
+ * Describes the enum candela.v1.RuntimeState.
+ */
+export const RuntimeStateSchema: GenEnum<RuntimeState> = /*@__PURE__*/
+  enumDesc(file_candela_v1_runtime_service, 0);
+
+/**
+ * ModelLoadState describes the result of a load/unload operation.
+ *
+ * @generated from enum candela.v1.ModelLoadState
+ */
+export enum ModelLoadState {
+  /**
+   * @generated from enum value: MODEL_LOAD_STATE_UNSPECIFIED = 0;
+   */
+  UNSPECIFIED = 0,
+
+  /**
+   * Immediately available (Ollama)
+   *
+   * @generated from enum value: MODEL_LOAD_STATE_LOADED = 1;
+   */
+  LOADED = 1,
+
+  /**
+   * Async startup in progress (vLLM)
+   *
+   * @generated from enum value: MODEL_LOAD_STATE_STARTING = 2;
+   */
+  STARTING = 2,
+}
+
+/**
+ * Describes the enum candela.v1.ModelLoadState.
+ */
+export const ModelLoadStateSchema: GenEnum<ModelLoadState> = /*@__PURE__*/
+  enumDesc(file_candela_v1_runtime_service, 1);
+
+/**
  * RuntimeService manages local LLM inference servers (Ollama, vLLM, LM Studio).
  * Used by the embedded management UI and future Flutter desktop client.
  *
@@ -769,3 +835,4 @@ export const RuntimeService: GenService<{
   },
 }> = /*@__PURE__*/
   serviceDesc(file_candela_v1_runtime_service, 0);
+

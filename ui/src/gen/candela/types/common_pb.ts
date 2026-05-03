@@ -4,6 +4,7 @@
 
 import type { GenFile, GenMessage } from "@bufbuild/protobuf/codegenv2";
 import { fileDesc, messageDesc } from "@bufbuild/protobuf/codegenv2";
+import { file_buf_validate_validate } from "../../buf/validate/validate_pb";
 import type { Timestamp } from "@bufbuild/protobuf/wkt";
 import { file_google_protobuf_timestamp } from "@bufbuild/protobuf/wkt";
 import type { Message } from "@bufbuild/protobuf";
@@ -12,7 +13,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file candela/types/common.proto.
  */
 export const file_candela_types_common: GenFile = /*@__PURE__*/
-  fileDesc("ChpjYW5kZWxhL3R5cGVzL2NvbW1vbi5wcm90bxINY2FuZGVsYS50eXBlcyI6ChFQYWdpbmF0aW9uUmVxdWVzdBIRCglwYWdlX3NpemUYASABKAUSEgoKcGFnZV90b2tlbhgCIAEoCSJCChJQYWdpbmF0aW9uUmVzcG9uc2USFwoPbmV4dF9wYWdlX3Rva2VuGAEgASgJEhMKC3RvdGFsX2NvdW50GAIgASgFIl8KCVRpbWVSYW5nZRIpCgVzdGFydBgBIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASJwoDZW5kGAIgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcCJ8CglBdHRyaWJ1dGUSCwoDa2V5GAEgASgJEhYKDHN0cmluZ192YWx1ZRgCIAEoCUgAEhMKCWludF92YWx1ZRgDIAEoA0gAEhYKDGRvdWJsZV92YWx1ZRgEIAEoAUgAEhQKCmJvb2xfdmFsdWUYBSABKAhIAEIHCgV2YWx1ZUKoAQoRY29tLmNhbmRlbGEudHlwZXNCC0NvbW1vblByb3RvUAFaMWdpdGh1Yi5jb20vY2FuZGVsYWhxL2NhbmRlbGEvZ2VuL2dvL2NhbmRlbGEvdHlwZXOiAgNDVFiqAg1DYW5kZWxhLlR5cGVzygINQ2FuZGVsYVxUeXBlc+ICGUNhbmRlbGFcVHlwZXNcR1BCTWV0YWRhdGHqAg5DYW5kZWxhOjpUeXBlc2IGcHJvdG8z", [file_google_protobuf_timestamp]);
+  fileDesc("ChpjYW5kZWxhL3R5cGVzL2NvbW1vbi5wcm90bxINY2FuZGVsYS50eXBlcyJGChFQYWdpbmF0aW9uUmVxdWVzdBIdCglwYWdlX3NpemUYASABKAVCCrpIBxoFGOgHKAASEgoKcGFnZV90b2tlbhgCIAEoCSJCChJQYWdpbmF0aW9uUmVzcG9uc2USFwoPbmV4dF9wYWdlX3Rva2VuGAEgASgJEhMKC3RvdGFsX2NvdW50GAIgASgFIl8KCVRpbWVSYW5nZRIpCgVzdGFydBgBIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASJwoDZW5kGAIgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcCJ8CglBdHRyaWJ1dGUSCwoDa2V5GAEgASgJEhYKDHN0cmluZ192YWx1ZRgCIAEoCUgAEhMKCWludF92YWx1ZRgDIAEoA0gAEhYKDGRvdWJsZV92YWx1ZRgEIAEoAUgAEhQKCmJvb2xfdmFsdWUYBSABKAhIAEIHCgV2YWx1ZUKoAQoRY29tLmNhbmRlbGEudHlwZXNCC0NvbW1vblByb3RvUAFaMWdpdGh1Yi5jb20vY2FuZGVsYWhxL2NhbmRlbGEvZ2VuL2dvL2NhbmRlbGEvdHlwZXOiAgNDVFiqAg1DYW5kZWxhLlR5cGVzygINQ2FuZGVsYVxUeXBlc+ICGUNhbmRlbGFcVHlwZXNcR1BCTWV0YWRhdGHqAg5DYW5kZWxhOjpUeXBlc2IGcHJvdG8z", [file_buf_validate_validate, file_google_protobuf_timestamp]);
 
 /**
  * Pagination request parameters.
@@ -133,3 +134,4 @@ export type Attribute = Message<"candela.types.Attribute"> & {
  */
 export const AttributeSchema: GenMessage<Attribute> = /*@__PURE__*/
   messageDesc(file_candela_types_common, 3);
+

@@ -124,7 +124,7 @@ func (h *runtimeHandler) LoadModel(
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
 	slog.Info("model loaded via RPC", "model", model)
-	return connect.NewResponse(&v1.LoadModelResponse{Status: "loaded"}), nil
+	return connect.NewResponse(&v1.LoadModelResponse{State: v1.ModelLoadState_MODEL_LOAD_STATE_LOADED}), nil
 }
 
 func (h *runtimeHandler) UnloadModel(
@@ -177,7 +177,7 @@ func (h *runtimeHandler) PullModel(
 
 	// Check if already pulling.
 	if _, loaded := h.activePulls.Load(model); loaded {
-		return connect.NewResponse(&v1.PullModelResponse{Status: "already_pulling"}), nil
+		return connect.NewResponse(&v1.PullModelResponse{}), nil
 	}
 
 	// Register the active pull.
@@ -244,7 +244,7 @@ func (h *runtimeHandler) PullModel(
 		time.AfterFunc(10*time.Second, func() { h.activePulls.CompareAndDelete(model, ps) })
 	}()
 
-	return connect.NewResponse(&v1.PullModelResponse{Status: "pulling"}), nil
+	return connect.NewResponse(&v1.PullModelResponse{}), nil
 }
 
 // ActivePulls returns a snapshot of all in-flight and recently completed pulls.
@@ -385,9 +385,24 @@ var (
 	errNoStateDB     = fmt.Errorf("state database not configured")
 )
 
+func statusToRuntimeState(s runtime.Status) v1.RuntimeState {
+	switch s {
+	case runtime.StatusStopped:
+		return v1.RuntimeState_RUNTIME_STATE_STOPPED
+	case runtime.StatusStarting:
+		return v1.RuntimeState_RUNTIME_STATE_STARTING
+	case runtime.StatusRunning:
+		return v1.RuntimeState_RUNTIME_STATE_RUNNING
+	case runtime.StatusError:
+		return v1.RuntimeState_RUNTIME_STATE_ERROR
+	default:
+		return v1.RuntimeState_RUNTIME_STATE_UNSPECIFIED
+	}
+}
+
 func healthToProto(h *runtime.Health, backend string) *v1.RuntimeStatus {
 	return &v1.RuntimeStatus{
-		Status:        string(h.Status),
+		State:         statusToRuntimeState(h.Status),
 		Backend:       backend,
 		Endpoint:      h.Endpoint,
 		UptimeSeconds: h.Uptime,

@@ -4,6 +4,7 @@
 
 import type { GenFile, GenMessage, GenService } from "@bufbuild/protobuf/codegenv2";
 import { fileDesc, messageDesc, serviceDesc } from "@bufbuild/protobuf/codegenv2";
+import { file_buf_validate_validate } from "../../buf/validate/validate_pb";
 import type { Span } from "../types/trace_pb";
 import { file_candela_types_trace } from "../types/trace_pb";
 import type { Message } from "@bufbuild/protobuf";
@@ -12,7 +13,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file candela/v1/ingestion_service.proto.
  */
 export const file_candela_v1_ingestion_service: GenFile = /*@__PURE__*/
-  fileDesc("CiJjYW5kZWxhL3YxL2luZ2VzdGlvbl9zZXJ2aWNlLnByb3RvEgpjYW5kZWxhLnYxIjgKEkluZ2VzdFNwYW5zUmVxdWVzdBIiCgVzcGFucxgBIAMoCzITLmNhbmRlbGEudHlwZXMuU3BhbiJVChNJbmdlc3RTcGFuc1Jlc3BvbnNlEhYKDmFjY2VwdGVkX2NvdW50GAEgASgFEhYKDnJlamVjdGVkX2NvdW50GAIgASgFEg4KBmVycm9ycxgDIAMoCTJiChBJbmdlc3Rpb25TZXJ2aWNlEk4KC0luZ2VzdFNwYW5zEh4uY2FuZGVsYS52MS5Jbmdlc3RTcGFuc1JlcXVlc3QaHy5jYW5kZWxhLnYxLkluZ2VzdFNwYW5zUmVzcG9uc2VCqgEKDmNvbS5jYW5kZWxhLnYxQhVJbmdlc3Rpb25TZXJ2aWNlUHJvdG9QAVo4Z2l0aHViLmNvbS9jYW5kZWxhaHEvY2FuZGVsYS9nZW4vZ28vY2FuZGVsYS92MTtjYW5kZWxhdjGiAgNDWFiqAgpDYW5kZWxhLlYxygIKQ2FuZGVsYVxWMeICFkNhbmRlbGFcVjFcR1BCTWV0YWRhdGHqAgtDYW5kZWxhOjpWMWIGcHJvdG8z", [file_candela_types_trace]);
+  fileDesc("CiJjYW5kZWxhL3YxL2luZ2VzdGlvbl9zZXJ2aWNlLnByb3RvEgpjYW5kZWxhLnYxIkMKEkluZ2VzdFNwYW5zUmVxdWVzdBItCgVzcGFucxgBIAMoCzITLmNhbmRlbGEudHlwZXMuU3BhbkIJukgGkgEDEJBOIlUKE0luZ2VzdFNwYW5zUmVzcG9uc2USFgoOYWNjZXB0ZWRfY291bnQYASABKAUSFgoOcmVqZWN0ZWRfY291bnQYAiABKAUSDgoGZXJyb3JzGAMgAygJMmIKEEluZ2VzdGlvblNlcnZpY2USTgoLSW5nZXN0U3BhbnMSHi5jYW5kZWxhLnYxLkluZ2VzdFNwYW5zUmVxdWVzdBofLmNhbmRlbGEudjEuSW5nZXN0U3BhbnNSZXNwb25zZUKqAQoOY29tLmNhbmRlbGEudjFCFUluZ2VzdGlvblNlcnZpY2VQcm90b1ABWjhnaXRodWIuY29tL2NhbmRlbGFocS9jYW5kZWxhL2dlbi9nby9jYW5kZWxhL3YxO2NhbmRlbGF2MaICA0NYWKoCCkNhbmRlbGEuVjHKAgpDYW5kZWxhXFYx4gIWQ2FuZGVsYVxWMVxHUEJNZXRhZGF0YeoCC0NhbmRlbGE6OlYxYgZwcm90bzM", [file_buf_validate_validate, file_candela_types_trace]);
 
 /**
  * @generated from message candela.v1.IngestSpansRequest
@@ -77,3 +78,4 @@ export const IngestionService: GenService<{
   },
 }> = /*@__PURE__*/
   serviceDesc(file_candela_v1_ingestion_service, 0);
+

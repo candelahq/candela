@@ -2,7 +2,7 @@ pre-commit:
   parallel: true
   commands:
     trailing-whitespace:
-      glob: "*.{go,yaml,yml,json,md,proto}"
+      glob: "*.{go,rs,toml,yaml,yml,json,md,proto}"
       run: "grep -rn '[[:blank:]]$' {staged_files} && exit 1 || exit 0"
     check-yaml:
       glob: "*.{yaml,yml}"
@@ -18,7 +18,7 @@ pre-commit:
       glob: "*.json"
       run: "for f in {staged_files}; do python3 -m json.tool \"$f\" > /dev/null || exit 1; done"
     end-of-file-fixer:
-      glob: "*.{go,yaml,yml,json,md,proto}"
+      glob: "*.{go,rs,toml,yaml,yml,json,md,proto}"
       run: |
         fail=0
         for f in {staged_files}; do
@@ -43,3 +43,13 @@ pre-commit:
     go-test:
       glob: "*.go"
       run: go test ./... -count=1 -timeout 30s
+    # ── Rust ──
+    cargo-fmt:
+      glob: "*.rs"
+      run: cargo fmt --manifest-path rust/Cargo.toml -- --check
+    cargo-clippy:
+      glob: "*.{rs,toml}"
+      run: cargo clippy --manifest-path rust/Cargo.toml --workspace -- -D warnings
+    cargo-test:
+      glob: "*.rs"
+      run: cargo test --manifest-path rust/Cargo.toml --workspace --quiet

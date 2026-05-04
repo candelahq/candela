@@ -4,12 +4,21 @@
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
     flake-utils.url = "github:numtide/flake-utils";
+    rust-overlay = {
+      url = "github:oxalica/rust-overlay";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
   };
 
-  outputs = { self, nixpkgs, flake-utils }:
+  outputs = { self, nixpkgs, flake-utils, rust-overlay }:
     flake-utils.lib.eachDefaultSystem (system:
       let
-        pkgs = nixpkgs.legacyPackages.${system};
+        overlays = [ (import rust-overlay) ];
+        pkgs = import nixpkgs { inherit system overlays; };
+
+        rustToolchain = pkgs.rust-bin.stable.latest.default.override {
+          extensions = [ "rust-src" "rust-analyzer" ];
+        };
 
         # BigQuery schema generator for protobuf (not in nixpkgs).
         protoc-gen-bq-schema = pkgs.buildGoModule rec {
@@ -58,6 +67,11 @@
             jq
             yq-go
 
+            # Rust
+            rustToolchain
+            cargo-deny
+            cargo-watch
+
             # Git
             git
             gh
@@ -72,6 +86,7 @@
 
             echo "🕯️  Candela dev shell ready"
             echo "   Go:     $(go version | cut -d' ' -f3)"
+            echo "   Rust:   $(rustc --version | cut -d' ' -f2)"
             echo "   Buf:    $(buf --version 2>&1)"
             echo "   Node:   $(node --version)"
             echo "   Python: $(python3 --version | cut -d' ' -f2)"

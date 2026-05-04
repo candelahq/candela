@@ -1,0 +1,18 @@
+# Rust proto codegen — generates prost types from BSR.
+# Run: cd rust && buf generate
+# Same source module as Go/TS codegen (buf.gen.yaml at repo root).
+version: v2
+plugins:
+  # Prost — Rust struct generation
+  - remote: buf.build/community/neoeinstein-prost:v0.5.0
+    out: gen/src
+    opt:
+      - compile_well_known_types
+      - file_descriptor_set
+  # Prost-serde — JSON serialization for proto types
+  - remote: buf.build/community/neoeinstein-prost-serde:v0.5.0
+    out: gen/src
+    opt:
+      - compile_well_known_types
+inputs:
+  - module: buf.build/candelahq/protos:v0.2.1

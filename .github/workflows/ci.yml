@@ -105,3 +105,31 @@ jobs:
           name: playwright-report
           path: ui/playwright-report/
           retention-days: 7
+
+  rust-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@main
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: DeterminateSystems/magic-nix-cache-action@main
+
+      - name: Generate Rust proto stubs (from BSR)
+        run: nix develop -c bash -c "cd rust && buf generate"
+
+      - name: Format check
+        run: nix develop -c cargo fmt --manifest-path rust/Cargo.toml -- --check
+
+      - name: Clippy
+        run: nix develop -c cargo clippy --manifest-path rust/Cargo.toml --workspace -- -D warnings
+
+      - name: Test
+        run: nix develop -c cargo test --manifest-path rust/Cargo.toml --workspace
+
+      - name: License & vulnerability audit
+        continue-on-error: true  # Advisory until deny.toml is configured
+        run: nix develop -c cargo deny --manifest-path rust/Cargo.toml check

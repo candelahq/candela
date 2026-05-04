@@ -112,7 +112,10 @@ func (cb *CircuitBreaker) RecordFailure() {
 	cb.mu.Lock()
 	defer cb.mu.Unlock()
 
-	cb.failures++
+	// Cap at threshold+1 to prevent unbounded growth.
+	if cb.failures <= cb.threshold {
+		cb.failures++
+	}
 	cb.lastFailureTime = time.Now()
 
 	if cb.failures >= cb.threshold {

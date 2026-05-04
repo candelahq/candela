@@ -34,10 +34,9 @@ func TestCORS_TraceparentHeader(t *testing.T) {
 	}
 }
 
-// TestCORS_OptionsPreflightReturns204 verifies that OPTIONS preflight
-// requests return 204 with the correct CORS headers.
-// Note: This tests the proxy compat route's behavior with OPTIONS.
-func TestCORS_OptionsPreflightReturns204(t *testing.T) {
+// TestCORS_ModelsEndpointReturnsJSON verifies that GET /v1/models returns
+// a 200 response with application/json content type.
+func TestCORS_ModelsEndpointReturnsJSON(t *testing.T) {
 	submitter := &mockSubmitter{}
 	calc := costcalc.New()
 

@@ -1,4 +1,10 @@
-package main
+// Package pubsub implements storage.SpanWriter by publishing spans to a
+// Google Cloud Pub/Sub topic. Supports proto (default) and JSON formats.
+//
+// This package is used by candela-sidecar for production span export.
+// It can also be wired into candela-server or candela-local as an
+// additional fan-out sink alongside BigQuery, OTLP, etc.
+package pubsub
 
 import (
 	"context"
@@ -16,17 +22,26 @@ import (
 	"github.com/candelahq/candela/pkg/storage"
 )
 
-// PubSubWriter implements storage.SpanWriter by publishing spans to a
-// Google Cloud Pub/Sub topic. Supports proto (default) and JSON formats.
-type PubSubWriter struct {
+var _ storage.SpanWriter = (*Writer)(nil)
+
+// Config holds Pub/Sub writer configuration.
+type Config struct {
+	ProjectID string `yaml:"project_id"` // GCP project ID
+	TopicID   string `yaml:"topic_id"`   // Pub/Sub topic name
+	Format    string `yaml:"format"`     // "proto" (default) or "json"
+}
+
+// Writer implements storage.SpanWriter for Pub/Sub.
+type Writer struct {
 	publisher *pubsub.Publisher
 	client    *pubsub.Client
 	format    string // "proto" or "json"
 }
 
-// NewPubSubWriter creates a new Pub/Sub span writer.
+// New creates a new Pub/Sub span writer.
 // format must be "proto" (default) or "json".
-func NewPubSubWriter(ctx context.Context, projectID, topicID, format string) (*PubSubWriter, error) {
+func New(ctx context.Context, cfg Config) (*Writer, error) {
+	format := cfg.Format
 	if format == "" {
 		format = "proto"
 	}
@@ -34,14 +49,14 @@ func NewPubSubWriter(ctx context.Context, projectID, topicID, format string) (*P
 		return nil, fmt.Errorf("unsupported span format %q (use \"proto\" or \"json\")", format)
 	}
 
-	client, err := pubsub.NewClient(ctx, projectID)
+	client, err := pubsub.NewClient(ctx, cfg.ProjectID)
 	if err != nil {
 		return nil, fmt.Errorf("pubsub.NewClient: %w", err)
 	}
 
-	publisher := client.Publisher(topicID)
+	publisher := client.Publisher(cfg.TopicID)
 
-	return &PubSubWriter{
+	return &Writer{
 		publisher: publisher,
 		client:    client,
 		format:    format,
@@ -49,7 +64,7 @@ func NewPubSubWriter(ctx context.Context, projectID, topicID, format string) (*P
 }
 
 // IngestSpans publishes a batch of spans to Pub/Sub.
-func (w *PubSubWriter) IngestSpans(ctx context.Context, spans []storage.Span) error {
+func (w *Writer) IngestSpans(ctx context.Context, spans []storage.Span) error {
 	var results []*pubsub.PublishResult
 
 	for _, span := range spans {
@@ -88,13 +103,13 @@ func (w *PubSubWriter) IngestSpans(ctx context.Context, spans []storage.Span) er
 }
 
 // Close flushes pending messages and closes the client.
-func (w *PubSubWriter) Close() error {
+func (w *Writer) Close() error {
 	w.publisher.Stop()
 	return w.client.Close()
 }
 
 // marshal serializes a span in the configured format.
-func (w *PubSubWriter) marshal(span storage.Span) ([]byte, error) {
+func (w *Writer) marshal(span storage.Span) ([]byte, error) {
 	switch w.format {
 	case "proto":
 		return w.marshalProto(span)
@@ -106,7 +121,7 @@ func (w *PubSubWriter) marshal(span storage.Span) ([]byte, error) {
 }
 
 // marshalProto converts a storage.Span to its protobuf wire format.
-func (w *PubSubWriter) marshalProto(span storage.Span) ([]byte, error) {
+func (w *Writer) marshalProto(span storage.Span) ([]byte, error) {
 	pb := &typespb.Span{
 		SpanId:       span.SpanID,
 		TraceId:      span.TraceID,

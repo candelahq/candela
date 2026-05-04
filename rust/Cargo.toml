@@ -1,0 +1,69 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/candela-core",
+    "crates/candela-proxy",
+    "crates/candela-processor",
+    "crates/candela-storage",
+    "bins/candela-sidecar",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+repository = "https://github.com/candelahq/candela"
+
+[workspace.dependencies]
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+
+# HTTP framework + reverse proxy
+axum = "0.8"
+hyper = { version = "1", features = ["full"] }
+hyper-util = { version = "0.1", features = ["full"] }
+http-body-util = "0.1"
+tower = "0.5"
+tower-http = { version = "0.6", features = ["cors", "timeout", "trace"] }
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Proto (buf-generated prost types)
+prost = "0.14"
+prost-types = "0.14"
+
+# GCP (first-party official crates)
+google-cloud-pubsub = "0.10"
+gcp-auth = "0.13"
+
+# Observability
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["json", "env-filter"] }
+
+# HTTP client (OTLP export, upstream proxying)
+reqwest = { version = "0.12", default-features = false, features = ["gzip", "json", "rustls-tls"] }
+
+# Utilities
+anyhow = "1"
+thiserror = "2"
+chrono = { version = "0.4", features = ["serde"] }
+uuid = { version = "1", features = ["v4"] }
+regex = "1"
+bytes = "1"
+
+# Testing
+tokio-test = "0.4"
+
+# Workspace crates
+candela-core = { path = "crates/candela-core" }
+candela-proxy = { path = "crates/candela-proxy" }
+candela-processor = { path = "crates/candela-processor" }
+candela-storage = { path = "crates/candela-storage" }
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true
+panic = "abort"

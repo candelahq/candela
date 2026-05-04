@@ -46,6 +46,9 @@ deploy/config.production.yaml
 result
 result-*
 
+# Rust
+rust/target/
+
 # Python
 __pycache__/
 *.pyc

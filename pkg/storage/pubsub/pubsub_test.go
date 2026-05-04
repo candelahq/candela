@@ -1,4 +1,4 @@
-package main
+package pubsub
 
 import (
 	"context"
@@ -13,8 +13,8 @@ import (
 	"github.com/candelahq/candela/pkg/storage"
 )
 
-func TestPubSubWriter_MarshalProto(t *testing.T) {
-	w := &PubSubWriter{format: "proto"}
+func TestWriter_MarshalProto(t *testing.T) {
+	w := &Writer{format: "proto"}
 	span := testSpan()
 
 	data, err := w.marshal(span)
@@ -47,8 +47,8 @@ func TestPubSubWriter_MarshalProto(t *testing.T) {
 	}
 }
 
-func TestPubSubWriter_MarshalJSON(t *testing.T) {
-	w := &PubSubWriter{format: "json"}
+func TestWriter_MarshalJSON(t *testing.T) {
+	w := &Writer{format: "json"}
 	span := testSpan()
 
 	data, err := w.marshal(span)
@@ -68,16 +68,16 @@ func TestPubSubWriter_MarshalJSON(t *testing.T) {
 	}
 }
 
-func TestPubSubWriter_MarshalInvalidFormat(t *testing.T) {
-	w := &PubSubWriter{format: "xml"}
+func TestWriter_MarshalInvalidFormat(t *testing.T) {
+	w := &Writer{format: "xml"}
 	_, err := w.marshal(testSpan())
 	if err == nil {
 		t.Fatal("expected error for unsupported format")
 	}
 }
 
-func TestPubSubWriter_ProtoPreservesDuration(t *testing.T) {
-	w := &PubSubWriter{format: "proto"}
+func TestWriter_ProtoPreservesDuration(t *testing.T) {
+	w := &Writer{format: "proto"}
 	span := testSpan()
 	span.Duration = 1500 * time.Millisecond
 
@@ -97,8 +97,8 @@ func TestPubSubWriter_ProtoPreservesDuration(t *testing.T) {
 	}
 }
 
-func TestPubSubWriter_ProtoAttributes(t *testing.T) {
-	w := &PubSubWriter{format: "proto"}
+func TestWriter_ProtoAttributes(t *testing.T) {
+	w := &Writer{format: "proto"}
 	span := testSpan()
 	span.Attributes = map[string]string{
 		"http.status":  "200",
@@ -139,15 +139,19 @@ func TestPubSubWriter_ProtoAttributes(t *testing.T) {
 	}
 }
 
-func TestNewPubSubWriter_InvalidFormat(t *testing.T) {
-	_, err := NewPubSubWriter(context.TODO(), "project", "topic", "xml")
+func TestNew_InvalidFormat(t *testing.T) {
+	_, err := New(context.TODO(), Config{
+		ProjectID: "project",
+		TopicID:   "topic",
+		Format:    "xml",
+	})
 	if err == nil {
 		t.Fatal("expected error for invalid format")
 	}
 }
 
-func TestPubSubWriter_NilGenAI(t *testing.T) {
-	w := &PubSubWriter{format: "proto"}
+func TestWriter_NilGenAI(t *testing.T) {
+	w := &Writer{format: "proto"}
 	span := testSpan()
 	span.GenAI = nil
 

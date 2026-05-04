@@ -268,8 +268,8 @@ func TestUpstreamUnreachable_502(t *testing.T) {
 	}
 
 	body, _ := io.ReadAll(resp.Body)
-	if !strings.Contains(string(body), "upstream error") {
-		t.Errorf("body = %q, should mention upstream error", body)
+	if !strings.Contains(string(body), "upstream provider unavailable") {
+		t.Errorf("body = %q, should mention upstream provider unavailable", body)
 	}
 }
 

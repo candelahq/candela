@@ -211,7 +211,7 @@ func (t *AnthropicFormatTranslator) TranslateStreamChunk(data []byte, model stri
 
 	// We need a consistent ID across all chunks in the stream.
 	// Extract it from message_start if present, otherwise generate one.
-	streamID := fmt.Sprintf("chatcmpl-%d", time.Now().UnixNano())
+	streamID := "chatcmpl-" + generateSpanID()
 
 	for _, line := range strings.Split(string(data), "\n") {
 		line = strings.TrimSpace(line)

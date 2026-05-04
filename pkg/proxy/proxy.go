@@ -21,6 +21,7 @@ import (
 	"regexp"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"log/slog"
 
@@ -360,6 +361,24 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 	// Uses effectiveUserID so budget is checked against the real end-user.
 	// Service accounts have no budget entries — skip to avoid spurious warnings.
 	if p.users != nil && effectiveUserID != "" && !isServiceAccount {
+		// ── Rate limiting ──
+		// Enforce per-user request velocity limits before budget check.
+		allowed, count, limit, rlErr := p.users.CheckRateLimit(r.Context(), effectiveUserID)
+		if rlErr != nil {
+			slog.Warn("rate limit check failed, allowing request",
+				"user_id", effectiveUserID, "error", rlErr)
+		} else if !allowed {
+			w.Header().Set("Content-Type", "application/json")
+			w.Header().Set("Retry-After", "60")
+			w.WriteHeader(http.StatusTooManyRequests)
+			_, _ = fmt.Fprintf(w, `{"error":{"message":"rate limit exceeded (%d/%d requests/min)","type":"rate_limit_exceeded","code":429}}`, count, limit)
+			slog.Info("blocked request: rate limit exceeded",
+				"user_id", effectiveUserID,
+				"count", count, "limit", limit)
+			return
+		}
+
+		// ── Pre-flight budget check ──
 		check, err := p.users.CheckBudget(r.Context(), effectiveUserID, 0)
 		if err != nil {
 			slog.Warn("budget check failed, allowing request",
@@ -569,8 +588,14 @@ func (p *Proxy) handleStandardResponse(
 	_, _ = w.Write(clientBody)
 
 	// Create observability span (async — don't block the response).
+	// Use a bounded timeout (not WithoutCancel) to prevent goroutine leaks
+	// if downstream services (Firestore, storage) hang.
 	if cbAllow {
-		go p.createSpan(context.WithoutCancel(r.Context()), provider, reqBody, respBody, startTime, endTime, resp.StatusCode, ttfb, requestID, sessionID, effectiveUserID, traceCtx, proxySpanID)
+		spanCtx, spanCancel := context.WithTimeout(context.Background(), 30*time.Second)
+		go func() {
+			defer spanCancel()
+			p.createSpan(spanCtx, provider, reqBody, respBody, startTime, endTime, resp.StatusCode, ttfb, requestID, sessionID, effectiveUserID, traceCtx, proxySpanID)
+		}()
 	} else {
 		slog.Debug("skipping span creation (circuit open)", "provider", provider.Name, "request_id", requestID)
 	}
@@ -616,6 +641,7 @@ func (p *Proxy) handleStreamingResponse(
 	buf := make([]byte, 4096)
 	var ttft time.Duration
 	isFirstChunk := true
+	streamCompleted := false // tracks whether stream ended normally
 
 	for {
 		n, err := resp.Body.Read(buf)
@@ -656,6 +682,9 @@ func (p *Proxy) handleStreamingResponse(
 			flusher.Flush()
 		}
 		if err != nil {
+			if err == io.EOF {
+				streamCompleted = true
+			}
 			break
 		}
 	}
@@ -663,8 +692,17 @@ func (p *Proxy) handleStreamingResponse(
 	endTime := time.Now()
 
 	// Parse the accumulated stream to extract usage data.
+	// Use bounded timeout to prevent goroutine leaks.
+	streamStatus := storage.SpanStatusOK
+	if !streamCompleted {
+		streamStatus = storage.SpanStatusError
+	}
 	if cbAllow {
-		go p.createStreamingSpan(context.WithoutCancel(r.Context()), provider, reqBody, streamBuffer.Bytes(), startTime, endTime, ttfb, ttft, requestID, sessionID, effectiveUserID, traceCtx, proxySpanID)
+		spanCtx, spanCancel := context.WithTimeout(context.Background(), 30*time.Second)
+		go func() {
+			defer spanCancel()
+			p.createStreamingSpan(spanCtx, provider, reqBody, streamBuffer.Bytes(), startTime, endTime, ttfb, ttft, requestID, sessionID, effectiveUserID, streamStatus, traceCtx, proxySpanID)
+		}()
 	} else {
 		slog.Debug("skipping streaming span (circuit open)", "provider", provider.Name, "request_id", requestID)
 	}
@@ -844,6 +882,7 @@ func (p *Proxy) createStreamingSpan(
 	requestID string,
 	sessionID string,
 	effectiveUserID string,
+	streamStatus storage.SpanStatus,
 	traceCtx *traceContext,
 	proxySpanID string,
 ) {
@@ -860,7 +899,7 @@ func (p *Proxy) createStreamingSpan(
 		outputTokens:    outputTokens,
 		startTime:       startTime,
 		endTime:         endTime,
-		status:          storage.SpanStatusOK,
+		status:          streamStatus,
 		ttfb:            ttfb,
 		requestID:       requestID,
 		sessionID:       sessionID,
@@ -947,5 +986,11 @@ func truncate(s string, maxLen int) string {
 	if len(s) <= maxLen {
 		return s
 	}
-	return s[:maxLen] + "...[truncated]"
+	// Operate on runes to avoid cutting multi-byte UTF-8 characters mid-sequence,
+	// which would produce invalid strings rejected by BigQuery and protobuf.
+	if utf8.RuneCountInString(s) <= maxLen {
+		return s
+	}
+	runes := []rune(s)
+	return string(runes[:maxLen]) + "...[truncated]"
 }

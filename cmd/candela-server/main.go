@@ -146,8 +146,9 @@ func main() {
 	// Health check.
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		if err := reader.Ping(r.Context()); err != nil {
+			slog.Error("healthz: storage ping failed", "error", err)
 			w.WriteHeader(http.StatusServiceUnavailable)
-			_, _ = fmt.Fprintf(w, `{"status": "error", "detail": %q}`, err.Error())
+			_, _ = fmt.Fprintln(w, `{"status": "unhealthy"}`)
 			return
 		}
 		w.WriteHeader(http.StatusOK)
@@ -317,8 +318,10 @@ func main() {
 
 	// Wrap the mux with Firebase Auth middleware.
 	devMode := cfg.Auth.DevMode
-	if os.Getenv("CANDELA_DEV_MODE") == "true" {
-		devMode = true
+	// Guard: never allow dev mode on Cloud Run (K_SERVICE is always set by Cloud Run).
+	if devMode && os.Getenv("K_SERVICE") != "" {
+		slog.Error("auth.dev_mode=true is not allowed on Cloud Run — disabling")
+		devMode = false
 	}
 
 	// Initialize Firebase Admin SDK for token verification.
@@ -373,6 +376,8 @@ func main() {
 		Addr:              addr,
 		Handler:           h2c.NewHandler(authedMux, &http2.Server{}),
 		ReadHeaderTimeout: 10 * time.Second,
+		WriteTimeout:      10 * time.Minute, // generous for streaming LLM responses
+		IdleTimeout:       120 * time.Second,
 	}
 
 	// Graceful shutdown.
@@ -408,8 +413,25 @@ func main() {
 			_, _ = fmt.Fprintln(w, `{"status":"ok","mode":"lmstudio"}`)
 		})
 
+		// Wrap LM Studio mux with the same auth + CORS middleware as the main
+		// server. Without this, port 1234 would be completely unauthenticated,
+		// allowing anyone on the network to make unlimited LLM API calls.
+		authedLmMux := auth.FirebaseAuthMiddleware(
+			corsMiddleware(lmMux, cfg.CORS.AllowedOrigins),
+			fbAuthClient,
+			cloudRunURL,
+			userAuth,
+			devMode,
+		)
+
 		lmAddr := fmt.Sprintf("%s:%d", cfg.Server.Host, lmPort)
-		lmSrv = &http.Server{Addr: lmAddr, Handler: lmMux, ReadHeaderTimeout: 10 * time.Second}
+		lmSrv = &http.Server{
+			Addr:              lmAddr,
+			Handler:           authedLmMux,
+			ReadHeaderTimeout: 10 * time.Second,
+			WriteTimeout:      10 * time.Minute,
+			IdleTimeout:       120 * time.Second,
+		}
 
 		go func() {
 			slog.Info("🖥️  LM Studio compat listener starting", "addr", lmAddr)

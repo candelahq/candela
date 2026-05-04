@@ -225,6 +225,8 @@ func (u *UserMsgResolver) fingerprint(info SessionInfo) (string, int) {
 	h := sha256.New()
 	h.Write([]byte(info.UserID))
 	h.Write([]byte{0}) // separator
+	h.Write([]byte(info.Model))
+	h.Write([]byte{0}) // separator
 	h.Write(contentBytes)
 
 	return hex.EncodeToString(h.Sum(nil)), len(msgs)

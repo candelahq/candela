@@ -79,7 +79,9 @@ func TestUserMsgResolver_SameConversationGrows(t *testing.T) {
 	}
 }
 
-func TestUserMsgResolver_ModelSwitchSameSession(t *testing.T) {
+func TestUserMsgResolver_ModelSwitchDifferentSession(t *testing.T) {
+	// After hardening v4, model is part of the fingerprint to prevent
+	// merging unrelated conversations across different models.
 	r := NewUserMsgResolver(30 * time.Minute)
 
 	msgs := makeMessages(
@@ -90,8 +92,8 @@ func TestUserMsgResolver_ModelSwitchSameSession(t *testing.T) {
 	id1 := r.Resolve(SessionInfo{UserID: "alice", Model: "gpt-4", Messages: msgs})
 	id2 := r.Resolve(SessionInfo{UserID: "alice", Model: "claude-3", Messages: msgs})
 
-	if id1 != id2 {
-		t.Errorf("model switch should not create new session, got %q and %q", id1, id2)
+	if id1 == id2 {
+		t.Errorf("different models should create different sessions, got same: %q", id1)
 	}
 }
 

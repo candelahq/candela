@@ -409,7 +409,7 @@ func main() {
 		})
 
 		lmAddr := fmt.Sprintf("%s:%d", cfg.Server.Host, lmPort)
-		lmSrv = &http.Server{Addr: lmAddr, Handler: lmMux}
+		lmSrv = &http.Server{Addr: lmAddr, Handler: lmMux, ReadHeaderTimeout: 10 * time.Second}
 
 		go func() {
 			slog.Info("🖥️  LM Studio compat listener starting", "addr", lmAddr)
@@ -571,7 +571,7 @@ func corsMiddleware(next http.Handler, origins []string) http.Handler {
 		}
 
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Accept, Authorization, Content-Type, Connect-Protocol-Version, Connect-Timeout-Ms")
+		w.Header().Set("Access-Control-Allow-Headers", "Accept, Authorization, Content-Type, Connect-Protocol-Version, Connect-Timeout-Ms, Traceparent, Tracestate, X-Request-ID, X-Session-Id")
 		w.Header().Set("Access-Control-Expose-Headers", "Connect-Content-Encoding")
 		w.Header().Set("Access-Control-Max-Age", "86400")
 

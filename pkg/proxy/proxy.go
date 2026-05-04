@@ -236,7 +236,13 @@ func (p *Proxy) RegisterCompatRoutes(mux *http.ServeMux, models []CompatModel) {
 		if !ok {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusBadRequest)
-			_, _ = fmt.Fprintf(w, `{"error":{"message":"unknown model: %s. Configure it in proxy.lmstudio.models","type":"invalid_request_error"}}`, req.Model)
+			errResp, _ := json.Marshal(map[string]interface{}{
+				"error": map[string]interface{}{
+					"message": fmt.Sprintf("unknown model: %s. Configure it in proxy.lmstudio.models", req.Model),
+					"type":    "invalid_request_error",
+				},
+			})
+			_, _ = w.Write(errResp)
 			return
 		}
 
@@ -297,7 +303,7 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 	// Generate or accept request ID.
 	requestID := r.Header.Get("X-Request-ID")
 	if requestID == "" {
-		requestID = generateSpanID() + generateSpanID() // 32-char hex
+		requestID = generateTraceID() // 32-char hex
 	}
 
 	// Accept session ID from candela-local (or other clients).
@@ -335,7 +341,7 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 
 	provider, ok := p.providers[providerName]
 	if !ok {
-		http.Error(w, fmt.Sprintf("unknown provider: %s", providerName), http.StatusBadRequest)
+		http.Error(w, "unknown provider", http.StatusBadRequest)
 		return
 	}
 
@@ -373,7 +379,12 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 	// Read the request body (capped at 10MB — returns 413 if exceeded).
 	reqBody, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 10<<20))
 	if err != nil {
-		http.Error(w, "failed to read request body", http.StatusBadRequest)
+		var maxErr *http.MaxBytesError
+		if errors.As(err, &maxErr) {
+			http.Error(w, "request body too large", http.StatusRequestEntityTooLarge)
+		} else {
+			http.Error(w, "failed to read request body", http.StatusBadRequest)
+		}
 		return
 	}
 	_ = r.Body.Close()

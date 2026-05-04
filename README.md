@@ -40,6 +40,7 @@ For deep observability into agent frameworks (**ADK**, **LangChain**, **CrewAI**
 - **📦 Single-Binary Edge-Ready**: In-process queuing and processing for low-overhead deployments.
 - **🔀 Fan-out Architecture**: CQRS-based design allows writing to multiple sinks simultaneously (e.g., DuckDB + Pub/Sub + OTLP export to Datadog/Tempo/Jaeger).
 - **🐳 Production Sidecar**: Minimal `candela-sidecar` binary (<5MB) for container environments — Pub/Sub + OTLP span export with ADC auth.
+- **🔗 W3C Trace Context**: Full `Traceparent` / `Tracestate` propagation for unified trace trees across ADK agents and LLM calls.
 
 ---
 
@@ -203,6 +204,24 @@ graph TD
     Processor -->|Write| DuckDB
     Processor -.->|Write| BQ
 ```
+
+### W3C Trace Context Integration
+
+Candela implements W3C Trace Context (via `Traceparent` / `Tracestate` headers) for end-to-end distributed tracing across agent frameworks:
+
+| Header | Direction | Description |
+|--------|-----------|-------------|
+| `Traceparent` | Client → Proxy → Upstream | Carries trace ID + parent span ID |
+| `Tracestate` | Client → Proxy → Upstream | Vendor-specific trace context |
+| `X-Request-ID` | Client ↔ Proxy | Request correlation (auto-generated if absent) |
+| `X-Session-Id` | Client → Proxy | Session grouping for conversations |
+
+When a caller (e.g., ADK agent) sends a `Traceparent` header, the proxy:
+1. Parses the incoming trace ID and parent span ID
+2. Creates a child span under that trace
+3. Forwards a new `Traceparent` to the upstream LLM with the proxy's span ID
+
+This produces a unified trace tree: `Agent Span → Proxy Span → LLM Call`.
 
 ### Storage Architecture (CQRS)
 
@@ -420,7 +439,12 @@ All features are accessible via **ConnectRPC** (`RuntimeService`) and the embedd
   - Budget enforcement with grant-first waterfall
   - `candela-local` auth-injecting proxy for developer machines
   - `candela-local` embedded runtime management UI (`/_local/`)
-- **Phase 5: Ecosystem & Polish** 📋 (Agent DAGs, Multi-region, Alerting, Google Workspace Sync)
+- **Phase 5: Hardening** ✅ (Security audit, input validation, CORS hardening, race condition fixes)
+  - 10 critical/high issues remediated (XSS, DoS, TOCTOU races)
+  - 25 new tests (18 unit + 7 integration) with race detector
+  - W3C Trace Context for unified ADK ↔ sidecar trace trees
+  - Fan-out sink isolation with per-sink timeouts
+- **Phase 6: Ecosystem & Polish** 📋 (Agent DAGs, Multi-region, Alerting, Google Workspace Sync)
 
 ---
 
@@ -444,10 +468,14 @@ candela/
 │   │   ├── bigquery/            # BigQuery driver (production scale)
 │   │   └── pubsub/              # Pub/Sub sink (write-only fan-out)
 │   ├── proxy/                   # LLM API reverse proxy
+│   │   └── ids.go               # W3C Trace Context propagation
 │   ├── costcalc/                # Token cost calculation engine
 │   ├── connecthandlers/         # ConnectRPC service handlers
 │   ├── runtime/                 # Local LLM runtime abstraction (Ollama, vLLM, LM Studio)
+│   ├── session/                 # Session resolution (header + fingerprint)
+│   ├── notify/                  # Budget threshold notifications
 │   └── ingestion/               # OTel span ingestion
+├── cmd/candela-sidecar/         # Production sidecar binary
 ├── terraform/                   # GCP infrastructure (OpenTofu/Terraform)
 │   ├── cloud_run.tf             # Cloud Run + IAP
 │   ├── bigquery.tf              # Spans storage
@@ -589,7 +617,7 @@ gcloud projects add-iam-policy-binding YOUR-PROJECT-ID \
 ```
 
 ### Getting Help
-- **GitHub Issues**: [Report bugs](https://github.delahq/candela/issues)
+- **GitHub Issues**: [Report bugs](https://github.com/candelahq/candela/issues)
 - **Documentation**: Check `docs/` directory for detailed guides
 - **Logs**: Run with `CANDELA_LOG_LEVEL=debug` for verbose output
 

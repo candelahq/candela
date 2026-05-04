@@ -85,10 +85,15 @@ func (p *SpanProcessor) Run(ctx context.Context) {
 		}
 
 		// Fan-out: write to all sinks independently.
+		// Clone the batch for each writer to prevent cross-sink mutation.
 		for _, w := range p.writers {
-			if err := w.IngestSpans(ctx, batch); err != nil {
-				slog.Error("failed to flush spans", "error", err, "count", len(batch))
+			sinkBatch := make([]storage.Span, len(batch))
+			copy(sinkBatch, batch)
+			sinkCtx, sinkCancel := context.WithTimeout(ctx, 30*time.Second)
+			if err := w.IngestSpans(sinkCtx, sinkBatch); err != nil {
+				slog.Error("failed to flush spans", "error", err, "count", len(sinkBatch))
 			}
+			sinkCancel()
 		}
 		slog.Debug("flushed spans to storage", "count", len(batch), "sinks", len(p.writers))
 		batch = batch[:0]

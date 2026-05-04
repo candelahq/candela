@@ -36,6 +36,7 @@ import (
 	"github.com/candelahq/candela/pkg/proxy"
 	"github.com/candelahq/candela/pkg/storage"
 	otlpexporter "github.com/candelahq/candela/pkg/storage/otlpexporter"
+	pubsubstore "github.com/candelahq/candela/pkg/storage/pubsub"
 )
 
 func main() {
@@ -76,7 +77,11 @@ func main() {
 			slog.Error("PUBSUB_TOPIC requires GCP_PROJECT")
 			os.Exit(1)
 		}
-		psWriter, err := NewPubSubWriter(context.Background(), gcpProject, pubsubTopic, spanFormat)
+		psWriter, err := pubsubstore.New(context.Background(), pubsubstore.Config{
+			ProjectID: gcpProject,
+			TopicID:   pubsubTopic,
+			Format:    spanFormat,
+		})
 		if err != nil {
 			slog.Error("failed to initialize Pub/Sub writer", "error", err)
 			os.Exit(1)

@@ -43,7 +43,7 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["json", "env-filter"] }
 
 # HTTP client (OTLP export, upstream proxying)
-reqwest = { version = "0.12", features = ["gzip", "json"] }
+reqwest = { version = "0.12", default-features = false, features = ["gzip", "json", "rustls-tls"] }
 
 # Utilities
 anyhow = "1"

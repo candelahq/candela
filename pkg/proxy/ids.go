@@ -17,7 +17,8 @@ func generateTraceID() string {
 	if _, err := rand.Read(b); err != nil {
 		// Fallback: time-based ID is not cryptographically random but
 		// keeps the server alive instead of panicking.
-		return fmt.Sprintf("%016x%016x", time.Now().UnixNano(), time.Now().UnixNano()^0xdeadbeef)
+		now := time.Now().UnixNano()
+		return fmt.Sprintf("%016x%016x", now, now^0xdeadbeef)
 	}
 	return hex.EncodeToString(b)
 }

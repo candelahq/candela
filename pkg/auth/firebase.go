@@ -38,6 +38,15 @@ type UserAuthorizer func(ctx context.Context, email string) error
 //
 // In dev mode (devMode=true), no validation is performed; a synthetic admin
 // user is injected instead.
+// selfServicePaths are ConnectRPC procedures that bypass the registration
+// gate. These allow auto-provisioning on first login (GetCurrentUser) and
+// self-service budget queries (GetMyBudget) without requiring admin
+// pre-provisioning. The handler itself is responsible for auth checks.
+var selfServicePaths = map[string]bool{
+	"/candela.v1.UserService/GetCurrentUser": true,
+	"/candela.v1.UserService/GetMyBudget":    true,
+}
+
 func FirebaseAuthMiddleware(next http.Handler, fbAuth *fbauth.Client, cloudRunAudience string, userAuth UserAuthorizer, devMode bool) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Skip auth for health checks.
@@ -45,6 +54,11 @@ func FirebaseAuthMiddleware(next http.Handler, fbAuth *fbauth.Client, cloudRunAu
 			next.ServeHTTP(w, r)
 			return
 		}
+
+		// Self-service RPCs bypass the registration gate so that
+		// auto-provisioning (GetCurrentUser) works for first-time users.
+		// Auth token is still validated — only the user-store lookup is skipped.
+		isSelfService := selfServicePaths[r.URL.Path]
 
 		if devMode {
 			// Dev mode: inject a synthetic admin user.
@@ -78,7 +92,7 @@ func FirebaseAuthMiddleware(next http.Handler, fbAuth *fbauth.Client, cloudRunAu
 					ID:    decoded.UID,
 					Email: strings.ToLower(email),
 				}
-				if !verifyRegistered(r.Context(), w, user, userAuth) {
+				if !isSelfService && !verifyRegistered(r.Context(), w, user, userAuth) {
 					return
 				}
 				slog.Debug("authenticated via Firebase",
@@ -115,7 +129,7 @@ func FirebaseAuthMiddleware(next http.Handler, fbAuth *fbauth.Client, cloudRunAu
 				if strings.HasSuffix(user.Email, ".gserviceaccount.com") {
 					slog.Info("service account authenticated — skipping registration check",
 						"email", user.Email, "path", r.URL.Path)
-				} else if !verifyRegistered(r.Context(), w, user, userAuth) {
+				} else if !isSelfService && !verifyRegistered(r.Context(), w, user, userAuth) {
 					return
 				}
 				slog.Debug("authenticated via Google ID token",
@@ -131,7 +145,7 @@ func FirebaseAuthMiddleware(next http.Handler, fbAuth *fbauth.Client, cloudRunAu
 		// Validates via Google's userinfo endpoint.
 		user, err := validateAccessToken(r.Context(), token)
 		if err == nil {
-			if !verifyRegistered(r.Context(), w, user, userAuth) {
+			if !isSelfService && !verifyRegistered(r.Context(), w, user, userAuth) {
 				return
 			}
 			slog.Debug("authenticated via OAuth2 access token",

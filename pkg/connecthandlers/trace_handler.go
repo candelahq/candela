@@ -103,6 +103,9 @@ func (h *TraceHandler) ListTraces(
 	if q.PageSize == 0 {
 		q.PageSize = 50
 	}
+	if q.PageSize > 500 {
+		q.PageSize = 500
+	}
 
 	result, err := h.store.QueryTraces(ctx, q)
 	if err != nil {
@@ -149,6 +152,12 @@ func (h *TraceHandler) SearchSpans(
 	if msg.Pagination != nil {
 		q.PageSize = int(msg.Pagination.PageSize)
 		q.PageToken = msg.Pagination.PageToken
+	}
+	if q.PageSize == 0 {
+		q.PageSize = 50
+	}
+	if q.PageSize > 500 {
+		q.PageSize = 500
 	}
 
 	result, err := h.store.SearchSpans(ctx, q)

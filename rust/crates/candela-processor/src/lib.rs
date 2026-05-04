@@ -136,10 +136,14 @@ async fn flush(batch: &mut Vec<Span>, writers: &[Arc<dyn SpanWriter>], calc: &Co
     }
 
     // Fan-out to all sinks in parallel.
+    // Use Arc<[Span]> to share the batch across tasks without cloning —
+    // avoids expensive allocations when spans contain large content strings.
+    let count = batch.len();
+    let shared_spans: Arc<[Span]> = Arc::from(std::mem::take(batch).into_boxed_slice());
     let mut handles = Vec::with_capacity(writers.len());
     for writer in writers {
-        let spans = batch.clone();
-        let writer = writer.clone();
+        let spans = Arc::clone(&shared_spans);
+        let writer = Arc::clone(writer);
         handles.push(tokio::spawn(async move {
             if let Err(e) = writer.ingest_spans(&spans).await {
                 error!(error = %e, count = spans.len(), "failed to flush spans");
@@ -151,9 +155,8 @@ async fn flush(batch: &mut Vec<Span>, writers: &[Arc<dyn SpanWriter>], calc: &Co
     }
 
     debug!(
-        count = batch.len(),
+        count = count,
         sinks = writers.len(),
         "flushed spans to storage"
     );
-    batch.clear();
 }

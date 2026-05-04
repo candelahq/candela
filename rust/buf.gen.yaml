@@ -12,7 +12,5 @@ plugins:
   # Prost-serde — JSON serialization for proto types
   - remote: buf.build/community/neoeinstein-prost-serde:v0.4.0
     out: gen/src
-    opt:
-      - compile_well_known_types
 inputs:
   - module: buf.build/candelahq/protos:v0.2.1

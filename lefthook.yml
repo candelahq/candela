@@ -46,10 +46,10 @@ pre-commit:
     # ── Rust ──
     cargo-fmt:
       glob: "*.rs"
-      run: cargo fmt --manifest-path rust/Cargo.toml -- --check
+      run: cd rust && cargo fmt --check
     cargo-clippy:
       glob: "*.{rs,toml}"
-      run: cargo clippy --manifest-path rust/Cargo.toml --workspace -- -D warnings
+      run: cd rust && cargo clippy --workspace -- -D warnings
     cargo-test:
       glob: "*.rs"
-      run: cargo test --manifest-path rust/Cargo.toml --workspace --quiet
+      run: cd rust && cargo test --workspace --quiet

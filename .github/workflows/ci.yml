@@ -122,14 +122,14 @@ jobs:
         run: nix develop -c bash -c "cd rust && buf generate"
 
       - name: Format check
-        run: nix develop -c cargo fmt --manifest-path rust/Cargo.toml -- --check
+        run: nix develop -c bash -c "cd rust && cargo fmt --check"
 
       - name: Clippy
-        run: nix develop -c cargo clippy --manifest-path rust/Cargo.toml --workspace -- -D warnings
+        run: nix develop -c bash -c "cd rust && cargo clippy --workspace -- -D warnings"
 
       - name: Test
-        run: nix develop -c cargo test --manifest-path rust/Cargo.toml --workspace
+        run: nix develop -c bash -c "cd rust && cargo test --workspace"
 
       - name: License & vulnerability audit
         continue-on-error: true  # Advisory until deny.toml is configured
-        run: nix develop -c cargo deny --manifest-path rust/Cargo.toml check
+        run: nix develop -c bash -c "cd rust && cargo deny check"

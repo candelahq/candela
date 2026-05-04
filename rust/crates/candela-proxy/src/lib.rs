@@ -12,11 +12,9 @@ pub mod translate;
 
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::Duration;
 
 use candela_core::Span;
 use tokio::sync::RwLock;
-use tracing::{info, warn};
 
 /// Handles request/response format translation between client format
 /// (e.g. OpenAI Chat Completions) and upstream provider format.
@@ -62,6 +60,7 @@ pub struct Config {
 ///
 /// Routes requests to configured providers, captures request/response data,
 /// and generates spans for the processing pipeline.
+#[allow(dead_code)] // Fields used in Phase 1 implementation
 pub struct Proxy {
     providers: HashMap<String, Provider>,
     project_id: String,

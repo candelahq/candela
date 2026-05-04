@@ -131,11 +131,13 @@ pub trait SpanWriter: Send + Sync {
     fn ingest_spans(
         &self,
         spans: &[Span],
-    ) -> impl std::future::Future<Output = anyhow::Result<()>> + Send;
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = anyhow::Result<()>> + Send + '_>>;
 
     /// Flush any pending writes and release resources.
-    fn close(&self) -> impl std::future::Future<Output = anyhow::Result<()>> + Send {
-        async { Ok(()) }
+    fn close(
+        &self,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = anyhow::Result<()>> + Send + '_>> {
+        Box::pin(async { Ok(()) })
     }
 }
 

@@ -43,6 +43,12 @@ async fn main() -> anyhow::Result<()> {
     let _vertex_region = env_or("VERTEX_REGION", "us-central1");
     let _project_id = env_or("CANDELA_PROJECT_ID", &_gcp_project);
 
+    if _project_id.is_empty() {
+        tracing::warn!(
+            "CANDELA_PROJECT_ID and GCP_PROJECT are both unset — spans will have an empty project_id"
+        );
+    }
+
     info!(
         port = %port,
         gcp_project = %_gcp_project,

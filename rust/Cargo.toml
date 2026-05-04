@@ -12,7 +12,7 @@ members = [
 version = "0.1.0"
 edition = "2024"
 license = "Apache-2.0"
-repository = "https://github.com/candelahq/candela-rs"
+repository = "https://github.com/candelahq/candela"
 
 [workspace.dependencies]
 # Async runtime
@@ -31,8 +31,8 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
 # Proto (buf-generated prost types)
-prost = "0.13"
-prost-types = "0.13"
+prost = "0.14"
+prost-types = "0.14"
 
 # GCP (first-party official crates)
 google-cloud-pubsub = "0.10"

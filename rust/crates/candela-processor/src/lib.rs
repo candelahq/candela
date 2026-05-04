@@ -8,8 +8,8 @@
 
 pub mod cost;
 
-use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicI64, Ordering};
 use std::time::Duration;
 
 use candela_core::{Span, SpanWriter};
@@ -30,11 +30,7 @@ impl SpanProcessor {
     /// Create a new span processor.
     ///
     /// All provided writers receive every batch on flush.
-    pub fn new(
-        writers: Vec<Arc<dyn SpanWriter>>,
-        calc: CostCalculator,
-        batch_size: usize,
-    ) -> Self {
+    pub fn new(writers: Vec<Arc<dyn SpanWriter>>, calc: CostCalculator, batch_size: usize) -> Self {
         let batch_size = if batch_size == 0 { 100 } else { batch_size };
         let (tx, rx) = mpsc::channel(batch_size * 10);
         let dropped = Arc::new(AtomicI64::new(0));
@@ -55,7 +51,10 @@ impl SpanProcessor {
     pub fn submit(&self, span: Span) {
         if self.tx.try_send(span).is_err() {
             let dropped = self.dropped_spans.fetch_add(1, Ordering::Relaxed) + 1;
-            warn!(total_dropped = dropped, "span processor buffer full, dropping span");
+            warn!(
+                total_dropped = dropped,
+                "span processor buffer full, dropping span"
+            );
         }
     }
 
@@ -108,36 +107,44 @@ async fn run_loop(
     }
 }
 
-async fn flush(
-    batch: &mut Vec<Span>,
-    writers: &[Arc<dyn SpanWriter>],
-    calc: &CostCalculator,
-) {
+async fn flush(batch: &mut Vec<Span>, writers: &[Arc<dyn SpanWriter>], calc: &CostCalculator) {
     if batch.is_empty() {
         return;
     }
 
     // Enrich with cost data.
     for span in batch.iter_mut() {
-        if let Some(ref mut gen_ai) = span.gen_ai {
-            if gen_ai.cost_usd == 0.0 {
-                gen_ai.cost_usd = calc.calculate(
-                    &gen_ai.provider,
-                    &gen_ai.model,
-                    gen_ai.input_tokens,
-                    gen_ai.output_tokens,
-                );
-            }
+        if let Some(ref mut gen_ai) = span.gen_ai
+            && gen_ai.cost_usd == 0.0
+        {
+            gen_ai.cost_usd = calc.calculate(
+                &gen_ai.provider,
+                &gen_ai.model,
+                gen_ai.input_tokens,
+                gen_ai.output_tokens,
+            );
         }
     }
 
-    // Fan-out to all sinks.
+    // Fan-out to all sinks in parallel.
+    let mut handles = Vec::with_capacity(writers.len());
     for writer in writers {
-        if let Err(e) = writer.ingest_spans(batch).await {
-            error!(error = %e, count = batch.len(), "failed to flush spans");
-        }
+        let spans = batch.clone();
+        let writer = writer.clone();
+        handles.push(tokio::spawn(async move {
+            if let Err(e) = writer.ingest_spans(&spans).await {
+                error!(error = %e, count = spans.len(), "failed to flush spans");
+            }
+        }));
+    }
+    for handle in handles {
+        let _ = handle.await;
     }
 
-    debug!(count = batch.len(), sinks = writers.len(), "flushed spans to storage");
+    debug!(
+        count = batch.len(),
+        sinks = writers.len(),
+        "flushed spans to storage"
+    );
     batch.clear();
 }

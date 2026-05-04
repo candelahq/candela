@@ -50,6 +50,12 @@ func (m *mutatingWriter) IngestSpans(_ context.Context, spans []storage.Span) er
 	for i := range spans {
 		spans[i].Name = "MUTATED"
 		spans[i].ProjectID = "MUTATED"
+		if spans[i].GenAI != nil {
+			spans[i].GenAI.Model = "MUTATED"
+		}
+		if spans[i].Attributes != nil {
+			spans[i].Attributes["injected"] = "true"
+		}
 	}
 	return nil
 }
@@ -83,7 +89,7 @@ func TestFanout_SinkIsolation(t *testing.T) {
 }
 
 // TestFanout_SliceMutationSafety verifies that a writer mutating its batch
-// doesn't affect other writers (batch isolation via copy).
+// (including GenAI pointer and Attributes map) doesn't affect other writers.
 func TestFanout_SliceMutationSafety(t *testing.T) {
 	mutator := &mutatingWriter{}
 	clean := &mockWriter{}
@@ -97,6 +103,7 @@ func TestFanout_SliceMutationSafety(t *testing.T) {
 	span := testSpan("mutation-test")
 	span.Name = "original"
 	span.ProjectID = "proj-original"
+	span.Attributes = map[string]string{"key": "value"}
 	proc.Submit(span)
 	proc.Submit(testSpan("mutation-test-2"))
 
@@ -113,6 +120,12 @@ func TestFanout_SliceMutationSafety(t *testing.T) {
 	for _, s := range cleanSpans {
 		if s.Name == "MUTATED" || s.ProjectID == "MUTATED" {
 			t.Errorf("clean writer received mutated span: name=%q project=%q", s.Name, s.ProjectID)
+		}
+		if s.GenAI != nil && s.GenAI.Model == "MUTATED" {
+			t.Error("clean writer received mutated GenAI.Model — deep copy failed")
+		}
+		if s.Attributes != nil && s.Attributes["injected"] == "true" {
+			t.Error("clean writer received injected attribute — deep copy failed")
 		}
 	}
 }

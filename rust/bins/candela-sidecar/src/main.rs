@@ -145,10 +145,11 @@ mod tests {
 
     #[test]
     fn env_or_returns_env_when_set() {
-        // SAFETY: This test runs single-threaded; no other threads read this var.
-        unsafe { env::set_var("CANDELA_TEST_ENV_OR", "custom_value") };
-        let result = env_or("CANDELA_TEST_ENV_OR", "fallback");
-        assert_eq!(result, "custom_value");
-        unsafe { env::remove_var("CANDELA_TEST_ENV_OR") };
+        // Test env_or logic without mutating global state:
+        // env::var succeeds → env_or returns its value (not the default).
+        // We rely on PATH always being set on all platforms.
+        let result = env_or("PATH", "fallback");
+        assert_ne!(result, "fallback");
+        assert!(!result.is_empty());
     }
 }

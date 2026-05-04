@@ -79,9 +79,10 @@ func (c *BudgetChecker) CheckAndNotify(ctx context.Context, userID, email, perio
 		return
 	}
 
-	// Hold a single lock for the entire check-and-notify cycle to prevent
-	// TOCTOU race: without this, another goroutine could fire a duplicate
-	// notification between the period-rollover reset and the threshold check.
+	// Collect alerts under the lock, then send after releasing.
+	// This avoids the previous unlock-in-loop / re-lock pattern.
+	var alerts []storage.BudgetAlert
+
 	c.mu.Lock()
 	if c.currentPeriod != periodKey {
 		c.sent = make(map[string]bool)
@@ -99,7 +100,7 @@ func (c *BudgetChecker) CheckAndNotify(ctx context.Context, userID, email, perio
 		}
 		c.sent[key] = true
 
-		alert := storage.BudgetAlert{
+		alerts = append(alerts, storage.BudgetAlert{
 			UserID:    userID,
 			Email:     email,
 			Threshold: threshold,
@@ -107,22 +108,21 @@ func (c *BudgetChecker) CheckAndNotify(ctx context.Context, userID, email, perio
 			LimitUSD:  result.LimitUSD,
 			PeriodKey: periodKey,
 			SentAt:    time.Now().UTC(),
-		}
+		})
+	}
+	c.mu.Unlock()
 
-		// Release lock before calling external notifiers to avoid holding
-		// the lock during I/O. Mark as sent first to prevent duplicates.
-		c.mu.Unlock()
+	// Send notifications outside the lock — no I/O while holding mu.
+	for _, alert := range alerts {
 		for _, ch := range c.channels {
 			if err := ch.NotifyBudgetThreshold(ctx, alert); err != nil {
 				slog.Error("failed to send budget notification",
 					"channel", fmt.Sprintf("%T", ch),
 					"user_id", userID,
-					"threshold", threshold,
+					"threshold", alert.Threshold,
 					"error", err,
 				)
 			}
 		}
-		c.mu.Lock()
 	}
-	c.mu.Unlock()
 }

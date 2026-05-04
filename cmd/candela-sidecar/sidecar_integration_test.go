@@ -1,6 +1,7 @@
 package main
 
 import (
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -41,6 +42,11 @@ func TestSidecar_HealthAndReadiness(t *testing.T) {
 
 			if resp.StatusCode != http.StatusOK {
 				t.Errorf("status = %d, want 200", resp.StatusCode)
+			}
+
+			body, _ := io.ReadAll(resp.Body)
+			if !strings.Contains(string(body), tc.expect) {
+				t.Errorf("body %q does not contain %q", body, tc.expect)
 			}
 		})
 	}

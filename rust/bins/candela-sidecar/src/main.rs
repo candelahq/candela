@@ -23,7 +23,7 @@ use std::env;
 
 use axum::{Router, routing::get};
 use tokio::net::TcpListener;
-use tower_http::cors::CorsLayer;
+use tower_http::cors::{AllowOrigin, CorsLayer};
 use tracing::info;
 
 #[tokio::main]
@@ -49,11 +49,41 @@ async fn main() -> anyhow::Result<()> {
         );
     }
 
+    // ── CORS configuration ──
+    // Parse CORS_ORIGINS env var into allowed origins.
+    // Default "*" is permissive; production should set explicit origins.
+    let cors_origins = env_or("CORS_ORIGINS", "*");
+    let cors_layer = if cors_origins == "*" {
+        CorsLayer::permissive()
+    } else {
+        let origins: Vec<_> = cors_origins
+            .split(',')
+            .filter_map(|s| {
+                let trimmed = s.trim();
+                if trimmed.is_empty() {
+                    None
+                } else {
+                    trimmed.parse().ok()
+                }
+            })
+            .collect();
+        if origins.is_empty() {
+            tracing::warn!("CORS_ORIGINS contained no valid origins, falling back to permissive");
+            CorsLayer::permissive()
+        } else {
+            CorsLayer::new()
+                .allow_origin(AllowOrigin::list(origins))
+                .allow_methods(tower_http::cors::Any)
+                .allow_headers(tower_http::cors::Any)
+        }
+    };
+
     info!(
         port = %port,
         gcp_project = %_gcp_project,
         vertex_region = %_vertex_region,
         project_id = %_project_id,
+        cors_origins = %cors_origins,
         "🕯️ candela-sidecar starting"
     );
 
@@ -65,7 +95,7 @@ async fn main() -> anyhow::Result<()> {
     let app = Router::new()
         .route("/healthz", get(healthz))
         .route("/readyz", get(readyz))
-        .layer(CorsLayer::permissive());
+        .layer(cors_layer);
 
     let addr = format!("0.0.0.0:{port}");
     let listener = TcpListener::bind(&addr).await?;
@@ -91,12 +121,34 @@ async fn readyz() -> axum::Json<serde_json::Value> {
 }
 
 async fn shutdown_signal() {
-    tokio::signal::ctrl_c()
-        .await
-        .expect("failed to listen for ctrl+c");
-    info!("shutting down...");
+    match tokio::signal::ctrl_c().await {
+        Ok(()) => info!("shutting down..."),
+        Err(e) => tracing::error!(error = %e, "failed to listen for ctrl+c, shutting down anyway"),
+    }
 }
 
 fn env_or(key: &str, default: &str) -> String {
     env::var(key).unwrap_or_else(|_| default.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // U-15: env_or returns default when env var is unset.
+    #[test]
+    fn env_or_returns_default_when_unset() {
+        // Use a key that definitely doesn't exist.
+        let result = env_or("CANDELA_TEST_NONEXISTENT_VAR_12345", "fallback");
+        assert_eq!(result, "fallback");
+    }
+
+    #[test]
+    fn env_or_returns_env_when_set() {
+        // SAFETY: This test runs single-threaded; no other threads read this var.
+        unsafe { env::set_var("CANDELA_TEST_ENV_OR", "custom_value") };
+        let result = env_or("CANDELA_TEST_ENV_OR", "fallback");
+        assert_eq!(result, "custom_value");
+        unsafe { env::remove_var("CANDELA_TEST_ENV_OR") };
+    }
 }

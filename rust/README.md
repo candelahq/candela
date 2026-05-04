@@ -2,7 +2,7 @@
 
 Rust implementation of the [Candela](https://github.com/candelahq/candela) LLM observability platform, colocated with the Go codebase for unified development and star accumulation.
 
-> **Status**: Phase 0 — workspace scaffold. See the [Rust Rewrite milestone](https://github.com/candelahq/candela/milestone/1) and [project board](https://github.com/orgs/candelahq/projects/2) for tracking.
+> **Status**: Phase 1 — core types, processor, proxy, and sidecar scaffold are implemented with **38+ tests** (unit + integration). See the [Rust Rewrite milestone](https://github.com/candelahq/candela/milestone/1) for tracking.
 
 ## Workspace
 

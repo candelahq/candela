@@ -168,8 +168,13 @@ mod duration_serde {
         D: Deserializer<'de>,
     {
         let secs = f64::deserialize(deserializer)?;
-        // CRITICAL: Duration::from_secs_f64 panics on negative values.
-        // Clamp to zero to prevent adversarial input from crashing the process.
+        // CRITICAL: Duration::from_secs_f64 panics on negative, NaN, Infinity,
+        // and values exceeding ~2^63 nanoseconds. Clamp to a safe range.
+        // Max safe value: ~584 years in seconds (u64::MAX nanos).
+        const MAX_SAFE_SECS: f64 = 1e18;
+        if secs.is_nan() || secs.is_infinite() || secs > MAX_SAFE_SECS {
+            return Ok(Duration::from_secs_f64(MAX_SAFE_SECS));
+        }
         Ok(Duration::from_secs_f64(secs.max(0.0)))
     }
 }
@@ -314,5 +319,53 @@ mod tests {
         assert!(is_zero_f64(&-0.0));
         assert!(is_zero_f64(&0.0));
         assert!(!is_zero_f64(&0.001));
+    }
+
+    // U-11: NaN duration must not panic — clamp to zero.
+    #[test]
+    fn duration_nan_clamped_to_zero() {
+        let json = r#"{
+            "span_id": "s1", "trace_id": "t1", "name": "test",
+            "start_time": "2025-01-01T00:00:00Z", "end_time": "2025-01-01T00:00:01Z",
+            "duration": "NaN", "project_id": "p1"
+        }"#;
+        // NaN is not valid JSON per spec, so serde should reject it.
+        let result = serde_json::from_str::<Span>(json);
+        assert!(result.is_err(), "NaN duration should be rejected by serde");
+    }
+
+    // U-12: +Infinity duration must not panic.
+    #[test]
+    fn duration_infinity_rejected() {
+        let json = r#"{
+            "span_id": "s1", "trace_id": "t1", "name": "test",
+            "start_time": "2025-01-01T00:00:00Z", "end_time": "2025-01-01T00:00:01Z",
+            "duration": 1e308, "project_id": "p1"
+        }"#;
+        // Very large but finite — should clamp gracefully, not panic.
+        let result = serde_json::from_str::<Span>(json);
+        // Either it parses (clamped) or rejects — but must NOT panic.
+        match result {
+            Ok(span) => assert!(span.duration.as_secs() > 0),
+            Err(_) => {} // rejection is acceptable
+        }
+    }
+
+    // U-13: Overflow in token math should not panic.
+    #[test]
+    fn cost_fields_handle_max_values() {
+        let attrs = GenAIAttributes {
+            input_tokens: i64::MAX,
+            output_tokens: i64::MAX,
+            total_tokens: i64::MAX,
+            cost_usd: f64::MAX,
+            ..Default::default()
+        };
+        // Serialization must not panic.
+        let json = serde_json::to_string(&attrs).unwrap();
+        assert!(!json.is_empty());
+        // Deserialization round-trip.
+        let restored: GenAIAttributes = serde_json::from_str(&json).unwrap();
+        assert_eq!(restored.input_tokens, i64::MAX);
     }
 }

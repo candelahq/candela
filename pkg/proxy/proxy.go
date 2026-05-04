@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"regexp"
 	"strings"
 	"time"
 
@@ -297,12 +298,18 @@ func buildModelsResponse(models []CompatModel) []byte {
 	return b
 }
 
+// requestIDPattern validates that a request ID contains only safe characters
+// (alphanumeric, hyphens) and is between 1-128 chars.
+// This prevents log injection and trace poisoning via crafted X-Request-ID headers.
+var requestIDPattern = regexp.MustCompile(`^[a-zA-Z0-9\-]{1,128}$`)
+
 func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 	startTime := time.Now()
 
 	// Generate or accept request ID.
+	// CRITICAL: Validate to prevent log/trace injection.
 	requestID := r.Header.Get("X-Request-ID")
-	if requestID == "" {
+	if requestID == "" || !requestIDPattern.MatchString(requestID) {
 		requestID = generateTraceID() // 32-char hex
 	}
 
@@ -465,7 +472,9 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 	// Execute the upstream request.
 	resp, err := p.client.Do(upstreamReq)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("upstream error: %v", err), http.StatusBadGateway)
+		// CRITICAL: Don't leak internal URLs/DNS/network info to the client.
+		slog.Error("upstream request failed", "provider", providerName, "error", err)
+		http.Error(w, `{"error":{"message":"upstream provider unavailable","type":"upstream_error"}}`, http.StatusBadGateway)
 		p.recordCircuitBreaker(providerName, true)
 		return
 	}
@@ -741,37 +750,35 @@ func (p *Proxy) buildSpan(ctx context.Context, params spanParams) {
 		p.submitter.SubmitBatch([]storage.Span{span})
 	}
 
-	// Async budget deduction and notification.
+	// Budget deduction — SYNCHRONOUS to prevent billing bypass on crash.
+	// Notification is non-critical and remains async.
 	// Skip for service accounts — they have no budget entries.
 	isSA := strings.HasSuffix(span.UserID, ".gserviceaccount.com")
 	if p.users != nil && span.UserID != "" && !isSA && span.GenAI != nil && span.GenAI.CostUSD > 0 {
-		go func() {
-			ctx := context.Background()
-			if err := p.users.DeductSpend(ctx, span.UserID, span.GenAI.CostUSD, span.GenAI.TotalTokens); err != nil {
-				slog.Error("failed to deduct spend",
-					"user_id", span.UserID,
-					"cost_usd", span.GenAI.CostUSD,
-					"error", err)
-				return
-			}
-
-			// Check budget thresholds and notify if needed.
-			if p.budgetCk != nil {
-				budget, err := p.users.GetBudget(ctx, span.UserID)
+		if err := p.users.DeductSpend(ctx, span.UserID, span.GenAI.CostUSD, span.GenAI.TotalTokens); err != nil {
+			slog.Error("failed to deduct spend",
+				"user_id", span.UserID,
+				"cost_usd", span.GenAI.CostUSD,
+				"error", err)
+		} else if p.budgetCk != nil {
+			// Async: threshold notification is best-effort.
+			go func() {
+				bgCtx := context.Background()
+				budget, err := p.users.GetBudget(bgCtx, span.UserID)
 				if err == nil && budget != nil && budget.LimitUSD > 0 {
 					var email string
-					user, uerr := p.users.GetUser(ctx, span.UserID)
+					user, uerr := p.users.GetUser(bgCtx, span.UserID)
 					if uerr == nil {
 						email = user.Email
 					}
-					p.budgetCk.CheckAndNotify(ctx, span.UserID, email, budget.PeriodKey,
+					p.budgetCk.CheckAndNotify(bgCtx, span.UserID, email, budget.PeriodKey,
 						notify.DeductResult{
 							SpentUSD: budget.SpentUSD,
 							LimitUSD: budget.LimitUSD,
 						})
 				}
-			}
-		}()
+			}()
+		}
 	}
 
 	slog.Debug("proxied LLM call",

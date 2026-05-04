@@ -130,4 +130,29 @@ mod tests {
         cb.record_failure();
         assert_eq!(cb.state(), State::Open);
     }
+
+    // U-14: Default config creates a working circuit breaker.
+    #[test]
+    fn default_config_creates_working_breaker() {
+        let mut cb = CircuitBreaker::new(5, Duration::from_secs(30));
+        assert_eq!(cb.state(), State::Closed);
+        assert!(cb.is_allowed());
+
+        // 4 failures — should still be closed.
+        for _ in 0..4 {
+            cb.record_failure();
+        }
+        assert!(cb.is_allowed());
+
+        // 5th failure trips it.
+        cb.record_failure();
+        assert_eq!(cb.state(), State::Open);
+        assert!(!cb.is_allowed());
+
+        // Success resets.
+        cb.state = State::HalfOpen;
+        cb.record_success();
+        assert_eq!(cb.state(), State::Closed);
+        assert!(cb.is_allowed());
+    }
 }

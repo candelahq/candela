@@ -440,10 +440,11 @@ All features are accessible via **ConnectRPC** (`RuntimeService`) and the embedd
   - `candela-local` auth-injecting proxy for developer machines
   - `candela-local` embedded runtime management UI (`/_local/`)
 - **Phase 5: Hardening** ✅ (Security audit, input validation, CORS hardening, race condition fixes)
-  - 10 critical/high issues remediated (XSS, DoS, TOCTOU races)
-  - 25 new tests (18 unit + 7 integration) with race detector
+  - 16 critical/high issues remediated across Go and Rust (XSS, DoS, billing bypass, info leak)
+  - 47 new tests (25 unit + 9 integration + 13 Rust) with race detector
   - W3C Trace Context for unified ADK ↔ sidecar trace trees
   - Fan-out sink isolation with per-sink timeouts
+  - Rust sidecar CORS enforcement from env config
 - **Phase 6: Ecosystem & Polish** 📋 (Agent DAGs, Multi-region, Alerting, Google Workspace Sync)
 
 ---
@@ -491,6 +492,12 @@ candela/
 │   ├── e2e/                     # Playwright E2E tests (app + admin)
 │   └── playwright.config.ts     # Playwright config
 ├── .github/workflows/ci.yml    # CI pipeline (Go + UI + Playwright)
+├── rust/                          # Rust workspace (incremental rewrite)
+│   ├── crates/candela-core/       # Domain types, SpanWriter trait
+│   ├── crates/candela-proxy/      # LLM reverse proxy engine
+│   ├── crates/candela-processor/  # Batched span processor + cost calc
+│   ├── crates/candela-storage/    # Pub/Sub + OTLP sinks (WIP)
+│   └── bins/candela-sidecar/      # Production sidecar binary
 └── config.yaml                  # Server configuration
 ```
 

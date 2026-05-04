@@ -3,15 +3,21 @@ package proxy
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"fmt"
 	"regexp"
 	"strings"
+	"time"
 )
 
 // generateTraceID returns a random 32-char hex trace ID (16 bytes).
+// Falls back to a time-based ID if crypto/rand fails (should never happen
+// in practice, but avoids crashing the entire production server).
 func generateTraceID() string {
 	b := make([]byte, 16)
 	if _, err := rand.Read(b); err != nil {
-		panic("crypto/rand failed: " + err.Error())
+		// Fallback: time-based ID is not cryptographically random but
+		// keeps the server alive instead of panicking.
+		return fmt.Sprintf("%016x%016x", time.Now().UnixNano(), time.Now().UnixNano()^0xdeadbeef)
 	}
 	return hex.EncodeToString(b)
 }
@@ -20,7 +26,7 @@ func generateTraceID() string {
 func generateSpanID() string {
 	b := make([]byte, 8)
 	if _, err := rand.Read(b); err != nil {
-		panic("crypto/rand failed: " + err.Error())
+		return fmt.Sprintf("%016x", time.Now().UnixNano())
 	}
 	return hex.EncodeToString(b)
 }

@@ -171,3 +171,119 @@ async fn processor_fan_out_to_multiple_writers() {
     assert_eq!(writer_a.total_spans().await, 2);
     assert_eq!(writer_b.total_spans().await, 2);
 }
+
+// I-6: Batch cost enrichment across multiple models.
+#[tokio::test]
+async fn processor_batch_cost_enrichment_mixed_models() {
+    let writer = Arc::new(MockWriter::new());
+    let proc = SpanProcessor::new(vec![writer.clone()], CostCalculator::new(), 10);
+
+    // Submit spans with different models in a single batch.
+    proc.submit(make_test_span_with_gen_ai("gpt4_call", "gpt-4o"));
+    proc.submit(make_test_span_with_gen_ai(
+        "claude_call",
+        "claude-sonnet-4-20250514",
+    ));
+    proc.submit(make_test_span("no_genai")); // no gen_ai, should pass through unchanged
+
+    proc.shutdown().await;
+
+    let batches = writer.ingested.lock().await;
+    let all_spans: Vec<&Span> = batches.iter().flat_map(|b| b.iter()).collect();
+    assert_eq!(all_spans.len(), 3);
+
+    // GPT-4o span should have cost enrichment.
+    let gpt4_span = all_spans.iter().find(|s| s.name == "gpt4_call").unwrap();
+    let gpt4_cost = gpt4_span.gen_ai.as_ref().unwrap().cost_usd;
+    assert!(
+        gpt4_cost > 0.0,
+        "gpt-4o span should have cost > 0, got {gpt4_cost}"
+    );
+
+    // Claude span should have cost enrichment (may be 0 if not in calculator, that's ok).
+    let claude_span = all_spans.iter().find(|s| s.name == "claude_call").unwrap();
+    assert!(
+        claude_span.gen_ai.is_some(),
+        "claude span should have gen_ai"
+    );
+
+    // Non-GenAI span should be unchanged.
+    let plain_span = all_spans.iter().find(|s| s.name == "no_genai").unwrap();
+    assert!(
+        plain_span.gen_ai.is_none(),
+        "plain span should have no gen_ai"
+    );
+}
+
+// I-7: Graceful drain ensures all writers complete before shutdown returns.
+#[tokio::test]
+async fn processor_graceful_drain_on_shutdown() {
+    /// A slow writer that simulates latency.
+    struct SlowWriter {
+        ingested: Mutex<Vec<Vec<Span>>>,
+        close_called: AtomicUsize,
+    }
+
+    impl SlowWriter {
+        fn new() -> Self {
+            Self {
+                ingested: Mutex::new(Vec::new()),
+                close_called: AtomicUsize::new(0),
+            }
+        }
+    }
+
+    impl SpanWriter for SlowWriter {
+        fn ingest_spans(
+            &self,
+            spans: &[Span],
+        ) -> std::pin::Pin<Box<dyn std::future::Future<Output = anyhow::Result<()>> + Send + '_>>
+        {
+            let spans_owned: Vec<Span> = spans.to_vec();
+            Box::pin(async move {
+                // Simulate slow write.
+                tokio::time::sleep(Duration::from_millis(50)).await;
+                self.ingested.lock().await.push(spans_owned);
+                Ok(())
+            })
+        }
+
+        fn close(
+            &self,
+        ) -> std::pin::Pin<Box<dyn std::future::Future<Output = anyhow::Result<()>> + Send + '_>>
+        {
+            Box::pin(async move {
+                self.close_called.fetch_add(1, Ordering::SeqCst);
+                Ok(())
+            })
+        }
+    }
+
+    let slow_writer = Arc::new(SlowWriter::new());
+    let proc = SpanProcessor::new(
+        vec![slow_writer.clone() as Arc<dyn SpanWriter>],
+        CostCalculator::new(),
+        100,
+    );
+
+    // Submit spans.
+    for i in 0..5 {
+        proc.submit(make_test_span(&format!("drain_{i}")));
+    }
+
+    // Shutdown should wait for all pending writes to complete.
+    proc.shutdown().await;
+
+    // Verify all spans were flushed despite the slow writer.
+    let total: usize = slow_writer
+        .ingested
+        .lock()
+        .await
+        .iter()
+        .map(|b| b.len())
+        .sum();
+    assert_eq!(
+        total, 5,
+        "all 5 spans should be drained on shutdown, got {total}"
+    );
+}

@@ -84,12 +84,38 @@ func (p *SpanProcessor) Run(ctx context.Context) {
 			}
 		}
 
-		// Fan-out: write to all sinks independently.
+		// Fan-out: write to all sinks independently and in parallel.
+		// Deep-clone each span's reference types to prevent cross-sink mutation.
+		var wg sync.WaitGroup
 		for _, w := range p.writers {
-			if err := w.IngestSpans(ctx, batch); err != nil {
-				slog.Error("failed to flush spans", "error", err, "count", len(batch))
+			sinkBatch := make([]storage.Span, len(batch))
+			for i, s := range batch {
+				sinkBatch[i] = s
+				// Deep-copy the GenAI pointer.
+				if s.GenAI != nil {
+					cp := *s.GenAI
+					sinkBatch[i].GenAI = &cp
+				}
+				// Deep-copy the Attributes map.
+				if s.Attributes != nil {
+					attrs := make(map[string]string, len(s.Attributes))
+					for k, v := range s.Attributes {
+						attrs[k] = v
+					}
+					sinkBatch[i].Attributes = attrs
+				}
 			}
+			wg.Add(1)
+			go func(w storage.SpanWriter, batch []storage.Span) {
+				defer wg.Done()
+				sinkCtx, sinkCancel := context.WithTimeout(ctx, 30*time.Second)
+				defer sinkCancel()
+				if err := w.IngestSpans(sinkCtx, batch); err != nil {
+					slog.Error("failed to flush spans", "error", err, "count", len(batch))
+				}
+			}(w, sinkBatch)
 		}
+		wg.Wait()
 		slog.Debug("flushed spans to storage", "count", len(batch), "sinks", len(p.writers))
 		batch = batch[:0]
 	}

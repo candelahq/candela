@@ -1,0 +1,23 @@
+[package]
+name = "candela-sidecar"
+description = "Minimal production LLM proxy for container environments"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "candela-sidecar"
+path = "src/main.rs"
+
+[dependencies]
+candela-core = { workspace = true }
+candela-proxy = { workspace = true }
+candela-processor = { workspace = true }
+candela-storage = { workspace = true }
+anyhow = { workspace = true }
+axum = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true }
+tower-http = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }

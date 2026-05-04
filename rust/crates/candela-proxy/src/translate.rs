@@ -76,3 +76,74 @@ pub enum AnthropicStreamEvent {
     #[serde(rename = "ping")]
     Ping,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn openai_request_serde_round_trip() {
+        let req = OpenAIRequest {
+            model: "gpt-4o".into(),
+            messages: vec![OpenAIMessage {
+                role: "user".into(),
+                content: serde_json::Value::String("Hello".into()),
+            }],
+            max_tokens: Some(1024),
+            temperature: Some(0.7),
+            stream: false,
+            tools: vec![],
+        };
+        let json = serde_json::to_string(&req).unwrap();
+        let restored: OpenAIRequest = serde_json::from_str(&json).unwrap();
+        assert_eq!(restored.model, "gpt-4o");
+        assert_eq!(restored.messages.len(), 1);
+        assert_eq!(restored.max_tokens, Some(1024));
+    }
+
+    #[test]
+    fn anthropic_stream_event_deserialization() {
+        let events = vec![
+            (r#"{"type":"ping"}"#, "ping"),
+            (r#"{"type":"message_stop"}"#, "message_stop"),
+            (r#"{"type":"content_block_stop"}"#, "content_block_stop"),
+            (
+                r#"{"type":"content_block_delta","delta":{"type":"text_delta","text":"hi"}}"#,
+                "content_block_delta",
+            ),
+            (
+                r#"{"type":"message_start","message":{"id":"msg_1","type":"message","role":"assistant","content":[],"model":"claude-3","stop_reason":null,"usage":{"input_tokens":10,"output_tokens":0}}}"#,
+                "message_start",
+            ),
+        ];
+
+        for (json, expected_type) in events {
+            let event: AnthropicStreamEvent = serde_json::from_str(json)
+                .unwrap_or_else(|e| panic!("failed to parse {expected_type}: {e}"));
+            match (&event, expected_type) {
+                (AnthropicStreamEvent::Ping, "ping") => {}
+                (AnthropicStreamEvent::MessageStop, "message_stop") => {}
+                (AnthropicStreamEvent::ContentBlockStop, "content_block_stop") => {}
+                (AnthropicStreamEvent::ContentBlockDelta { .. }, "content_block_delta") => {}
+                (AnthropicStreamEvent::MessageStart { .. }, "message_start") => {}
+                _ => panic!("unexpected variant for {expected_type}"),
+            }
+        }
+    }
+
+    #[test]
+    fn openai_to_anthropic_message_structure() {
+        // Verify structural compatibility between OpenAI and Anthropic message formats.
+        let openai_msg = OpenAIMessage {
+            role: "user".into(),
+            content: serde_json::Value::String("What is Rust?".into()),
+        };
+        let anthropic_msg = AnthropicMessage {
+            role: openai_msg.role.clone(),
+            content: openai_msg.content.clone(),
+        };
+        let json = serde_json::to_value(&anthropic_msg).unwrap();
+        assert_eq!(json["role"], "user");
+        assert_eq!(json["content"], "What is Rust?");
+    }
+}

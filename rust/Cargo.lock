@@ -152,6 +152,8 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "candela-core",
+ "chrono",
+ "serde_json",
  "tokio",
  "tokio-test",
  "tracing",

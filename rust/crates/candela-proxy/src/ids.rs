@@ -47,4 +47,15 @@ mod tests {
         let b = new_trace_id();
         assert_ne!(a, b);
     }
+
+    #[test]
+    fn span_ids_batch_unique() {
+        use std::collections::HashSet;
+        let ids: HashSet<String> = (0..1000).map(|_| new_span_id()).collect();
+        assert_eq!(
+            ids.len(),
+            1000,
+            "span IDs must be unique across 1000 generations"
+        );
+    }
 }

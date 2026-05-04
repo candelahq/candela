@@ -39,7 +39,7 @@ impl CircuitBreaker {
 
     /// Record a failed call — may trip the breaker.
     pub fn record_failure(&mut self) {
-        self.failure_count += 1;
+        self.failure_count = self.failure_count.saturating_add(1);
         self.last_failure = Some(Instant::now());
         if self.failure_count >= self.threshold {
             self.state = State::Open;
@@ -102,5 +102,32 @@ mod tests {
 
         cb.record_success();
         assert_eq!(cb.state(), State::Closed);
+    }
+
+    #[test]
+    fn failure_count_saturates() {
+        // CRITICAL-2: Must not overflow/wrap.
+        let mut cb = CircuitBreaker::new(u32::MAX, Duration::from_secs(30));
+        cb.failure_count = u32::MAX - 1;
+        cb.record_failure(); // Should saturate to u32::MAX, not panic.
+        assert_eq!(cb.failure_count, u32::MAX);
+        cb.record_failure(); // Should stay at u32::MAX.
+        assert_eq!(cb.failure_count, u32::MAX);
+    }
+
+    #[test]
+    fn half_open_trips_on_failure() {
+        let mut cb = CircuitBreaker::new(2, Duration::from_secs(30));
+        cb.record_failure();
+        cb.record_failure();
+        assert_eq!(cb.state(), State::Open);
+
+        // Simulate entering half-open.
+        cb.state = State::HalfOpen;
+        assert!(cb.is_allowed());
+
+        // Another failure should re-trip to open.
+        cb.record_failure();
+        assert_eq!(cb.state(), State::Open);
     }
 }

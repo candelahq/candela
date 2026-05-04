@@ -57,6 +57,10 @@ impl CostCalculator {
             return 0.0;
         };
 
+        // CRITICAL: Clamp negative tokens to prevent negative costs.
+        let input_tokens = input_tokens.max(0);
+        let output_tokens = output_tokens.max(0);
+
         let input_cost = (input_tokens as f64 / 1_000_000.0) * input_rate;
         let output_cost = (output_tokens as f64 / 1_000_000.0) * output_rate;
         input_cost + output_cost
@@ -93,5 +97,29 @@ mod tests {
     fn unknown_model_returns_zero() {
         let calc = CostCalculator::new();
         assert_eq!(calc.calculate("openai", "unknown-model", 1000, 1000), 0.0);
+    }
+
+    #[test]
+    fn gemini_cost_calculation() {
+        let calc = CostCalculator::new();
+        let cost = calc.calculate("google", "gemini-2.0-flash", 1_000_000, 1_000_000);
+        // 1M input @ $0.10/M + 1M output @ $0.40/M = $0.10 + $0.40 = $0.50
+        assert!((cost - 0.50).abs() < 0.001);
+    }
+
+    #[test]
+    fn negative_tokens_clamped() {
+        // CRITICAL-3: Negative tokens must not produce negative costs.
+        let calc = CostCalculator::new();
+        let cost = calc.calculate("openai", "gpt-4o", -1000, -500);
+        assert!(cost >= 0.0, "cost must never be negative, got {cost}");
+        assert_eq!(cost, 0.0); // clamped to 0 tokens = $0
+    }
+
+    #[test]
+    fn zero_tokens_returns_zero() {
+        let calc = CostCalculator::new();
+        let cost = calc.calculate("openai", "gpt-4o", 0, 0);
+        assert_eq!(cost, 0.0);
     }
 }

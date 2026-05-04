@@ -86,22 +86,31 @@ async fn run_loop(
 ) {
     let mut batch = Vec::with_capacity(batch_size);
     let mut interval = tokio::time::interval(Duration::from_secs(2));
+    // The first tick completes immediately — consume it.
+    interval.tick().await;
 
     loop {
         tokio::select! {
-            Some(span) = rx.recv() => {
-                batch.push(span);
-                if batch.len() >= batch_size {
-                    flush(&mut batch, &writers, &calc).await;
+            // Bias toward receiving spans over timer ticks.
+            biased;
+
+            msg = rx.recv() => {
+                match msg {
+                    Some(span) => {
+                        batch.push(span);
+                        if batch.len() >= batch_size {
+                            flush(&mut batch, &writers, &calc).await;
+                        }
+                    }
+                    None => {
+                        // Channel closed — drain remaining.
+                        flush(&mut batch, &writers, &calc).await;
+                        break;
+                    }
                 }
             }
             _ = interval.tick() => {
                 flush(&mut batch, &writers, &calc).await;
-            }
-            else => {
-                // Channel closed — drain remaining.
-                flush(&mut batch, &writers, &calc).await;
-                break;
             }
         }
     }

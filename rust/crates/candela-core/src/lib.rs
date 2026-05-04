@@ -148,7 +148,7 @@ fn is_zero_i64(v: &i64) -> bool {
 }
 
 fn is_zero_f64(v: &f64) -> bool {
-    *v == 0.0
+    v.abs() < f64::EPSILON
 }
 
 /// Serde module for `std::time::Duration` as floating-point seconds.
@@ -168,7 +168,9 @@ mod duration_serde {
         D: Deserializer<'de>,
     {
         let secs = f64::deserialize(deserializer)?;
-        Ok(Duration::from_secs_f64(secs))
+        // CRITICAL: Duration::from_secs_f64 panics on negative values.
+        // Clamp to zero to prevent adversarial input from crashing the process.
+        Ok(Duration::from_secs_f64(secs.max(0.0)))
     }
 }
 
@@ -213,5 +215,104 @@ mod tests {
         assert_eq!(restored.kind, SpanKind::Llm);
         assert_eq!(restored.gen_ai.as_ref().unwrap().model, "gpt-4");
         assert_eq!(restored.gen_ai.as_ref().unwrap().input_tokens, 100);
+    }
+
+    #[test]
+    fn duration_negative_clamped_to_zero() {
+        // CRITICAL-1: Negative durations must not panic.
+        let json = r#"{
+            "span_id": "s1", "trace_id": "t1", "name": "test",
+            "start_time": "2025-01-01T00:00:00Z", "end_time": "2025-01-01T00:00:01Z",
+            "duration": -5.0, "project_id": "p1"
+        }"#;
+        let span: Span = serde_json::from_str(json).expect("should not panic on negative duration");
+        assert_eq!(span.duration, Duration::ZERO);
+    }
+
+    #[test]
+    fn span_with_all_optional_fields() {
+        let span = Span {
+            span_id: "s".into(),
+            trace_id: "t".into(),
+            parent_span_id: Some("parent".into()),
+            name: "op".into(),
+            kind: SpanKind::Agent,
+            status: SpanStatus::Error,
+            status_message: Some("timeout".into()),
+            start_time: Utc::now(),
+            end_time: Utc::now(),
+            duration: Duration::from_secs(1),
+            gen_ai: None,
+            attributes: BTreeMap::from([("key".into(), "val".into())]),
+            project_id: "proj".into(),
+            environment: Some("prod".into()),
+            service_name: Some("svc".into()),
+            user_id: Some("u1".into()),
+            session_id: Some("sess1".into()),
+        };
+        let json = serde_json::to_string(&span).unwrap();
+        let restored: Span = serde_json::from_str(&json).unwrap();
+        assert_eq!(restored.parent_span_id, Some("parent".into()));
+        assert_eq!(restored.status, SpanStatus::Error);
+        assert_eq!(restored.status_message, Some("timeout".into()));
+        assert_eq!(restored.attributes.get("key").unwrap(), "val");
+        assert_eq!(restored.user_id, Some("u1".into()));
+    }
+
+    #[test]
+    fn span_minimal_fields_only() {
+        let json = r#"{
+            "span_id": "s1", "trace_id": "t1", "name": "test",
+            "start_time": "2025-01-01T00:00:00Z", "end_time": "2025-01-01T00:00:01Z",
+            "duration": 1.0, "project_id": "p1"
+        }"#;
+        let span: Span = serde_json::from_str(json).unwrap();
+        assert_eq!(span.kind, SpanKind::Unspecified);
+        assert_eq!(span.status, SpanStatus::Unspecified);
+        assert!(span.gen_ai.is_none());
+        assert!(span.parent_span_id.is_none());
+    }
+
+    #[test]
+    fn gen_ai_defaults() {
+        let attrs = GenAIAttributes::default();
+        assert!(attrs.model.is_empty());
+        assert_eq!(attrs.input_tokens, 0);
+        assert!(attrs.cost_usd.abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn span_kind_serde_round_trip() {
+        for kind in [
+            SpanKind::Unspecified,
+            SpanKind::Llm,
+            SpanKind::Agent,
+            SpanKind::Tool,
+            SpanKind::Retrieval,
+            SpanKind::Embedding,
+            SpanKind::Chain,
+            SpanKind::General,
+        ] {
+            let json = serde_json::to_string(&kind).unwrap();
+            let restored: SpanKind = serde_json::from_str(&json).unwrap();
+            assert_eq!(restored, kind);
+        }
+    }
+
+    #[test]
+    fn span_status_serde_round_trip() {
+        for status in [SpanStatus::Unspecified, SpanStatus::Ok, SpanStatus::Error] {
+            let json = serde_json::to_string(&status).unwrap();
+            let restored: SpanStatus = serde_json::from_str(&json).unwrap();
+            assert_eq!(restored, status);
+        }
+    }
+
+    #[test]
+    fn is_zero_handles_negative_zero() {
+        // HIGH-1: -0.0 should be treated as zero for skip_serializing_if.
+        assert!(is_zero_f64(&-0.0));
+        assert!(is_zero_f64(&0.0));
+        assert!(!is_zero_f64(&0.001));
     }
 }

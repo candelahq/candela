@@ -5,6 +5,7 @@ import (
 
 	connect "connectrpc.com/connect"
 	v1 "github.com/candelahq/candela/gen/go/candela/v1"
+	"github.com/candelahq/candela/pkg/auth"
 	"github.com/candelahq/candela/pkg/storage"
 )
 
@@ -28,6 +29,13 @@ func (h *IngestionHandler) IngestSpans(
 	ctx context.Context,
 	req *connect.Request[v1.IngestSpansRequest],
 ) (*connect.Response[v1.IngestSpansResponse], error) {
+	// Resolve the caller's identity so we can attribute spans that arrive
+	// without a user_id (e.g. from candela-local).
+	var callerID string
+	if caller := auth.FromContext(ctx); caller != nil {
+		callerID = caller.EffectiveID()
+	}
+
 	var spans []storage.Span
 	var errors []string
 
@@ -36,6 +44,12 @@ func (h *IngestionHandler) IngestSpans(
 		if err != nil {
 			errors = append(errors, err.Error())
 			continue
+		}
+		// Stamp the caller's identity on spans with no user_id.
+		// This ensures candela-local spans are attributed to the
+		// authenticated user for per-user views (Today page).
+		if span.UserID == "" && callerID != "" {
+			span.UserID = callerID
 		}
 		spans = append(spans, *span)
 	}

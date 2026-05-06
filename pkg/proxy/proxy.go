@@ -330,12 +330,8 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 	var effectiveUserID string
 	var isServiceAccount bool
 	if caller != nil {
-		if caller.Email != "" {
-			effectiveUserID = strings.ToLower(caller.Email)
-			isServiceAccount = strings.HasSuffix(effectiveUserID, ".gserviceaccount.com")
-		} else {
-			effectiveUserID = caller.ID
-		}
+		effectiveUserID = caller.EffectiveID()
+		isServiceAccount = strings.HasSuffix(effectiveUserID, ".gserviceaccount.com")
 	}
 
 	// Extract provider from path: /proxy/{provider}/v1/...

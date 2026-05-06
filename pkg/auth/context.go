@@ -4,12 +4,25 @@
 // The middleware extracts the email/uid and makes the user available via context.
 package auth
 
-import "context"
+import (
+	"context"
+	"strings"
+)
 
 // User represents the authenticated identity for the current request.
 type User struct {
 	ID    string // Firebase UID or Google subject
 	Email string // Verified email claim
+}
+
+// EffectiveID returns the canonical user identifier used for span attribution
+// and budget tracking. Prefers lowercased email (matching the proxy's user_id
+// convention) and falls back to the raw ID.
+func (u *User) EffectiveID() string {
+	if u.Email != "" {
+		return strings.ToLower(u.Email)
+	}
+	return u.ID
 }
 
 type contextKey struct{}

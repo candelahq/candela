@@ -138,7 +138,8 @@ func (h *DashboardHandler) GetMyUsage(
 		}
 		userID = user.ID
 	} else {
-		userID = authUser.ID
+		// No Firestore — use EffectiveID to match the proxy's user_id convention.
+		userID = authUser.EffectiveID()
 	}
 
 	msg := req.Msg

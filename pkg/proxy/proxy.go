@@ -236,6 +236,23 @@ func (p *Proxy) RegisterCompatRoutes(mux *http.ServeMux, models []CompatModel) {
 
 		providerName, ok := modelToProvider[req.Model]
 		if !ok {
+			// Try prefix-based alias resolution (e.g. "claude-sonnet-4" → "claude-sonnet-4-20250514").
+			var matches []string
+			for id := range modelToProvider {
+				if strings.HasPrefix(id, req.Model) {
+					matches = append(matches, id)
+				}
+			}
+			if len(matches) == 1 {
+				resolved := matches[0]
+				slog.Info("compat: resolved model alias", "from", req.Model, "to", resolved)
+				providerName = modelToProvider[resolved]
+				ok = true
+				// Rewrite the model field in the body so upstream gets the canonical ID.
+				body = rewriteModelField(body, resolved)
+			}
+		}
+		if !ok {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusBadRequest)
 			errResp, _ := json.Marshal(map[string]interface{}{
@@ -297,6 +314,25 @@ func buildModelsResponse(models []CompatModel) []byte {
 		return []byte(`{"object":"list","data":[]}`)
 	}
 	return b
+}
+
+// rewriteModelField replaces the "model" field in a JSON request body with newModel.
+// Uses JSON-aware parsing to avoid corrupting other fields.
+func rewriteModelField(body []byte, newModel string) []byte {
+	var obj map[string]json.RawMessage
+	if err := json.Unmarshal(body, &obj); err != nil {
+		return body
+	}
+	newModelJSON, err := json.Marshal(newModel)
+	if err != nil {
+		return body
+	}
+	obj["model"] = newModelJSON
+	rewritten, err := json.Marshal(obj)
+	if err != nil {
+		return body
+	}
+	return rewritten
 }
 
 // requestIDPattern validates that a request ID contains only safe characters

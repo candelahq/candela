@@ -30,7 +30,8 @@ type lmHandler struct {
 	cloudModels  map[string]string      // model ID → provider name
 	calc         *costcalc.Calculator   // pricing calculator (for filtering unpriced models)
 
-	localModels sync.Map // model ID string → bool (cached for fast routing)
+	localModels  sync.Map // model ID string → bool (cached for fast routing)
+	remoteModels sync.Map // model ID string → bool (cached from remote /v1/models)
 }
 
 // newLMHandler creates a smart LM compat handler that merges local + remote + cloud
@@ -133,6 +134,20 @@ func (h *lmHandler) serveModels(w http.ResponseWriter, r *http.Request) {
 	remoteModels := h.fetchRemoteModels(r)
 	merged = append(merged, remoteModels...)
 
+	// Cache remote model IDs for alias resolution.
+	newRemoteSet := make(map[string]bool, len(remoteModels))
+	for _, m := range remoteModels {
+		newRemoteSet[m.ID] = true
+		h.remoteModels.Store(m.ID, true)
+	}
+	// Remove stale remote entries.
+	h.remoteModels.Range(func(key, _ any) bool {
+		if !newRemoteSet[key.(string)] {
+			h.remoteModels.Delete(key)
+		}
+		return true
+	})
+
 	// 4. Return merged OpenAI-format response.
 	w.Header().Set("Content-Type", "application/json")
 	resp := openaiModelList{Object: "list", Data: merged}
@@ -183,6 +198,14 @@ func (h *lmHandler) serveChat(w http.ResponseWriter, r *http.Request) {
 	}
 	_ = json.Unmarshal(body, &req)
 
+	// Resolve model aliases (e.g. "claude-sonnet-4" → "claude-sonnet-4-20250514").
+	resolved := h.resolveModel(req.Model)
+	if resolved != req.Model {
+		slog.Info("lm handler: resolved model alias", "from", req.Model, "to", resolved)
+		body = rewriteModelInBody(body, req.Model, resolved)
+		req.Model = resolved
+	}
+
 	// Replay body for the proxy.
 	r.Body = io.NopCloser(bytes.NewReader(body))
 	r.ContentLength = int64(len(body))
@@ -230,6 +253,88 @@ func (h *lmHandler) isLocalModel(model string) bool {
 		return ok
 	}
 	return false
+}
+
+// resolveModel resolves a model name to its canonical ID using prefix matching.
+// For example, "claude-sonnet-4" resolves to "claude-sonnet-4-20250514" if that
+// is the only model with that prefix. If zero or multiple models match, the
+// original name is returned unchanged.
+func (h *lmHandler) resolveModel(model string) string {
+	if model == "" {
+		return model
+	}
+
+	// Collect all known model IDs.
+	var allModels []string
+	h.localModels.Range(func(key, _ any) bool {
+		allModels = append(allModels, key.(string))
+		return true
+	})
+	for id := range h.cloudModels {
+		allModels = append(allModels, id)
+	}
+
+	// Lazy-populate remote models if cache is empty and we have a remote proxy.
+	remoteEmpty := true
+	h.remoteModels.Range(func(_, _ any) bool {
+		remoteEmpty = false
+		return false // stop after first entry
+	})
+	if remoteEmpty && h.remoteProxy != nil {
+		req, _ := http.NewRequest(http.MethodGet, "/v1/models", nil)
+		if req != nil {
+			remote := h.fetchRemoteModels(req)
+			for _, m := range remote {
+				h.remoteModels.Store(m.ID, true)
+			}
+		}
+	}
+
+	h.remoteModels.Range(func(key, _ any) bool {
+		allModels = append(allModels, key.(string))
+		return true
+	})
+
+	// Exact match → no resolution needed.
+	for _, id := range allModels {
+		if id == model {
+			return model
+		}
+	}
+
+	// Prefix match → resolve if exactly one model matches.
+	var matches []string
+	for _, id := range allModels {
+		if strings.HasPrefix(id, model) {
+			matches = append(matches, id)
+		}
+	}
+	if len(matches) == 1 {
+		return matches[0]
+	}
+
+	// Ambiguous or no match — return original.
+	return model
+}
+
+// rewriteModelInBody replaces the model field value in a JSON request body.
+// Uses JSON-aware replacement to avoid corrupting other fields.
+func rewriteModelInBody(body []byte, oldModel, newModel string) []byte {
+	// Parse, replace, re-marshal to be safe with JSON escaping.
+	var obj map[string]json.RawMessage
+	if err := json.Unmarshal(body, &obj); err != nil {
+		return body // can't parse, return original
+	}
+	newModelJSON, err := json.Marshal(newModel)
+	if err != nil {
+		return body
+	}
+	obj["model"] = newModelJSON
+	rewritten, err := json.Marshal(obj)
+	if err != nil {
+		return body
+	}
+	return rewritten
 }
 
 // responseRecorder captures a proxy response for parsing.

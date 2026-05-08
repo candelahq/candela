@@ -766,3 +766,200 @@ func TestBuildCloudProxy_UnknownProvider(t *testing.T) {
 		}
 	}
 }
+
+// --- Model aliasing tests ---
+
+func TestLMHandler_ModelAlias_PrefixResolvesRemote(t *testing.T) {
+	// "claude-sonnet-4" should resolve to "claude-sonnet-4-20250514" via prefix match.
+	// The test uses lazy remote model fetching (no /v1/models call first).
+	remoteModels := []openaiModel{
+		{ID: "claude-sonnet-4-20250514", Object: "model", OwnedBy: "anthropic"},
+		{ID: "gpt-4o", Object: "model", OwnedBy: "openai"},
+	}
+
+	remoteSrv := mockRemoteServer(t, remoteModels)
+	h := newLMHandler(nil, proxyTo(remoteSrv.URL), nil, nil, nil, nil, nil)
+	srv := httptest.NewServer(h)
+	defer srv.Close()
+
+	// Send chat with short alias — should resolve and route to remote.
+	body := `{"model": "claude-sonnet-4", "messages": [{"role": "user", "content": "hi"}]}`
+	resp, err := http.Post(srv.URL+"/v1/chat/completions", "application/json", strings.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		respBody, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status = %d, want 200; body: %s", resp.StatusCode, respBody)
+	}
+
+	var result map[string]string
+	_ = json.NewDecoder(resp.Body).Decode(&result)
+	if result["source"] != "remote" {
+		t.Errorf("source = %q, want remote", result["source"])
+	}
+}
+
+func TestLMHandler_ModelAlias_BodyRewritten(t *testing.T) {
+	// Verify the model field in the request body is rewritten to the canonical ID.
+	var receivedModel string
+	remoteSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v1/models" {
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(openaiModelList{
+				Object: "list",
+				Data:   []openaiModel{{ID: "claude-sonnet-4-20250514", Object: "model", OwnedBy: "anthropic"}},
+			})
+			return
+		}
+		if r.URL.Path == "/v1/chat/completions" {
+			body, _ := io.ReadAll(r.Body)
+			var req struct {
+				Model string `json:"model"`
+			}
+			_ = json.Unmarshal(body, &req)
+			receivedModel = req.Model
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]string{"source": "remote"})
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer remoteSrv.Close()
+
+	h := newLMHandler(nil, proxyTo(remoteSrv.URL), nil, nil, nil, nil, nil)
+	srv := httptest.NewServer(h)
+	defer srv.Close()
+
+	body := `{"model": "claude-sonnet-4", "messages": [{"role": "user", "content": "hi"}]}`
+	resp, err := http.Post(srv.URL+"/v1/chat/completions", "application/json", strings.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = resp.Body.Close()
+
+	if receivedModel != "claude-sonnet-4-20250514" {
+		t.Errorf("upstream received model = %q, want claude-sonnet-4-20250514", receivedModel)
+	}
+}
+
+func TestLMHandler_ModelAlias_AmbiguousPrefixNoResolve(t *testing.T) {
+	// If "claude" matches multiple models, it should NOT resolve.
+	remoteModels := []openaiModel{
+		{ID: "claude-sonnet-4-20250514", Object: "model", OwnedBy: "anthropic"},
+		{ID: "claude-opus-4-20250514", Object: "model", OwnedBy: "anthropic"},
+	}
+
+	remoteSrv := mockRemoteServer(t, remoteModels)
+	h := newLMHandler(nil, proxyTo(remoteSrv.URL), nil, nil, nil, nil, nil)
+	srv := httptest.NewServer(h)
+	defer srv.Close()
+
+	// "claude" matches both — should pass through unchanged to remote.
+	body := `{"model": "claude", "messages": [{"role": "user", "content": "hi"}]}`
+	resp, err := http.Post(srv.URL+"/v1/chat/completions", "application/json", strings.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	// Should still reach remote (passthrough), not 404.
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("status = %d, want 200 (ambiguous prefix should pass through)", resp.StatusCode)
+	}
+}
+
+func TestLMHandler_ModelAlias_ExactMatchSkipsResolution(t *testing.T) {
+	// Exact model name should not trigger prefix resolution.
+	remoteModels := []openaiModel{
+		{ID: "gpt-4o", Object: "model", OwnedBy: "openai"},
+		{ID: "gpt-4o-mini", Object: "model", OwnedBy: "openai"},
+	}
+
+	remoteSrv := mockRemoteServer(t, remoteModels)
+	h := newLMHandler(nil, proxyTo(remoteSrv.URL), nil, nil, nil, nil, nil)
+	srv := httptest.NewServer(h)
+	defer srv.Close()
+
+	// "gpt-4o" is an exact match — should NOT resolve to "gpt-4o-mini".
+	body := `{"model": "gpt-4o", "messages": [{"role": "user", "content": "hi"}]}`
+	resp, err := http.Post(srv.URL+"/v1/chat/completions", "application/json", strings.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+}
+
+func TestLMHandler_ModelAlias_CloudModel(t *testing.T) {
+	// Prefix resolution should also work for cloud models.
+	cloudModels := map[string]string{
+		"gemini-2.5-pro-preview-05-06": "gemini-oai",
+	}
+
+	cloudUpstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"id":      "chatcmpl-cloud",
+			"model":   "gemini-2.5-pro-preview-05-06",
+			"choices": []map[string]any{{"message": map[string]string{"role": "assistant", "content": "hi"}}},
+			"usage":   map[string]int{"prompt_tokens": 5, "completion_tokens": 2, "total_tokens": 7},
+		})
+	}))
+	defer cloudUpstream.Close()
+
+	calc := costcalc.New()
+	cp := proxy.New(proxy.Config{
+		Providers: []proxy.Provider{{Name: "gemini-oai", UpstreamURL: cloudUpstream.URL}},
+		ProjectID: "local",
+	}, nil, calc)
+
+	h := newLMHandler(nil, nil, nil, nil, cp, cloudModels, calc)
+	srv := httptest.NewServer(h)
+	defer srv.Close()
+
+	// "gemini-2.5-pro-preview" should resolve to the full ID.
+	body := `{"model": "gemini-2.5-pro-preview", "messages": [{"role": "user", "content": "hi"}]}`
+	resp, err := http.Post(srv.URL+"/v1/chat/completions", "application/json", strings.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		respBody, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status = %d, want 200; body: %s", resp.StatusCode, respBody)
+	}
+}
+
+func TestRewriteModelInBody(t *testing.T) {
+	body := []byte(`{"model":"claude-sonnet-4","messages":[{"role":"user","content":"hi"}],"max_tokens":5}`)
+	rewritten := rewriteModelInBody(body, "claude-sonnet-4", "claude-sonnet-4-20250514")
+
+	var result map[string]json.RawMessage
+	if err := json.Unmarshal(rewritten, &result); err != nil {
+		t.Fatal(err)
+	}
+
+	var model string
+	if err := json.Unmarshal(result["model"], &model); err != nil {
+		t.Fatal(err)
+	}
+	if model != "claude-sonnet-4-20250514" {
+		t.Errorf("model = %q, want claude-sonnet-4-20250514", model)
+	}
+
+	// Ensure other fields are preserved.
+	var maxTokens int
+	if err := json.Unmarshal(result["max_tokens"], &maxTokens); err != nil {
+		t.Fatal(err)
+	}
+	if maxTokens != 5 {
+		t.Errorf("max_tokens = %d, want 5", maxTokens)
+	}
+}

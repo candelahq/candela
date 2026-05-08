@@ -963,3 +963,30 @@ func TestRewriteModelInBody(t *testing.T) {
 		t.Errorf("max_tokens = %d, want 5", maxTokens)
 	}
 }
+
+func TestRewriteModelInBody_DoesNotCorruptUserContent(t *testing.T) {
+	// The model name appears in user content BEFORE the model field.
+	// The rewrite must only replace the "model":"..." key-value pair.
+	body := []byte(`{"messages":[{"role":"user","content":"Tell me about claude-sonnet-4"}],"model":"claude-sonnet-4","max_tokens":5}`)
+	rewritten := rewriteModelInBody(body, "claude-sonnet-4", "claude-sonnet-4-20250514")
+
+	var result struct {
+		Model    string `json:"model"`
+		Messages []struct {
+			Content string `json:"content"`
+		} `json:"messages"`
+	}
+	if err := json.Unmarshal(rewritten, &result); err != nil {
+		t.Fatal(err)
+	}
+
+	// Model field should be rewritten.
+	if result.Model != "claude-sonnet-4-20250514" {
+		t.Errorf("model = %q, want claude-sonnet-4-20250514", result.Model)
+	}
+
+	// User content must NOT be modified.
+	if result.Messages[0].Content != "Tell me about claude-sonnet-4" {
+		t.Errorf("user content corrupted: %q", result.Messages[0].Content)
+	}
+}

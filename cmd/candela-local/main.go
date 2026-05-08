@@ -578,13 +578,13 @@ func buildCloudProxy(cfg Config, submitter *processor.SpanProcessor) (*proxy.Pro
 	if project == "" {
 		// Try gcloud config as fallback.
 		gcloudCtx, gcloudCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer gcloudCancel()
 		if out, err := exec.CommandContext(gcloudCtx, "gcloud", "config", "get", "project").Output(); err == nil {
 			project = strings.TrimSpace(string(out))
 			if project != "" {
 				slog.Warn("vertex_ai.project not set in config, using gcloud default", "project", project)
 			}
 		}
-		gcloudCancel()
 	}
 	if project == "" {
 		slog.Error("vertex_ai.project is required for direct cloud providers — set it in ~/.candela.yaml")

@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httputil"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -325,13 +326,20 @@ func (h *lmHandler) resolveModel(model string) string {
 }
 
 // rewriteModelInBody replaces the model field value in a JSON request body.
-// Uses targeted string replacement to preserve field order and formatting.
+// Targets the "model" key specifically to avoid corrupting user message
+// content that might contain the model name as plain text.
+// Handles optional whitespace around the JSON colon ("model": "value").
 func rewriteModelInBody(body []byte, oldModel, newModel string) []byte {
 	oldJSON, _ := json.Marshal(oldModel)
 	newJSON, _ := json.Marshal(newModel)
-	// Replace only the first occurrence of the model value to avoid
-	// corrupting user message content that might contain the model name.
-	return bytes.Replace(body, oldJSON, newJSON, 1)
+	// Match "model"\s*:\s*"oldValue" to handle both compact and pretty JSON.
+	pattern := regexp.MustCompile(`("model"\s*:\s*)` + regexp.QuoteMeta(string(oldJSON)))
+	rewritten := pattern.ReplaceAll(body, append([]byte(`${1}`), newJSON...))
+	if !bytes.Equal(rewritten, body) {
+		return rewritten
+	}
+	// Fallback: body unchanged (key not found), return original.
+	return body
 }
 
 // responseRecorder captures a proxy response for parsing.

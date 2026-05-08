@@ -322,9 +322,11 @@ func buildModelsResponse(models []CompatModel) []byte {
 }
 
 // rewriteModelField replaces the "model" field in a JSON request body with newModel.
-// Uses targeted string replacement to preserve field order and formatting.
+// Targets the "model" key specifically to avoid corrupting user message
+// content that might contain the model name as plain text.
+// Handles optional whitespace around the JSON colon ("model": "value").
 func rewriteModelField(body []byte, newModel string) []byte {
-	// Find the current model value by parsing, then do targeted replacement.
+	// Find the current model value by parsing first.
 	var req struct {
 		Model string `json:"model"`
 	}
@@ -333,7 +335,13 @@ func rewriteModelField(body []byte, newModel string) []byte {
 	}
 	oldJSON, _ := json.Marshal(req.Model)
 	newJSON, _ := json.Marshal(newModel)
-	return bytes.Replace(body, oldJSON, newJSON, 1)
+	// Match "model"\s*:\s*"oldValue" to handle both compact and pretty JSON.
+	pattern := regexp.MustCompile(`("model"\s*:\s*)` + regexp.QuoteMeta(string(oldJSON)))
+	rewritten := pattern.ReplaceAll(body, append([]byte(`${1}`), newJSON...))
+	if !bytes.Equal(rewritten, body) {
+		return rewritten
+	}
+	return body
 }
 
 // requestIDPattern validates that a request ID contains only safe characters

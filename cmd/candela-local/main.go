@@ -228,7 +228,7 @@ func main() {
 				slog.Error("proxy error", "path", r.URL.Path, "error", err)
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusBadGateway)
-				_ = json.NewEncoder(w).Encode(map[string]string{"error": fmt.Sprintf("proxy error: %v", err)})
+				_ = json.NewEncoder(w).Encode(map[string]string{"error": "remote server unavailable"})
 			},
 		}
 	}
@@ -264,7 +264,7 @@ func main() {
 				slog.Error("local proxy error", "path", r.URL.Path, "error", err)
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusBadGateway)
-				_ = json.NewEncoder(w).Encode(map[string]string{"error": fmt.Sprintf("local runtime unavailable: %v", err)})
+				_ = json.NewEncoder(w).Encode(map[string]string{"error": "local runtime unavailable"})
 			},
 		}
 		mux.Handle("/proxy/local/", localProxy)
@@ -341,8 +341,11 @@ func main() {
 
 	addr := fmt.Sprintf("127.0.0.1:%d", cfg.Port)
 	srv := &http.Server{
-		Addr:    addr,
-		Handler: mux,
+		Addr:              addr,
+		Handler:           mux,
+		ReadHeaderTimeout: 10 * time.Second,
+		WriteTimeout:      10 * time.Minute, // generous for streaming LLM responses
+		IdleTimeout:       120 * time.Second,
 	}
 
 	// ── LM Studio compat listener ──
@@ -426,7 +429,13 @@ func main() {
 	}()
 
 	// Start LM Studio compat listener on separate port.
-	lmSrv = &http.Server{Addr: lmAddr, Handler: lmH}
+	lmSrv = &http.Server{
+		Addr:              lmAddr,
+		Handler:           lmH,
+		ReadHeaderTimeout: 10 * time.Second,
+		WriteTimeout:      10 * time.Minute,
+		IdleTimeout:       120 * time.Second,
+	}
 	go func() {
 		slog.Info("🖥️ LM Studio compat listener started",
 			"addr", fmt.Sprintf("http://%s", lmAddr),
@@ -551,7 +560,7 @@ func buildLocalProxy(upstream string) *httputil.ReverseProxy {
 			slog.Error("local proxy error", "path", r.URL.Path, "error", err)
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusBadGateway)
-			_ = json.NewEncoder(w).Encode(map[string]string{"error": fmt.Sprintf("local runtime unavailable: %v", err)})
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": "local runtime unavailable"})
 		},
 	}
 }
@@ -568,12 +577,14 @@ func buildCloudProxy(cfg Config, submitter *processor.SpanProcessor) (*proxy.Pro
 	project := cfg.VertexAI.Project
 	if project == "" {
 		// Try gcloud config as fallback.
-		if out, err := exec.Command("gcloud", "config", "get", "project").Output(); err == nil {
+		gcloudCtx, gcloudCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		if out, err := exec.CommandContext(gcloudCtx, "gcloud", "config", "get", "project").Output(); err == nil {
 			project = strings.TrimSpace(string(out))
 			if project != "" {
 				slog.Warn("vertex_ai.project not set in config, using gcloud default", "project", project)
 			}
 		}
+		gcloudCancel()
 	}
 	if project == "" {
 		slog.Error("vertex_ai.project is required for direct cloud providers — set it in ~/.candela.yaml")

@@ -218,6 +218,9 @@ func (r *responseCapture) WriteHeader(code int) {
 }
 
 func (r *responseCapture) Write(b []byte) (int, error) {
+	if r.statusCode == 0 {
+		r.statusCode = http.StatusOK // match net/http implicit behavior
+	}
 	if !r.capped {
 		if r.body.Len()+len(b) > maxCaptureBytes {
 			// Write what fits, then stop buffering.

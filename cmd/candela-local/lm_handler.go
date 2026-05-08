@@ -16,6 +16,7 @@ import (
 	"github.com/candelahq/candela/pkg/costcalc"
 	"github.com/candelahq/candela/pkg/proxy"
 	"github.com/candelahq/candela/pkg/runtime"
+	"golang.org/x/sync/singleflight"
 )
 
 // lmHandler implements a smart HTTP handler for the LM Studio compat listener.
@@ -32,6 +33,8 @@ type lmHandler struct {
 
 	localModels  sync.Map // model ID string → bool (cached for fast routing)
 	remoteModels sync.Map // model ID string → bool (cached from remote /v1/models)
+
+	remoteFetchGroup singleflight.Group // deduplicates concurrent lazy fetches
 }
 
 // newLMHandler creates a smart LM compat handler that merges local + remote + cloud
@@ -275,19 +278,23 @@ func (h *lmHandler) resolveModel(model string) string {
 	}
 
 	// Lazy-populate remote models if cache is empty and we have a remote proxy.
+	// Uses singleflight to prevent thundering herd on concurrent first requests.
 	remoteEmpty := true
 	h.remoteModels.Range(func(_, _ any) bool {
 		remoteEmpty = false
 		return false // stop after first entry
 	})
 	if remoteEmpty && h.remoteProxy != nil {
-		req, _ := http.NewRequest(http.MethodGet, "/v1/models", nil)
-		if req != nil {
-			remote := h.fetchRemoteModels(req)
-			for _, m := range remote {
-				h.remoteModels.Store(m.ID, true)
+		_, _, _ = h.remoteFetchGroup.Do("fetch-remote-models", func() (any, error) {
+			req, _ := http.NewRequest(http.MethodGet, "/v1/models", nil)
+			if req != nil {
+				remote := h.fetchRemoteModels(req)
+				for _, m := range remote {
+					h.remoteModels.Store(m.ID, true)
+				}
 			}
-		}
+			return nil, nil
+		})
 	}
 
 	h.remoteModels.Range(func(key, _ any) bool {
@@ -318,37 +325,42 @@ func (h *lmHandler) resolveModel(model string) string {
 }
 
 // rewriteModelInBody replaces the model field value in a JSON request body.
-// Uses JSON-aware replacement to avoid corrupting other fields.
+// Uses targeted string replacement to preserve field order and formatting.
 func rewriteModelInBody(body []byte, oldModel, newModel string) []byte {
-	// Parse, replace, re-marshal to be safe with JSON escaping.
-	var obj map[string]json.RawMessage
-	if err := json.Unmarshal(body, &obj); err != nil {
-		return body // can't parse, return original
-	}
-	newModelJSON, err := json.Marshal(newModel)
-	if err != nil {
-		return body
-	}
-	obj["model"] = newModelJSON
-	rewritten, err := json.Marshal(obj)
-	if err != nil {
-		return body
-	}
-	return rewritten
+	oldJSON, _ := json.Marshal(oldModel)
+	newJSON, _ := json.Marshal(newModel)
+	// Replace only the first occurrence of the model value to avoid
+	// corrupting user message content that might contain the model name.
+	return bytes.Replace(body, oldJSON, newJSON, 1)
 }
 
 // responseRecorder captures a proxy response for parsing.
+// Buffer is capped at maxRecorderBytes to prevent OOM on large responses.
 type responseRecorder struct {
 	headers    http.Header
 	body       bytes.Buffer
 	statusCode int
+	capped     bool
 }
+
+const maxRecorderBytes = 2 << 20 // 2MB — enough for /v1/models JSON
 
 func (r *responseRecorder) Header() http.Header { return r.headers }
 func (r *responseRecorder) Write(b []byte) (int, error) {
 	if r.statusCode == 0 {
 		r.statusCode = http.StatusOK // match net/http implicit behavior
 	}
-	return r.body.Write(b)
+	if !r.capped {
+		if r.body.Len()+len(b) > maxRecorderBytes {
+			remaining := maxRecorderBytes - r.body.Len()
+			if remaining > 0 {
+				r.body.Write(b[:remaining])
+			}
+			r.capped = true
+		} else {
+			r.body.Write(b)
+		}
+	}
+	return len(b), nil
 }
 func (r *responseRecorder) WriteHeader(code int) { r.statusCode = code }

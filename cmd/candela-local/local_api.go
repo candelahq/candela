@@ -42,8 +42,9 @@ func (a *localAPI) handleHealth(w http.ResponseWriter, _ *http.Request) {
 func (a *localAPI) handleListModels(w http.ResponseWriter, r *http.Request) {
 	models, err := a.mgr.Runtime().ListModels(r.Context())
 	if err != nil {
+		slog.Warn("failed to list local models", "error", err)
 		writeJSON(w, http.StatusBadGateway, map[string]string{
-			"error": err.Error(),
+			"error": "failed to list local models",
 		})
 		return
 	}
@@ -61,7 +62,7 @@ func (a *localAPI) handlePullModel(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{
-			"error": "invalid JSON: " + err.Error(),
+			"error": "invalid JSON body",
 		})
 		return
 	}

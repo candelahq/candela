@@ -89,6 +89,8 @@ type Proxy struct {
 	// Optional dependencies for team-mode features.
 	users    storage.UserStore     // Budget deduction (nil = no budget tracking)
 	budgetCk *notify.BudgetChecker // Budget threshold notifications (nil = no alerts)
+
+	compatModels []CompatModel // configured models for per-provider /models responses
 }
 
 // Config holds proxy configuration.
@@ -191,6 +193,9 @@ func (p *Proxy) RegisterCompatRoutes(mux *http.ServeMux, models []CompatModel) {
 
 	// Build the /v1/models response once at startup.
 	modelList := buildModelsResponse(pricedModels)
+
+	// Store models for per-provider /models responses in handleProxy.
+	p.compatModels = pricedModels
 
 	// GET /v1/models — return the configured model list (OpenAI-compatible).
 	mux.HandleFunc("GET /v1/models", func(w http.ResponseWriter, r *http.Request) {
@@ -317,27 +322,24 @@ func buildModelsResponse(models []CompatModel) []byte {
 }
 
 // rewriteModelField replaces the "model" field in a JSON request body with newModel.
-// Uses JSON-aware parsing to avoid corrupting other fields.
+// Uses targeted string replacement to preserve field order and formatting.
 func rewriteModelField(body []byte, newModel string) []byte {
-	var obj map[string]json.RawMessage
-	if err := json.Unmarshal(body, &obj); err != nil {
+	// Find the current model value by parsing, then do targeted replacement.
+	var req struct {
+		Model string `json:"model"`
+	}
+	if err := json.Unmarshal(body, &req); err != nil || req.Model == "" {
 		return body
 	}
-	newModelJSON, err := json.Marshal(newModel)
-	if err != nil {
-		return body
-	}
-	obj["model"] = newModelJSON
-	rewritten, err := json.Marshal(obj)
-	if err != nil {
-		return body
-	}
-	return rewritten
+	oldJSON, _ := json.Marshal(req.Model)
+	newJSON, _ := json.Marshal(newModel)
+	return bytes.Replace(body, oldJSON, newJSON, 1)
 }
 
 // requestIDPattern validates that a request ID contains only safe characters
 // (alphanumeric, hyphens) and is between 1-128 chars.
 // This prevents log injection and trace poisoning via crafted X-Request-ID headers.
+// Also used to validate X-Session-Id.
 var requestIDPattern = regexp.MustCompile(`^[a-zA-Z0-9\-]{1,128}$`)
 
 func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
@@ -351,7 +353,11 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Accept session ID from candela-local (or other clients).
+	// Validate to prevent log/trace injection — same rules as request ID.
 	sessionID := r.Header.Get("X-Session-Id")
+	if sessionID != "" && !requestIDPattern.MatchString(sessionID) {
+		sessionID = "" // invalid → discard
+	}
 
 	// Extract W3C Trace Context for trace correlation with OTel-instrumented
 	// callers (e.g. Google ADK, LangChain). When present, the proxy span
@@ -426,11 +432,18 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Handle GET /v1/models — return synthetic model list for OpenAI-compatible clients.
+	// Handle GET /v1/models — return configured models for this provider.
+	// Build per-provider model list from the proxy's registered providers/models.
 	if r.Method == http.MethodGet && strings.HasSuffix(upstreamPath, "/models") {
+		// Collect models configured for this specific provider.
+		var providerModels []CompatModel
+		for _, m := range p.compatModels {
+			if m.Provider == providerName {
+				providerModels = append(providerModels, m)
+			}
+		}
 		w.Header().Set("Content-Type", "application/json")
-		modelsResp := `{"object":"list","data":[{"id":"claude-sonnet-4-20250514","object":"model","created":1700000000,"owned_by":"anthropic"}]}`
-		_, _ = w.Write([]byte(modelsResp))
+		_, _ = w.Write(buildModelsResponse(providerModels))
 		return
 	}
 

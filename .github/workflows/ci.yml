@@ -8,13 +8,12 @@ on:
 
 permissions:
   contents: read
-  packages: read   # needed to pull ghcr.io/candelahq/candela-dev
+  packages: read   # pull ghcr.io/candelahq/candela-dev
 
-# All jobs use the pre-baked Nix dev container — no per-job Nix install,
-# no FlakeHub rate limits. Rebuild the image via the dev-container workflow
-# whenever flake.nix / flake.lock changes.
-env:
-  DEV_IMAGE: ghcr.io/candelahq/candela-dev:latest
+# All jobs run inside the pre-baked CI container:
+#   Ubuntu 24.04 + Determinate Nix + dev shell pre-warmed in Nix store.
+# Steps use `nix develop . --command <cmd>` — identical to local dev.
+# Rebuild the image via dev-container.yml when flake.nix / flake.lock changes.
 
 jobs:
   # ── build, vet, and lint ────────────────────────────────────────────────────
@@ -29,16 +28,16 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Lint GitHub Actions workflows
-        run: actionlint
+        run: nix develop . --command actionlint
 
-      - name: Generate proto stubs (from BSR)
-        run: buf generate
+      - name: Generate proto stubs
+        run: nix develop . --command buf generate
 
       - name: Build
-        run: go build ./...
+        run: nix develop . --command go build ./...
 
       - name: Vet
-        run: go vet ./...
+        run: nix develop . --command go vet ./...
 
   # ── tests — parallel matrix by package group ────────────────────────────────
   go-test:
@@ -51,42 +50,37 @@ jobs:
     env:
       FIRESTORE_EMULATOR_HOST: localhost:8086
     strategy:
-      fail-fast: false   # let all groups run so we see all failures at once
+      fail-fast: false
       matrix:
         group:
-          # Only cmd packages that contain test files.
           - name: cmd
             pkgs: ./cmd/candela-local/... ./cmd/candela-sidecar/...
-          # Fast pkg tests — no Firestore dependency.
           - name: pkg-core
             pkgs: ./pkg/auth/... ./pkg/connecthandlers/... ./pkg/costcalc/... ./pkg/notify/... ./pkg/proxy/... ./pkg/runtime/... ./pkg/session/...
-          # Storage layer — mix of emulator and pure-Go backends.
           - name: pkg-storage
             pkgs: ./pkg/storage/...
-          # Heavy integration tests (Firestore-backed processor + prototest harness).
           - name: pkg-processor
             pkgs: ./pkg/processor/... ./pkg/prototest/...
-    services: {}   # No sidecar needed — gcloud is in the dev container.
     steps:
       - uses: actions/checkout@v4
 
       - name: Start Firestore emulator
         run: |
-          gcloud emulators firestore start \
-            --host-port=0.0.0.0:8086 \
-            --project=test-project &
-          for _ in $(seq 1 30); do
-            curl -sf http://localhost:8086/ && break
-            sleep 2
-          done
+          nix develop . --command bash -c "
+            gcloud emulators firestore start \
+              --host-port=0.0.0.0:8086 \
+              --project=test-project &
+            for _ in \$(seq 1 30); do
+              curl -sf http://localhost:8086/ && break
+              sleep 2
+            done
+          "
 
-      - name: Generate proto stubs (from BSR)
-        run: buf generate
+      - name: Generate proto stubs
+        run: nix develop . --command buf generate
 
       - name: Test (${{ matrix.group.name }})
-        # -p 4:        run up to 4 packages concurrently (matches 4-vCPU runner)
-        # -parallel 4: run up to 4 t.Parallel() funcs concurrently within a package
-        run: go test ${{ matrix.group.pkgs }} -v -race -count=1 -p 4 -parallel 4 -coverprofile=coverage-${{ matrix.group.name }}.out -timeout 180s
+        run: nix develop . --command go test ${{ matrix.group.pkgs }} -v -race -count=1 -p 4 -parallel 4 -coverprofile=coverage-${{ matrix.group.name }}.out -timeout 180s
 
       - name: Upload coverage (${{ matrix.group.name }})
         uses: actions/upload-artifact@v4
@@ -95,7 +89,7 @@ jobs:
           path: coverage-${{ matrix.group.name }}.out
           retention-days: 1
 
-  # ── merge coverage and run govulncheck ──────────────────────────────────────
+  # ── merge coverage and govulncheck ──────────────────────────────────────────
   build-and-test:
     needs: [go-test]
     runs-on: ubuntu-latest
@@ -122,11 +116,11 @@ jobs:
           done
 
       - name: Coverage summary
-        run: go tool cover -func=coverage.out | tail -1
+        run: nix develop . --command go tool cover -func=coverage.out | tail -1
 
       - name: govulncheck
-        continue-on-error: true   # Advisory — don't block CI on stdlib CVEs we can't patch immediately
-        run: govulncheck ./...
+        continue-on-error: true
+        run: nix develop . --command govulncheck ./...
 
   # ── UI build + lint ─────────────────────────────────────────────────────────
   ui-build-and-lint:
@@ -140,18 +134,18 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Install dependencies
-        run: pnpm install
+        run: nix develop . --command pnpm install
         working-directory: ui
 
-      - name: Generate TS proto stubs (from BSR)
-        run: buf generate
+      - name: Generate TS proto stubs
+        run: nix develop . --command buf generate
 
       - name: Lint
-        run: pnpm run lint
+        run: nix develop . --command pnpm run lint
         working-directory: ui
 
       - name: Build
-        run: pnpm run build
+        run: nix develop . --command pnpm run build
         working-directory: ui
 
   # ── UI E2E ──────────────────────────────────────────────────────────────────
@@ -167,18 +161,18 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Install dependencies
-        run: pnpm install
+        run: nix develop . --command pnpm install
         working-directory: ui
 
-      - name: Generate TS proto stubs (from BSR)
-        run: buf generate
+      - name: Generate TS proto stubs
+        run: nix develop . --command buf generate
 
       - name: Install Playwright browsers
-        run: pnpm exec playwright install --with-deps chromium
+        run: nix develop . --command pnpm exec playwright install --with-deps chromium
         working-directory: ui
 
       - name: Run Playwright tests
-        run: pnpm exec playwright test
+        run: nix develop . --command pnpm exec playwright test
         working-directory: ui
         env:
           CI: true
@@ -202,18 +196,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Generate Rust proto stubs (from BSR)
-        run: cd rust && buf generate
+      - name: Generate Rust proto stubs
+        run: nix develop . --command bash -c "cd rust && buf generate"
 
       - name: Format check
-        run: cd rust && cargo fmt --check
+        run: nix develop . --command bash -c "cd rust && cargo fmt --check"
 
       - name: Clippy
-        run: cd rust && cargo clippy --workspace -- -D warnings
+        run: nix develop . --command bash -c "cd rust && cargo clippy --workspace -- -D warnings"
 
       - name: Test
-        run: cd rust && cargo test --workspace
+        run: nix develop . --command bash -c "cd rust && cargo test --workspace"
 
       - name: License & vulnerability audit
-        continue-on-error: true  # Advisory until deny.toml is configured
-        run: cd rust && cargo deny check
+        continue-on-error: true
+        run: nix develop . --command bash -c "cd rust && cargo deny check"

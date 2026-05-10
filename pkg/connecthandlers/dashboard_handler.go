@@ -8,7 +8,6 @@ import (
 	"time"
 
 	connect "connectrpc.com/connect"
-	typespb "github.com/candelahq/candela/gen/go/candela/types"
 	v1 "github.com/candelahq/candela/gen/go/candela/v1"
 	"github.com/candelahq/candela/pkg/auth"
 	"github.com/candelahq/candela/pkg/storage"
@@ -115,13 +114,16 @@ func (h *DashboardHandler) GetLatencyPercentiles(
 	return connect.NewResponse(&v1.GetLatencyPercentilesResponse{}), nil
 }
 
-// GetMyUsage returns the calling user's personal usage summary + budget context.
+// GetMyUsage returns the calling user's personal usage summary (BigQuery).
 //
-// Data source strategy (two-tier):
-//   - TODAY's tokens/cost → Firestore budget doc (written synchronously by the
-//     proxy on every span, zero BigQuery streaming lag)
-//   - Model breakdown → BigQuery always (no Firestore equivalent; ~1s latency ok)
-//   - Historical time ranges → BigQuery for everything
+// This is a pure BigQuery handler — ~800ms, authoritative token/cost split.
+// For real-time budget progress bars and grant remaining, call
+// UserService.GetMyBudget (~80ms, Firestore-only) in parallel.
+//
+// Client rendering pattern:
+//
+//	UserService.GetMyBudget()     → renders budget bar + grant bars (~80ms)
+//	DashboardService.GetMyUsage() → renders token counts + model table (~800ms)
 func (h *DashboardHandler) GetMyUsage(
 	ctx context.Context,
 	req *connect.Request[v1.GetMyUsageRequest],
@@ -132,7 +134,7 @@ func (h *DashboardHandler) GetMyUsage(
 	}
 
 	// Resolve the user's store ID (Firestore doc ID = sanitized email).
-	// The proxy also writes this same ID into span.user_id, so BQ queries match.
+	// The proxy writes this same ID into span.user_id, so BQ queries match.
 	var userID string
 	if h.users != nil {
 		user, err := h.users.GetUserByEmail(ctx, authUser.Email)
@@ -144,7 +146,6 @@ func (h *DashboardHandler) GetMyUsage(
 		}
 		userID = user.ID
 	} else {
-		// No Firestore — use EffectiveID to match the proxy's user_id convention.
 		userID = authUser.EffectiveID()
 	}
 
@@ -168,59 +169,13 @@ func (h *DashboardHandler) GetMyUsage(
 		q.EndTime = time.Now()
 	}
 
-	// Detect "today" requests: default dashboard view within the last 25h.
-	// We use Firestore for budget/grant remaining (real-time), and BigQuery
-	// for token counts and cost (authoritative, fast with day partition + clustering).
-	//
-	// NOTE: We intentionally do NOT use Firestore budget.SpentUSD or
-	// budget.TokensUsed as the primary cost/token source because:
-	//   - budget.SpentUSD is only the budget-portion of cost (after grants absorb
-	//     their share via the DeductSpend waterfall). A dev fully covered by grants
-	//     would show $0 spent on the budget doc.
-	//   - budget.TokensUsed is proportionally attributed (not total token count).
-	// BigQuery always has the accurate total cost and token split per span.
-	isToday := q.StartTime.After(time.Now().Add(-25*time.Hour)) &&
-		q.EndTime.After(time.Now().Add(-1*time.Hour))
-
-	// ── Concurrent fetch: BigQuery (spend/tokens/models) + Firestore (budget+grants) ──
-	type budgetResult struct {
-		budget *storage.BudgetRecord
-		grants []*storage.GrantRecord
-		err    error
-	}
+	// ── BigQuery: usage summary + model breakdown (concurrent) ──────────────
 	type bqResult struct {
 		summary *storage.UsageSummary
 		models  []storage.ModelUsage
 		err     error
 	}
-
-	budgetCh := make(chan budgetResult, 1)
 	bqCh := make(chan bqResult, 1)
-
-	// Goroutine 1: Firestore — budget limits + active grants.
-	// These are real-time: the proxy writes them synchronously on every span.
-	go func() {
-		if h.users == nil {
-			budgetCh <- budgetResult{}
-			return
-		}
-		budget, err := h.users.GetBudget(ctx, userID)
-		if err != nil {
-			budgetCh <- budgetResult{err: err}
-			return
-		}
-		grants, grantErr := h.users.ListGrants(ctx, userID, true)
-		if grantErr != nil {
-			slog.Warn("failed to fetch grants for GetMyUsage", "user_id", userID, "error", grantErr)
-		}
-		budgetCh <- budgetResult{budget: budget, grants: grants}
-	}()
-
-	// Goroutine 2: BigQuery — usage summary + model breakdown.
-	// BigQuery is the authoritative source for token counts and cost because:
-	// - It has the accurate input/output token split (Firestore only has totals)
-	// - budget.SpentUSD only tracks the budget-portion, not grant-funded cost
-	// - Day partition + (project_id, user_id) clustering makes today queries fast (~1s)
 	go func() {
 		models, err := h.store.GetModelBreakdown(ctx, q)
 		if err != nil {
@@ -234,20 +189,13 @@ func (h *DashboardHandler) GetMyUsage(
 		}
 		bqCh <- bqResult{summary: summary, models: models}
 	}()
-
-	// Collect results.
-	br := <-budgetCh
 	bq := <-bqCh
-
 	if bq.err != nil {
 		return nil, internalError("failed to get usage data", bq.err)
 	}
-	if br.err != nil {
-		slog.Warn("failed to fetch budget for GetMyUsage", "user_id", userID, "error", br.err)
-		// Non-fatal: continue without budget context.
-	}
 
-	// Build response: token/cost figures always from BigQuery.
+	// Build response — token/cost figures are always from BigQuery.
+	// Budget progress bars and grant remaining: call UserService.GetMyBudget.
 	resp := &v1.GetMyUsageResponse{}
 	if bq.summary != nil {
 		resp.TotalCalls = bq.summary.TotalLLMCalls
@@ -256,22 +204,6 @@ func (h *DashboardHandler) GetMyUsage(
 		resp.TotalCostUsd = bq.summary.TotalCostUSD
 		resp.AvgLatencyMs = bq.summary.AvgLatencyMs
 	}
-
-	// "Today" Firestore fallback: if BQ has no data yet (streaming buffer lag,
-	// first call within the last ~90s), use Firestore total tokens as a stopgap
-	// so the dashboard doesn't show 0 immediately after the first API call.
-	if isToday && bq.summary != nil &&
-		bq.summary.TotalInputTokens == 0 && bq.summary.TotalOutputTokens == 0 &&
-		br.budget != nil && br.budget.TokensUsed > 0 {
-		// Firestore TokensUsed = budget-portion only (not grant-funded tokens),
-		// so this is a lower bound, not the true total. Show it with the understanding
-		// it may be partial for grant users. Better than showing 0.
-		resp.TotalInputTokens = br.budget.TokensUsed
-		if br.budget.SpentUSD > 0 {
-			resp.TotalCostUsd = br.budget.SpentUSD
-		}
-	}
-
 	for _, m := range bq.models {
 		resp.Models = append(resp.Models, &v1.ModelUsage{
 			Model:        m.Model,
@@ -283,38 +215,6 @@ func (h *DashboardHandler) GetMyUsage(
 			AvgLatencyMs: m.AvgLatencyMs,
 		})
 	}
-
-	// Budget context from Firestore — real-time, always accurate.
-	// budget.SpentUsd here is the budget-portion only (grants waterfall first).
-	// This is correct for "budget remaining" computation: limit - budget_spent.
-	if br.budget != nil {
-		resp.Budget = &typespb.UserBudget{
-			UserId:     br.budget.UserID,
-			LimitUsd:   br.budget.LimitUSD,
-			SpentUsd:   br.budget.SpentUSD,   // budget-portion spent
-			TokensUsed: br.budget.TokensUsed, // budget-portion tokens
-		}
-	}
-	for _, g := range br.grants {
-		resp.ActiveGrants = append(resp.ActiveGrants, grantToProto(g))
-	}
-
-	// TotalRemainingUsd: budget headroom + sum of active grant remaining.
-	// Correctly handles: budget-only, grants-only, and mixed cases.
-	//   - If grants cover all cost: budget.SpentUSD=0, so budget headroom = LimitUSD
-	//   - If grants exhausted: grants[i].Remaining()=0, budget absorbs remainder
-	//   - Mixed: both contribute to remaining
-	var totalRemaining float64
-	if br.budget != nil {
-		if rem := br.budget.LimitUSD - br.budget.SpentUSD; rem > 0 {
-			totalRemaining += rem
-		}
-	}
-	for _, g := range br.grants {
-		totalRemaining += g.Remaining()
-	}
-	resp.TotalRemainingUsd = totalRemaining
-
 	return connect.NewResponse(resp), nil
 }
 

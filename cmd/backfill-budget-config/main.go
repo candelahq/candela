@@ -64,6 +64,7 @@ func main() {
 	)
 
 	userIter := client.Collection(usersCol).Documents(ctx)
+	defer userIter.Stop()
 	for {
 		userSnap, err := userIter.Next()
 		if err == iterator.Done {
@@ -109,6 +110,7 @@ func main() {
 			}
 			budgetDocs = append(budgetDocs, snap)
 		}
+		budgetIter.Stop()
 
 		if len(budgetDocs) == 0 {
 			fmt.Printf("  [SKIP] %s — no budget docs found\n", userID)

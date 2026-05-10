@@ -19,6 +19,7 @@ import (
 	"math"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"cloud.google.com/go/firestore"
 	"github.com/google/uuid"
@@ -383,8 +384,8 @@ func (s *Store) ResetSpend(ctx context.Context, userID string) error {
 	// period doc (new day). Update fails with NOT_FOUND when the spend doc
 	// doesn't exist yet (e.g. called by an admin just after midnight).
 	_, err := ref.Set(ctx, map[string]any{
-		"spent_usd":      0,
-		"tokens_used":    0,
+		"spent_usd":       0,
+		"tokens_used":     0,
 		"all_tokens_used": 0,
 	}, firestore.Merge(
 		firestore.FieldPath{"spent_usd"},
@@ -847,8 +848,14 @@ func sanitizeID(id string) string {
 	// separator that keeps the ID human-readable.
 	s = strings.ReplaceAll(s, "..", "._")
 	// #I: Firestore document IDs must be ≤ 1500 bytes.
+	// Walk back from byte 1500 to find a valid UTF-8 boundary to avoid
+	// splitting a multi-byte character (which would produce an invalid ID).
 	if len(s) > 1500 {
-		s = s[:1500]
+		end := 1500
+		for end > 0 && !utf8.ValidString(s[:end]) {
+			end--
+		}
+		s = s[:end]
 	}
 	// Firestore reserves document IDs matching __.*__ (e.g. __user__@example.com).
 	if len(s) >= 4 && strings.HasPrefix(s, "__") && strings.HasSuffix(s, "__") {

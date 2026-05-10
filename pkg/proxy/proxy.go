@@ -321,6 +321,11 @@ func buildModelsResponse(models []CompatModel) []byte {
 	return b
 }
 
+// rewriteModelFieldRe matches the JSON model key with optional whitespace around
+// the colon (e.g. both `"model":"x"` and `"model" : "x"`) so the rewrite is
+// robust to both compact and pretty-printed JSON payloads.
+var rewriteModelFieldRe = regexp.MustCompile(`("model"\s*:\s*)"([^"\\]|\\.)*"`)
+
 // rewriteModelField replaces the "model" field in a JSON request body with newModel.
 // Targets the "model" key specifically to avoid corrupting user message
 // content that might contain the model name as plain text.
@@ -333,14 +338,19 @@ func rewriteModelField(body []byte, newModel string) []byte {
 	if err := json.Unmarshal(body, &req); err != nil || req.Model == "" {
 		return body
 	}
-	oldJSON, _ := json.Marshal(req.Model)
 	newJSON, _ := json.Marshal(newModel)
-	// Replace `"model":"<old>"` with `"model":"<new>"` — FIRST occurrence only.
-	// bytes.Replace n=1 prevents corrupting user message content that contains
-	// the same byte sequence (e.g., few-shot examples referencing a model name).
-	target := append([]byte(`"model":`), oldJSON...)
-	replacement := append([]byte(`"model":`), newJSON...)
-	return bytes.Replace(body, target, replacement, 1)
+	// Replace the first occurrence only — prevents corrupting user message
+	// content that might contain the same model name as plain text.
+	replaced := false
+	return rewriteModelFieldRe.ReplaceAllFunc(body, func(match []byte) []byte {
+		if replaced {
+			return match
+		}
+		replaced = true
+		// Preserve the key+whitespace prefix (e.g. `"model" : `), replace only the value.
+		keyPart := rewriteModelFieldRe.FindSubmatch(match)[1]
+		return append(keyPart, newJSON...)
+	})
 }
 
 // requestIDPattern validates that a request ID contains only safe characters

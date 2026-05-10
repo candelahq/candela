@@ -103,7 +103,9 @@
 
           # Include only what CI jobs need — keeps the image lean.
           contents = with pkgs; [
-            # Core
+            # Core — /etc/passwd + /etc/group needed by many tools
+            dockerTools.fakeNss
+
             bashInteractive
             coreutils
             cacert         # TLS certs (needed for go get, gcloud, etc.)
@@ -135,7 +137,19 @@
             cargo-deny
           ];
 
+          # Create the standard shell symlinks GitHub Actions expects.
+          # GH Actions execs /bin/sh to run steps inside a container job.
+          extraCommands = ''
+            mkdir -p bin usr/bin tmp root
+            ln -sf ${pkgs.bashInteractive}/bin/bash bin/sh
+            ln -sf ${pkgs.bashInteractive}/bin/bash bin/bash
+            ln -sf ${pkgs.coreutils}/bin/env       usr/bin/env
+          '';
+
           config = {
+            # Keep container alive — GH Actions execs steps into it rather
+            # than running a single command.
+            Cmd = [ "${pkgs.bashInteractive}/bin/bash" "-c" "trap : TERM INT; sleep infinity & wait" ];
             Env = [
               # Point Go module cache to a writable path inside the container.
               "GOPATH=/root/go"

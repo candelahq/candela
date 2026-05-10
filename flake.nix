@@ -64,7 +64,11 @@
             docker-compose
             cloudflared
             grpcurl
-            google-cloud-sdk  # Includes Firestore emulator (gcloud emulators firestore start)
+            # The Nix-managed SDK blocks 'gcloud components install', so the
+            # Firestore emulator must be bundled at derivation time.
+            (google-cloud-sdk.withExtraComponents [
+              google-cloud-sdk.components.cloud-firestore-emulator
+            ])
             jdk21_headless    # Required by the Firestore emulator (Java 8+ JRE)
             jq
             yq-go

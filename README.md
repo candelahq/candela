@@ -322,6 +322,16 @@ pnpm run test:e2e      # run Playwright E2E tests (27+ tests)
 pnpm run test:e2e:ui   # Playwright interactive UI mode
 ```
 
+For **language-agnostic HTTP tests** (works against Go or Rust binary):
+
+```bash
+# Start the mock upstream, then:
+./test/functional/run.sh --go   # run against Go binary
+./test/functional/run.sh --rust # run against Rust binary
+```
+
+See [`test/functional/README.md`](test/functional/README.md) for full setup.
+
 The UI communicates with the backend via **ConnectRPC v2** on port `8181`. Pages gracefully handle offline backend state.
 
 > [!TIP]
@@ -498,6 +508,13 @@ candela/
 │   ├── crates/candela-processor/  # Batched span processor + cost calc
 │   ├── crates/candela-storage/    # Pub/Sub + OTLP sinks (WIP)
 │   └── bins/candela-sidecar/      # Production sidecar binary
+├── test/functional/               # Hurl HTTP test suite (Go/Rust parity)
+│   ├── mock/upstream.go           # Mock LLM server (OpenAI/Anthropic/Vertex AI)
+│   ├── proxy/                     # Proxy round-trip + error tests
+│   ├── billing/                   # Budget gate + pricing gate tests
+│   ├── compat/                    # /v1/models + compat routing tests
+│   ├── security/                  # Header injection + auth bypass tests
+│   └── run.sh                     # Runner (--go / --rust flags)
 └── config.yaml                  # Server configuration
 ```
 

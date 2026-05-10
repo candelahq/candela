@@ -6,7 +6,7 @@ We are in the early stages of building a production-grade LLM observability plat
 
 1.  **Clone the Repo**: `git clone https://github.com/candelahq/candela`
 2.  **Enter the Dev Environment**: `nix develop`
-3.  **Run the Tests**: `go test ./...`
+3.  **Run the Tests**: `go test ./...` (unit) or `./test/functional/run.sh` (functional, requires a running server)
 4.  **Create a Branch**: `git checkout -b feat/my-new-feature`
 
 ## 🛠️ Development Workflow
@@ -19,6 +19,7 @@ We are in the early stages of building a production-grade LLM observability plat
 ### 🧪 Testing
 - **Unit Tests**: Place in the same package as your code (e.g., `pkg/proxy/proxy_test.go`).
 - **Integration Tests**: We use the Nix dev shell to run database-backed tests.
+- **Functional Tests**: Language-agnostic HTTP tests in `test/functional/` using [Hurl](https://hurl.dev). Run against any binary (Go or Rust) via `./test/functional/run.sh`. See [`test/functional/README.md`](test/functional/README.md).
 - **New Features**: Every new feature **must** include tests.
 
 ## 🐛 Reporting Issues

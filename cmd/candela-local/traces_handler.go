@@ -54,24 +54,36 @@ func (h *tracesHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Parse limit from query param (default 50, max 200).
-	limit := 50
+	// Parse limit from query param (default 500, max 2000).
+	// The Flutter client requests 500 for 24h and 2000 for 7d/30d views;
+	// a 200-span cap was silently truncating billing data.
+	limit := 500
 	if l := r.URL.Query().Get("limit"); l != "" {
 		if parsed, err := strconv.Atoi(l); err == nil && parsed > 0 {
 			limit = parsed
 		}
 	}
-	if limit > 200 {
-		limit = 200
+	if limit > 2000 {
+		limit = 2000
 	}
 
-	// Query recent spans (LLM kind = 1).
+	// Parse range query param to set the correct time window.
+	// The Flutter client sends "24h", "7d", or "30d".
+	// Without this, the server always returned 7-day data regardless
+	// of the selected range, making the 30d chart show only 7d totals.
 	now := time.Now()
-	weekAgo := now.Add(-7 * 24 * time.Hour)
+	window := 7 * 24 * time.Hour // default: 7 days
+	switch r.URL.Query().Get("range") {
+	case "24h":
+		window = 24 * time.Hour
+	case "30d":
+		window = 30 * 24 * time.Hour
+	}
+	startTime := now.Add(-window)
 
 	result, err := h.reader.SearchSpans(r.Context(), storage.SpanQuery{
 		ProjectID: "local",
-		StartTime: weekAgo,
+		StartTime: startTime,
 		EndTime:   now,
 		Kind:      storage.SpanKindLLM,
 		PageSize:  limit,

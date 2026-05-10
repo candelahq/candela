@@ -425,9 +425,12 @@ func (s *Store) DeductSpend(ctx context.Context, userID string, costUSD float64,
 	return s.client.RunTransaction(ctx, func(ctx context.Context, tx *firestore.Transaction) error {
 		// ── ALL READS FIRST (Firestore requirement) ──
 
-		userID = sanitizeID(userID)
+		// Sanitize into a local so we don't mutate the outer parameter.
+		// Firestore transactions auto-retry on contention — mutating the outer
+		// userID would cause it to be double-sanitized on each retry.
+		localUserID := sanitizeID(userID)
 		// Read 1: Load active grants (earliest-expiring first).
-		grantsRef := s.client.Collection(usersCol).Doc(userID).
+		grantsRef := s.client.Collection(usersCol).Doc(localUserID).
 			Collection(grantsCol)
 		grantsSnaps, err := tx.Documents(grantsRef.
 			Where("expires_at", ">", time.Now().UTC()).
@@ -438,7 +441,7 @@ func (s *Store) DeductSpend(ctx context.Context, userID string, costUSD float64,
 
 		// Read 2: Load daily budget.
 		periodKey := currentPeriodKey("daily")
-		budgetRef := s.client.Collection(usersCol).Doc(userID).
+		budgetRef := s.client.Collection(usersCol).Doc(localUserID).
 			Collection(budgetsCol).Doc(periodKey)
 		budgetSnap, err := tx.Get(budgetRef)
 		if err != nil && status.Code(err) != codes.NotFound {
@@ -449,7 +452,51 @@ func (s *Store) DeductSpend(ctx context.Context, userID string, costUSD float64,
 
 		remaining := costUSD
 
-		// Write 1: Deduct from grants first (waterfall).
+		// Write 1: Deduct from daily budget first.
+		// Budget is the developer's primary daily pool. Grants act as overflow
+		// when the budget is exhausted (budget-first waterfall).
+		if budgetSnap != nil && budgetSnap.Exists() {
+			b, err := snapToBudget(budgetSnap)
+			if err != nil {
+				return err
+			}
+			budgetAvailable := b.LimitUSD - b.SpentUSD
+			if budgetAvailable < 0 {
+				budgetAvailable = 0
+			}
+			budgetDeduct := min(remaining, budgetAvailable)
+			if budgetDeduct > 0 || tokens > 0 {
+				// Attribute tokens proportional to the budget fraction absorbed.
+				// If budget absorbs 100% of cost → 100% of tokens.
+				// If budget absorbs 30% → 30% of tokens (remainder lands on grants).
+				budgetTokens := tokens
+				if costUSD > 0 && budgetDeduct < costUSD {
+					budgetTokens = int64(math.Round(float64(tokens) * (budgetDeduct / costUSD)))
+				}
+				// Combine all_tokens_used (total, pre-waterfall) and tokens_used
+				// (budget-portion) + spent_usd in a single Update call.
+				// all_tokens_used is always the full token count regardless of
+				// whether grants absorb any cost — used by GetMyBudget fast path.
+				updates := []firestore.Update{
+					{Path: "all_tokens_used", Value: b.AllTokensUsed + tokens},
+					{Path: "tokens_used", Value: b.TokensUsed + budgetTokens},
+				}
+				if budgetDeduct > 0 {
+					updates = append(updates, firestore.Update{
+						Path:  "spent_usd",
+						Value: b.SpentUSD + budgetDeduct,
+					})
+				}
+				if err := tx.Update(budgetRef, updates); err != nil {
+					return fmt.Errorf("firestoredb: deducting from budget: %w", err)
+				}
+			}
+			remaining -= budgetDeduct
+		}
+
+		// Write 2: Overflow into grants (earliest-expiry-first).
+		// Draining the soonest-to-expire grant first minimises waste from
+		// grants expiring with unused balance.
 		for _, snap := range grantsSnaps {
 			if remaining <= 0 {
 				break
@@ -471,26 +518,6 @@ func (s *Store) DeductSpend(ctx context.Context, userID string, costUSD float64,
 			remaining -= deduct
 		}
 
-		// Write 2: Deduct remainder from budget.
-		if remaining > 0 && budgetSnap != nil && budgetSnap.Exists() {
-			b, err := snapToBudget(budgetSnap)
-			if err != nil {
-				return err
-			}
-			// Proportionally attribute tokens based on the cost fraction
-			// absorbed by the budget (vs. grants). If $0.10 total and the
-			// budget absorbs $0.02, it gets 20% of the tokens.
-			budgetTokens := tokens
-			if costUSD > 0 {
-				budgetTokens = int64(math.Round(float64(tokens) * (remaining / costUSD)))
-			}
-			if err := tx.Update(budgetRef, []firestore.Update{
-				{Path: "spent_usd", Value: b.SpentUSD + remaining},
-				{Path: "tokens_used", Value: b.TokensUsed + budgetTokens},
-			}); err != nil {
-				return fmt.Errorf("firestoredb: deducting from budget: %w", err)
-			}
-		}
 		return nil
 	})
 }

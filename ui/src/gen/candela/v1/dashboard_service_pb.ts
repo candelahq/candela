@@ -359,7 +359,7 @@ export type GetMyUsageResponse = Message<"candela.v1.GetMyUsageResponse"> & {
   totalRemainingUsd: number;
 
   /**
-   * Active grants (grants-first waterfall)
+   * Active grants
    *
    * @generated from field: repeated candela.types.BudgetGrant active_grants = 22;
    */
@@ -509,7 +509,8 @@ export const DashboardService: GenService<{
     output: typeof GetLatencyPercentilesResponseSchema;
   },
   /**
-   * GetMyUsage returns the calling user's personal usage summary.
+   * GetMyUsage returns the calling user's personal usage summary (BigQuery).
+   * For real-time budget/grant progress, see UserService.GetMyBudget.
    *
    * @generated from rpc candela.v1.DashboardService.GetMyUsage
    */

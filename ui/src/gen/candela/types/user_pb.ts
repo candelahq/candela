@@ -140,7 +140,9 @@ export const UserBudgetSchema: GenMessage<UserBudget> = /*@__PURE__*/
 
 /**
  * BudgetGrant is a one-time bonus budget with an expiry window.
- * Consumed BEFORE the recurring budget (grants-first waterfall).
+ * Consumed AFTER the recurring budget (budget-first waterfall).
+ * When the daily budget is exhausted, grants absorb the overflow.
+ * Multiple grants are consumed earliest-expiry-first to minimise waste.
  * Firestore path: users/{user_id}/grants/{id}
  *
  * @generated from message candela.types.BudgetGrant

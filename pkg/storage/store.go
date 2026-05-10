@@ -14,6 +14,24 @@ import (
 // Store implementations should return this (or wrap it) for "not found" cases.
 var ErrNotFound = errors.New("not found")
 
+// userScopeKey is the context key for the current user's ID used for trace scoping.
+type userScopeKey struct{}
+
+// WithUserScope attaches a user ID to the context for storage-layer query scoping.
+// Handlers call this before invoking GetTrace so backends can push authorization
+// filtering to the database rather than fetching all data and checking post-hoc.
+// An empty userID means "admin — no filter".
+func WithUserScope(ctx context.Context, userID string) context.Context {
+	return context.WithValue(ctx, userScopeKey{}, userID)
+}
+
+// UserScopeFromContext retrieves the scoped user ID set by WithUserScope.
+// Returns empty string if no scope is set (admin view or dev mode).
+func UserScopeFromContext(ctx context.Context) string {
+	v, _ := ctx.Value(userScopeKey{}).(string)
+	return v
+}
+
 // User status constants.
 const (
 	StatusProvisioned = "provisioned"
@@ -338,14 +356,19 @@ type UserRecord struct {
 
 // BudgetRecord is the Go representation of a user's recurring budget.
 type BudgetRecord struct {
-	UserID      string    `json:"user_id" firestore:"user_id"`
-	LimitUSD    float64   `json:"limit_usd,omitempty" firestore:"limit_usd,omitempty"`
-	SpentUSD    float64   `json:"spent_usd,omitempty" firestore:"spent_usd,omitempty"`
-	TokensUsed  int64     `json:"tokens_used,omitempty" firestore:"tokens_used,omitempty"`
-	PeriodType  string    `json:"period_type,omitempty" firestore:"period_type,omitempty"` // "daily"
-	PeriodKey   string    `json:"period_key,omitempty" firestore:"period_key,omitempty"`   // "2026-04", "2026-W15"
-	PeriodStart time.Time `json:"period_start,omitempty" firestore:"period_start,omitempty"`
-	PeriodEnd   time.Time `json:"period_end,omitempty" firestore:"period_end,omitempty"`
+	UserID     string  `json:"user_id" firestore:"user_id"`
+	LimitUSD   float64 `json:"limit_usd,omitempty" firestore:"limit_usd,omitempty"`
+	SpentUSD   float64 `json:"spent_usd,omitempty" firestore:"spent_usd,omitempty"`
+	TokensUsed int64   `json:"tokens_used,omitempty" firestore:"tokens_used,omitempty"`
+	// AllTokensUsed is incremented for every LLM call before the grants waterfall —
+	// regardless of whether the cost was absorbed by a grant or the budget.
+	// This gives GetMyBudget an accurate "tokens used today" count from Firestore
+	// without needing BigQuery. Contrast with TokensUsed, which is budget-portion only.
+	AllTokensUsed int64     `json:"all_tokens_used,omitempty" firestore:"all_tokens_used,omitempty"`
+	PeriodType    string    `json:"period_type,omitempty" firestore:"period_type,omitempty"` // "daily"
+	PeriodKey     string    `json:"period_key,omitempty" firestore:"period_key,omitempty"`   // "2026-04", "2026-W15"
+	PeriodStart   time.Time `json:"period_start,omitempty" firestore:"period_start,omitempty"`
+	PeriodEnd     time.Time `json:"period_end,omitempty" firestore:"period_end,omitempty"`
 }
 
 // GrantRecord is the Go representation of a one-time budget grant.

@@ -49,7 +49,8 @@ export const DashboardService = {
       kind: MethodKind.Unary,
     },
     /**
-     * GetMyUsage returns the calling user's personal usage summary.
+     * GetMyUsage returns the calling user's personal usage summary (BigQuery).
+     * For real-time budget/grant progress, see UserService.GetMyBudget.
      *
      * @generated from rpc candela.v1.DashboardService.GetMyUsage
      */

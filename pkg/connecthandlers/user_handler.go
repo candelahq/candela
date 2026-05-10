@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"strconv"
 	"strings"
+	"time"
 
 	connect "connectrpc.com/connect"
 	typespb "github.com/candelahq/candela/gen/go/candela/types"
@@ -589,33 +590,77 @@ func (h *UserHandler) GetMyBudget(
 		return nil, connect.NewError(connect.CodeNotFound, fmt.Errorf("user not found"))
 	}
 
-	budget, err := h.store.GetBudget(ctx, user.ID)
-	if err != nil {
-		return nil, internalError("failed to get budget", err)
+	// Fetch budget and grants concurrently — both are Firestore reads, ~80ms total.
+	type budgetResult struct {
+		b   *storage.BudgetRecord
+		err error
 	}
-	grants, err := h.store.ListGrants(ctx, user.ID, true)
-	if err != nil {
-		return nil, internalError("failed to list grants", err)
+	type grantsResult struct {
+		gs  []*storage.GrantRecord
+		err error
 	}
-	check, err := h.store.CheckBudget(ctx, user.ID, 0)
-	if err != nil {
-		return nil, internalError("failed to check budget", err)
+	budgetCh := make(chan budgetResult, 1)
+	grantsCh := make(chan grantsResult, 1)
+
+	go func() {
+		b, err := h.store.GetBudget(ctx, user.ID)
+		budgetCh <- budgetResult{b, err}
+	}()
+	go func() {
+		gs, err := h.store.ListGrants(ctx, user.ID, true)
+		grantsCh <- grantsResult{gs, err}
+	}()
+
+	br := <-budgetCh
+	gr := <-grantsCh
+
+	if br.err != nil {
+		return nil, internalError("failed to get budget", br.err)
+	}
+	if gr.err != nil {
+		return nil, internalError("failed to list grants", gr.err)
 	}
 
-	pbGrants := make([]*typespb.BudgetGrant, len(grants))
-	for i, g := range grants {
+	// ── Compute per-pool remaining ──────────────────────────────────────────
+	var budgetRemaining float64
+	var allTokensToday int64
+	if br.b != nil {
+		budgetRemaining = br.b.LimitUSD - br.b.SpentUSD
+		if budgetRemaining < 0 {
+			budgetRemaining = 0
+		}
+		allTokensToday = br.b.AllTokensUsed
+	}
+
+	var grantsRemaining float64
+	pbGrants := make([]*typespb.BudgetGrant, len(gr.gs))
+	for i, g := range gr.gs {
 		pbGrants[i] = grantToProto(g)
+		grantsRemaining += g.Remaining()
+	}
+	if grantsRemaining < 0 {
+		grantsRemaining = 0
 	}
 
-	var totalRemaining float64
-	if check != nil {
-		totalRemaining = check.RemainingUSD
-	}
+	totalRemaining := budgetRemaining + grantsRemaining
+
+	// ── Period metadata (UTC) ───────────────────────────────────────────────
+	// Matches the period key used by DeductSpend — midnight UTC reset.
+	now := time.Now().UTC()
+	periodKey := now.Format("2006-01-02")
+	// Next midnight UTC.
+	nextMidnight := now.Truncate(24 * time.Hour).Add(24 * time.Hour)
+	periodResetsAt := nextMidnight.Format(time.RFC3339)
 
 	return connect.NewResponse(&v1.GetMyBudgetResponse{
-		Budget:            budgetToProto(budget),
-		ActiveGrants:      pbGrants,
-		TotalRemainingUsd: totalRemaining,
+		Budget:             budgetToProto(br.b),
+		ActiveGrants:       pbGrants,
+		TotalRemainingUsd:  totalRemaining,
+		BudgetRemainingUsd: budgetRemaining,
+		GrantsRemainingUsd: grantsRemaining,
+		TokensUsedToday:    allTokensToday,
+		PeriodKey:          periodKey,
+		PeriodResetsAt:     periodResetsAt,
 	}), nil
 }
 

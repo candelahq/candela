@@ -117,6 +117,7 @@ jobs:
           merge-multiple: true
 
       - name: Merge coverage profiles
+        shell: bash
         run: |
           files=(coverage-*.out)
           head -1 "${files[0]}" > coverage.out

@@ -379,11 +379,18 @@ func (s *Store) ResetSpend(ctx context.Context, userID string) error {
 	userID = sanitizeID(userID)
 	ref := s.client.Collection(usersCol).Doc(userID).
 		Collection(budgetsCol).Doc(periodKey)
-	_, err := ref.Update(ctx, []firestore.Update{
-		{Path: "spent_usd", Value: 0},
-		{Path: "tokens_used", Value: 0},
-		{Path: "all_tokens_used", Value: 0}, // reset fast-path counter too
-	})
+	// #H: Use Set+Merge instead of Update so this is idempotent on a missing
+	// period doc (new day). Update fails with NOT_FOUND when the spend doc
+	// doesn't exist yet (e.g. called by an admin just after midnight).
+	_, err := ref.Set(ctx, map[string]any{
+		"spent_usd":      0,
+		"tokens_used":    0,
+		"all_tokens_used": 0,
+	}, firestore.Merge(
+		firestore.FieldPath{"spent_usd"},
+		firestore.FieldPath{"tokens_used"},
+		firestore.FieldPath{"all_tokens_used"},
+	))
 	if err != nil {
 		return fmt.Errorf("firestoredb: resetting spend: %w", err)
 	}
@@ -458,6 +465,21 @@ func (s *Store) RevokeGrant(ctx context.Context, userID, grantID string) error {
 // Budget Enforcement
 // ──────────────────────────────────────────
 
+// CheckBudget returns whether the user has sufficient funds (grants + budget)
+// for an estimated call cost.
+//
+// # TOCTOU note (#G)
+//
+// CheckBudget and DeductSpend are intentionally separate operations. There is
+// a small window between a passing CheckBudget and the subsequent DeductSpend
+// where another concurrent request could exhaust the remaining balance. This
+// means a user near their limit may occasionally make one extra call.
+//
+// The risk is bounded and acceptable: DeductSpend still records actual spend
+// post-fact, and the pre-flight floor ($0.001) prevents truly zero-balance
+// calls from succeeding. A future improvement would collapse the two into a
+// single Firestore transaction, but that would require reading grants inside
+// the DeductSpend transaction (significant latency increase on the hot path).
 func (s *Store) CheckBudget(ctx context.Context, userID string, estimatedCostUSD float64) (*storage.BudgetCheckResult, error) {
 	// Sum remaining grants.
 	grants, err := s.ListGrants(ctx, userID, true)
@@ -790,17 +812,44 @@ func snapToAudit(snap *firestore.DocumentSnapshot) (*storage.AuditRecord, error)
 	return &a, nil
 }
 
-// currentPeriodKey returns the daily period key for the current time.
-func currentPeriodKey(_ string) string {
-	return time.Now().UTC().Format("2006-01-02")
+// currentPeriodKey returns the period key for the given period type.
+// Supported period types: "daily" (YYYY-MM-DD), "monthly" (YYYY-MM),
+// "weekly" (YYYY-WNN). Unknown types fall back to "daily".
+// #F: was `func currentPeriodKey(_ string)` — the argument was always
+// ignored, so monthly and weekly budgets always rolled over daily.
+func currentPeriodKey(periodType string) string {
+	now := time.Now().UTC()
+	switch periodType {
+	case "monthly":
+		return now.Format("2006-01")
+	case "weekly":
+		_, week := now.ISOWeek()
+		return fmt.Sprintf("%d-W%02d", now.Year(), week)
+	default: // "daily" and anything unrecognised
+		return now.Format("2006-01-02")
+	}
 }
 
 // sanitizeID makes a generic string (like an email) safe for use as a
-// Firestore document ID by lowercasing, replacing slashes, and escaping
-// Firestore's reserved __.*__ pattern (IDs that start and end with double
-// underscores are reserved by Firestore and will cause writes to fail).
+// Firestore document ID by lowercasing, replacing path-separator and
+// consecutive-dot characters, and enforcing Firestore's 1500-byte limit.
+//
+// Rules applied:
+//   - Lowercase (emails are case-insensitive)
+//   - `/` → `_` (Firestore path separator)
+//   - `..` → `._` (consecutive dots are disallowed in Firestore IDs)
+//   - Truncate to 1500 bytes (Firestore document ID limit) — #I
+//   - Prefix `u_` if the result matches the reserved `__.*__` pattern
 func sanitizeID(id string) string {
-	s := strings.ReplaceAll(strings.ToLower(id), "/", "_")
+	s := strings.ToLower(id)
+	s = strings.ReplaceAll(s, "/", "_")
+	// Firestore disallows consecutive dots; replace with a visually-distinct
+	// separator that keeps the ID human-readable.
+	s = strings.ReplaceAll(s, "..", "._")
+	// #I: Firestore document IDs must be ≤ 1500 bytes.
+	if len(s) > 1500 {
+		s = s[:1500]
+	}
 	// Firestore reserves document IDs matching __.*__ (e.g. __user__@example.com).
 	if len(s) >= 4 && strings.HasPrefix(s, "__") && strings.HasSuffix(s, "__") {
 		s = "u_" + s

@@ -169,30 +169,41 @@ func (h *DashboardHandler) GetMyUsage(
 		q.EndTime = time.Now()
 	}
 
-	// ── BigQuery: usage summary + model breakdown (concurrent) ──────────────
+	// ── BigQuery: usage summary + model breakdown (truly concurrent) ─────────
+	// Both queries hit BigQuery independently (~800ms each). Run them in
+	// separate goroutines so total wait is max(summary, breakdown) ≈ 800ms
+	// instead of sum ≈ 1600ms.
+	type summaryResult struct {
+		v   *storage.UsageSummary
+		err error
+	}
+	type modelsResult struct {
+		v   []storage.ModelUsage
+		err error
+	}
+	summaryCh := make(chan summaryResult, 1)
+	modelsCh := make(chan modelsResult, 1)
+	go func() {
+		v, err := h.store.GetUsageSummary(ctx, q)
+		summaryCh <- summaryResult{v, err}
+	}()
+	go func() {
+		v, err := h.store.GetModelBreakdown(ctx, q)
+		modelsCh <- modelsResult{v, err}
+	}()
+	sr := <-summaryCh
+	mr := <-modelsCh
+	if sr.err != nil {
+		return nil, internalError("failed to get usage summary", sr.err)
+	}
+	if mr.err != nil {
+		return nil, internalError("failed to get model breakdown", mr.err)
+	}
 	type bqResult struct {
 		summary *storage.UsageSummary
 		models  []storage.ModelUsage
-		err     error
 	}
-	bqCh := make(chan bqResult, 1)
-	go func() {
-		models, err := h.store.GetModelBreakdown(ctx, q)
-		if err != nil {
-			bqCh <- bqResult{err: err}
-			return
-		}
-		summary, err := h.store.GetUsageSummary(ctx, q)
-		if err != nil {
-			bqCh <- bqResult{err: err}
-			return
-		}
-		bqCh <- bqResult{summary: summary, models: models}
-	}()
-	bq := <-bqCh
-	if bq.err != nil {
-		return nil, internalError("failed to get usage data", bq.err)
-	}
+	bq := bqResult{summary: sr.v, models: mr.v}
 
 	// Build response — token/cost figures are always from BigQuery.
 	// Budget progress bars and grant remaining: call UserService.GetMyBudget.

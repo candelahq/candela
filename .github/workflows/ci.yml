@@ -77,13 +77,11 @@ jobs:
             sleep 2
           done
 
-      - name: Generate proto stubs (from BSR)
-        run: nix develop -c buf generate
-
       - name: Test (${{ matrix.group.name }})
         # -p 4:        run up to 4 packages concurrently (matches 4-vCPU runner)
         # -parallel 4: run up to 4 t.Parallel() funcs concurrently within a package
-        run: nix develop -c go test ${{ matrix.group.pkgs }} -v -race -count=1 -p 4 -parallel 4 -coverprofile=coverage-${{ matrix.group.name }}.out -timeout 120s
+        # timeout 180s: extra headroom for Firestore emulator startup under Nix cache pressure
+        run: nix develop -c go test ${{ matrix.group.pkgs }} -v -race -count=1 -p 4 -parallel 4 -coverprofile=coverage-${{ matrix.group.name }}.out -timeout 180s
 
       - name: Upload coverage (${{ matrix.group.name }})
         uses: actions/upload-artifact@v4

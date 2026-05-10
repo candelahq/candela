@@ -325,6 +325,11 @@ func (h *lmHandler) resolveModel(model string) string {
 	return model
 }
 
+// rewriteModelCache caches compiled per-model regexes keyed by the
+// JSON-encoded old model string so repeated alias resolutions (same model
+// across concurrent requests) compile the regex only once.
+var rewriteModelCache sync.Map // map[string]*regexp.Regexp
+
 // rewriteModelInBody replaces the model field value in a JSON request body.
 // Uses a regex to match `"model"` followed by optional whitespace, a colon,
 // optional whitespace, and the JSON-encoded old model value. Only the first
@@ -333,16 +338,26 @@ func (h *lmHandler) resolveModel(model string) string {
 func rewriteModelInBody(body []byte, oldModel, newModel string) []byte {
 	oldJSON, _ := json.Marshal(oldModel)
 	newJSON, _ := json.Marshal(newModel)
-	// Build a pattern that tolerates optional whitespace around the colon.
-	// regexp.QuoteMeta escapes the JSON-encoded string (handles special chars).
-	pattern := `"model"\s*:\s*` + regexp.QuoteMeta(string(oldJSON))
-	re, err := regexp.Compile(pattern)
-	if err != nil {
-		// Should never happen — fallback to compact no-whitespace replace.
-		target := append([]byte(`"model":`), oldJSON...)
-		replacement := append([]byte(`"model":`), newJSON...)
-		return bytes.Replace(body, target, replacement, 1)
+
+	// Look up or compile a regex for this specific old model value.
+	// The static key prefix is already compiled; we only need a per-value pattern.
+	cacheKey := string(oldJSON)
+	var re *regexp.Regexp
+	if v, ok := rewriteModelCache.Load(cacheKey); ok {
+		re = v.(*regexp.Regexp)
+	} else {
+		pattern := `"model"\s*:\s*` + regexp.QuoteMeta(cacheKey)
+		compiled, err := regexp.Compile(pattern)
+		if err != nil {
+			// Should never happen — fallback to compact no-whitespace replace.
+			target := append([]byte(`"model":`), oldJSON...)
+			replacement := append([]byte(`"model":`), newJSON...)
+			return bytes.Replace(body, target, replacement, 1)
+		}
+		rewriteModelCache.Store(cacheKey, compiled)
+		re = compiled
 	}
+
 	replacement := append([]byte(`"model":`), newJSON...)
 	loc := re.FindIndex(body)
 	if loc == nil {

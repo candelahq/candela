@@ -11,7 +11,7 @@ import (
 // stubUserStore implements storage.UserStore for tests.
 // Only GetUserByEmail is functional; all other methods panic to catch misuse.
 type stubUserStore struct {
-	storage.UserStore           // satisfies interface; panics on unimplemented methods
+	storage.UserStore // satisfies interface; panics on unimplemented methods
 	calls             int
 	result            *storage.UserRecord
 	err               error
@@ -82,7 +82,10 @@ func TestResolveUserID_LowercasesKey(t *testing.T) {
 	}
 }
 
-// U7: expired entries are pruned after each write, keeping the map bounded.
+// U7: the background eviction sweep correctly prunes expired entries.
+// Eviction is no longer triggered inline on every write — a background goroutine
+// calls evictExpired() on a 30-second cadence. We invoke it directly here to
+// verify the sweep logic without waiting for the ticker.
 func TestResolveUserID_EvictsExpiredOnWrite(t *testing.T) {
 	resetUserIDCache()
 
@@ -95,18 +98,24 @@ func TestResolveUserID_EvictsExpiredOnWrite(t *testing.T) {
 			expiresAt: time.Now().Add(-time.Minute),
 		}
 	}
+	// Add one live entry that must survive the sweep.
+	globalUserIDCache.entries["live@x.com"] = userIDEntry{
+		userID:    "live-uid",
+		found:     true,
+		expiresAt: time.Now().Add(userIDCacheTTL),
+	}
 	globalUserIDCache.mu.Unlock()
 
-	stub := &stubUserStore{result: &storage.UserRecord{ID: "new-uid"}}
-	_, _ = resolveUserID(context.Background(), stub, "trigger@x.com")
+	// Invoke the background sweep directly (same package).
+	globalUserIDCache.evictExpired()
 
 	globalUserIDCache.mu.RLock()
 	size := len(globalUserIDCache.entries)
 	globalUserIDCache.mu.RUnlock()
 
-	// Only the freshly written entry should remain (3 expired ones pruned).
+	// Only the live entry should remain (3 expired ones pruned).
 	if size != 1 {
-		t.Errorf("cache has %d entries after eviction, want 1", size)
+		t.Errorf("cache has %d entries after eviction sweep, want 1", size)
 	}
 }
 

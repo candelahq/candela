@@ -239,20 +239,6 @@ func TestProxyEndToEndAnthropic(t *testing.T) {
 	}
 }
 
-func TestTruncate(t *testing.T) {
-	if got := truncate("short", 100); got != "short" {
-		t.Errorf("truncate short = %q", got)
-	}
-	long := strings.Repeat("a", 200)
-	got := truncate(long, 50)
-	if len(got) > 70 {
-		t.Errorf("truncate long len = %d", len(got))
-	}
-	if !strings.Contains(got, "[truncated]") {
-		t.Error("expected truncated marker")
-	}
-}
-
 func TestGenerateIDs(t *testing.T) {
 	traceID := generateTraceID()
 	if len(traceID) != 32 {

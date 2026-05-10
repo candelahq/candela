@@ -21,7 +21,6 @@ import (
 	"regexp"
 	"strings"
 	"time"
-	"unicode/utf8"
 
 	"log/slog"
 
@@ -897,8 +896,8 @@ func (p *Proxy) buildSpan(ctx context.Context, params spanParams) {
 			OutputTokens:  params.outputTokens,
 			TotalTokens:   totalTokens,
 			CostUSD:       cost,
-			InputContent:  truncate(params.inputContent, 10000),
-			OutputContent: truncate(params.outputContent, 10000),
+			InputContent:  params.inputContent,
+			OutputContent: params.outputContent,
 		},
 		Attributes: attrs,
 	}
@@ -1115,17 +1114,4 @@ func toInt64(v interface{}) int64 {
 		return i
 	}
 	return 0
-}
-
-func truncate(s string, maxLen int) string {
-	if len(s) <= maxLen {
-		return s
-	}
-	// Operate on runes to avoid cutting multi-byte UTF-8 characters mid-sequence,
-	// which would produce invalid strings rejected by BigQuery and protobuf.
-	if utf8.RuneCountInString(s) <= maxLen {
-		return s
-	}
-	runes := []rune(s)
-	return string(runes[:maxLen]) + "...[truncated]"
 }

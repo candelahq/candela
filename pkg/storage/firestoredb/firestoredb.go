@@ -824,8 +824,10 @@ func currentPeriodKey(periodType string) string {
 	case "monthly":
 		return now.Format("2006-01")
 	case "weekly":
-		_, week := now.ISOWeek()
-		return fmt.Sprintf("%d-W%02d", now.Year(), week)
+		// Use the year returned by ISOWeek() — in the first days of January
+		// the ISO week may belong to the previous year (e.g. 2024-W52).
+		year, week := now.ISOWeek()
+		return fmt.Sprintf("%d-W%02d", year, week)
 	default: // "daily" and anything unrecognised
 		return now.Format("2006-01-02")
 	}
@@ -852,7 +854,11 @@ func sanitizeID(id string) string {
 	// splitting a multi-byte character (which would produce an invalid ID).
 	if len(s) > 1500 {
 		end := 1500
-		for end > 0 && !utf8.ValidString(s[:end]) {
+		// Walk back from byte 1500 until we land on a UTF-8 leading byte.
+		// utf8.RuneStart reports true for any byte that starts a rune (ASCII
+		// or a multi-byte lead byte), so this is O(1) for well-formed input
+		// — at most 3 steps back for a 4-byte sequence.
+		for end > 0 && !utf8.RuneStart(s[end]) {
 			end--
 		}
 		s = s[:end]

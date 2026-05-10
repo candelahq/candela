@@ -325,32 +325,36 @@ func (h *lmHandler) resolveModel(model string) string {
 	return model
 }
 
-// rewriteModelInBody replaces the model field value in a JSON request body.
-// Uses a regex to match `"model"` followed by optional whitespace, a colon,
-// optional whitespace, and the JSON-encoded old model value. Only the first
-// occurrence is replaced to avoid corrupting user message content that happens
-// to contain the same model name (e.g. in few-shot examples).
-func rewriteModelInBody(body []byte, oldModel, newModel string) []byte {
-	oldJSON, _ := json.Marshal(oldModel)
-	newJSON, _ := json.Marshal(newModel)
-	// Build a pattern that tolerates optional whitespace around the colon.
-	// regexp.QuoteMeta escapes the JSON-encoded string (handles special chars).
-	pattern := `"model"\s*:\s*` + regexp.QuoteMeta(string(oldJSON))
-	re, err := regexp.Compile(pattern)
-	if err != nil {
-		// Should never happen — fallback to compact no-whitespace replace.
-		target := append([]byte(`"model":`), oldJSON...)
-		replacement := append([]byte(`"model":`), newJSON...)
-		return bytes.Replace(body, target, replacement, 1)
+// rewriteModelInBody replaces the "model" field value in a JSON request body.
+// Consistent with pkg/proxy/proxy.go's rewriteModelField: parse the body to
+// find the actual current model string, then build a targeted regex that
+// handles any whitespace around the colon and any valid JSON encoding of the
+// old value (including \uXXXX escapes). Uses ReplaceAll with a ${1} backreference
+// so the whitespace between the key and value is preserved.
+func rewriteModelInBody(body []byte, _, newModel string) []byte {
+	// Parse to get the ground-truth model string (handles all JSON encodings).
+	var req struct {
+		Model string `json:"model"`
 	}
-	replacement := append([]byte(`"model":`), newJSON...)
-	loc := re.FindIndex(body)
+	if err := json.Unmarshal(body, &req); err != nil || req.Model == "" {
+		return body
+	}
+	oldJSON, _ := json.Marshal(req.Model)
+	newJSON, _ := json.Marshal(newModel)
+	// Match "model"\s*:\s*<current-json-value>, preserving key+whitespace via capture group.
+	// Use FindSubmatchIndex + manual splice so only the FIRST occurrence is replaced,
+	// leaving any nested "model" keys in message content untouched.
+	pattern := regexp.MustCompile(`("model"\s*:\s*)` + regexp.QuoteMeta(string(oldJSON)))
+	loc := pattern.FindSubmatchIndex(body)
 	if loc == nil {
 		return body
 	}
-	result := make([]byte, 0, len(body)-(loc[1]-loc[0])+len(replacement))
-	result = append(result, body[:loc[0]]...)
-	result = append(result, replacement...)
+	// loc[0]:loc[1] = full match; loc[2]:loc[3] = capture group (key+whitespace).
+	// Rebuild: everything before match + key+whitespace + newJSON + everything after match.
+	result := make([]byte, 0, len(body)+(len(newJSON)-len(oldJSON)))
+	result = append(result, body[:loc[2]]...)       // up to start of capture group
+	result = append(result, body[loc[2]:loc[3]]...) // key + whitespace (the ${1} part)
+	result = append(result, newJSON...)
 	result = append(result, body[loc[1]:]...)
 	return result
 }

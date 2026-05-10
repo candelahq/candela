@@ -21,8 +21,10 @@ import (
 //   - Email changes (rare) propagate within a minute.
 //
 // Keys are lowercased so different casings for the same address share a slot.
-// The cache evicts expired entries on every write to bound memory in long-running
-// instances, keeping the map size proportional to the number of active users.
+//
+// Eviction: a background goroutine sweeps expired entries every 30 seconds so
+// that writes never hold the write lock while scanning the whole map (O(N)).
+// This keeps write-lock critical sections O(1) regardless of cache size.
 //
 // #B: Negative entries (user not found) are cached with a 5-second TTL to
 // prevent a thundering herd of Firestore reads when a user is not yet provisioned.
@@ -39,11 +41,37 @@ type userIDEntry struct {
 
 const (
 	userIDCacheTTL         = 60 * time.Second
-	userIDCacheNegativeTTL = 5 * time.Second // short TTL for not-found entries
+	userIDCacheNegativeTTL = 5 * time.Second  // short TTL for not-found entries
+	userIDCacheSweepPeriod = 30 * time.Second // background eviction cadence
 )
 
-var globalUserIDCache = &userIDCache{
-	entries: make(map[string]userIDEntry),
+var globalUserIDCache = func() *userIDCache {
+	c := &userIDCache{
+		entries: make(map[string]userIDEntry),
+	}
+	// Background goroutine: sweep expired entries every 30 seconds.
+	// This keeps write-path critical sections O(1) — no per-write map scan.
+	go func() {
+		ticker := time.NewTicker(userIDCacheSweepPeriod)
+		defer ticker.Stop()
+		for range ticker.C {
+			c.evictExpired()
+		}
+	}()
+	return c
+}()
+
+// evictExpired removes all entries whose TTL has elapsed. Called by the
+// background sweep goroutine; must not be called while already holding the lock.
+func (c *userIDCache) evictExpired() {
+	now := time.Now()
+	c.mu.Lock()
+	for k, e := range c.entries {
+		if now.After(e.expiresAt) {
+			delete(c.entries, k)
+		}
+	}
+	c.mu.Unlock()
 }
 
 // resolveUserID returns the Firestore user ID for the given email, using a
@@ -82,16 +110,9 @@ func resolveUserID(ctx context.Context, users storage.UserStore, email string) (
 		entry = userIDEntry{userID: user.ID, found: true, expiresAt: now.Add(userIDCacheTTL)}
 	}
 
-	// Cache the result and evict expired entries to bound map growth.
+	// Store result. The background goroutine handles eviction — no per-write scan.
 	globalUserIDCache.mu.Lock()
 	globalUserIDCache.entries[key] = entry
-	// Evict expired entries on every write — keeps map size proportional
-	// to the number of active users, not total unique users ever seen.
-	for k, e := range globalUserIDCache.entries {
-		if now.After(e.expiresAt) {
-			delete(globalUserIDCache.entries, k)
-		}
-	}
 	globalUserIDCache.mu.Unlock()
 
 	return entry.userID, nil

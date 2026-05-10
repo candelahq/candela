@@ -65,6 +65,7 @@
             cloudflared
             grpcurl
             google-cloud-sdk  # Includes Firestore emulator (gcloud emulators firestore start)
+            jdk21_headless    # Required by the Firestore emulator (Java 8+ JRE)
             jq
             yq-go
 

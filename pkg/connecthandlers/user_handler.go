@@ -585,7 +585,7 @@ func (h *UserHandler) GetMyBudget(
 		return nil, connect.NewError(connect.CodeUnauthenticated, fmt.Errorf("not authenticated"))
 	}
 
-	user, err := h.store.GetUserByEmail(ctx, authUser.Email)
+	userID, err := resolveUserID(ctx, h.store, authUser.Email)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeNotFound, fmt.Errorf("user not found"))
 	}
@@ -603,11 +603,11 @@ func (h *UserHandler) GetMyBudget(
 	grantsCh := make(chan grantsResult, 1)
 
 	go func() {
-		b, err := h.store.GetBudget(ctx, user.ID)
+		b, err := h.store.GetBudget(ctx, userID)
 		budgetCh <- budgetResult{b, err}
 	}()
 	go func() {
-		gs, err := h.store.ListGrants(ctx, user.ID, true)
+		gs, err := h.store.ListGrants(ctx, userID, true)
 		grantsCh <- grantsResult{gs, err}
 	}()
 

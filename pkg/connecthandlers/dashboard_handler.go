@@ -133,18 +133,18 @@ func (h *DashboardHandler) GetMyUsage(
 		return nil, connect.NewError(connect.CodeUnauthenticated, fmt.Errorf("not authenticated"))
 	}
 
-	// Resolve the user's store ID (Firestore doc ID = sanitized email).
+	// Resolve the user's store ID via the in-process cache (60s TTL).
 	// The proxy writes this same ID into span.user_id, so BQ queries match.
 	var userID string
 	if h.users != nil {
-		user, err := h.users.GetUserByEmail(ctx, authUser.Email)
+		id, err := resolveUserID(ctx, h.users, authUser.Email)
 		if err != nil {
 			if errors.Is(err, storage.ErrNotFound) {
 				return nil, connect.NewError(connect.CodeNotFound, fmt.Errorf("user not found"))
 			}
 			return nil, internalError("failed to look up user", err)
 		}
-		userID = user.ID
+		userID = id
 	} else {
 		userID = authUser.EffectiveID()
 	}

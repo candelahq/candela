@@ -32,6 +32,14 @@ func New(path string) (*Store, error) {
 		return nil, fmt.Errorf("projectdb: open %s: %w", path, err)
 	}
 
+	// SQLite is single-writer: limit to 1 open connection to prevent
+	// 'database is locked' errors under concurrent requests. Multiple
+	// readers are allowed by WAL mode but Go's database/sql pool handles
+	// this correctly with a single-connection limit.
+	db.SetMaxOpenConns(1)
+	db.SetMaxIdleConns(1)
+	db.SetConnMaxLifetime(0) // keep the connection alive (avoid repeated open/close overhead)
+
 	// Enable WAL mode for concurrent reads.
 	if _, err := db.Exec("PRAGMA journal_mode=WAL"); err != nil {
 		_ = db.Close()

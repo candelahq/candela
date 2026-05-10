@@ -31,16 +31,21 @@ func (h *TraceHandler) GetTrace(
 	ctx context.Context,
 	req *connect.Request[v1.GetTraceRequest],
 ) (*connect.Response[v1.GetTraceResponse], error) {
-	trace, err := h.store.GetTrace(ctx, req.Msg.TraceId)
+	// Thread the user scope into the context so the storage backend can
+	// push the user_id filter to the database query, preventing BigQuery
+	// from fetching another user's prompt/response content before auth check.
+	ownerID := scopeUserID(ctx, h.users)
+	scopedCtx := storage.WithUserScope(ctx, ownerID)
+
+	trace, err := h.store.GetTrace(scopedCtx, req.Msg.TraceId)
 	if err != nil {
 		slog.Error("failed to get trace", "trace_id", req.Msg.TraceId, "error", err)
 		return nil, connect.NewError(connect.CodeNotFound, fmt.Errorf("trace not found"))
 	}
 
-	// Authorization gate: non-admin users may only view their own traces.
-	// The trace's user_id is set by the proxy at ingestion time and matches
-	// the Firestore doc ID (sanitized email) used by scopeUserID.
-	if ownerID := scopeUserID(ctx, h.users); ownerID != "" {
+	// Defense-in-depth authorization check: even if the storage layer filtered
+	// correctly, verify the returned trace owner matches the caller.
+	if ownerID != "" {
 		// Determine the trace's owner from its root span (or first span).
 		traceOwner := traceUserID(trace)
 		if traceOwner != "" && traceOwner != ownerID {

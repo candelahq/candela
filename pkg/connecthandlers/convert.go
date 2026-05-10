@@ -38,6 +38,10 @@ func protoToSpan(ps *typespb.Span) (*storage.Span, error) {
 		span.Duration = ps.Duration.AsDuration()
 	} else if !span.StartTime.IsZero() && !span.EndTime.IsZero() {
 		span.Duration = span.EndTime.Sub(span.StartTime)
+		// Clamp: don't store negative durations from malformed proto timestamps.
+		if span.Duration < 0 {
+			span.Duration = 0
+		}
 	}
 
 	if ps.GenAi != nil {
@@ -72,10 +76,13 @@ func protoToSpan(ps *typespb.Span) (*storage.Span, error) {
 		}
 	}
 
-	// Set defaults.
+	// Set defaults for missing timestamps. Use UTC to match BigQuery's
+	// TIMESTAMP type which is stored in UTC.
 	if span.StartTime.IsZero() {
-		span.StartTime = time.Now()
+		span.StartTime = time.Now().UTC()
 	}
+	// If EndTime is still zero after parsing, don't compute a duration
+	// (it stays 0, which the UI renders as 0ms rather than a negative value).
 
 	return span, nil
 }

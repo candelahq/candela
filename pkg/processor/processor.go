@@ -138,6 +138,19 @@ func (p *SpanProcessor) Run(ctx context.Context) {
 			flush()
 			return
 		case <-ctx.Done():
+			// Drain remaining buffered spans before exiting so we don't silently
+			// drop data when the context is cancelled. This mirrors the p.done path.
+			// NOTE: we do NOT close p.spanCh here (only Stop() owns that), so we
+			// use a non-blocking drain loop instead of ranging over the channel.
+		drainCtx:
+			for {
+				select {
+				case span := <-p.spanCh:
+					batch = append(batch, span)
+				default:
+					break drainCtx
+				}
+			}
 			flush()
 			return
 		}

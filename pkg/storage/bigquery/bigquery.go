@@ -339,16 +339,23 @@ func (s *Store) Close() error {
 }
 
 // GetTrace retrieves all spans for a given trace ID.
+// If the context carries a user scope (set by handlers via storage.WithUserScope),
+// the query filters to that user's spans only — preventing cross-user data access
+// and avoiding the cost of fetching another user's prompt content from BigQuery.
 func (s *Store) GetTrace(ctx context.Context, traceID string) (*storage.Trace, error) {
+	userID := storage.UserScopeFromContext(ctx)
+
 	query := fmt.Sprintf(`
 		SELECT * FROM %s
 		WHERE trace_id = @traceID
+		  AND (@userID = '' OR user_id = @userID)
 		ORDER BY start_time ASC
 	`, quoteTable(s.tableID))
 
 	q := s.client.Query(query)
 	q.Parameters = []bigquery.QueryParameter{
 		{Name: "traceID", Value: traceID},
+		{Name: "userID", Value: userID},
 	}
 
 	spans, err := s.querySpans(ctx, q)
@@ -414,12 +421,20 @@ func (s *Store) QueryTraces(ctx context.Context, tq storage.TraceQuery) (*storag
 		return &storage.TraceResult{Traces: nil, TotalCount: 0}, nil
 	}
 
-	// Batch-fetch only the columns buildTrace needs (avoids scanning
-	// large text fields like gen_ai_input_content/gen_ai_output_content).
+	// Batch-fetch all columns that querySpans() expects, but use '' literals
+	// for large text content fields (input/output content) to avoid scanning
+	// MBs of prompt/response text just to build a trace list summary.
+	// IMPORTANT: querySpans() scans into a full spanRow struct — missing columns
+	// in the SELECT will silently zero-fill every field, causing 0 token counts
+	// and blank model names in the trace list.
 	batchQuery := fmt.Sprintf(`
-		SELECT span_id, trace_id, parent_span_id, name, kind, status,
-		       start_time, end_time, duration_ns, project_id, environment,
-		       gen_ai_total_tokens, gen_ai_cost_usd
+		SELECT span_id, trace_id, parent_span_id, name, kind, status, status_message,
+		       start_time, end_time, duration_ns, project_id, environment, service_name,
+		       gen_ai_model, gen_ai_provider,
+		       gen_ai_input_tokens, gen_ai_output_tokens, gen_ai_total_tokens,
+		       gen_ai_cost_usd, gen_ai_temperature, gen_ai_max_tokens,
+		       '' AS gen_ai_input_content, '' AS gen_ai_output_content,
+		       attributes, user_id, session_id
 		FROM %s
 		WHERE trace_id IN UNNEST(@traceIDs)
 		ORDER BY start_time ASC, span_id ASC
@@ -556,6 +571,10 @@ func (s *Store) GetUsageSummary(ctx context.Context, uq storage.UsageQuery) (*st
 	summary.TotalLLMCalls = row.TotalLLMCalls
 	summary.TotalInputTokens = row.TotalInputTokens
 	summary.TotalOutputTokens = row.TotalOutputTokens
+	// NOTE: UsageSummary has no dedicated TotalTokens field; the dashboard
+	// computes it from TotalInputTokens + TotalOutputTokens. Keep row.TotalTokens
+	// here for correctness verification but do not discard it silently.
+	_ = row.TotalTokens
 	summary.TotalCostUSD = row.TotalCostUSD
 	summary.AvgLatencyMs = float64(row.AvgDurationNs) / 1e6
 

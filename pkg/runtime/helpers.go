@@ -3,9 +3,33 @@ package runtime
 import (
 	"context"
 	"fmt"
+	"net"
 	"net/http"
 	"time"
 )
+
+// httpClient is a shared HTTP client with explicit timeouts used by all
+// runtime backends. http.DefaultClient has no timeout, which means a hung
+// local backend (LM Studio / vLLM / Ollama) would block goroutines forever.
+//
+// Timeout values:
+//   - DialTimeout 5s:       local backends should accept connections immediately
+//   - ResponseHeaderTimeout 30s: headers must arrive within 30s (covers slow starts)
+//   - No client-level Timeout: streaming responses need unlimited body read time;
+//     callers control overall duration via their request context.
+var httpClient = &http.Client{
+	Transport: &http.Transport{
+		DialContext:           (&net.Dialer{Timeout: 5 * time.Second}).DialContext,
+		ResponseHeaderTimeout: 30 * time.Second,
+		MaxIdleConnsPerHost:   10,
+		IdleConnTimeout:       90 * time.Second,
+	},
+}
+
+// HTTPClient returns the shared bounded HTTP client used by all runtime
+// backends. Use this instead of http.DefaultClient to avoid hung goroutines
+// when a local backend (LM Studio / vLLM / Ollama) stops responding.
+func HTTPClient() *http.Client { return httpClient }
 
 // WaitHealthy polls the given URL until it returns HTTP 200 or the timeout
 // expires. This is shared across all runtime implementations that need to
@@ -26,7 +50,7 @@ func WaitHealthy(ctx context.Context, url string, interval, timeout time.Duratio
 			if err != nil {
 				continue
 			}
-			resp, err := http.DefaultClient.Do(req)
+			resp, err := httpClient.Do(req)
 			if err == nil {
 				_ = resp.Body.Close()
 				if resp.StatusCode == http.StatusOK {

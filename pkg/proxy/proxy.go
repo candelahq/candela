@@ -400,15 +400,8 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// ── Pre-flight budget check ──
-	// Soft gate: check if the user has *any* remaining budget (grants + base).
-	// We pass estimatedCostUSD=0 because we can't know the actual cost until
-	// after the upstream response. This blocks only fully-exhausted users;
-	// actual cost deduction happens post-response via DeductSpend.
-	// Uses effectiveUserID so budget is checked against the real end-user.
-	// Service accounts have no budget entries — skip to avoid spurious warnings.
 	if p.users != nil && effectiveUserID != "" && !isServiceAccount {
 		// ── Rate limiting ──
-		// Enforce per-user request velocity limits before budget check.
 		allowed, count, limit, rlErr := p.users.CheckRateLimit(r.Context(), effectiveUserID)
 		if rlErr != nil {
 			slog.Warn("rate limit check failed, allowing request",
@@ -423,21 +416,8 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 				"count", count, "limit", limit)
 			return
 		}
-
-		// ── Pre-flight budget check ──
-		check, err := p.users.CheckBudget(r.Context(), effectiveUserID, 0)
-		if err != nil {
-			slog.Warn("budget check failed, allowing request",
-				"user_id", effectiveUserID, "error", err)
-		} else if !check.Allowed {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusPaymentRequired)
-			_, _ = w.Write([]byte(`{"error":{"message":"budget exhausted — contact your admin for a grant or budget increase","type":"insufficient_budget","code":402}}`))
-			slog.Info("blocked request: budget exhausted",
-				"user_id", effectiveUserID,
-				"remaining_usd", check.RemainingUSD)
-			return
-		}
+		// Budget + pricing gates are applied after body read (below) so we
+		// can extract the model name for a more accurate pre-flight estimate.
 	}
 
 	// Handle GET /v1/models — return configured models for this provider.
@@ -470,6 +450,39 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 
 	// Check if this is a streaming request (check BEFORE translation).
 	isStreaming := isStreamingRequest(providerName, reqBody)
+
+	// ── Pricing gate (#6) + budget pre-flight with model-aware floor (#7) ──
+	// These checks run after body read so we can extract the model name.
+	if p.users != nil && effectiveUserID != "" && !isServiceAccount {
+		model, _ := extractRequestInfo(providerName, reqBody)
+
+		// #6: Block calls to cloud models with no pricing configured.
+		// Unknown models would be billed $0, letting users make free API calls.
+		if model != "" && strings.ToLower(providerName) != "local" && !p.calc.HasPricing(providerName, model) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusPaymentRequired)
+			_, _ = fmt.Fprintf(w, `{"error":{"message":"no pricing configured for model %q — contact your admin","type":"pricing_not_configured","code":402}}`, model)
+			slog.Warn("blocked request: no pricing for model",
+				"user_id", effectiveUserID, "provider", providerName, "model", model)
+			return
+		}
+
+		// #7: Budget check with a per-call floor so even a $0.001-remaining
+		// user can't fire a $50 request. Floor = minimum meaningful API cost.
+		const budgetCheckFloor = 0.001 // $0.001 — lower than any cloud model's minimum call
+		check, err := p.users.CheckBudget(r.Context(), effectiveUserID, budgetCheckFloor)
+		if err != nil {
+			slog.Warn("budget check failed, allowing request",
+				"user_id", effectiveUserID, "error", err)
+		} else if !check.Allowed {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusPaymentRequired)
+			_, _ = w.Write([]byte(`{"error":{"message":"budget exhausted — contact your admin for a grant or budget increase","type":"insufficient_budget","code":402}}`))
+			slog.Info("blocked request: budget exhausted",
+				"user_id", effectiveUserID, "remaining_usd", check.RemainingUSD)
+			return
+		}
+	}
 
 	// --- Translation layer ---
 	// If the provider has a FormatTranslator, convert the request format
@@ -687,14 +700,34 @@ func (p *Proxy) handleStreamingResponse(
 	}
 
 	// Tee the stream: forward to client AND buffer for observability.
-	// Buffer capped at 1MB to prevent OOM on large streaming responses.
+	// Two separate buffers:
+	//   streamBuffer — first 32KB of content (for BigQuery input/output text)
+	//   tailBuf      — last 8KB always (ring-overwrites); captures the SSE
+	//                  usage chunk which appears at stream END. Without this,
+	//                  the old 1MB cap stopped before the usage line arrived,
+	//                  billing $0 for every long streaming response (#8).
 	var streamBuffer bytes.Buffer
-	const maxStreamCapture = 1 << 20 // 1MB
+	const maxStreamCapture = 32 << 10 // 32KB for content logging
+	const tailBufSize = 8 << 10       // 8KB tail — enough for any usage chunk
+	tailBuf := make([]byte, tailBufSize)
+	tailHead := 0     // write position in ring
+	tailFull := false // whether ring has wrapped
 	streamCapped := false
 	buf := make([]byte, 4096)
 	var ttft time.Duration
 	isFirstChunk := true
 	streamCompleted := false // tracks whether stream ended normally
+
+	appendTail := func(data []byte) {
+		for len(data) > 0 {
+			n := copy(tailBuf[tailHead:], data)
+			tailHead = (tailHead + n) % tailBufSize
+			if tailHead == 0 {
+				tailFull = true
+			}
+			data = data[n:]
+		}
+	}
 
 	for {
 		n, err := resp.Body.Read(buf)
@@ -707,16 +740,17 @@ func (p *Proxy) handleStreamingResponse(
 			chunk := buf[:n]
 
 			// Buffer raw upstream data for observability (before translation).
-			if cbAllow && !streamCapped {
-				if streamBuffer.Len()+n > maxStreamCapture {
-					remaining := maxStreamCapture - streamBuffer.Len()
-					if remaining > 0 {
-						streamBuffer.Write(chunk[:remaining])
+			if cbAllow {
+				if !streamCapped {
+					if streamBuffer.Len()+n > maxStreamCapture {
+						streamCapped = true
+					} else {
+						streamBuffer.Write(chunk)
 					}
-					streamCapped = true
-				} else {
-					streamBuffer.Write(chunk)
 				}
+				// Always update tail buffer — overwrites oldest bytes.
+				// Usage chunks are last; this ensures they're always captured.
+				appendTail(chunk)
 			}
 
 			// Translate chunk if provider has a FormatTranslator.
@@ -744,6 +778,22 @@ func (p *Proxy) handleStreamingResponse(
 
 	endTime := time.Now()
 
+	// Reconstruct parse data: content buffer (first 32KB) + tail buffer (last 8KB).
+	// When streamCapped, the usage SSE chunk at stream-end is in tailBuf, not
+	// streamBuffer — merge them so extractStreamingUsage always finds the token counts.
+	var parseData []byte
+	if streamCapped {
+		var tail []byte
+		if tailFull {
+			tail = append(tailBuf[tailHead:], tailBuf[:tailHead]...)
+		} else {
+			tail = tailBuf[:tailHead]
+		}
+		parseData = append(streamBuffer.Bytes(), tail...)
+	} else {
+		parseData = streamBuffer.Bytes()
+	}
+
 	// Parse the accumulated stream to extract usage data.
 	// Use bounded timeout to prevent goroutine leaks.
 	streamStatus := storage.SpanStatusOK
@@ -754,7 +804,7 @@ func (p *Proxy) handleStreamingResponse(
 		spanCtx, spanCancel := context.WithTimeout(context.Background(), 30*time.Second)
 		go func() {
 			defer spanCancel()
-			p.createStreamingSpan(spanCtx, provider, reqBody, streamBuffer.Bytes(), startTime, endTime, ttfb, ttft, requestID, sessionID, effectiveUserID, streamStatus, traceCtx, proxySpanID)
+			p.createStreamingSpan(spanCtx, provider, reqBody, parseData, startTime, endTime, ttfb, ttft, requestID, sessionID, effectiveUserID, streamStatus, traceCtx, proxySpanID)
 		}()
 	} else {
 		slog.Debug("skipping streaming span (circuit open)", "provider", provider.Name, "request_id", requestID)
@@ -845,7 +895,14 @@ func (p *Proxy) buildSpan(ctx context.Context, params spanParams) {
 	// Notification is non-critical and remains async.
 	// Skip for service accounts — they have no budget entries.
 	isSA := strings.HasSuffix(span.UserID, ".gserviceaccount.com")
-	if p.users != nil && span.UserID != "" && !isSA && span.GenAI != nil && span.GenAI.CostUSD > 0 {
+	// #10: DeductSpend is called when CostUSD>0 OR TotalTokens>0.
+	// The TotalTokens>0 case handles: unknown cloud models (cost=$0 from pricing
+	// gap), streaming calls where the buffer cap lost the usage chunk, and any
+	// other zero-cost path. We still want AllTokensUsed incremented for them.
+	// Local models (isSA-like but provider=local) pass cost=$0 — DeductSpend
+	// with costUSD=0 is safe: it only updates token counters, not spent_usd.
+	if p.users != nil && span.UserID != "" && !isSA && span.GenAI != nil &&
+		(span.GenAI.CostUSD > 0 || span.GenAI.TotalTokens > 0) {
 		if err := p.users.DeductSpend(ctx, span.UserID, span.GenAI.CostUSD, span.GenAI.TotalTokens); err != nil {
 			slog.Error("failed to deduct spend",
 				"user_id", span.UserID,
@@ -853,8 +910,11 @@ func (p *Proxy) buildSpan(ctx context.Context, params spanParams) {
 				"error", err)
 		} else if p.budgetCk != nil {
 			// Async: threshold notification is best-effort.
+			// Use a bounded context — an unbounded context.Background() leaks
+			// goroutines if Firestore is degraded (blocked reads on every proxied call).
 			go func() {
-				bgCtx := context.Background()
+				bgCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+				defer cancel()
 				budget, err := p.users.GetBudget(bgCtx, span.UserID)
 				if err == nil && budget != nil && budget.LimitUSD > 0 {
 					var email string

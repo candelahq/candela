@@ -27,6 +27,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Fix git ownership for Nix flake
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
       - name: Lint GitHub Actions workflows
         run: nix develop . --command actionlint
 
@@ -63,6 +66,9 @@ jobs:
             pkgs: ./pkg/processor/... ./pkg/prototest/...
     steps:
       - uses: actions/checkout@v4
+
+      - name: Fix git ownership for Nix flake
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
       - name: Start Firestore emulator
         run: |
@@ -101,6 +107,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Fix git ownership for Nix flake
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
       - name: Download coverage artifacts
         uses: actions/download-artifact@v4
         with:
@@ -133,6 +142,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Fix git ownership for Nix flake
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
       - name: Install dependencies
         run: nix develop . --command pnpm install
         working-directory: ui
@@ -159,6 +171,9 @@ jobs:
         password: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - uses: actions/checkout@v4
+
+      - name: Fix git ownership for Nix flake
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
       - name: Install dependencies
         run: nix develop . --command pnpm install
@@ -195,6 +210,9 @@ jobs:
         password: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - uses: actions/checkout@v4
+
+      - name: Fix git ownership for Nix flake
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
       - name: Generate Rust proto stubs
         run: nix develop . --command bash -c "cd rust && buf generate"

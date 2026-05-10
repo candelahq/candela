@@ -197,17 +197,26 @@ func (s *Store) ListUsers(ctx context.Context, statusFilter string, limit, offse
 func (s *Store) UpdateUser(ctx context.Context, user *storage.UserRecord) error {
 	id := sanitizeID(user.ID)
 	ref := s.client.Collection(usersCol).Doc(id)
-	// Use targeted updates for mutable fields only. This avoids the
-	// "MergeAll can only be specified with map data" error that occurs
-	// when passing a struct to Set with MergeAll.
-	updates := []firestore.Update{
-		{Path: "role", Value: user.Role},
-		{Path: "status", Value: user.Status},
-		{Path: "display_name", Value: user.DisplayName},
-		{Path: "rate_limit", Value: user.RateLimit},
+	// Build a targeted update list, skipping zero-value fields so a partial
+	// update (e.g. only DisplayName) does not overwrite Role/Status/RateLimit.
+	var updates []firestore.Update
+	if user.DisplayName != "" {
+		updates = append(updates, firestore.Update{Path: "display_name", Value: user.DisplayName})
+	}
+	if user.Role != "" {
+		updates = append(updates, firestore.Update{Path: "role", Value: user.Role})
+	}
+	if user.Status != "" {
+		updates = append(updates, firestore.Update{Path: "status", Value: user.Status})
+	}
+	if user.RateLimit != 0 {
+		updates = append(updates, firestore.Update{Path: "rate_limit", Value: user.RateLimit})
 	}
 	if !user.LastSeenAt.IsZero() {
 		updates = append(updates, firestore.Update{Path: "last_seen_at", Value: user.LastSeenAt})
+	}
+	if len(updates) == 0 {
+		return nil // nothing to update
 	}
 	_, err := ref.Update(ctx, updates)
 	if err != nil {
@@ -589,6 +598,20 @@ func (s *Store) DeductSpend(ctx context.Context, userID string, costUSD float64,
 				budgetAvailable = 0
 			}
 			budgetDeduct := min(remaining, budgetAvailable)
+
+			// Pre-compute how much the active grants can absorb from the overflow.
+			// Any overflow NOT covered by grants is still charged to the budget
+			// (it happened, the user owes it — CheckBudget is the gate, not here).
+			grantCoverage := float64(0)
+			for _, snap := range grantsSnaps {
+				if g, err2 := snapToGrant(snap); err2 == nil {
+					grantCoverage += g.Remaining()
+				}
+			}
+			overflow := math.Max(0, costUSD-budgetDeduct)
+			unabsorbed := math.Max(0, overflow-grantCoverage)
+			budgetCharge := budgetDeduct + unabsorbed
+
 			if budgetDeduct > 0 || tokens > 0 {
 				// Attribute tokens proportional to the budget fraction absorbed.
 				// If budget absorbs 100% of cost → 100% of tokens.
@@ -607,7 +630,7 @@ func (s *Store) DeductSpend(ctx context.Context, userID string, costUSD float64,
 						LimitUSD:      b.LimitUSD,
 						PeriodType:    b.PeriodType,
 						PeriodKey:     periodKey,
-						SpentUSD:      budgetDeduct,
+						SpentUSD:      budgetCharge,
 						TokensUsed:    budgetTokens,
 						AllTokensUsed: tokens,
 					}
@@ -618,12 +641,7 @@ func (s *Store) DeductSpend(ctx context.Context, userID string, costUSD float64,
 					updates := []firestore.Update{
 						{Path: "all_tokens_used", Value: b.AllTokensUsed + tokens},
 						{Path: "tokens_used", Value: b.TokensUsed + budgetTokens},
-					}
-					if budgetDeduct > 0 {
-						updates = append(updates, firestore.Update{
-							Path:  "spent_usd",
-							Value: b.SpentUSD + budgetDeduct,
-						})
+						{Path: "spent_usd", Value: b.SpentUSD + budgetCharge},
 					}
 					if err := tx.Update(budgetRef, updates); err != nil {
 						return fmt.Errorf("firestoredb: deducting from budget: %w", err)

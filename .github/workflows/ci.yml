@@ -10,10 +10,53 @@ permissions:
   contents: read
 
 jobs:
-  build-and-test:
+  # ── Phase 1: build, vet, and lint ─────────────────────────────────────────
+  build-and-lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@main
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: DeterminateSystems/magic-nix-cache-action@main
+
+      - name: Lint GitHub Actions workflows
+        run: nix develop -c actionlint
+
+      - name: Generate proto stubs (from BSR)
+        run: nix develop -c buf generate
+
+      - name: Build
+        run: nix develop -c go build ./...
+
+      - name: Vet
+        run: nix develop -c go vet ./...
+
+  # ── Phase 2: tests — parallel matrix by package group ─────────────────────
+  go-test:
+    needs: [build-and-lint]
     runs-on: ubuntu-latest
     env:
       FIRESTORE_EMULATOR_HOST: localhost:8086
+    strategy:
+      fail-fast: false   # let all groups run so we see all failures at once
+      matrix:
+        group:
+          # Only cmd packages that contain test files.
+          - name: cmd
+            pkgs: ./cmd/candela-local/... ./cmd/candela-sidecar/...
+          # Fast pkg tests — no Firestore dependency.
+          - name: pkg-core
+            pkgs: ./pkg/auth/... ./pkg/connecthandlers/... ./pkg/costcalc/... ./pkg/notify/... ./pkg/proxy/... ./pkg/runtime/... ./pkg/session/...
+          # Storage layer — mix of emulator and pure-Go backends.
+          - name: pkg-storage
+            pkgs: ./pkg/storage/...
+          # Heavy integration tests (Firestore-backed processor + prototest harness).
+          - name: pkg-processor
+            pkgs: ./pkg/processor/... ./pkg/prototest/...
     steps:
       - uses: actions/checkout@v4
 
@@ -29,26 +72,55 @@ jobs:
           gcloud emulators firestore start \
             --host-port=0.0.0.0:8086 \
             --project=test-project &
-          # Wait until the emulator HTTP port responds.
           for _ in $(seq 1 30); do
             curl -sf http://localhost:8086/ && break
             sleep 2
           done
 
-      - name: Lint GitHub Actions workflows
-        run: nix develop -c actionlint
-
       - name: Generate proto stubs (from BSR)
         run: nix develop -c buf generate
 
-      - name: Build
-        run: nix develop -c go build ./...
+      - name: Test (${{ matrix.group.name }})
+        # -p 4:        run up to 4 packages concurrently (matches 4-vCPU runner)
+        # -parallel 4: run up to 4 t.Parallel() funcs concurrently within a package
+        run: nix develop -c go test ${{ matrix.group.pkgs }} -v -race -count=1 -p 4 -parallel 4 -coverprofile=coverage-${{ matrix.group.name }}.out -timeout 120s
 
-      - name: Vet
-        run: nix develop -c go vet ./...
+      - name: Upload coverage (${{ matrix.group.name }})
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-${{ matrix.group.name }}
+          path: coverage-${{ matrix.group.name }}.out
+          retention-days: 1
 
-      - name: Test
-        run: nix develop -c go test ./... -v -race -count=1 -coverprofile=coverage.out -timeout 120s
+  # ── Phase 3: merge coverage and run govulncheck ───────────────────────────
+  build-and-test:
+    needs: [go-test]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@main
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: DeterminateSystems/magic-nix-cache-action@main
+
+      - name: Download coverage artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: coverage-*
+          merge-multiple: true
+
+      - name: Merge coverage profiles
+        run: |
+          # Combine all per-group profiles into one file.
+          # Take the mode header from the first file, skip it in all subsequent files.
+          files=(coverage-*.out)
+          head -1 "${files[0]}" > coverage.out
+          for f in "${files[@]}"; do
+            tail -n +2 "$f" >> coverage.out
+          done
 
       - name: Coverage summary
         run: nix develop -c go tool cover -func=coverage.out | tail -1

@@ -267,7 +267,7 @@ func TestCheckBudget(t *testing.T) {
 	}
 }
 
-func TestDeductSpend_GrantFirstWaterfall(t *testing.T) {
+func TestDeductSpend_BudgetFirstWaterfall(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
 
@@ -279,15 +279,15 @@ func TestDeductSpend_GrantFirstWaterfall(t *testing.T) {
 		t.Fatalf("CreateUser: %v", err)
 	}
 
-	// Set $100 daily budget.
+	// Set $20 daily budget (small, so the second call overflows into grants).
 	budget := &storage.BudgetRecord{
-		UserID: userID, LimitUSD: 100.0, PeriodType: "daily",
+		UserID: userID, LimitUSD: 20.0, PeriodType: "daily",
 	}
 	if err := s.SetBudget(ctx, budget); err != nil {
 		t.Fatalf("SetBudget: %v", err)
 	}
 
-	// Create a $10 grant (expires sooner) and a $20 grant (expires later).
+	// Create a $10 grant (expires sooner) and a $30 grant (expires later).
 	grant1 := &storage.GrantRecord{
 		UserID: userID, AmountUSD: 10.0, Reason: "small grant",
 		GrantedBy: "admin@example.com",
@@ -295,7 +295,7 @@ func TestDeductSpend_GrantFirstWaterfall(t *testing.T) {
 		ExpiresAt: time.Now().UTC().Add(1 * time.Hour), // expires first
 	}
 	grant2 := &storage.GrantRecord{
-		UserID: userID, AmountUSD: 20.0, Reason: "big grant",
+		UserID: userID, AmountUSD: 30.0, Reason: "big grant",
 		GrantedBy: "admin@example.com",
 		StartsAt:  time.Now().UTC().Add(-time.Hour),
 		ExpiresAt: time.Now().UTC().Add(24 * time.Hour), // expires later
@@ -307,41 +307,107 @@ func TestDeductSpend_GrantFirstWaterfall(t *testing.T) {
 		t.Fatalf("CreateGrant 2: %v", err)
 	}
 
-	// Deduct $25 — should consume grant1 ($10) + grant2 ($15), monthly budget untouched.
-	if err := s.DeductSpend(ctx, userID, 25.0, 1000); err != nil {
-		t.Fatalf("DeductSpend: %v", err)
+	// ── Deduct $15 (within budget headroom of $20) ─────────────────────────
+	// Expected: budget absorbs $15, grants untouched.
+	if err := s.DeductSpend(ctx, userID, 15.0, 1000); err != nil {
+		t.Fatalf("DeductSpend 1: %v", err)
 	}
 
-	// Check grant1: should be fully spent.
+	b, _ := s.GetBudget(ctx, userID)
+	if b.SpentUSD != 15.0 {
+		t.Errorf("budget.SpentUSD = %f, want 15.0 (budget-first)", b.SpentUSD)
+	}
+	// AllTokensUsed should capture the full 1000 tokens.
+	if b.AllTokensUsed != 1000 {
+		t.Errorf("budget.AllTokensUsed = %d, want 1000", b.AllTokensUsed)
+	}
+	// tokens_used (budget-portion): budget absorbed 100% of cost → 100% of tokens.
+	if b.TokensUsed != 1000 {
+		t.Errorf("budget.TokensUsed = %d, want 1000", b.TokensUsed)
+	}
+
 	grants, _ := s.ListGrants(ctx, userID, false)
 	for _, g := range grants {
-		if g.Reason == "small grant" && g.SpentUSD != 10.0 {
-			t.Errorf("small grant spent = %f, want 10.0", g.SpentUSD)
-		}
-		if g.Reason == "big grant" && g.SpentUSD != 15.0 {
-			t.Errorf("big grant spent = %f, want 15.0", g.SpentUSD)
+		if g.SpentUSD != 0 {
+			t.Errorf("grant %q spent = %f, want 0 (budget should be hit first)", g.Reason, g.SpentUSD)
 		}
 	}
 
-	// Check budget: should be untouched.
-	b, _ := s.GetBudget(ctx, userID)
-	if b.SpentUSD != 0 {
-		t.Errorf("budget spent = %f, want 0 (all deducted from grants)", b.SpentUSD)
-	}
-
-	// Deduct another $10 — should consume remaining grant2 ($5) + budget ($5).
+	// ── Deduct $10 (budget has $5 left; $5 overflows into earliest-expiry grant) ──
+	// Expected: budget absorbs $5, grant1 (expires sooner) absorbs $5.
 	if err := s.DeductSpend(ctx, userID, 10.0, 500); err != nil {
 		t.Fatalf("DeductSpend 2: %v", err)
 	}
 
 	b, _ = s.GetBudget(ctx, userID)
-	if b.SpentUSD != 5.0 {
-		t.Errorf("budget spent after second deduct = %f, want 5.0", b.SpentUSD)
+	if b.SpentUSD != 20.0 {
+		t.Errorf("budget.SpentUSD = %f, want 20.0 (budget fully exhausted)", b.SpentUSD)
 	}
-	// Token attribution: $10 cost, $5 from grant2, $5 from budget.
-	// Budget absorbed 50% of the cost, so should get 50% of 500 tokens = 250.
-	if b.TokensUsed != 250 {
-		t.Errorf("budget tokens after proportional split = %d, want 250 (50%% of 500)", b.TokensUsed)
+	// AllTokensUsed accumulates: 1000 + 500 = 1500.
+	if b.AllTokensUsed != 1500 {
+		t.Errorf("budget.AllTokensUsed = %d, want 1500", b.AllTokensUsed)
+	}
+	// Budget absorbed $5 of the $10 call → 50% of 500 tokens = 250.
+	if b.TokensUsed != 1250 {
+		t.Errorf("budget.TokensUsed = %d, want 1250 (1000 + 250 proportional)", b.TokensUsed)
+	}
+
+	// grant1 (earliest expiry) should absorb the $5 overflow.
+	grants, _ = s.ListGrants(ctx, userID, false)
+	for _, g := range grants {
+		if g.Reason == "small grant" && g.SpentUSD != 5.0 {
+			t.Errorf("grant1 spent = %f, want 5.0 (earliest-expiry-first overflow)", g.SpentUSD)
+		}
+		if g.Reason == "big grant" && g.SpentUSD != 0 {
+			t.Errorf("grant2 spent = %f, want 0 (grant1 should drain first)", g.SpentUSD)
+		}
+	}
+}
+
+func TestDeductSpend_AllTokensUsed_GrantFundedCalls(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	userID := fmt.Sprintf("test-all-tokens-%d", time.Now().UnixNano())
+	user := &storage.UserRecord{ID: userID, Email: "tokens@example.com", Role: "developer"}
+	t.Cleanup(func() { cleanupUser(ctx, s, userID) })
+	if err := s.CreateUser(ctx, user); err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+
+	// Set a $5 budget and a $50 grant — calls will go to budget first (small),
+	// then overflow to the grant. AllTokensUsed must capture both.
+	budget := &storage.BudgetRecord{UserID: userID, LimitUSD: 5.0, PeriodType: "daily"}
+	if err := s.SetBudget(ctx, budget); err != nil {
+		t.Fatalf("SetBudget: %v", err)
+	}
+	grant := &storage.GrantRecord{
+		UserID: userID, AmountUSD: 50.0, Reason: "overflow grant",
+		GrantedBy: "admin@example.com",
+		StartsAt:  time.Now().UTC().Add(-time.Hour),
+		ExpiresAt: time.Now().UTC().Add(24 * time.Hour),
+	}
+	if err := s.CreateGrant(ctx, grant); err != nil {
+		t.Fatalf("CreateGrant: %v", err)
+	}
+
+	// Deduct $20 (budget absorbs $5, grant absorbs $15).
+	if err := s.DeductSpend(ctx, userID, 20.0, 2000); err != nil {
+		t.Fatalf("DeductSpend: %v", err)
+	}
+
+	b, _ := s.GetBudget(ctx, userID)
+
+	// AllTokensUsed must be 2000 — the full count regardless of who paid.
+	if b.AllTokensUsed != 2000 {
+		t.Errorf("AllTokensUsed = %d, want 2000 (all tokens, including grant-funded)", b.AllTokensUsed)
+	}
+	// Budget absorbed $5 of $20 = 25%, so tokens_used = 25% of 2000 = 500.
+	if b.TokensUsed != 500 {
+		t.Errorf("TokensUsed = %d, want 500 (budget-proportion: 5/20 * 2000)", b.TokensUsed)
+	}
+	if b.SpentUSD != 5.0 {
+		t.Errorf("SpentUSD = %f, want 5.0", b.SpentUSD)
 	}
 }
 

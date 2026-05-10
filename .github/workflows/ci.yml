@@ -12,6 +12,25 @@ permissions:
 jobs:
   build-and-test:
     runs-on: ubuntu-latest
+    services:
+      firestore-emulator:
+        image: gcr.io/google.com/cloudsdktool/google-cloud-cli:emulators
+        ports:
+          - 8086:8086
+        options: >-
+          --health-cmd "curl -sf http://localhost:8086/ || exit 1"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+        env:
+          CLOUDSDK_CORE_PROJECT: test-project
+        # Start the Firestore emulator on container boot.
+        entrypoint: >
+          gcloud emulators firestore start
+          --host-port=0.0.0.0:8086
+          --project=test-project
+    env:
+      FIRESTORE_EMULATOR_HOST: localhost:8086
     steps:
       - uses: actions/checkout@v4
 
@@ -32,7 +51,7 @@ jobs:
         run: nix develop -c go vet ./...
 
       - name: Test
-        run: nix develop -c go test ./... -v -race -count=1 -coverprofile=coverage.out -timeout 60s
+        run: nix develop -c go test ./... -v -race -count=1 -coverprofile=coverage.out -timeout 120s
 
       - name: Coverage summary
         run: nix develop -c go tool cover -func=coverage.out | tail -1

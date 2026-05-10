@@ -12,24 +12,6 @@ permissions:
 jobs:
   build-and-test:
     runs-on: ubuntu-latest
-    services:
-      firestore-emulator:
-        image: gcr.io/google.com/cloudsdktool/google-cloud-cli:emulators
-        ports:
-          - 8086:8086
-        options: >-
-          --health-cmd "curl -sf http://localhost:8086/ || exit 1"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 10
-        env:
-          CLOUDSDK_CORE_PROJECT: test-project
-        # Start the Firestore emulator on container boot.
-        entrypoint: sh
-        args: >-
-          -c "gcloud emulators firestore start
-          --host-port=0.0.0.0:8086
-          --project=test-project"
     env:
       FIRESTORE_EMULATOR_HOST: localhost:8086
     steps:
@@ -41,6 +23,17 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - uses: DeterminateSystems/magic-nix-cache-action@main
+
+      - name: Start Firestore emulator
+        run: |
+          gcloud emulators firestore start \
+            --host-port=0.0.0.0:8086 \
+            --project=test-project &
+          # Wait until the emulator HTTP port responds.
+          for _ in $(seq 1 30); do
+            curl -sf http://localhost:8086/ && break
+            sleep 2
+          done
 
       - name: Lint GitHub Actions workflows
         run: nix develop -c actionlint

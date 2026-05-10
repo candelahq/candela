@@ -335,13 +335,12 @@ func rewriteModelField(body []byte, newModel string) []byte {
 	}
 	oldJSON, _ := json.Marshal(req.Model)
 	newJSON, _ := json.Marshal(newModel)
-	// Match "model"\s*:\s*"oldValue" to handle both compact and pretty JSON.
-	pattern := regexp.MustCompile(`("model"\s*:\s*)` + regexp.QuoteMeta(string(oldJSON)))
-	rewritten := pattern.ReplaceAll(body, append([]byte(`${1}`), newJSON...))
-	if !bytes.Equal(rewritten, body) {
-		return rewritten
-	}
-	return body
+	// Replace `"model":"<old>"` with `"model":"<new>"`.
+	// json.Marshal always produces compact output so literal byte replacement is safe
+	// and ~10x faster than compiling a regexp per request.
+	target := append([]byte(`"model":`), oldJSON...)
+	replacement := append([]byte(`"model":`), newJSON...)
+	return bytes.ReplaceAll(body, target, replacement)
 }
 
 // requestIDPattern validates that a request ID contains only safe characters

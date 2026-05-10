@@ -506,7 +506,10 @@ func (s *Store) DeductSpend(ctx context.Context, userID string, costUSD float64,
 		// When the period doc is NotFound (new day), read the stable config
 		// to get limit_usd and auto-create the spend doc in this transaction.
 		configRef := userRef.Collection(budgetsCol).Doc(budgetConfigDocID)
-		configSnap, _ := tx.Get(configRef) // best-effort: nil if no budget configured
+		configSnap, configErr := tx.Get(configRef)
+		if configErr != nil && status.Code(configErr) != codes.NotFound {
+			return fmt.Errorf("firestoredb: getting budget config in tx: %w", configErr)
+		}
 
 		// ── ALL WRITES AFTER READS ──
 

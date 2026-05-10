@@ -42,6 +42,7 @@
             golangci-lint
             gotools
             govulncheck
+            actionlint
 
             # Protobuf / Buf
             buf

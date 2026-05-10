@@ -2,6 +2,7 @@ package connecthandlers
 
 import (
 	"context"
+	"strings"
 	"sync"
 	"time"
 
@@ -19,7 +20,9 @@ import (
 //   - Provisioning delays resolve quickly after a new user is created.
 //   - Email changes (rare) propagate within a minute.
 //
-// The cache is safe for concurrent use and has no dependency on external state.
+// Keys are lowercased so different casings for the same address share a slot.
+// The cache evicts expired entries on every write to bound memory in long-running
+// instances, keeping the map size proportional to the number of active users.
 type userIDCache struct {
 	mu      sync.RWMutex
 	entries map[string]userIDEntry
@@ -43,9 +46,12 @@ func resolveUserID(ctx context.Context, users storage.UserStore, email string) (
 		return "", nil
 	}
 
+	// Normalize key: emails are case-insensitive; different casings must share a slot.
+	key := strings.ToLower(email)
+
 	// Fast path: cache hit.
 	globalUserIDCache.mu.RLock()
-	if e, ok := globalUserIDCache.entries[email]; ok && time.Now().Before(e.expiresAt) {
+	if e, ok := globalUserIDCache.entries[key]; ok && time.Now().Before(e.expiresAt) {
 		globalUserIDCache.mu.RUnlock()
 		return e.userID, nil
 	}
@@ -57,11 +63,19 @@ func resolveUserID(ctx context.Context, users storage.UserStore, email string) (
 		return "", err
 	}
 
-	// Cache the result.
+	// Cache the result and evict expired entries to bound map growth.
+	now := time.Now()
 	globalUserIDCache.mu.Lock()
-	globalUserIDCache.entries[email] = userIDEntry{
+	globalUserIDCache.entries[key] = userIDEntry{
 		userID:    user.ID,
-		expiresAt: time.Now().Add(userIDCacheTTL),
+		expiresAt: now.Add(userIDCacheTTL),
+	}
+	// Evict expired entries on every write — keeps map size proportional
+	// to the number of active users, not total unique users ever seen.
+	for k, e := range globalUserIDCache.entries {
+		if now.After(e.expiresAt) {
+			delete(globalUserIDCache.entries, k)
+		}
 	}
 	globalUserIDCache.mu.Unlock()
 

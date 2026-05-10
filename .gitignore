@@ -5,6 +5,7 @@
 /candela-cli
 /candela-local
 /candela-sidecar
+/backfill-budget-config
 
 # Generated code
 /gen/

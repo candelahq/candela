@@ -122,7 +122,15 @@ func main() {
 		})
 		latest := budgetDocs[0].Data()
 
-		limitUSD, _ := latest["limit_usd"].(float64)
+		limitUSD := 0.0
+		switch v := latest["limit_usd"].(type) {
+		case float64:
+			limitUSD = v
+		case int64:
+			limitUSD = float64(v)
+		case int32:
+			limitUSD = float64(v)
+		}
 		periodType, _ := latest["period_type"].(string)
 		if periodType == "" {
 			periodType = "daily"

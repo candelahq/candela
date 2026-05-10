@@ -42,7 +42,6 @@
             golangci-lint
             gotools
             govulncheck
-            actionlint
 
             # Protobuf / Buf
             buf
@@ -92,73 +91,6 @@
             echo "   Node:   $(node --version)"
             echo "   Python: $(python3 --version | cut -d' ' -f2)"
           '';
-        };
-
-        # CI dev container — baked from the same Nix inputs as the dev shell.
-        # Build: nix build .#devContainer
-        # Push:  docker load < result && docker push ghcr.io/candelahq/candela-dev:latest
-        packages.devContainer = pkgs.dockerTools.buildLayeredImage {
-          name = "candela-dev";
-          tag  = "latest";
-
-          # Include only what CI jobs need — keeps the image lean.
-          contents = with pkgs; [
-            # Core — /etc/passwd + /etc/group needed by many tools
-            dockerTools.fakeNss
-
-            bashInteractive
-            coreutils
-            cacert         # TLS certs (needed for go get, gcloud, etc.)
-            git
-            curl
-            jq
-
-            # Go toolchain
-            go_1_26
-            golangci-lint
-            gotools
-            govulncheck
-            actionlint
-
-            # Protobuf / Buf (needed for buf generate in every job)
-            buf
-            protobuf
-            protoc-gen-bq-schema
-
-            # Node + pnpm (for UI jobs)
-            nodejs_22
-            pnpm
-
-            # GCP tooling (Firestore emulator)
-            google-cloud-sdk
-
-            # Rust (for rust-check job)
-            rustToolchain
-            cargo-deny
-          ];
-
-          # Create the standard shell symlinks GitHub Actions expects.
-          # GH Actions execs /bin/sh to run steps inside a container job.
-          extraCommands = ''
-            mkdir -p bin usr/bin tmp root
-            ln -sf ${pkgs.bashInteractive}/bin/bash bin/sh
-            ln -sf ${pkgs.bashInteractive}/bin/bash bin/bash
-            ln -sf ${pkgs.coreutils}/bin/env       usr/bin/env
-          '';
-
-          config = {
-            # Keep container alive — GH Actions execs steps into it rather
-            # than running a single command.
-            Cmd = [ "${pkgs.bashInteractive}/bin/bash" "-c" "trap : TERM INT; sleep infinity & wait" ];
-            Env = [
-              # Point Go module cache to a writable path inside the container.
-              "GOPATH=/root/go"
-              "GOMODCACHE=/root/go/pkg/mod"
-              "PATH=/root/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
-              # Trust the Nix-provided CA bundle.
-              "SSL_CERT_FILE=${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt"
-            ];
-          };
         };
       }
     );

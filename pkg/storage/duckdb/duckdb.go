@@ -432,7 +432,10 @@ func scanSpans(rows *sql.Rows) ([]storage.Span, error) {
 		span.Status = storage.SpanStatus(status)
 		span.Duration = time.Duration(durationNs)
 
-		if genAI.Model != "" {
+		// Populate GenAI if any meaningful attribute is present — not just when
+		// model is set. A span may have cost/token data without a known model
+		// name (e.g. proxied through an unknown provider).
+		if genAI.Model != "" || genAI.Provider != "" || genAI.TotalTokens > 0 || genAI.CostUSD > 0 {
 			span.GenAI = &genAI
 		}
 

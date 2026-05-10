@@ -10,7 +10,7 @@ permissions:
   contents: read
 
 jobs:
-  # ── Phase 1: build, vet, and lint ─────────────────────────────────────────
+  # ── build, vet, and lint ──────────────────────────────────────────────────
   build-and-lint:
     runs-on: ubuntu-latest
     steps:
@@ -37,7 +37,6 @@ jobs:
 
   # ── Phase 2: tests — parallel matrix by package group ─────────────────────
   go-test:
-    needs: [build-and-lint]
     runs-on: ubuntu-latest
     env:
       FIRESTORE_EMULATOR_HOST: localhost:8086
@@ -60,12 +59,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Nix
-        uses: DeterminateSystems/nix-installer-action@main
+      # Use setup-go instead of Nix here — go test only needs Go, not the full
+      # dev shell. This avoids 4 simultaneous FlakeHub auth hits from the matrix.
+      - uses: actions/setup-go@v5
         with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-
-      - uses: DeterminateSystems/magic-nix-cache-action@main
+          go-version-file: go.mod
+          cache: true
 
       - name: Start Firestore emulator
         run: |
@@ -80,8 +79,7 @@ jobs:
       - name: Test (${{ matrix.group.name }})
         # -p 4:        run up to 4 packages concurrently (matches 4-vCPU runner)
         # -parallel 4: run up to 4 t.Parallel() funcs concurrently within a package
-        # timeout 180s: extra headroom for Firestore emulator startup under Nix cache pressure
-        run: nix develop -c go test ${{ matrix.group.pkgs }} -v -race -count=1 -p 4 -parallel 4 -coverprofile=coverage-${{ matrix.group.name }}.out -timeout 180s
+        run: go test ${{ matrix.group.pkgs }} -v -race -count=1 -p 4 -parallel 4 -coverprofile=coverage-${{ matrix.group.name }}.out -timeout 180s
 
       - name: Upload coverage (${{ matrix.group.name }})
         uses: actions/upload-artifact@v4

@@ -712,8 +712,14 @@ func TestUserHandler_UpdateUser_FieldMask(t *testing.T) {
 	}
 
 	u, _ := store.GetUser(ctx, userID)
-	if u.DisplayName != "Updated" {
-		t.Errorf("display_name = %q, want Updated", u.DisplayName)
+	if u.DisplayName == nil || *u.DisplayName != "Updated" {
+		t.Errorf("display_name = %q, want Updated", func() string {
+			if u.DisplayName == nil {
+				return ""
+			} else {
+				return *u.DisplayName
+			}
+		}())
 	}
 	// Without field mask, both fields update.
 	if u.Role != "admin" {

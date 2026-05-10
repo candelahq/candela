@@ -197,6 +197,25 @@ func (s *Store) QueryTraces(ctx context.Context, q storage.TraceQuery) (*storage
 		q.PageSize = 50
 	}
 
+	// Allowlisted ORDER BY columns — never interpolate user input directly.
+	orderCols := map[string]string{
+		"start_time":   "MIN(start_time)",
+		"total_tokens": "SUM(gen_ai_total_tokens)",
+		"total_cost":   "SUM(gen_ai_cost_usd)",
+		"duration":     "(MAX(end_time) - MIN(start_time))",
+		"span_count":   "COUNT(*)",
+	}
+	orderExpr, ok := orderCols[q.OrderBy]
+	if !ok {
+		orderExpr = "MIN(start_time)"
+	}
+	// Default to DESC (most recent first). Only go ASC when the caller
+	// explicitly requests ascending order AND has named a sort column.
+	dir := "DESC"
+	if ok && !q.Descending {
+		dir = "ASC"
+	}
+
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT
 			trace_id,
@@ -213,10 +232,12 @@ func (s *Store) QueryTraces(ctx context.Context, q storage.TraceQuery) (*storage
 		FROM spans
 		WHERE project_id = ? AND start_time >= ? AND start_time <= ?
 			AND (? = '' OR user_id = ?)
+			AND (? = '' OR environment = ?)
 		GROUP BY trace_id
-		ORDER BY MIN(start_time) DESC
+		ORDER BY `+orderExpr+` `+dir+`
 		LIMIT ?
-	`, q.ProjectID, q.StartTime.Format(time.RFC3339Nano), q.EndTime.Format(time.RFC3339Nano), q.UserID, q.UserID, q.PageSize)
+	`, q.ProjectID, q.StartTime.Format(time.RFC3339Nano), q.EndTime.Format(time.RFC3339Nano),
+		q.UserID, q.UserID, q.Environment, q.Environment, q.PageSize)
 	if err != nil {
 		return nil, fmt.Errorf("querying traces: %w", err)
 	}
@@ -450,7 +471,12 @@ func scanSpans(rows *sql.Rows) ([]storage.Span, error) {
 		}
 		span.Duration = time.Duration(durationNs)
 
-		if genAI.Model != "" {
+		// Populate GenAI whenever any meaningful field is set — not just when
+		// model is known. A span may carry token/cost data from an unrecognized
+		// provider, or may report input/output counts without a total.
+		if genAI.Model != "" || genAI.Provider != "" ||
+			genAI.InputTokens > 0 || genAI.OutputTokens > 0 ||
+			genAI.TotalTokens > 0 || genAI.CostUSD > 0 {
 			span.GenAI = &genAI
 		}
 

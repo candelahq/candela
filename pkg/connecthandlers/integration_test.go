@@ -93,7 +93,25 @@ func (s *integrationStore) ListUsers(_ context.Context, statusFilter string, lim
 }
 
 func (s *integrationStore) UpdateUser(_ context.Context, u *storage.UserRecord) error {
-	s.users[u.ID] = u
+	existing, ok := s.users[u.ID]
+	if !ok {
+		s.users[u.ID] = u
+		return nil
+	}
+	// Apply pointer fields: nil means "leave unchanged".
+	if u.DisplayName != nil {
+		existing.DisplayName = u.DisplayName
+	}
+	if u.RateLimit != nil {
+		existing.RateLimit = u.RateLimit
+	}
+	// Plain fields: non-empty means "write this".
+	if u.Role != "" {
+		existing.Role = u.Role
+	}
+	if u.Status != "" {
+		existing.Status = u.Status
+	}
 	return nil
 }
 
@@ -544,7 +562,7 @@ func TestIntegration_UpdateUser_EmptyFieldMask(t *testing.T) {
 	}
 	store.users["target"] = &storage.UserRecord{
 		ID: "target", Email: "target@test.com", Role: "developer",
-		DisplayName: "Original", Status: storage.StatusActive,
+		DisplayName: func(s string) *string { return &s }("Original"), Status: storage.StatusActive,
 	}
 	client := startTestServerWithClient(t, store, "admin@test.com")
 

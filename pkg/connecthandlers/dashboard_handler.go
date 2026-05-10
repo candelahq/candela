@@ -296,7 +296,9 @@ func (h *DashboardHandler) GetTeamLeaderboard(
 		// Enrich from batch-fetched map.
 		if rec, ok := userMap[u.UserID]; ok {
 			pu.Email = rec.Email
-			pu.DisplayName = rec.DisplayName
+			if rec.DisplayName != nil {
+				pu.DisplayName = *rec.DisplayName
+			}
 		}
 
 		pbUsers = append(pbUsers, pu)

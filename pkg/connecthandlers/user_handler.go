@@ -65,7 +65,7 @@ func (h *UserHandler) CreateUser(
 
 	user := &storage.UserRecord{
 		Email:       normalizedEmail,
-		DisplayName: req.Msg.DisplayName,
+		DisplayName: stringPtr(req.Msg.DisplayName),
 		Role:        roleToString(req.Msg.Role),
 	}
 	if err := h.store.CreateUser(ctx, user); err != nil {
@@ -214,7 +214,7 @@ func (h *UserHandler) UpdateUser(
 	for _, p := range paths {
 		switch p {
 		case "display_name":
-			user.DisplayName = req.Msg.DisplayName
+			user.DisplayName = stringPtr(req.Msg.DisplayName)
 		case "role":
 			user.Role = roleToString(req.Msg.Role)
 		}
@@ -675,11 +675,11 @@ func userToProto(u *storage.UserRecord) *typespb.User {
 	pb := &typespb.User{
 		Id:          u.ID,
 		Email:       u.Email,
-		DisplayName: u.DisplayName,
+		DisplayName: derefString(u.DisplayName),
 		Role:        stringToRole(u.Role),
 		Status:      stringToStatus(u.Status),
 		CreatedAt:   timestamppb.New(u.CreatedAt),
-		RateLimit:   int32(u.RateLimit),
+		RateLimit:   int32(derefInt(u.RateLimit)),
 	}
 	if !u.LastSeenAt.IsZero() {
 		pb.LastSeenAt = timestamppb.New(u.LastSeenAt)
@@ -797,4 +797,23 @@ func mustJSON(v any) string {
 		return `{"error":"failed to marshal audit details"}`
 	}
 	return string(b)
+}
+
+// stringPtr returns a pointer to a copy of s. Useful for setting *string fields.
+func stringPtr(s string) *string { return &s }
+
+// derefString safely dereferences a *string, returning "" if nil.
+func derefString(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
+}
+
+// derefInt safely dereferences a *int, returning 0 if nil.
+func derefInt(i *int) int {
+	if i == nil {
+		return 0
+	}
+	return *i
 }

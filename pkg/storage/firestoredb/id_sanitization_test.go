@@ -48,7 +48,7 @@ func TestUpdateUser_PartialUpdate(t *testing.T) {
 
 	user := &storage.UserRecord{
 		Email:       userID,
-		DisplayName: "Original Name",
+		DisplayName: func(s string) *string { return &s }("Original Name"),
 		Role:        "admin",
 		Status:      "active",
 	}
@@ -64,7 +64,7 @@ func TestUpdateUser_PartialUpdate(t *testing.T) {
 	// Because of 'omitempty' tags, Role and Status should NOT be overwritten in Firestore.
 	update := &storage.UserRecord{
 		ID:          user.ID, // Need ID to know which doc to update
-		DisplayName: "Updated Name",
+		DisplayName: func(s string) *string { return &s }("Updated Name"),
 	}
 
 	if err := s.UpdateUser(ctx, update); err != nil {
@@ -77,8 +77,12 @@ func TestUpdateUser_PartialUpdate(t *testing.T) {
 		t.Fatalf("GetUser: %v", err)
 	}
 
-	if got.DisplayName != "Updated Name" {
-		t.Errorf("DisplayName = %q, want %q", got.DisplayName, "Updated Name")
+	if got.DisplayName == nil || *got.DisplayName != "Updated Name" {
+		got_dn := ""
+		if got.DisplayName != nil {
+			got_dn = *got.DisplayName
+		}
+		t.Errorf("DisplayName = %q, want %q", got_dn, "Updated Name")
 	}
 	if got.Role != "admin" {
 		t.Errorf("Role was overwritten! got %q, want %q", got.Role, "admin")

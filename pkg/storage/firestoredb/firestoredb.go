@@ -18,6 +18,7 @@ import (
 	"log/slog"
 	"math"
 	"strings"
+	"sync"
 	"time"
 	"unicode/utf8"
 
@@ -39,7 +40,54 @@ const (
 	rateLimitCol   = "rate_limit"
 
 	defaultRateLimit = 60 // requests/minute
+
+	// rateLimitCacheTTL controls how long a user's configured RateLimit value
+	// is cached in-process. RateLimit only changes on explicit admin updates,
+	// so 5 minutes is a safe propagation window.
+	rateLimitCacheTTL = 5 * time.Minute
 )
+
+// rateLimitValueCache is an in-process cache of userID → configured rate limit.
+// CheckRateLimit previously called GetUser (one Firestore RPC) on every
+// proxied LLM request just to fetch this value. Caching it eliminates that
+// hot-path read for the common case where no admin has recently changed the limit.
+var rateLimitValueCache struct {
+	mu      sync.RWMutex
+	entries map[string]rlCacheEntry
+}
+
+func init() {
+	rateLimitValueCache.entries = make(map[string]rlCacheEntry)
+}
+
+type rlCacheEntry struct {
+	limit     int
+	expiresAt time.Time
+}
+
+func getCachedRateLimit(userID string) (int, bool) {
+	rateLimitValueCache.mu.RLock()
+	defer rateLimitValueCache.mu.RUnlock()
+	if e, ok := rateLimitValueCache.entries[userID]; ok && time.Now().Before(e.expiresAt) {
+		return e.limit, true
+	}
+	return 0, false
+}
+
+func setCachedRateLimit(userID string, limit int) {
+	rateLimitValueCache.mu.Lock()
+	rateLimitValueCache.entries[userID] = rlCacheEntry{
+		limit:     limit,
+		expiresAt: time.Now().Add(rateLimitCacheTTL),
+	}
+	rateLimitValueCache.mu.Unlock()
+}
+
+func evictRateLimitCache(userID string) {
+	rateLimitValueCache.mu.Lock()
+	delete(rateLimitValueCache.entries, userID)
+	rateLimitValueCache.mu.Unlock()
+}
 
 // Store implements storage.UserStore using Firestore.
 type Store struct {
@@ -65,6 +113,56 @@ func (s *Store) Close() error {
 	return s.client.Close()
 }
 
+// firestoreUser is the Firestore-internal representation of a user document.
+// It owns the firestore:" struct tags so storage.UserRecord remains
+// database-agnostic (no Firestore-specific annotations on the shared type).
+type firestoreUser struct {
+	ID          string    `firestore:"id"`
+	Email       string    `firestore:"email"`
+	DisplayName string    `firestore:"display_name,omitempty"`
+	Role        string    `firestore:"role,omitempty"`
+	Status      string    `firestore:"status,omitempty"`
+	CreatedAt   time.Time `firestore:"created_at,omitempty"`
+	LastSeenAt  time.Time `firestore:"last_seen_at,omitempty"`
+	RateLimit   int       `firestore:"rate_limit,omitempty"`
+}
+
+func userToFirestore(u *storage.UserRecord) *firestoreUser {
+	fu := &firestoreUser{
+		ID:         u.ID,
+		Email:      u.Email,
+		Role:       u.Role,
+		Status:     u.Status,
+		CreatedAt:  u.CreatedAt,
+		LastSeenAt: u.LastSeenAt,
+	}
+	if u.DisplayName != nil {
+		fu.DisplayName = *u.DisplayName
+	}
+	if u.RateLimit != nil {
+		fu.RateLimit = *u.RateLimit
+	}
+	return fu
+}
+
+func firestoreToUser(fu *firestoreUser) *storage.UserRecord {
+	u := &storage.UserRecord{
+		ID:         fu.ID,
+		Email:      fu.Email,
+		Role:       fu.Role,
+		Status:     fu.Status,
+		CreatedAt:  fu.CreatedAt,
+		LastSeenAt: fu.LastSeenAt,
+	}
+	if fu.DisplayName != "" {
+		u.DisplayName = &fu.DisplayName
+	}
+	if fu.RateLimit != 0 {
+		u.RateLimit = &fu.RateLimit
+	}
+	return u
+}
+
 // ──────────────────────────────────────────
 // User CRUD
 // ──────────────────────────────────────────
@@ -86,7 +184,7 @@ func (s *Store) CreateUser(ctx context.Context, user *storage.UserRecord) error 
 	}
 
 	ref := s.client.Collection(usersCol).Doc(user.ID)
-	_, err := ref.Create(ctx, user)
+	_, err := ref.Create(ctx, userToFirestore(user))
 	if err != nil {
 		if status.Code(err) == codes.AlreadyExists {
 			return fmt.Errorf("firestoredb: user already exists: %s", user.ID)
@@ -197,11 +295,14 @@ func (s *Store) ListUsers(ctx context.Context, statusFilter string, limit, offse
 func (s *Store) UpdateUser(ctx context.Context, user *storage.UserRecord) error {
 	id := sanitizeID(user.ID)
 	ref := s.client.Collection(usersCol).Doc(id)
-	// Build a targeted update list, skipping zero-value fields so a partial
-	// update (e.g. only DisplayName) does not overwrite Role/Status/RateLimit.
+	// Build a targeted update list from pointer fields:
+	// - nil pointer means "leave unchanged"
+	// - non-nil pointer (including &""/&0) means "write this value"
+	// Plain string fields (Role, Status) are included when non-empty, as they
+	// are always set by the handlers that call UpdateUser for those paths.
 	var updates []firestore.Update
-	if user.DisplayName != "" {
-		updates = append(updates, firestore.Update{Path: "display_name", Value: user.DisplayName})
+	if user.DisplayName != nil {
+		updates = append(updates, firestore.Update{Path: "display_name", Value: *user.DisplayName})
 	}
 	if user.Role != "" {
 		updates = append(updates, firestore.Update{Path: "role", Value: user.Role})
@@ -209,8 +310,10 @@ func (s *Store) UpdateUser(ctx context.Context, user *storage.UserRecord) error 
 	if user.Status != "" {
 		updates = append(updates, firestore.Update{Path: "status", Value: user.Status})
 	}
-	if user.RateLimit != 0 {
-		updates = append(updates, firestore.Update{Path: "rate_limit", Value: user.RateLimit})
+	if user.RateLimit != nil {
+		updates = append(updates, firestore.Update{Path: "rate_limit", Value: *user.RateLimit})
+		// Evict the rate-limit cache so the new value takes effect immediately.
+		evictRateLimitCache(id)
 	}
 	if !user.LastSeenAt.IsZero() {
 		updates = append(updates, firestore.Update{Path: "last_seen_at", Value: user.LastSeenAt})
@@ -612,13 +715,14 @@ func (s *Store) DeductSpend(ctx context.Context, userID string, costUSD float64,
 			unabsorbed := math.Max(0, overflow-grantCoverage)
 			budgetCharge := budgetDeduct + unabsorbed
 
-			if budgetDeduct > 0 || tokens > 0 {
-				// Attribute tokens proportional to the budget fraction absorbed.
-				// If budget absorbs 100% of cost → 100% of tokens.
-				// If budget absorbs 30% → 30% of tokens (remainder lands on grants).
+			if budgetCharge > 0 || tokens > 0 {
+				// Attribute tokens proportional to the budget fraction absorbed
+				// (including unabsorbed overflow charged to the budget).
+				// budgetCharge = budgetDeduct + unabsorbed overflow, so the ratio
+				// correctly reflects all cost attributed to the recurring budget.
 				budgetTokens := tokens
-				if costUSD > 0 && budgetDeduct < costUSD {
-					budgetTokens = int64(math.Round(float64(tokens) * (budgetDeduct / costUSD)))
+				if costUSD > 0 && budgetCharge < costUSD {
+					budgetTokens = int64(math.Round(float64(tokens) * (budgetCharge / costUSD)))
 				}
 				// all_tokens_used is always the full token count regardless of
 				// whether grants absorb any cost — used by GetMyBudget fast path.
@@ -648,7 +752,11 @@ func (s *Store) DeductSpend(ctx context.Context, userID string, costUSD float64,
 					}
 				}
 			}
-			remaining -= budgetDeduct
+			// Decrement by budgetCharge so the grants waterfall only covers
+			// cost not already absorbed (directly or as unabsorbed overflow)
+			// by the recurring budget. Using budgetDeduct here would cause
+			// the same overflow to be double-charged to a grant.
+			remaining -= budgetCharge
 		}
 
 		// Write 2: Overflow into grants (earliest-expiry-first).
@@ -684,14 +792,24 @@ func (s *Store) DeductSpend(ctx context.Context, userID string, costUSD float64,
 // ──────────────────────────────────────────
 
 func (s *Store) CheckRateLimit(ctx context.Context, userID string) (bool, int, int, error) {
-	// Get user's rate limit.
-	user, err := s.GetUser(ctx, userID)
-	if err != nil {
-		return false, 0, 0, err
-	}
-	limit := user.RateLimit
-	if limit <= 0 {
-		limit = defaultRateLimit
+	// Resolve the user's configured rate limit.
+	// Use a short in-process cache so we don't issue a Firestore GetUser read
+	// on every proxied LLM request (hot path). RateLimit only changes on
+	// explicit admin updates, so a 5-minute TTL is safe.
+	sanitized := sanitizeID(userID)
+	limit, cached := getCachedRateLimit(sanitized)
+	if !cached {
+		user, err := s.GetUser(ctx, userID)
+		if err != nil {
+			return false, 0, 0, err
+		}
+		if user.RateLimit != nil {
+			limit = *user.RateLimit
+		}
+		if limit <= 0 {
+			limit = defaultRateLimit
+		}
+		setCachedRateLimit(sanitized, limit)
 	}
 
 	// Window key: minute-level granularity.
@@ -700,7 +818,7 @@ func (s *Store) CheckRateLimit(ctx context.Context, userID string) (bool, int, i
 	ref := s.client.Collection(rateLimitCol).Doc(windowKey)
 
 	var count int
-	err = s.client.RunTransaction(ctx, func(ctx context.Context, tx *firestore.Transaction) error {
+	err := s.client.RunTransaction(ctx, func(ctx context.Context, tx *firestore.Transaction) error {
 		snap, err := tx.Get(ref)
 		if err != nil && status.Code(err) != codes.NotFound {
 			return err
@@ -797,12 +915,13 @@ func (s *Store) ListAuditLog(ctx context.Context, userID string, limit int) ([]*
 // ──────────────────────────────────────────
 
 func snapToUser(snap *firestore.DocumentSnapshot) (*storage.UserRecord, error) {
-	var u storage.UserRecord
-	if err := snap.DataTo(&u); err != nil {
+	var fu firestoreUser
+	if err := snap.DataTo(&fu); err != nil {
 		return nil, fmt.Errorf("decoding user: %w", err)
 	}
+	u := firestoreToUser(&fu)
 	u.ID = snap.Ref.ID
-	return &u, nil
+	return u, nil
 }
 
 func snapToBudget(snap *firestore.DocumentSnapshot) (*storage.BudgetRecord, error) {

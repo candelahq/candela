@@ -56,7 +56,7 @@ func TestCreateAndGetUser(t *testing.T) {
 	user := &storage.UserRecord{
 		ID:          fmt.Sprintf("test-user-%d", time.Now().UnixNano()),
 		Email:       "alice@example.com",
-		DisplayName: "Alice",
+		DisplayName: func(s string) *string { return &s }("Alice"),
 		Role:        "developer",
 	}
 	t.Cleanup(func() { cleanupUser(ctx, s, user.ID) })

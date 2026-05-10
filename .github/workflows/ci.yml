@@ -70,9 +70,6 @@ jobs:
       - name: Fix git ownership for Nix flake
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
-      - name: Install Java (Firestore emulator dependency)
-        run: apt-get install -y --no-install-recommends default-jre-headless
-
       - name: Start Firestore emulator
         run: |
           nix develop . --command bash -c "

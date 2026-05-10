@@ -335,12 +335,12 @@ func rewriteModelField(body []byte, newModel string) []byte {
 	}
 	oldJSON, _ := json.Marshal(req.Model)
 	newJSON, _ := json.Marshal(newModel)
-	// Replace `"model":"<old>"` with `"model":"<new>"`.
-	// json.Marshal always produces compact output so literal byte replacement is safe
-	// and ~10x faster than compiling a regexp per request.
+	// Replace `"model":"<old>"` with `"model":"<new>"` — FIRST occurrence only.
+	// bytes.Replace n=1 prevents corrupting user message content that contains
+	// the same byte sequence (e.g., few-shot examples referencing a model name).
 	target := append([]byte(`"model":`), oldJSON...)
 	replacement := append([]byte(`"model":`), newJSON...)
-	return bytes.ReplaceAll(body, target, replacement)
+	return bytes.Replace(body, target, replacement, 1)
 }
 
 // requestIDPattern validates that a request ID contains only safe characters
@@ -460,7 +460,15 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 		if model != "" && strings.ToLower(providerName) != "local" && !p.calc.HasPricing(providerName, model) {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusPaymentRequired)
-			_, _ = fmt.Fprintf(w, `{"error":{"message":"no pricing configured for model %q — contact your admin","type":"pricing_not_configured","code":402}}`, model)
+			// Marshal the full error object so the model name is always safely escaped.
+			errBody, _ := json.Marshal(map[string]any{
+				"error": map[string]any{
+					"message": "no pricing configured for model " + model + " — contact your admin",
+					"type":    "pricing_not_configured",
+					"code":    402,
+				},
+			})
+			_, _ = w.Write(errBody)
 			slog.Warn("blocked request: no pricing for model",
 				"user_id", effectiveUserID, "provider", providerName, "model", model)
 			return
@@ -656,7 +664,10 @@ func (p *Proxy) handleStandardResponse(
 	// Use a bounded timeout (not WithoutCancel) to prevent goroutine leaks
 	// if downstream services (Firestore, storage) hang.
 	if cbAllow {
-		spanCtx, spanCancel := context.WithTimeout(context.Background(), 30*time.Second)
+		// #D: Use WithoutCancel so the goroutine inherits trace context but is
+		// not cancelled when the client disconnects. The 30s timeout bounds the
+		// goroutine lifetime regardless of downstream Firestore latency.
+		spanCtx, spanCancel := context.WithTimeout(context.WithoutCancel(r.Context()), 30*time.Second)
 		go func() {
 			defer spanCancel()
 			p.createSpan(spanCtx, provider, reqBody, respBody, startTime, endTime, resp.StatusCode, ttfb, requestID, sessionID, effectiveUserID, traceCtx, proxySpanID)
@@ -800,7 +811,9 @@ func (p *Proxy) handleStreamingResponse(
 		streamStatus = storage.SpanStatusError
 	}
 	if cbAllow {
-		spanCtx, spanCancel := context.WithTimeout(context.Background(), 30*time.Second)
+		// #D: Use WithoutCancel so the goroutine inherits trace context but is
+		// not cancelled when the client disconnects mid-stream.
+		spanCtx, spanCancel := context.WithTimeout(context.WithoutCancel(r.Context()), 30*time.Second)
 		go func() {
 			defer spanCancel()
 			p.createStreamingSpan(spanCtx, provider, reqBody, parseData, startTime, endTime, ttfb, ttft, requestID, sessionID, effectiveUserID, streamStatus, traceCtx, proxySpanID)

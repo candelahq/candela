@@ -343,7 +343,9 @@ func (s *Store) budgetFromConfig(ctx context.Context, userRef *firestore.Documen
 		return nil, fmt.Errorf("firestoredb: reading budget config: %w", err)
 	}
 	data := configSnap.Data()
-	limitUSD, _ := data["limit_usd"].(float64)
+	// #E: Firestore stores whole numbers as int64, not float64.
+	// Use firestoreFloat to handle both numeric types.
+	limitUSD := firestoreFloat(data["limit_usd"])
 	periodType, _ := data["period_type"].(string)
 	if periodType == "" {
 		periodType = "daily"
@@ -355,6 +357,21 @@ func (s *Store) budgetFromConfig(ctx context.Context, userRef *firestore.Documen
 		PeriodKey:  periodKey,
 		// Spend counters start at 0 — no calls yet this period.
 	}, nil
+}
+
+// firestoreFloat safely converts a Firestore numeric field to float64.
+// Firestore stores whole-number values as int64 (not float64), so a plain
+// .(float64) assertion silently returns 0.0 for values like 100 or 50.
+func firestoreFloat(v interface{}) float64 {
+	switch n := v.(type) {
+	case float64:
+		return n
+	case int64:
+		return float64(n)
+	case int32:
+		return float64(n)
+	}
+	return 0
 }
 
 func (s *Store) ResetSpend(ctx context.Context, userID string) error {
@@ -528,7 +545,8 @@ func (s *Store) DeductSpend(ctx context.Context, userID string, costUSD float64,
 		} else if configSnap != nil && configSnap.Exists() {
 			// #9: Auto-rollover — create today's spend doc from config.
 			data := configSnap.Data()
-			limitUSD, _ := data["limit_usd"].(float64)
+			// #E: firestoreFloat handles int64 (Firestore whole numbers) and float64.
+			limitUSD := firestoreFloat(data["limit_usd"])
 			periodType, _ := data["period_type"].(string)
 			if periodType == "" {
 				periodType = "daily"

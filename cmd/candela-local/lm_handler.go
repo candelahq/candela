@@ -325,16 +325,16 @@ func (h *lmHandler) resolveModel(model string) string {
 }
 
 // rewriteModelInBody replaces the model field value in a JSON request body.
-// Uses a simple byte replacement on the JSON-encoded key+value pair — this is
-// safe because json.Marshal always produces compact output ("model":"value")
-// with no whitespace variation, and is ~10x faster than regexp on every call.
+// Uses bytes.Replace with n=1 to replace only the FIRST occurrence.
+// This prevents corrupting user message content that happens to contain
+// the same `"model":"<name>"` byte sequence (e.g. in few-shot examples).
 func rewriteModelInBody(body []byte, oldModel, newModel string) []byte {
 	oldJSON, _ := json.Marshal(oldModel)
 	newJSON, _ := json.Marshal(newModel)
-	// Replace `"model":"<old>"` with `"model":"<new>"`.
+	// Replace `"model":"<old>"` with `"model":"<new>"` — first occurrence only.
 	target := append([]byte(`"model":`), oldJSON...)
 	replacement := append([]byte(`"model":`), newJSON...)
-	return bytes.ReplaceAll(body, target, replacement)
+	return bytes.Replace(body, target, replacement, 1)
 }
 
 // responseRecorder captures a proxy response for parsing.

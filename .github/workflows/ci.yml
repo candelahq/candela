@@ -8,92 +8,171 @@ on:
 
 permissions:
   contents: read
+  packages: read   # pull ghcr.io/candelahq/candela-dev
+
+# All jobs run inside the pre-baked CI container:
+#   Ubuntu 24.04 + Determinate Nix + dev shell pre-warmed in Nix store.
+# Steps use `nix develop . --command <cmd>` — identical to local dev.
+# Rebuild the image via dev-container.yml when flake.nix / flake.lock changes.
 
 jobs:
-  build-and-test:
+  # ── build, vet, and lint ────────────────────────────────────────────────────
+  build-and-lint:
     runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/candelahq/candela-dev:latest
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Nix
-        uses: DeterminateSystems/nix-installer-action@main
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Lint GitHub Actions workflows
+        run: nix develop . --command actionlint
 
-      - uses: DeterminateSystems/magic-nix-cache-action@main
-
-      - name: Generate proto stubs (from BSR)
-        run: nix develop -c buf generate
+      - name: Generate proto stubs
+        run: nix develop . --command buf generate
 
       - name: Build
-        run: nix develop -c go build ./...
+        run: nix develop . --command go build ./...
 
       - name: Vet
-        run: nix develop -c go vet ./...
+        run: nix develop . --command go vet ./...
 
-      - name: Test
-        run: nix develop -c go test ./... -v -race -count=1 -coverprofile=coverage.out -timeout 60s
-
-      - name: Coverage summary
-        run: nix develop -c go tool cover -func=coverage.out | tail -1
-
-      - name: govulncheck
-        continue-on-error: true   # Advisory — don't block CI on stdlib CVEs we can't patch immediately
-        run: nix develop -c govulncheck ./...
-
-  ui-build-and-lint:
+  # ── tests — parallel matrix by package group ────────────────────────────────
+  go-test:
     runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/candelahq/candela-dev:latest
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+    env:
+      FIRESTORE_EMULATOR_HOST: localhost:8086
+    strategy:
+      fail-fast: false
+      matrix:
+        group:
+          - name: cmd
+            pkgs: ./cmd/candela-local/... ./cmd/candela-sidecar/...
+          - name: pkg-core
+            pkgs: ./pkg/auth/... ./pkg/connecthandlers/... ./pkg/costcalc/... ./pkg/notify/... ./pkg/proxy/... ./pkg/runtime/... ./pkg/session/...
+          - name: pkg-storage
+            pkgs: ./pkg/storage/...
+          - name: pkg-processor
+            pkgs: ./pkg/processor/... ./pkg/prototest/...
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Nix
-        uses: DeterminateSystems/nix-installer-action@main
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Start Firestore emulator
+        run: |
+          nix develop . --command bash -c "
+            gcloud emulators firestore start \
+              --host-port=0.0.0.0:8086 \
+              --project=test-project &
+            for _ in \$(seq 1 30); do
+              curl -sf http://localhost:8086/ && break
+              sleep 2
+            done
+          "
 
-      - uses: DeterminateSystems/magic-nix-cache-action@main
+      - name: Generate proto stubs
+        run: nix develop . --command buf generate
+
+      - name: Test (${{ matrix.group.name }})
+        run: nix develop . --command go test ${{ matrix.group.pkgs }} -v -race -count=1 -p 4 -parallel 4 -coverprofile=coverage-${{ matrix.group.name }}.out -timeout 180s
+
+      - name: Upload coverage (${{ matrix.group.name }})
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-${{ matrix.group.name }}
+          path: coverage-${{ matrix.group.name }}.out
+          retention-days: 1
+
+  # ── merge coverage and govulncheck ──────────────────────────────────────────
+  build-and-test:
+    needs: [go-test]
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/candelahq/candela-dev:latest
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download coverage artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: coverage-*
+          merge-multiple: true
+
+      - name: Merge coverage profiles
+        run: |
+          files=(coverage-*.out)
+          head -1 "${files[0]}" > coverage.out
+          for f in "${files[@]}"; do
+            tail -n +2 "$f" >> coverage.out
+          done
+
+      - name: Coverage summary
+        run: nix develop . --command go tool cover -func=coverage.out | tail -1
+
+      - name: govulncheck
+        continue-on-error: true
+        run: nix develop . --command govulncheck ./...
+
+  # ── UI build + lint ─────────────────────────────────────────────────────────
+  ui-build-and-lint:
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/candelahq/candela-dev:latest
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
 
       - name: Install dependencies
-        run: nix develop -c pnpm install
+        run: nix develop . --command pnpm install
         working-directory: ui
 
-      - name: Generate TS proto stubs (from BSR)
-        run: nix develop -c buf generate
+      - name: Generate TS proto stubs
+        run: nix develop . --command buf generate
 
       - name: Lint
-        run: nix develop -c pnpm run lint
+        run: nix develop . --command pnpm run lint
         working-directory: ui
 
       - name: Build
-        run: nix develop -c pnpm run build
+        run: nix develop . --command pnpm run build
         working-directory: ui
 
+  # ── UI E2E ──────────────────────────────────────────────────────────────────
   ui-e2e:
     runs-on: ubuntu-latest
     needs: [ui-build-and-lint]
+    container:
+      image: ghcr.io/candelahq/candela-dev:latest
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Nix
-        uses: DeterminateSystems/nix-installer-action@main
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-
-      - uses: DeterminateSystems/magic-nix-cache-action@main
-
       - name: Install dependencies
-        run: nix develop -c pnpm install
+        run: nix develop . --command pnpm install
         working-directory: ui
 
-      - name: Generate TS proto stubs (from BSR)
-        run: nix develop -c buf generate
+      - name: Generate TS proto stubs
+        run: nix develop . --command buf generate
 
-      - name: Install Playwright browsers (Using Nix)
-        run: nix develop -c pnpm exec playwright install --with-deps chromium
+      - name: Install Playwright browsers
+        run: nix develop . --command pnpm exec playwright install --with-deps chromium
         working-directory: ui
 
       - name: Run Playwright tests
-        run: nix develop -c pnpm exec playwright test
+        run: nix develop . --command pnpm exec playwright test
         working-directory: ui
         env:
           CI: true
@@ -106,30 +185,29 @@ jobs:
           path: ui/playwright-report/
           retention-days: 7
 
+  # ── Rust check ──────────────────────────────────────────────────────────────
   rust-check:
     runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/candelahq/candela-dev:latest
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Nix
-        uses: DeterminateSystems/nix-installer-action@main
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-
-      - uses: DeterminateSystems/magic-nix-cache-action@main
-
-      - name: Generate Rust proto stubs (from BSR)
-        run: nix develop -c bash -c "cd rust && buf generate"
+      - name: Generate Rust proto stubs
+        run: nix develop . --command bash -c "cd rust && buf generate"
 
       - name: Format check
-        run: nix develop -c bash -c "cd rust && cargo fmt --check"
+        run: nix develop . --command bash -c "cd rust && cargo fmt --check"
 
       - name: Clippy
-        run: nix develop -c bash -c "cd rust && cargo clippy --workspace -- -D warnings"
+        run: nix develop . --command bash -c "cd rust && cargo clippy --workspace -- -D warnings"
 
       - name: Test
-        run: nix develop -c bash -c "cd rust && cargo test --workspace"
+        run: nix develop . --command bash -c "cd rust && cargo test --workspace"
 
       - name: License & vulnerability audit
-        continue-on-error: true  # Advisory until deny.toml is configured
-        run: nix develop -c bash -c "cd rust && cargo deny check"
+        continue-on-error: true
+        run: nix develop . --command bash -c "cd rust && cargo deny check"

@@ -1,0 +1,31 @@
+# CI dev environment image.
+#
+# Ubuntu 24.04 base + Determinate Nix + pre-warmed dev shell.
+# CI steps run `nix develop . --command <cmd>` — identical to local dev.
+# Rebuild this image only when flake.nix / flake.lock changes (see dev-container.yml).
+
+FROM ubuntu:24.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update && apt-get install -y \
+    curl xz-utils sudo ca-certificates git \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Determinate Nix in single-user mode (no systemd in containers).
+RUN curl -sSf -L https://install.determinate.systems/nix | \
+    sh -s -- install linux \
+      --no-confirm \
+      --init none \
+      --extra-conf "experimental-features = nix-command flakes"
+
+ENV PATH="/nix/var/nix/profiles/default/bin:${PATH}"
+
+# Pre-warm the Nix store with every package in the dev shell.
+# This layer is invalidated (and rebuilt) only when flake.nix or flake.lock
+# changes — all other CI runs get instant `nix develop` with no downloads.
+WORKDIR /build
+COPY flake.nix flake.lock ./
+RUN nix develop . --command true
+
+WORKDIR /workspace

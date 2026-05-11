@@ -672,6 +672,24 @@ func (s *Store) ResetSpend(ctx context.Context, userID string) error {
 	if err != nil {
 		return fmt.Errorf("firestoredb: resetting spend: %w", err)
 	}
+
+	// CRIT-12 (Option 3): Clear the soft_blocked flag set by DeductSpend
+	// when an overdraft was detected. Admin calling ResetSpend is explicitly
+	// acknowledging the overdraft and unblocking the user.
+	configRef := s.client.Collection(usersCol).Doc(userID).
+		Collection(budgetsCol).Doc(budgetConfigDocID)
+	_, err = configRef.Set(ctx, map[string]any{
+		"soft_blocked":    false,
+		"soft_blocked_at": nil,
+	}, firestore.Merge(
+		firestore.FieldPath{"soft_blocked"},
+		firestore.FieldPath{"soft_blocked_at"},
+	))
+	if err != nil {
+		// Non-fatal: log but don't fail ResetSpend — spend is already cleared.
+		slog.Warn("ResetSpend: failed to clear soft_blocked flag",
+			"user_id", userID, "error", err)
+	}
 	return nil
 }
 
@@ -775,6 +793,27 @@ func (s *Store) CheckBudget(ctx context.Context, userID string, estimatedCostUSD
 			RemainingUSD:  0,
 			EstimatedCost: estimatedCostUSD,
 		}, nil
+	}
+
+	// CRIT-12 (Option 3): Check soft_blocked flag on the config doc.
+	// DeductSpend sets this atomically when an overdraft is detected (i.e. a
+	// concurrent request drained the pool between CheckBudget and DeductSpend).
+	// This flag fires on the NEXT request after an overdraft, not the one that
+	// caused it — that's the inherent limit of Option 3 vs a full atomic merge.
+	// An admin calling ResetSpend clears the flag.
+	sanitizedUID := sanitizeID(userID)
+	configRef := s.client.Collection(usersCol).Doc(sanitizedUID).
+		Collection(budgetsCol).Doc(budgetConfigDocID)
+	if configSnap, err := configRef.Get(ctx); err == nil && configSnap.Exists() {
+		if blocked, _ := configSnap.Data()["soft_blocked"].(bool); blocked {
+			slog.Warn("CheckBudget: user soft-blocked due to overdraft — admin must call ResetSpend",
+				"user_id", sanitizedUID)
+			return &storage.BudgetCheckResult{
+				Allowed:       false,
+				RemainingUSD:  0,
+				EstimatedCost: estimatedCostUSD,
+			}, nil
+		}
 	}
 
 	// Sum remaining grants.
@@ -982,17 +1021,32 @@ func (s *Store) DeductSpend(ctx context.Context, userID string, costUSD float64,
 			remaining -= deduct
 		}
 
-		// CRIT-12: log a structured warning when spend exceeds available balance.
-		// This happens when a concurrent request drained the budget/grants between
-		// CheckBudget passing and this DeductSpend transaction committing (TOCTOU).
-		// We can't roll back the LLM call, but we create an audit trail and
-		// surface the amount that couldn't be absorbed by any pool.
+		// CRIT-12 (Option 3): If cost couldn't be fully absorbed, it means the
+		// budget/grants were exhausted between CheckBudget passing and this
+		// DeductSpend transaction committing (classic TOCTOU race).
+		// We can't undo the LLM call, but we:
+		//   1. Log a structured warning for ops reconciliation.
+		//   2. Atomically set soft_blocked=true on the config doc so the NEXT
+		//      request from this user is denied immediately by CheckBudget.
+		//      This is within the same transaction — no extra round-trip.
+		// An admin calling ResetSpend will clear the flag.
 		if remaining > 0.000001 { // floating-point epsilon for near-zero residuals
-			slog.Warn("deduct_spend: unabsorbed cost — balance was exhausted by concurrent request",
+			slog.Warn("deduct_spend: unabsorbed cost — balance exhausted by concurrent request; user soft-blocked",
 				"user_id", localUserID,
 				"total_cost_usd", costUSD,
 				"unabsorbed_usd", remaining,
 			)
+			// Write soft_blocked flag atomically into the config doc.
+			// MergeAll preserves all other config fields (limit_usd, period_type…).
+			if err := tx.Set(configRef, map[string]any{
+				"soft_blocked":    true,
+				"soft_blocked_at": now,
+			}, firestore.MergeAll); err != nil {
+				// Non-fatal: if this write fails the deduction already landed.
+				// Log at ERROR so ops know the block didn't persist.
+				slog.Error("deduct_spend: failed to set soft_blocked flag — user NOT blocked",
+					"user_id", localUserID, "error", err)
+			}
 		}
 
 		return nil

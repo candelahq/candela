@@ -5,6 +5,7 @@ package sqlite
 import (
 	"context"
 	"database/sql"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -36,6 +37,13 @@ func New(cfg Config) (*Store, error) {
 	db, err := sql.Open("sqlite", cfg.Path)
 	if err != nil {
 		return nil, fmt.Errorf("opening sqlite: %w", err)
+	}
+
+	if cfg.Path == ":memory:" {
+		// For in-memory DBs, we MUST restrict to a single connection,
+		// otherwise different goroutines (e.g. processor vs test) will
+		// get different, isolated databases.
+		db.SetMaxOpenConns(1)
 	}
 
 	// SQLite performance tuning.
@@ -101,9 +109,9 @@ func (s *Store) migrate() error {
 		`ALTER TABLE spans ADD COLUMN user_id TEXT DEFAULT ''`,
 		// Migration: add session_id column to existing tables.
 		`ALTER TABLE spans ADD COLUMN session_id TEXT DEFAULT ''`,
-		// Migration: add tenant_id for multitenant cost attribution.
 		`ALTER TABLE spans ADD COLUMN tenant_id TEXT DEFAULT ''`,
 		`CREATE INDEX IF NOT EXISTS idx_spans_tenant ON spans(tenant_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_spans_tenant_time ON spans(project_id, tenant_id, start_time)`,
 	}
 
 	for _, q := range queries {
@@ -220,6 +228,14 @@ func (s *Store) QueryTraces(ctx context.Context, q storage.TraceQuery) (*storage
 		dir = "ASC"
 	}
 
+	// Implement offset-based pagination using PageToken.
+	var offset int
+	if q.PageToken != "" {
+		if b, err := base64.StdEncoding.DecodeString(q.PageToken); err == nil {
+			_, _ = fmt.Sscanf(string(b), "%d", &offset)
+		}
+	}
+
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT
 			trace_id,
@@ -232,7 +248,8 @@ func (s *Store) QueryTraces(ctx context.Context, q storage.TraceQuery) (*storage
 			MAX(CASE WHEN parent_span_id = '' THEN name ELSE '' END) as root_name,
 			MAX(gen_ai_model) as primary_model,
 			MAX(gen_ai_provider) as primary_provider,
-			MAX(status) as status
+			MAX(status) as status,
+			MAX(tenant_id) as tenant_id
 		FROM spans
 		WHERE project_id = ? AND start_time >= ? AND start_time <= ?
 			AND (? = '' OR user_id = ?)
@@ -240,9 +257,9 @@ func (s *Store) QueryTraces(ctx context.Context, q storage.TraceQuery) (*storage
 			AND (? = '' OR environment = ?)
 		GROUP BY trace_id
 		ORDER BY `+orderExpr+` `+dir+`
-		LIMIT ?
+		LIMIT ? OFFSET ?
 	`, q.ProjectID, q.StartTime.Format(time.RFC3339Nano), q.EndTime.Format(time.RFC3339Nano),
-		q.UserID, q.UserID, q.TenantID, q.TenantID, q.Environment, q.Environment, q.PageSize)
+		q.UserID, q.UserID, q.TenantID, q.TenantID, q.Environment, q.Environment, q.PageSize, offset)
 	if err != nil {
 		return nil, fmt.Errorf("querying traces: %w", err)
 	}
@@ -257,7 +274,7 @@ func (s *Store) QueryTraces(ctx context.Context, q storage.TraceQuery) (*storage
 		err := rows.Scan(
 			&t.TraceID, &startStr, &endStr, &t.SpanCount, &t.LLMCallCount,
 			&t.TotalTokens, &t.TotalCostUSD, &t.RootSpanName,
-			&t.PrimaryModel, &t.PrimaryProvider, &status,
+			&t.PrimaryModel, &t.PrimaryProvider, &status, &t.TenantID,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("scanning trace: %w", err)
@@ -274,7 +291,12 @@ func (s *Store) QueryTraces(ctx context.Context, q storage.TraceQuery) (*storage
 		return nil, fmt.Errorf("iterating traces: %w", err)
 	}
 
-	return &storage.TraceResult{Traces: traces, TotalCount: len(traces)}, nil
+	result := &storage.TraceResult{Traces: traces, TotalCount: len(traces)}
+	if len(traces) == q.PageSize {
+		nextOffset := offset + q.PageSize
+		result.NextPageToken = base64.StdEncoding.EncodeToString([]byte(fmt.Sprintf("%d", nextOffset)))
+	}
+	return result, nil
 }
 
 func (s *Store) SearchSpans(ctx context.Context, q storage.SpanQuery) (*storage.SpanResult, error) {

@@ -132,7 +132,7 @@ type TraceSummary struct {
 	TotalCostUSD    float64       `json:"total_cost_usd"`
 	Status          SpanStatus    `json:"status"`
 	PrimaryModel    string        `json:"primary_model"`
-	PrimaryProvider string        `json:"primary_provider"`
+	PrimaryProvider string        `json:"primary_provider,omitempty"`
 	UserID          string        `json:"user_id,omitempty"`
 	SessionID       string        `json:"session_id,omitempty"`
 	TenantID        string        `json:"tenant_id,omitempty"`
@@ -176,6 +176,8 @@ type TraceQuery struct {
 }
 
 // TraceResult is the paginated result of a trace query.
+// PageToken should be treated as an opaque string by clients, but
+// backends typically implement it as a base64-encoded offset or timestamp.
 type TraceResult struct {
 	Traces        []TraceSummary
 	NextPageToken string

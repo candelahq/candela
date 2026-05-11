@@ -8,11 +8,19 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"regexp"
+	"strings"
 	"time"
 
 	"github.com/candelahq/candela/pkg/processor"
 	"github.com/candelahq/candela/pkg/session"
 	"github.com/candelahq/candela/pkg/storage"
+)
+
+var (
+	// tenantIDPattern enforces the allowed character set and length limits for tenant IDs.
+	// Matches the implementation in pkg/proxy/proxy.go.
+	tenantIDPattern = regexp.MustCompile(`^[a-zA-Z0-9\-._]{1,128}$`)
 )
 
 // spanCapture wraps an HTTP handler (typically the local proxy) and captures
@@ -92,6 +100,16 @@ func (s *spanCapture) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Extract tenant ID for attribution.
+	// We check Baggage (W3C standard) first, then the explicit header.
+	tenantID := parseBaggageHeaders(r.Header.Values("Baggage"))
+	if tenantID == "" {
+		tenantID = r.Header.Get("X-Candela-Tenant-Id")
+		if !tenantIDPattern.MatchString(tenantID) {
+			tenantID = ""
+		}
+	}
+
 	// Capture response.
 	rec := &responseCapture{ResponseWriter: w}
 	s.next.ServeHTTP(rec, r)
@@ -99,10 +117,10 @@ func (s *spanCapture) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	duration := time.Since(start)
 
 	// Build the span asynchronously to not block the response.
-	go s.buildSpan(chatReq.Model, chatReq.Stream, inputContent, rec.body.Bytes(), rec.statusCode, start, duration, sessionID)
+	go s.buildSpan(chatReq.Model, chatReq.Stream, inputContent, rec.body.Bytes(), rec.statusCode, start, duration, sessionID, tenantID)
 }
 
-func (s *spanCapture) buildSpan(model string, stream *bool, inputContent string, respBody []byte, statusCode int, start time.Time, duration time.Duration, sessionID string) {
+func (s *spanCapture) buildSpan(model string, stream *bool, inputContent string, respBody []byte, statusCode int, start time.Time, duration time.Duration, sessionID, tenantID string) {
 	var inputTokens, outputTokens, totalTokens int64
 
 	isStreaming := stream != nil && *stream
@@ -146,6 +164,7 @@ func (s *spanCapture) buildSpan(model string, stream *bool, inputContent string,
 		Duration:  duration,
 		ProjectID: "local",
 		SessionID: sessionID,
+		TenantID:  tenantID,
 		GenAI: &storage.GenAIAttributes{
 			Model:        model,
 			Provider:     "local",
@@ -251,4 +270,48 @@ func generateID(size int) string {
 		panic("crypto/rand failed: " + err.Error())
 	}
 	return hex.EncodeToString(b)
+}
+
+// --- Tenant ID & Baggage parsing ---
+
+// parseBaggageHeaders joins multiple Baggage headers and extracts candela.tenant_id.
+func parseBaggageHeaders(values []string) string {
+	if len(values) == 0 {
+		return ""
+	}
+	// W3C spec allows multiple Baggage header instances; they are logically joined with commas.
+	return parseBaggage(strings.Join(values, ","))
+}
+
+// parseBaggage extracts the candela.tenant_id value from a W3C Baggage header string.
+// Matching is case-insensitive for the key; values are validated against tenantIDPattern.
+func parseBaggage(header string) string {
+	if header == "" {
+		return ""
+	}
+
+	var tenantID string
+	parts := strings.Split(header, ",")
+	for _, part := range parts {
+		kv := strings.SplitN(strings.TrimSpace(part), "=", 2)
+		if len(kv) != 2 {
+			continue
+		}
+		keyPart := strings.SplitN(strings.TrimSpace(kv[0]), ";", 2)[0]
+		if !strings.EqualFold(keyPart, "candela.tenant_id") {
+			continue
+		}
+
+		// Values can have properties (e.g. key=val;prop=1). Strip them.
+		val := strings.TrimSpace(kv[1])
+		if idx := strings.Index(val, ";"); idx >= 0 {
+			val = strings.TrimSpace(val[:idx])
+		}
+
+		if tenantIDPattern.MatchString(val) {
+			tenantID = val
+		}
+	}
+
+	return tenantID
 }

@@ -317,3 +317,132 @@ func TestTracesHandler_MethodNotAllowed(t *testing.T) {
 		t.Errorf("status = %d, want 405", resp.StatusCode)
 	}
 }
+func TestSpanCapture_TenantID_Explicit(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"choices": []any{}})
+	}))
+	defer upstream.Close()
+
+	store, _ := sqlitestore.New(sqlitestore.Config{Path: ":memory:"})
+	proc := processor.New([]storage.SpanWriter{store}, costcalc.New(), 1)
+	go proc.Run(context.Background())
+	defer proc.Stop()
+
+	handler := newSpanCapture(proxyTo(upstream.URL), proc, nil)
+	srv := httptest.NewServer(handler)
+	defer srv.Close()
+
+	body := `{"model": "test", "messages": []}`
+	req, _ := http.NewRequest("POST", srv.URL+"/v1/chat/completions", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Candela-Tenant-Id", "acme-corp")
+
+	resp, _ := http.DefaultClient.Do(req)
+	_ = resp.Body.Close()
+
+	// Poll for capture.
+	var spans *storage.SpanResult
+	var err error
+	for i := 0; i < 40; i++ {
+		spans, err = store.SearchSpans(context.Background(), storage.SpanQuery{
+			ProjectID: "local",
+			StartTime: time.Now().Add(-1 * time.Hour),
+			EndTime:   time.Now().Add(1 * time.Hour),
+			PageSize:  1,
+		})
+		if err == nil && len(spans.Spans) > 0 {
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+
+	if err != nil {
+		t.Fatalf("SearchSpans failed: %v", err)
+	}
+	if len(spans.Spans) == 0 {
+		t.Fatal("no spans captured")
+	}
+	if spans.Spans[0].TenantID != "acme-corp" {
+		t.Errorf("got tenant %q, want acme-corp", spans.Spans[0].TenantID)
+	}
+}
+
+func TestSpanCapture_TenantID_Baggage(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer upstream.Close()
+
+	store, _ := sqlitestore.New(sqlitestore.Config{Path: ":memory:"})
+	proc := processor.New([]storage.SpanWriter{store}, costcalc.New(), 1)
+	go proc.Run(context.Background())
+	defer proc.Stop()
+
+	handler := newSpanCapture(proxyTo(upstream.URL), proc, nil)
+	srv := httptest.NewServer(handler)
+	defer srv.Close()
+
+	body := `{"model": "test", "messages": []}`
+	req, _ := http.NewRequest("POST", srv.URL+"/v1/chat/completions", strings.NewReader(body))
+	req.Header.Add("Baggage", "candela.tenant_id=baggage-tenant")
+
+	resp, _ := http.DefaultClient.Do(req)
+	_ = resp.Body.Close()
+
+	// Poll for capture.
+	var spans *storage.SpanResult
+	var err error
+	for i := 0; i < 40; i++ {
+		spans, err = store.SearchSpans(context.Background(), storage.SpanQuery{
+			ProjectID: "local",
+			StartTime: time.Now().Add(-1 * time.Hour),
+			EndTime:   time.Now().Add(1 * time.Hour),
+			PageSize:  1,
+		})
+		if err == nil && len(spans.Spans) > 0 {
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+
+	if err != nil {
+		t.Fatalf("SearchSpans failed: %v", err)
+	}
+	if len(spans.Spans) == 0 {
+		t.Fatal("no spans captured")
+	}
+	if spans.Spans[0].TenantID != "baggage-tenant" {
+		t.Errorf("got tenant %q, want baggage-tenant", spans.Spans[0].TenantID)
+	}
+}
+
+func TestSpanCapture_TenantID_Invalid(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer upstream.Close()
+
+	store, _ := sqlitestore.New(sqlitestore.Config{Path: ":memory:"})
+	proc := processor.New([]storage.SpanWriter{store}, costcalc.New(), 1)
+	go proc.Run(context.Background())
+	defer proc.Stop()
+
+	handler := newSpanCapture(proxyTo(upstream.URL), proc, nil)
+	srv := httptest.NewServer(handler)
+	defer srv.Close()
+
+	body := `{"model": "test", "messages": []}`
+	req, _ := http.NewRequest("POST", srv.URL+"/v1/chat/completions", strings.NewReader(body))
+	req.Header.Set("X-Candela-Tenant-Id", "invalid spaces!")
+
+	resp, _ := http.DefaultClient.Do(req)
+	_ = resp.Body.Close()
+
+	// Sleep slightly to ensure it WOULD have been captured if valid.
+	time.Sleep(200 * time.Millisecond)
+	spans, _ := store.SearchSpans(context.Background(), storage.SpanQuery{PageSize: 1})
+	if len(spans.Spans) != 0 && spans.Spans[0].TenantID != "" {
+		t.Errorf("got tenant %q, want empty for invalid input", spans.Spans[0].TenantID)
+	}
+}

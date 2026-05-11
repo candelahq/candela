@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -75,6 +76,59 @@ func TestParseBaggage_InvalidFirstValidSecond(t *testing.T) {
 	got := parseBaggage(header)
 	if got != "good-tenant" {
 		t.Errorf("parseBaggage(%q) = %q, want good-tenant (invalid first entry should be skipped)", header, got)
+	}
+}
+
+
+// UNIT-4b: parseBaggageHeaders joins multiple header values (W3C allows multiple
+// Baggage: header instances in a single HTTP request).
+func TestParseBaggageHeaders_MultipleHeaders(t *testing.T) {
+	// Simulate two separate Baggage header lines — r.Header.Values returns both.
+	values := []string{"svc.version=1.0", "candela.tenant_id=multi-tenant,other=val"}
+	got := parseBaggageHeaders(values)
+	if got != "multi-tenant" {
+		t.Errorf("parseBaggageHeaders(%v) = %q, want multi-tenant", values, got)
+	}
+}
+
+// UNIT-4c: Baggage key matching is case-insensitive per RFC 8941.
+func TestParseBaggage_CaseInsensitiveKey(t *testing.T) {
+	cases := []string{
+		"Candela.Tenant_Id=acme-corp",
+		"CANDELA.TENANT_ID=acme-corp",
+		"candela.TENANT_ID=acme-corp",
+	}
+	for _, h := range cases {
+		if got := parseBaggage(h); got != "acme-corp" {
+			t.Errorf("parseBaggage(%q) = %q, want acme-corp (key should be case-insensitive)", h, got)
+		}
+	}
+}
+
+// UNIT-4d: W3C Baggage spec — right-most occurrence wins if keys are duplicated.
+func TestParseBaggage_RightMostWins(t *testing.T) {
+	header := "candela.tenant_id=first,svc=test,candela.tenant_id=second"
+	got := parseBaggage(header)
+	if got != "second" {
+		t.Errorf("parseBaggage(%q) = %q, want second (right-most occurrence must win)", header, got)
+	}
+}
+
+// UNIT-4e: Malformed parts are skipped without affecting valid ones.
+func TestParseBaggage_MalformedParts(t *testing.T) {
+	header := "!!!, candela.tenant_id=valid-one, ==, key=val"
+	got := parseBaggage(header)
+	if got != "valid-one" {
+		t.Errorf("parseBaggage(%q) = %q, want valid-one", header, got)
+	}
+}
+
+// UNIT-4f: Properties (semicolon-separated) are ignored per spec.
+func TestParseBaggage_PropertiesIgnored(t *testing.T) {
+	header := "candela.tenant_id=acme;ttl=100;p2=val,other=foo"
+	got := parseBaggage(header)
+	if got != "acme" {
+		t.Errorf("parseBaggage(%q) = %q, want acme (properties should be stripped)", header, got)
 	}
 }
 
@@ -349,5 +403,75 @@ func TestProxy_TenantID_MultiBaggageHeaders(t *testing.T) {
 	}
 	if got := sub.getSpans()[0].TenantID; got != "multi-header-tenant" {
 		t.Errorf("TenantID = %q, want multi-header-tenant", got)
+	}
+}
+
+// INTEG-6: W3C Baggage takes precedence over X-Candela-Tenant-Id header.
+func TestProxy_TenantID_Precedence(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"chatcmpl-p","object":"chat.completion","model":"gpt-4o","choices":[],"usage":{"total_tokens":1}}`))
+	}))
+	defer upstream.Close()
+
+	sub := &mockSubmitter{}
+	p := New(Config{
+		Providers: []Provider{{Name: "openai", UpstreamURL: upstream.URL}},
+		ProjectID: "proj-test",
+	}, sub, costcalc.New())
+
+	mux := http.NewServeMux()
+	p.RegisterRoutes(mux)
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	body := `{"model":"gpt-4o","messages":[]}`
+	req, _ := http.NewRequest(http.MethodPost, srv.URL+"/proxy/openai/v1/chat/completions", strings.NewReader(body))
+	req.Header.Set("X-Candela-Tenant-Id", "header-tenant")
+	req.Header.Set("Baggage", "candela.tenant_id=baggage-tenant")
+
+	resp, _ := http.DefaultClient.Do(req)
+	_ = resp.Body.Close()
+
+	if !waitForSpan(sub) {
+		t.Fatal("no spans submitted within timeout")
+	}
+	if got := sub.getSpans()[0].TenantID; got != "baggage-tenant" {
+		t.Errorf("TenantID = %q, want baggage-tenant (Baggage must win over header)", got)
+	}
+}
+
+// INTEG-7: Tenant ID is correctly attributed for streaming responses.
+func TestProxy_TenantID_Streaming(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}\n\ndata: [DONE]\n\n"))
+	}))
+	defer upstream.Close()
+
+	sub := &mockSubmitter{}
+	p := New(Config{
+		Providers: []Provider{{Name: "openai", UpstreamURL: upstream.URL}},
+		ProjectID: "proj-test",
+	}, sub, costcalc.New())
+
+	mux := http.NewServeMux()
+	p.RegisterRoutes(mux)
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	body := `{"model":"gpt-4o","messages":[],"stream":true}`
+	req, _ := http.NewRequest(http.MethodPost, srv.URL+"/proxy/openai/v1/chat/completions", strings.NewReader(body))
+	req.Header.Set("X-Candela-Tenant-Id", "stream-tenant")
+
+	resp, _ := http.DefaultClient.Do(req)
+	_, _ = io.ReadAll(resp.Body)
+	_ = resp.Body.Close()
+
+	if !waitForSpan(sub) {
+		t.Fatal("no spans submitted within timeout")
+	}
+	if got := sub.getSpans()[0].TenantID; got != "stream-tenant" {
+		t.Errorf("TenantID = %q, want stream-tenant", got)
 	}
 }

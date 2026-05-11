@@ -177,15 +177,13 @@ func main() {
 		// Strategy 1: idtoken.NewTokenSource (works for service accounts).
 		// Strategy 2: google.DefaultTokenSource with openid scope (works for user credentials).
 		var tokenSource oauth2.TokenSource
-		useIDToken := false
 
 		ts, err := idtoken.NewTokenSource(ctx, cfg.Audience)
 		if err == nil {
 			slog.Info("using service account ID token source")
 			tokenSource = ts
-			useIDToken = true
 		} else {
-			slog.Info("idtoken unavailable (user credentials), using OAuth2 with openid scope", "reason", err)
+			slog.Debug("idtoken.NewTokenSource unavailable (user credentials fallback)", "reason", err)
 			ts2, err2 := google.DefaultTokenSource(ctx, "openid", "email")
 			if err2 != nil {
 				slog.Error("failed to get credentials — run 'gcloud auth application-default login' first",
@@ -212,10 +210,11 @@ func main() {
 					return
 				}
 				bearerToken := token.AccessToken
-				if useIDToken {
-					if idToken, ok := token.Extra("id_token").(string); ok && idToken != "" {
-						bearerToken = idToken
-					}
+				// For IAP, we MUST use the OIDC ID token. Both idtoken.NewTokenSource
+				// and the OAuth2 fallback (with openid scope) provide this in the
+				// "id_token" extra field.
+				if idToken, ok := token.Extra("id_token").(string); ok && idToken != "" {
+					bearerToken = idToken
 				}
 				req.Header.Set("Authorization", "Bearer "+bearerToken)
 
@@ -480,7 +479,14 @@ func loadConfig(configPath string) *Config {
 	if configPath == "" {
 		home, err := os.UserHomeDir()
 		if err == nil {
-			configPath = filepath.Join(home, ".candela.yaml")
+			// Check modern XDG location first.
+			xdgPath := filepath.Join(home, ".config", "candela", "config.yaml")
+			if _, err := os.Stat(xdgPath); err == nil {
+				configPath = xdgPath
+			} else {
+				// Fallback to legacy location.
+				configPath = filepath.Join(home, ".candela.yaml")
+			}
 		}
 	}
 

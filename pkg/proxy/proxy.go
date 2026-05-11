@@ -375,6 +375,7 @@ func parseBaggage(header string) string {
 	if header == "" {
 		return ""
 	}
+	var tenantID string
 	for _, member := range strings.Split(header, ",") {
 		// Each member may have properties after a semicolon: "key=value;prop".
 		kv := strings.SplitN(strings.TrimSpace(member), ";", 2)[0]
@@ -383,14 +384,15 @@ func parseBaggage(header string) string {
 		if len(parts) == 2 && strings.EqualFold(strings.TrimSpace(parts[0]), "candela.tenant_id") {
 			val := strings.TrimSpace(parts[1])
 			if tenantIDPattern.MatchString(val) {
-				return val
+				// W3C spec: the right-most occurrence of a key wins.
+				tenantID = val
+			} else {
+				slog.Warn("skipping invalid candela.tenant_id in Baggage header",
+					"value", val)
 			}
-			slog.Warn("skipping invalid candela.tenant_id in Baggage header",
-				"value", val)
-			// Continue scanning — there may be a valid duplicate entry later.
 		}
 	}
-	return ""
+	return tenantID
 }
 
 // parseBaggageHeaders joins multiple Baggage header values (W3C allows multiple

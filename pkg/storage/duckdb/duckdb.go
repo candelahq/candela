@@ -91,6 +91,9 @@ func (s *Store) migrate() error {
 		`ALTER TABLE spans ADD COLUMN IF NOT EXISTS user_id VARCHAR DEFAULT ''`,
 		// Migration: add session_id column for conversation tracking.
 		`ALTER TABLE spans ADD COLUMN IF NOT EXISTS session_id VARCHAR DEFAULT ''`,
+		// Migration: add tenant_id for multitenant cost attribution.
+		`ALTER TABLE spans ADD COLUMN IF NOT EXISTS tenant_id VARCHAR DEFAULT ''`,
+		`CREATE INDEX IF NOT EXISTS idx_spans_tenant ON spans(tenant_id)`,
 	}
 
 	for _, q := range queries {
@@ -146,6 +149,7 @@ func (s *Store) IngestSpans(ctx context.Context, spans []storage.Span) error {
 				genAI.InputContent, genAI.OutputContent,
 				attrs,
 				span.SessionID,
+				span.TenantID,
 			); err != nil {
 				return fmt.Errorf("appending span %s: %w", span.SpanID, err)
 			}
@@ -164,7 +168,7 @@ func (s *Store) GetTrace(ctx context.Context, traceID string) (*storage.Trace, e
 			start_time, end_time, duration_ns, project_id, environment, service_name,
 			gen_ai_model, gen_ai_provider, gen_ai_input_tokens, gen_ai_output_tokens,
 			gen_ai_total_tokens, gen_ai_cost_usd, gen_ai_temperature, gen_ai_max_tokens,
-			gen_ai_input_content, gen_ai_output_content, attributes, user_id, session_id
+			gen_ai_input_content, gen_ai_output_content, attributes, user_id, session_id, tenant_id
 		FROM spans WHERE trace_id = ? ORDER BY start_time ASC
 	`, traceID)
 	if err != nil {
@@ -225,10 +229,11 @@ func (s *Store) QueryTraces(ctx context.Context, q storage.TraceQuery) (*storage
 		WHERE project_id = ? AND start_time >= ? AND start_time <= ?
 			AND (? = '' OR user_id = ?)
 			AND (? = '' OR environment = ?)
+			AND (? = '' OR tenant_id = ?)
 		GROUP BY trace_id
 		ORDER BY `+orderExpr+` `+dir+`
 		LIMIT ?
-	`, q.ProjectID, q.StartTime, q.EndTime, q.UserID, q.UserID, q.Environment, q.Environment, q.PageSize)
+	`, q.ProjectID, q.StartTime, q.EndTime, q.UserID, q.UserID, q.Environment, q.Environment, q.TenantID, q.TenantID, q.PageSize)
 	if err != nil {
 		return nil, fmt.Errorf("querying traces: %w", err)
 	}
@@ -271,13 +276,14 @@ func (s *Store) SearchSpans(ctx context.Context, q storage.SpanQuery) (*storage.
 			start_time, end_time, duration_ns, project_id, environment, service_name,
 			gen_ai_model, gen_ai_provider, gen_ai_input_tokens, gen_ai_output_tokens,
 			gen_ai_total_tokens, gen_ai_cost_usd, gen_ai_temperature, gen_ai_max_tokens,
-			gen_ai_input_content, gen_ai_output_content, attributes, user_id, session_id
+			gen_ai_input_content, gen_ai_output_content, attributes, user_id, session_id, tenant_id
 		FROM spans
 		WHERE project_id = ? AND start_time >= ? AND start_time <= ?
 			AND (? = 0 OR kind = ?)
 			AND (? = '' OR gen_ai_model = ?)
 			AND (? = '' OR name LIKE '%' || ? || '%' ESCAPE '\')
 			AND (? = '' OR user_id = ?)
+			AND (? = '' OR tenant_id = ?)
 		ORDER BY start_time DESC
 		LIMIT ?
 	`, q.ProjectID, q.StartTime, q.EndTime,
@@ -285,6 +291,7 @@ func (s *Store) SearchSpans(ctx context.Context, q storage.SpanQuery) (*storage.
 		q.Model, q.Model,
 		q.NameContains, storage.EscapeLike(q.NameContains),
 		q.UserID, q.UserID,
+		q.TenantID, q.TenantID,
 		q.PageSize,
 	)
 	if err != nil {
@@ -413,6 +420,54 @@ func (s *Store) GetUserLeaderboard(ctx context.Context, q storage.UsageQuery, li
 	return users, nil
 }
 
+// GetTenantLeaderboard returns per-tenant cost aggregations ranked by cost.
+func (s *Store) GetTenantLeaderboard(ctx context.Context, q storage.UsageQuery, limit int) ([]storage.TenantUsageSummary, error) {
+	if limit <= 0 {
+		limit = 20
+	}
+
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT tenant_id,
+			COUNT(*)::BIGINT,
+			COALESCE(SUM(gen_ai_total_tokens), 0)::BIGINT,
+			COALESCE(SUM(gen_ai_cost_usd), 0)::DOUBLE,
+			COALESCE(AVG(duration_ns), 0)::DOUBLE / 1000000.0,
+			COALESCE((
+				SELECT s2.gen_ai_model FROM spans s2
+				WHERE s2.tenant_id = spans.tenant_id
+					AND s2.project_id = ? AND s2.start_time >= ? AND s2.start_time <= ?
+					AND s2.gen_ai_model != ''
+				GROUP BY s2.gen_ai_model
+				ORDER BY SUM(s2.gen_ai_cost_usd) DESC
+				LIMIT 1
+			), '') AS top_model
+		FROM spans
+		WHERE project_id = ? AND start_time >= ? AND start_time <= ?
+			AND tenant_id IS NOT NULL AND tenant_id != ''
+		GROUP BY tenant_id
+		ORDER BY SUM(gen_ai_cost_usd) DESC
+		LIMIT ?
+	`, q.ProjectID, q.StartTime, q.EndTime, q.ProjectID, q.StartTime, q.EndTime, limit)
+	if err != nil {
+		return nil, fmt.Errorf("querying tenant leaderboard: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var tenants []storage.TenantUsageSummary
+	for rows.Next() {
+		var t storage.TenantUsageSummary
+		if err := rows.Scan(&t.TenantID, &t.CallCount, &t.TotalTokens,
+			&t.CostUSD, &t.AvgLatencyMs, &t.TopModel); err != nil {
+			return nil, fmt.Errorf("scanning tenant: %w", err)
+		}
+		tenants = append(tenants, t)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterating tenants: %w", err)
+	}
+	return tenants, nil
+}
+
 func (s *Store) Ping(ctx context.Context) error {
 	return s.db.PingContext(ctx)
 }
@@ -444,6 +499,7 @@ func scanSpans(rows *sql.Rows) ([]storage.Span, error) {
 			&attrsAny,
 			&span.UserID,
 			&span.SessionID,
+			&span.TenantID,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("scanning span: %w", err)

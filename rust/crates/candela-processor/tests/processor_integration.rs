@@ -74,6 +74,7 @@ fn make_test_span(name: &str) -> Span {
         service_name: None,
         user_id: None,
         session_id: None,
+        tenant_id: None,
     }
 }
 

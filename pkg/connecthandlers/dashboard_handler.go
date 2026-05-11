@@ -308,3 +308,68 @@ func (h *DashboardHandler) GetTeamLeaderboard(
 		Users: pbUsers,
 	}), nil
 }
+
+// GetTenantLeaderboard returns per-tenant LLM cost aggregations ranked by spend (admin only).
+// Tenant identity is captured from X-Candela-Tenant-Id header or W3C Baggage (candela.tenant_id).
+func (h *DashboardHandler) GetTenantLeaderboard(
+	ctx context.Context,
+	req *connect.Request[v1.GetTenantLeaderboardRequest],
+) (*connect.Response[v1.GetTenantLeaderboardResponse], error) {
+	// Admin-only: non-admin users (non-empty scopeUserID) are denied.
+	if uid := scopeUserID(ctx, h.users); uid != "" {
+		return nil, connect.NewError(connect.CodePermissionDenied,
+			fmt.Errorf("tenant leaderboard is admin-only"))
+	}
+
+	msg := req.Msg
+	q := storage.UsageQuery{ProjectID: msg.GetProjectId()}
+	if msg.GetTimeRange() != nil {
+		if msg.GetTimeRange().Start != nil {
+			q.StartTime = msg.GetTimeRange().Start.AsTime()
+		}
+		if msg.GetTimeRange().End != nil {
+			q.EndTime = msg.GetTimeRange().End.AsTime()
+		}
+	}
+	if q.StartTime.IsZero() {
+		q.StartTime = time.Now().Add(-30 * 24 * time.Hour) // default: last 30 days
+	}
+	if q.EndTime.IsZero() {
+		q.EndTime = time.Now()
+	}
+
+	limit := int(msg.GetLimit())
+	if limit <= 0 {
+		limit = 20
+	}
+	if limit > 100 {
+		limit = 100
+	}
+
+	tenants, err := h.store.GetTenantLeaderboard(ctx, q, limit)
+	if err != nil {
+		return nil, internalError("failed to get tenant leaderboard", err)
+	}
+
+	var pbTenants []*v1.TenantUsage
+	for _, t := range tenants {
+		pbTenants = append(pbTenants, &v1.TenantUsage{
+			TenantId:     t.TenantID,
+			CallCount:    t.CallCount,
+			TotalTokens:  t.TotalTokens,
+			CostUsd:      t.CostUSD,
+			AvgLatencyMs: t.AvgLatencyMs,
+			TopModel:     t.TopModel,
+		})
+	}
+
+	slog.Info("tenant leaderboard fetched",
+		"project_id", q.ProjectID,
+		"tenant_count", len(tenants),
+		"limit", limit,
+	)
+
+	return connect.NewResponse(&v1.GetTenantLeaderboardResponse{
+		Tenants: pbTenants,
+	}), nil
+}

@@ -106,6 +106,9 @@ type spanRow struct {
 	Attributes    []AttributeKV `bigquery:"attributes"`
 	UserID        string        `bigquery:"user_id"`
 	SessionID     string        `bigquery:"session_id"`
+	// TenantID identifies the downstream customer on whose behalf this LLM call
+	// was made. Populated from X-Candela-Tenant-Id header or W3C Baggage.
+	TenantID string `bigquery:"tenant_id"`
 }
 
 func spanToRow(span storage.Span) spanRow {
@@ -125,6 +128,7 @@ func spanToRow(span storage.Span) spanRow {
 		ServiceName:   span.ServiceName,
 		UserID:        span.UserID,
 		SessionID:     span.SessionID,
+		TenantID:      span.TenantID,
 	}
 
 	if span.GenAI != nil {
@@ -164,6 +168,7 @@ func rowToSpan(row spanRow) storage.Span {
 		ServiceName:   row.ServiceName,
 		UserID:        row.UserID,
 		SessionID:     row.SessionID,
+		TenantID:      row.TenantID,
 	}
 
 	if row.GenAIModel != "" {
@@ -218,7 +223,7 @@ func (s *Store) ensureSchema(ctx context.Context) error {
 			Type:  bigquery.DayPartitioningType,
 		},
 		Clustering: &bigquery.Clustering{
-			Fields: []string{"project_id", "user_id", "trace_id"},
+			Fields: []string{"project_id", "tenant_id", "user_id", "trace_id"},
 		},
 	}
 	if err := table.Create(ctx, tableMeta); err != nil {
@@ -493,6 +498,7 @@ func (s *Store) SearchSpans(ctx context.Context, sq storage.SpanQuery) (*storage
 		  AND (@model = '' OR gen_ai_model = @model)
 		  AND (@nameContains = '' OR name LIKE CONCAT('%%', @escapedName, '%%'))
 		  AND (@userID = '' OR user_id = @userID)
+		  AND (@tenantID = '' OR tenant_id = @tenantID)
 		ORDER BY start_time DESC
 		LIMIT @pageSize
 	`, quoteTable(s.tableID))
@@ -507,6 +513,7 @@ func (s *Store) SearchSpans(ctx context.Context, sq storage.SpanQuery) (*storage
 		{Name: "nameContains", Value: sq.NameContains},
 		{Name: "escapedName", Value: storage.EscapeLike(sq.NameContains)},
 		{Name: "userID", Value: sq.UserID},
+		{Name: "tenantID", Value: sq.TenantID},
 		{Name: "pageSize", Value: sq.PageSize},
 	}
 
@@ -535,6 +542,7 @@ func (s *Store) GetUsageSummary(ctx context.Context, uq storage.UsageQuery) (*st
 		  AND start_time >= @startTime
 		  AND start_time <= @endTime
 		  AND (@userID = '' OR user_id = @userID)
+		  AND (@tenantID = '' OR tenant_id = @tenantID)
 	`, quoteTable(s.tableID))
 
 	q := s.client.Query(query)
@@ -544,6 +552,7 @@ func (s *Store) GetUsageSummary(ctx context.Context, uq storage.UsageQuery) (*st
 		{Name: "endTime", Value: uq.EndTime},
 		{Name: "llmKind", Value: int(storage.SpanKindLLM)},
 		{Name: "userID", Value: uq.UserID},
+		{Name: "tenantID", Value: uq.TenantID},
 	}
 
 	it, err := q.Read(ctx)
@@ -599,6 +608,7 @@ func (s *Store) GetModelBreakdown(ctx context.Context, uq storage.UsageQuery) ([
 		  AND start_time <= @endTime
 		  AND gen_ai_model != ''
 		  AND (@userID = '' OR user_id = @userID)
+		  AND (@tenantID = '' OR tenant_id = @tenantID)
 		GROUP BY gen_ai_model, gen_ai_provider
 		ORDER BY total_cost_usd DESC
 	`, quoteTable(s.tableID))
@@ -609,6 +619,7 @@ func (s *Store) GetModelBreakdown(ctx context.Context, uq storage.UsageQuery) ([
 		{Name: "startTime", Value: uq.StartTime},
 		{Name: "endTime", Value: uq.EndTime},
 		{Name: "userID", Value: uq.UserID},
+		{Name: "tenantID", Value: uq.TenantID},
 	}
 
 	it, err := q.Read(ctx)
@@ -711,6 +722,82 @@ func (s *Store) GetUserLeaderboard(ctx context.Context, uq storage.UsageQuery, l
 	}
 
 	return users, nil
+}
+
+// GetTenantLeaderboard returns per-tenant cost aggregations ranked by cost.
+func (s *Store) GetTenantLeaderboard(ctx context.Context, uq storage.UsageQuery, limit int) ([]storage.TenantUsageSummary, error) {
+	if limit <= 0 {
+		limit = 20
+	}
+
+	query := fmt.Sprintf(`
+		SELECT
+			tenant_id,
+			COUNT(*) AS call_count,
+			COALESCE(SUM(gen_ai_total_tokens), 0) AS total_tokens,
+			COALESCE(SUM(gen_ai_cost_usd), 0) AS total_cost_usd,
+			COALESCE(AVG(duration_ns), 0) AS avg_duration_ns,
+			COALESCE(
+				(SELECT m FROM UNNEST(ARRAY_AGG(gen_ai_model ORDER BY cnt DESC LIMIT 1)) AS m),
+				''
+			) AS top_model
+		FROM (
+			SELECT
+				tenant_id, gen_ai_model, gen_ai_total_tokens, gen_ai_cost_usd,
+				duration_ns,
+				COUNT(*) OVER (PARTITION BY tenant_id, gen_ai_model) AS cnt
+			FROM %s
+			WHERE project_id = @projectID
+			  AND start_time >= @startTime
+			  AND start_time <= @endTime
+			  AND tenant_id IS NOT NULL AND tenant_id != ''
+		)
+		GROUP BY tenant_id
+		ORDER BY total_cost_usd DESC
+		LIMIT @limit
+	`, quoteTable(s.tableID))
+
+	q := s.client.Query(query)
+	q.Parameters = []bigquery.QueryParameter{
+		{Name: "projectID", Value: uq.ProjectID},
+		{Name: "startTime", Value: uq.StartTime},
+		{Name: "endTime", Value: uq.EndTime},
+		{Name: "limit", Value: limit},
+	}
+
+	it, err := q.Read(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("querying tenant leaderboard: %w", err)
+	}
+
+	var tenants []storage.TenantUsageSummary
+	for {
+		var row struct {
+			TenantID      string  `bigquery:"tenant_id"`
+			CallCount     int64   `bigquery:"call_count"`
+			TotalTokens   int64   `bigquery:"total_tokens"`
+			TotalCostUSD  float64 `bigquery:"total_cost_usd"`
+			AvgDurationNs float64 `bigquery:"avg_duration_ns"`
+			TopModel      string  `bigquery:"top_model"`
+		}
+		err := it.Next(&row)
+		if err == iterator.Done {
+			break
+		}
+		if err != nil {
+			return nil, fmt.Errorf("iterating tenant leaderboard: %w", err)
+		}
+		tenants = append(tenants, storage.TenantUsageSummary{
+			TenantID:     row.TenantID,
+			CallCount:    row.CallCount,
+			TotalTokens:  row.TotalTokens,
+			CostUSD:      row.TotalCostUSD,
+			AvgLatencyMs: float64(row.AvgDurationNs) / 1e6,
+			TopModel:     row.TopModel,
+		})
+	}
+
+	return tenants, nil
 }
 
 // querySpans executes a query and scans results into storage.Span.

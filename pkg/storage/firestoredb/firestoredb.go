@@ -14,6 +14,7 @@ package firestoredb
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"math"
@@ -538,9 +539,10 @@ func (s *Store) DeleteUser(ctx context.Context, id string) error {
 		}
 	}
 	if len(errs) > 0 {
-		// Return first error — caller can retry DeleteUser; orphaned docs are
-		// preferable to silently succeeding with partial deletion.
-		return fmt.Errorf("firestoredb: %d subcollection doc(s) failed to delete: %w", len(errs), errs[0])
+		// Return all errors via errors.Join so the caller can inspect the full
+		// set of failures (Go 1.20+). Orphaned docs are preferable to silently
+		// succeeding with partial deletion — caller can retry DeleteUser.
+		return fmt.Errorf("firestoredb: %d subcollection doc(s) failed to delete: %w", len(errs), errors.Join(errs...))
 	}
 
 	// Delete the user document.

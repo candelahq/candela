@@ -6,14 +6,14 @@ made by an agent — including sub-agents and tool calls — are attributed to
 the correct tenant and job for cost tracking in Candela.
 
 Usage:
-    from candela.adk import CandelaContextPlugin, CandelaContext
+    from candela.adk import CandleaContextPlugin, CandelaContext
 
     context = CandelaContext(
         tenant_id="acme-corp",
         job_id="trial-NCT01750580",   # optional: maps to trial_id, campaign_id, etc.
         session_id="session-42",       # optional: groups related calls
     )
-    plugin = CandelaContextPlugin(context)
+    plugin = CandleaContextPlugin(context)
 
     result = await agent.run_async(message, plugins=[plugin])
 
@@ -178,16 +178,16 @@ class CandelaContext:
 # ── ADK Plugin ────────────────────────────────────────────────────────────────
 
 
-class CandelaContextPlugin:
+class CandleaContextPlugin:
     """ADK plugin that injects Candela tenant context into every LLM call.
 
     Usage with Google ADK:
 
         from google.adk.agents import LlmAgent
-        from candela.adk import CandelaContextPlugin, CandelaContext
+        from candela.adk import CandleaContextPlugin, CandelaContext
 
         ctx = CandelaContext(tenant_id="acme-corp", job_id="trial-NCT01750580")
-        plugin = CandelaContextPlugin(ctx)
+        plugin = CandleaContextPlugin(ctx)
 
         result = await agent.run_async(
             "Match this patient for NCT01750580",
@@ -210,7 +210,7 @@ class CandelaContextPlugin:
 
     @property
     def name(self) -> str:
-        return "CandelaContextPlugin"
+        return "CandleaContextPlugin"
 
     def before_model_call(self, request: Any) -> Any:
         """Inject Candela baggage headers before each LLM HTTP request.
@@ -262,7 +262,7 @@ def _inject_headers(request: Any, headers: dict[str, str]) -> None:
     import warnings
 
     warnings.warn(
-        f"CandelaContextPlugin: could not inject headers into {type(request).__name__}. "
+        f"CandleaContextPlugin: could not inject headers into {type(request).__name__}. "
         "Tenant attribution may be missing for this call.",
         stacklevel=2,
     )
@@ -275,14 +275,14 @@ def make_candela_plugin(
     tenant_id: str | None = None,
     job_id: str | None = None,
     session_id: str | None = None,
-) -> CandelaContextPlugin:
-    """Convenience factory for creating a CandelaContextPlugin.
+) -> CandleaContextPlugin:
+    """Convenience factory for creating a CandleaContextPlugin.
 
     Example:
         plugin = make_candela_plugin(tenant_id="acme-corp", job_id="NCT01750580")
         result = await agent.run_async(message, plugins=[plugin])
     """
-    return CandelaContextPlugin(
+    return CandleaContextPlugin(
         CandelaContext(tenant_id=tenant_id, job_id=job_id, session_id=session_id)
     )
 
@@ -304,7 +304,7 @@ class CTMSCandelaContext(CandelaContext):
             trial_id=funnel_request.trial_id,
             run_id=funnel_request.run_id,
         )
-        plugin = CandelaContextPlugin(ctx)
+        plugin = CandleaContextPlugin(ctx)
     """
 
     trial_id: str | None = field(default=None)

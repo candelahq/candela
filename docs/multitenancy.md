@@ -109,12 +109,12 @@ def make_llm_request_with_tenant(tenant_id: str, payload: dict) -> dict:
 
 ### ADK Agent: Automatic Context Propagation
 
-With the `CandelaContextPlugin` (see `docs/adk-integration.md`), tenant context
+With the `CandlaContextPlugin` (see `docs/adk-integration.md`), tenant context
 is injected automatically into every LLM call made by an ADK agent:
 
 ```python
 from google.adk.agents import LlmAgent
-from candela.adk import CandelaContextPlugin, CandelaContext
+from candela.adk import CandleaContextPlugin, CandelaContext
 
 agent = LlmAgent(
     name="my-agent",
@@ -123,7 +123,7 @@ agent = LlmAgent(
 )
 
 ctx = CandelaContext(tenant_id="acme-corp", session_id="session-42")
-plugin = CandelaContextPlugin(ctx)
+plugin = CandleaContextPlugin(ctx)
 
 # The plugin injects Baggage headers on every underlying HTTP call.
 # No code changes needed in the agent itself.
@@ -259,7 +259,7 @@ The migration runs automatically on startup and is safe to run multiple times.
 | `tenant_id` in DuckDB / SQLite / BigQuery | ✅ Implemented |
 | `GetTenantLeaderboard` RPC | ✅ Implemented |
 | OTLP export of `candela.tenant_id` | ✅ Implemented |
-| ADK `CandelaContextPlugin` | ✅ Implemented |
+| ADK `CandleaContextPlugin` | ✅ Implemented |
 | `job_id` / `trial_id` second attribution dimension | 🔜 Planned |
 | Rust sidecar parity for tenant extraction | 🔜 Planned (after HTTP handler is wired) |
 | UI: Tenant leaderboard dashboard widget | 🔜 Planned (see GitHub issues) |

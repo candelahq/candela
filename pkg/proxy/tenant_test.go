@@ -78,6 +78,31 @@ func TestParseBaggage_InvalidFirstValidSecond(t *testing.T) {
 	}
 }
 
+// UNIT-4b: parseBaggageHeaders joins multiple header values (W3C allows multiple
+// Baggage: header instances in a single HTTP request).
+func TestParseBaggageHeaders_MultipleHeaders(t *testing.T) {
+	// Simulate two separate Baggage header lines — r.Header.Values returns both.
+	values := []string{"svc.version=1.0", "candela.tenant_id=multi-tenant,other=val"}
+	got := parseBaggageHeaders(values)
+	if got != "multi-tenant" {
+		t.Errorf("parseBaggageHeaders(%v) = %q, want multi-tenant", values, got)
+	}
+}
+
+// UNIT-4c: Baggage key matching is case-insensitive per RFC 8941.
+func TestParseBaggage_CaseInsensitiveKey(t *testing.T) {
+	cases := []string{
+		"Candela.Tenant_Id=acme-corp",
+		"CANDELA.TENANT_ID=acme-corp",
+		"candela.TENANT_ID=acme-corp",
+	}
+	for _, h := range cases {
+		if got := parseBaggage(h); got != "acme-corp" {
+			t.Errorf("parseBaggage(%q) = %q, want acme-corp (key should be case-insensitive)", h, got)
+		}
+	}
+}
+
 // UNIT-5: tenantIDPattern enforces the allowed character set and length limits.
 func TestTenantIDPattern(t *testing.T) {
 	valid := []string{

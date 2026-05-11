@@ -103,6 +103,7 @@ func (s *Store) migrate() error {
 		`ALTER TABLE spans ADD COLUMN session_id TEXT DEFAULT ''`,
 		// Migration: add tenant_id for multitenant cost attribution.
 		`ALTER TABLE spans ADD COLUMN tenant_id TEXT DEFAULT ''`,
+		`CREATE INDEX IF NOT EXISTS idx_spans_tenant ON spans(tenant_id)`,
 	}
 
 	for _, q := range queries {

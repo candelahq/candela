@@ -736,12 +736,22 @@ func (s *Store) GetTenantLeaderboard(ctx context.Context, uq storage.UsageQuery,
 			COUNT(*) AS call_count,
 			COALESCE(SUM(gen_ai_total_tokens), 0) AS total_tokens,
 			COALESCE(SUM(gen_ai_cost_usd), 0) AS total_cost_usd,
-			COALESCE(AVG(duration_ns), 0) AS avg_duration_ns
-		FROM %s
-		WHERE project_id = @projectID
-		  AND start_time >= @startTime
-		  AND start_time <= @endTime
-		  AND tenant_id != ''
+			COALESCE(AVG(duration_ns), 0) AS avg_duration_ns,
+			COALESCE(
+				(SELECT m FROM UNNEST(ARRAY_AGG(gen_ai_model ORDER BY cnt DESC LIMIT 1)) AS m),
+				''
+			) AS top_model
+		FROM (
+			SELECT
+				tenant_id, gen_ai_model, gen_ai_total_tokens, gen_ai_cost_usd,
+				duration_ns,
+				COUNT(*) OVER (PARTITION BY tenant_id, gen_ai_model) AS cnt
+			FROM %s
+			WHERE project_id = @projectID
+			  AND start_time >= @startTime
+			  AND start_time <= @endTime
+			  AND tenant_id IS NOT NULL AND tenant_id != ''
+		)
 		GROUP BY tenant_id
 		ORDER BY total_cost_usd DESC
 		LIMIT @limit
@@ -768,6 +778,7 @@ func (s *Store) GetTenantLeaderboard(ctx context.Context, uq storage.UsageQuery,
 			TotalTokens   int64   `bigquery:"total_tokens"`
 			TotalCostUSD  float64 `bigquery:"total_cost_usd"`
 			AvgDurationNs float64 `bigquery:"avg_duration_ns"`
+			TopModel      string  `bigquery:"top_model"`
 		}
 		err := it.Next(&row)
 		if err == iterator.Done {
@@ -782,6 +793,7 @@ func (s *Store) GetTenantLeaderboard(ctx context.Context, uq storage.UsageQuery,
 			TotalTokens:  row.TotalTokens,
 			CostUSD:      row.TotalCostUSD,
 			AvgLatencyMs: float64(row.AvgDurationNs) / 1e6,
+			TopModel:     row.TopModel,
 		})
 	}
 

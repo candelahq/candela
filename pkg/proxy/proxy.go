@@ -362,8 +362,10 @@ var requestIDPattern = regexp.MustCompile(`^[a-zA-Z0-9\-]{1,128}$`)
 // underscores for domain-style tenant IDs (e.g. "acme.corp", "tenant_42").
 var tenantIDPattern = regexp.MustCompile(`^[a-zA-Z0-9\-._]{1,128}$`)
 
-// parseBaggage extracts candela.tenant_id from a W3C Baggage header value.
+// parseBaggage extracts candela.tenant_id from W3C Baggage header value(s).
 // W3C Baggage format: "key1=val1;prop, key2=val2" (RFC 8941 list).
+// A single request may carry multiple Baggage headers; we join them all.
+// Baggage keys are case-insensitive per RFC 8941 — EqualFold is used.
 // ADK's OTel propagator injects Baggage automatically when context has baggage
 // set, making this the preferred propagation path for multitenant applications.
 //
@@ -377,7 +379,8 @@ func parseBaggage(header string) string {
 		// Each member may have properties after a semicolon: "key=value;prop".
 		kv := strings.SplitN(strings.TrimSpace(member), ";", 2)[0]
 		parts := strings.SplitN(kv, "=", 2)
-		if len(parts) == 2 && strings.TrimSpace(parts[0]) == "candela.tenant_id" {
+		// RFC 8941: Baggage keys are case-insensitive.
+		if len(parts) == 2 && strings.EqualFold(strings.TrimSpace(parts[0]), "candela.tenant_id") {
 			val := strings.TrimSpace(parts[1])
 			if tenantIDPattern.MatchString(val) {
 				return val
@@ -388,6 +391,12 @@ func parseBaggage(header string) string {
 		}
 	}
 	return ""
+}
+
+// parseBaggageHeaders joins multiple Baggage header values (W3C allows multiple
+// header instances) and delegates to parseBaggage for extraction.
+func parseBaggageHeaders(values []string) string {
+	return parseBaggage(strings.Join(values, ","))
 }
 
 func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
@@ -410,12 +419,9 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 	// ── Tenant ID extraction (for multitenant cost attribution) ──
 	// Precedence: W3C Baggage (candela.tenant_id) wins over X-Candela-Tenant-Id header.
 	//
-	// Baggage wins because it is set at the application boundary and propagated
-	// automatically by ADK/OTel through every LLM call in the agent trace tree,
-	// correctly representing the tenant for the ENTIRE trace — not just one hop.
-	//
-	// The header is the fallback for non-OTel callers (scripts, direct API use).
-	tenantID := parseBaggage(r.Header.Get("Baggage"))
+	// Use r.Header.Values (not .Get) to handle multiple Baggage header instances —
+	// W3C spec and some HTTP/1.1 proxies send separate Baggage lines per entry.
+	tenantID := parseBaggageHeaders(r.Header.Values("Baggage"))
 	if tenantID == "" {
 		// Fallback: explicit header (non-OTel callers, tests, simple scripts).
 		hdr := r.Header.Get("X-Candela-Tenant-Id")

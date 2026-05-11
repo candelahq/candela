@@ -118,6 +118,11 @@ pub struct Span {
     pub user_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub session_id: Option<String>,
+    /// Downstream customer/tenant on whose behalf this LLM call was made.
+    /// Populated from W3C Baggage (`candela.tenant_id`) or the
+    /// `X-Candela-Tenant-Id` header. Used for per-tenant cost attribution.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tenant_id: Option<String>,
 }
 
 // ── SpanWriter Trait ──
@@ -211,6 +216,7 @@ mod tests {
             service_name: None,
             user_id: None,
             session_id: None,
+            tenant_id: None,
         };
 
         let json = serde_json::to_string(&span).expect("serialize");
@@ -254,6 +260,7 @@ mod tests {
             service_name: Some("svc".into()),
             user_id: Some("u1".into()),
             session_id: Some("sess1".into()),
+            tenant_id: Some("acme-corp".into()),
         };
         let json = serde_json::to_string(&span).unwrap();
         let restored: Span = serde_json::from_str(&json).unwrap();
@@ -262,6 +269,7 @@ mod tests {
         assert_eq!(restored.status_message, Some("timeout".into()));
         assert_eq!(restored.attributes.get("key").unwrap(), "val");
         assert_eq!(restored.user_id, Some("u1".into()));
+        assert_eq!(restored.tenant_id, Some("acme-corp".into()));
     }
 
     #[test]

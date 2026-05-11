@@ -355,8 +355,49 @@ func rewriteModelField(body []byte, newModel string) []byte {
 // requestIDPattern validates that a request ID contains only safe characters
 // (alphanumeric, hyphens) and is between 1-128 chars.
 // This prevents log injection and trace poisoning via crafted X-Request-ID headers.
-// Also used to validate X-Session-Id.
+// Also used to validate X-Session-Id and X-Candela-Tenant-Id.
 var requestIDPattern = regexp.MustCompile(`^[a-zA-Z0-9\-]{1,128}$`)
+
+// tenantIDPattern is slightly looser than requestIDPattern — allows dots and
+// underscores for domain-style tenant IDs (e.g. "acme.corp", "tenant_42").
+var tenantIDPattern = regexp.MustCompile(`^[a-zA-Z0-9\-._]{1,128}$`)
+
+// parseBaggage extracts candela.tenant_id from W3C Baggage header value(s).
+// W3C Baggage format: "key1=val1;prop, key2=val2" (RFC 8941 list).
+// A single request may carry multiple Baggage headers; we join them all.
+// Baggage keys are case-insensitive per RFC 8941 — EqualFold is used.
+// ADK's OTel propagator injects Baggage automatically when context has baggage
+// set, making this the preferred propagation path for multitenant applications.
+//
+// If multiple candela.tenant_id entries are present (RFC 8941 allows duplicates),
+// the first valid one wins. Invalid values are warned and skipped.
+func parseBaggage(header string) string {
+	if header == "" {
+		return ""
+	}
+	for _, member := range strings.Split(header, ",") {
+		// Each member may have properties after a semicolon: "key=value;prop".
+		kv := strings.SplitN(strings.TrimSpace(member), ";", 2)[0]
+		parts := strings.SplitN(kv, "=", 2)
+		// RFC 8941: Baggage keys are case-insensitive.
+		if len(parts) == 2 && strings.EqualFold(strings.TrimSpace(parts[0]), "candela.tenant_id") {
+			val := strings.TrimSpace(parts[1])
+			if tenantIDPattern.MatchString(val) {
+				return val
+			}
+			slog.Warn("skipping invalid candela.tenant_id in Baggage header",
+				"value", val)
+			// Continue scanning — there may be a valid duplicate entry later.
+		}
+	}
+	return ""
+}
+
+// parseBaggageHeaders joins multiple Baggage header values (W3C allows multiple
+// header instances) and delegates to parseBaggage for extraction.
+func parseBaggageHeaders(values []string) string {
+	return parseBaggage(strings.Join(values, ","))
+}
 
 func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 	startTime := time.Now()
@@ -373,6 +414,22 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 	sessionID := r.Header.Get("X-Session-Id")
 	if sessionID != "" && !requestIDPattern.MatchString(sessionID) {
 		sessionID = "" // invalid → discard
+	}
+
+	// ── Tenant ID extraction (for multitenant cost attribution) ──
+	// Precedence: W3C Baggage (candela.tenant_id) wins over X-Candela-Tenant-Id header.
+	//
+	// Use r.Header.Values (not .Get) to handle multiple Baggage header instances —
+	// W3C spec and some HTTP/1.1 proxies send separate Baggage lines per entry.
+	tenantID := parseBaggageHeaders(r.Header.Values("Baggage"))
+	if tenantID == "" {
+		// Fallback: explicit header (non-OTel callers, tests, simple scripts).
+		hdr := r.Header.Get("X-Candela-Tenant-Id")
+		if tenantIDPattern.MatchString(hdr) {
+			tenantID = hdr
+		} else if hdr != "" {
+			slog.Warn("discarding invalid X-Candela-Tenant-Id header", "value", hdr)
+		}
 	}
 
 	// Extract W3C Trace Context for trace correlation with OTel-instrumented
@@ -592,9 +649,9 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 	cbAllow := p.breakers[providerName].AllowRequest()
 
 	if isStreaming && resp.StatusCode == http.StatusOK {
-		p.handleStreamingResponse(w, r, resp, provider, reqBody, startTime, ttfb, requestID, sessionID, effectiveUserID, cbAllow, traceCtx, proxySpanID)
+		p.handleStreamingResponse(w, r, resp, provider, reqBody, startTime, ttfb, requestID, sessionID, effectiveUserID, tenantID, cbAllow, traceCtx, proxySpanID)
 	} else {
-		p.handleStandardResponse(w, r, resp, provider, reqBody, startTime, ttfb, requestID, sessionID, effectiveUserID, cbAllow, traceCtx, proxySpanID)
+		p.handleStandardResponse(w, r, resp, provider, reqBody, startTime, ttfb, requestID, sessionID, effectiveUserID, tenantID, cbAllow, traceCtx, proxySpanID)
 	}
 }
 
@@ -624,6 +681,7 @@ func (p *Proxy) handleStandardResponse(
 	requestID string,
 	sessionID string,
 	effectiveUserID string,
+	tenantID string,
 	cbAllow bool,
 	traceCtx *traceContext,
 	proxySpanID string,
@@ -679,7 +737,7 @@ func (p *Proxy) handleStandardResponse(
 		spanCtx, spanCancel := context.WithTimeout(context.WithoutCancel(r.Context()), 30*time.Second)
 		go func() {
 			defer spanCancel()
-			p.createSpan(spanCtx, provider, reqBody, respBody, startTime, endTime, resp.StatusCode, ttfb, requestID, sessionID, effectiveUserID, traceCtx, proxySpanID)
+			p.createSpan(spanCtx, provider, reqBody, respBody, startTime, endTime, resp.StatusCode, ttfb, requestID, sessionID, effectiveUserID, tenantID, traceCtx, proxySpanID)
 		}()
 	} else {
 		slog.Debug("skipping span creation (circuit open)", "provider", provider.Name, "request_id", requestID)
@@ -694,6 +752,7 @@ func (p *Proxy) handleStreamingResponse(
 	requestID string,
 	sessionID string,
 	effectiveUserID string,
+	tenantID string,
 	cbAllow bool,
 	traceCtx *traceContext,
 	proxySpanID string,
@@ -825,7 +884,7 @@ func (p *Proxy) handleStreamingResponse(
 		spanCtx, spanCancel := context.WithTimeout(context.WithoutCancel(r.Context()), 30*time.Second)
 		go func() {
 			defer spanCancel()
-			p.createStreamingSpan(spanCtx, provider, reqBody, parseData, startTime, endTime, ttfb, ttft, requestID, sessionID, effectiveUserID, streamStatus, traceCtx, proxySpanID)
+			p.createStreamingSpan(spanCtx, provider, reqBody, parseData, startTime, endTime, ttfb, ttft, requestID, sessionID, effectiveUserID, tenantID, streamStatus, traceCtx, proxySpanID)
 		}()
 	} else {
 		slog.Debug("skipping streaming span (circuit open)", "provider", provider.Name, "request_id", requestID)
@@ -840,6 +899,7 @@ type spanParams struct {
 	model           string
 	sessionID       string
 	effectiveUserID string // resolved end-user identity (auth email > auth UID)
+	tenantID        string // downstream customer/tenant (from Baggage or header)
 	inputContent    string
 	outputContent   string
 	inputTokens     int64
@@ -907,6 +967,9 @@ func (p *Proxy) buildSpan(ctx context.Context, params spanParams) {
 
 	// Set session ID for conversation grouping.
 	span.SessionID = params.sessionID
+
+	// Set tenant ID for multitenant cost attribution.
+	span.TenantID = params.tenantID
 
 	if p.submitter != nil {
 		p.submitter.SubmitBatch([]storage.Span{span})
@@ -999,6 +1062,7 @@ func (p *Proxy) createSpan(
 	requestID string,
 	sessionID string,
 	effectiveUserID string,
+	tenantID string,
 	traceCtx *traceContext,
 	proxySpanID string,
 ) {
@@ -1014,6 +1078,7 @@ func (p *Proxy) createSpan(
 		provider:        provider,
 		model:           model,
 		effectiveUserID: effectiveUserID,
+		tenantID:        tenantID,
 		inputContent:    inputContent,
 		outputContent:   outputContent,
 		inputTokens:     inputTokens,
@@ -1042,6 +1107,7 @@ func (p *Proxy) createStreamingSpan(
 	requestID string,
 	sessionID string,
 	effectiveUserID string,
+	tenantID string,
 	streamStatus storage.SpanStatus,
 	traceCtx *traceContext,
 	proxySpanID string,
@@ -1053,6 +1119,7 @@ func (p *Proxy) createStreamingSpan(
 		provider:        provider,
 		model:           model,
 		effectiveUserID: effectiveUserID,
+		tenantID:        tenantID,
 		inputContent:    inputContent,
 		outputContent:   outputContent,
 		inputTokens:     inputTokens,

@@ -1,0 +1,96 @@
+# yaml-language-server: $schema=https://goreleaser.com/static/schema.json
+version: 2
+
+project_name: candela-local
+
+before:
+  hooks:
+    # Generate proto stubs needed by the build.
+    - buf generate
+
+builds:
+  - id: candela-local
+    main: ./cmd/candela-local
+    binary: candela-local
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - darwin
+      - linux
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+      - -X main.version={{.Version}}
+      - -X main.commit={{.Commit}}
+      - -X main.date={{.Date}}
+
+# Create macOS universal binaries (fat binaries: arm64 + amd64).
+universal_binaries:
+  - id: candela-local-universal
+    ids:
+      - candela-local
+    replace: true
+    name_template: candela-local
+
+archives:
+  - id: default
+    format: tar.gz
+    name_template: >-
+      {{ .ProjectName }}_
+      {{- .Version }}_
+      {{- title .Os }}_
+      {{- if eq .Arch "all" }}universal
+      {{- else }}{{ .Arch }}{{ end }}
+    format_overrides:
+      - goos: windows
+        format: zip
+
+checksum:
+  name_template: checksums.txt
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
+      - "^ci:"
+      - "^style:"
+
+brews:
+  - repository:
+      owner: candelahq
+      name: homebrew-tap
+      # Fine-grained PAT with contents:write on candelahq/homebrew-tap.
+      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+    folder: Formula
+    homepage: "https://github.com/candelahq/candela"
+    description: "Local LLM observability proxy — traces, costs, and budgets for AI-powered dev tools"
+    license: "Apache-2.0"
+    skip_upload: auto   # Skip on pre-releases
+    install: |
+      bin.install "candela-local"
+    test: |
+      system "#{bin}/candela-local", "--help"
+    # Post-install caveats shown to the user.
+    caveats: |
+      To get started, create a config file:
+
+        mkdir -p ~/.candela
+        cat > ~/.candela.yaml <<EOF
+        port: 8181
+        providers:
+          - name: google
+            models: ["gemini-2.5-pro", "gemini-2.5-flash"]
+        vertex_ai:
+          project: YOUR_GCP_PROJECT
+          region: us-central1
+        EOF
+
+      Then run:
+        candela-local
+
+      Management UI: http://127.0.0.1:8181/_local/

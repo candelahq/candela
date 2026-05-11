@@ -302,3 +302,52 @@ func TestProxy_TenantID_InvalidHeaderRejected(t *testing.T) {
 		t.Errorf("TenantID = %q, want empty (injection attempt must be rejected)", got)
 	}
 }
+
+// INTEG-5: Multiple Baggage header lines are joined and correctly parsed (W3C spec compliance).
+func TestProxy_TenantID_MultiBaggageHeaders(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"id":"chatcmpl-m","object":"chat.completion","model":"gpt-4o",
+			"choices":[{"message":{"role":"assistant","content":"multi"},"finish_reason":"stop","index":0}],
+			"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}
+		}`))
+	}))
+	defer upstream.Close()
+
+	sub := &mockSubmitter{}
+	p := New(Config{
+		Providers: []Provider{{Name: "openai", UpstreamURL: upstream.URL}},
+		ProjectID: "proj-test",
+	}, sub, costcalc.New())
+
+	mux := http.NewServeMux()
+	p.RegisterRoutes(mux)
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	body := `{"model":"gpt-4o","messages":[{"role":"user","content":"hi"}]}`
+	req, _ := http.NewRequest(http.MethodPost, srv.URL+"/proxy/openai/v1/chat/completions", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer sk-test")
+
+	// Add multiple Baggage headers.
+	req.Header.Add("Baggage", "svc.name=my-service,svc.version=1.2.3")
+	req.Header.Add("Baggage", "candela.tenant_id=multi-header-tenant")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("request: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+
+	if !waitForSpan(sub) {
+		t.Fatal("no spans submitted within timeout")
+	}
+	if got := sub.getSpans()[0].TenantID; got != "multi-header-tenant" {
+		t.Errorf("TenantID = %q, want multi-header-tenant", got)
+	}
+}

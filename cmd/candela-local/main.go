@@ -327,6 +327,7 @@ func main() {
 
 	// Register traces API endpoint (solo mode observability).
 	mux.Handle("/_local/api/traces", newTracesHandler(traceReader))
+	mux.Handle("/_local/api/leaderboard", newLeaderboardHandler(traceReader))
 
 	// Everything else → remote Candela server (if configured).
 	if remoteProxy != nil {

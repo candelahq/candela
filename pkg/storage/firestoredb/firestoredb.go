@@ -483,7 +483,16 @@ func (s *Store) DeleteUser(ctx context.Context, id string) error {
 
 	// Discover and delete all subcollections (Firestore doesn't cascade).
 	// Use a single BulkWriter across all subcollections for efficiency.
+	// CRIT-7: collect individual write result futures so errors are not
+	// silently swallowed when bw.End() flushes the queue.
 	bw := s.client.BulkWriter(ctx)
+	type deleteJob struct {
+		collID string
+		docID  string
+		job    *firestore.BulkWriterJob
+	}
+	var jobs []deleteJob
+
 	collIter := userRef.Collections(ctx)
 	for {
 		collRef, err := collIter.Next()
@@ -506,13 +515,33 @@ func (s *Store) DeleteUser(ctx context.Context, id string) error {
 				bw.End()
 				return fmt.Errorf("firestoredb: iterating subcollection %s: %w", collRef.ID, err)
 			}
-			if _, err := bw.Delete(docRef); err != nil {
+			job, err := bw.Delete(docRef)
+			if err != nil {
+				// Enqueue error (pre-flight validation) — doc ref is invalid.
 				slog.WarnContext(ctx, "bulk delete enqueue failed",
 					"collection", collRef.ID, "doc", docRef.ID, "error", err)
+				continue
 			}
+			jobs = append(jobs, deleteJob{collID: collRef.ID, docID: docRef.ID, job: job})
 		}
 	}
+	// Flush all enqueued deletes and wait for results.
 	bw.End()
+
+	// Check each write result for errors — previously these were silently ignored.
+	var errs []error
+	for _, j := range jobs {
+		if _, err := j.job.Results(); err != nil {
+			slog.ErrorContext(ctx, "bulk delete write failed",
+				"collection", j.collID, "doc", j.docID, "error", err)
+			errs = append(errs, fmt.Errorf("%s/%s: %w", j.collID, j.docID, err))
+		}
+	}
+	if len(errs) > 0 {
+		// Return first error — caller can retry DeleteUser; orphaned docs are
+		// preferable to silently succeeding with partial deletion.
+		return fmt.Errorf("firestoredb: %d subcollection doc(s) failed to delete: %w", len(errs), errs[0])
+	}
 
 	// Delete the user document.
 	if _, err := userRef.Delete(ctx); err != nil {
@@ -785,7 +814,11 @@ func (s *Store) DeductSpend(ctx context.Context, userID string, costUSD float64,
 	// CRIT-5: capture time.Now() once before the transaction so retries see
 	// a consistent timestamp (avoids crossing a minute boundary on retry).
 	now := time.Now().UTC()
-	return s.client.RunTransaction(ctx, func(ctx context.Context, tx *firestore.Transaction) error {
+	// CRIT-6: bound the transaction with a timeout so a slow or contended
+	// Firestore call can't block the proxy goroutine indefinitely.
+	txCtx, txCancel := context.WithTimeout(ctx, 10*time.Second)
+	defer txCancel()
+	return s.client.RunTransaction(txCtx, func(ctx context.Context, tx *firestore.Transaction) error {
 		// ── ALL READS FIRST (Firestore requirement) ──
 
 		// Sanitize into a local so we don't mutate the outer parameter.
@@ -992,12 +1025,21 @@ func (s *Store) CheckRateLimit(ctx context.Context, userID string) (bool, int, i
 	}
 
 	// Window key: minute-level granularity.
-	userID = sanitizeID(userID)
-	windowKey := fmt.Sprintf("%s:%s", userID, time.Now().UTC().Format("2006-01-02T15:04"))
+	// CRIT-4: use `sanitized` consistently — `userID` was already sanitized
+	// above. The previous re-sanitization on the outer param was redundant
+	// dead code (sanitizeID is idempotent but misleading to re-call).
+	// CRIT-5 (rate limit): capture now and windowKey before the transaction so
+	// retries see the same minute bucket even if a retry crosses a minute boundary.
+	now := time.Now().UTC()
+	windowKey := fmt.Sprintf("%s:%s", sanitized, now.Format("2006-01-02T15:04"))
 	ref := s.client.Collection(rateLimitCol).Doc(windowKey)
 
 	var count int
-	err := s.client.RunTransaction(ctx, func(ctx context.Context, tx *firestore.Transaction) error {
+	// CRIT-6: bound the rate-limit transaction with a timeout — this runs on
+	// the hot proxy path; a stuck Firestore call would block every request.
+	rlCtx, rlCancel := context.WithTimeout(ctx, 5*time.Second)
+	defer rlCancel()
+	err := s.client.RunTransaction(rlCtx, func(ctx context.Context, tx *firestore.Transaction) error {
 		snap, err := tx.Get(ref)
 		if err != nil && status.Code(err) != codes.NotFound {
 			return err
@@ -1012,11 +1054,11 @@ func (s *Store) CheckRateLimit(ctx context.Context, userID string) (bool, int, i
 
 		count++
 		return tx.Set(ref, map[string]any{
-			"user_id":       userID,
+			"user_id":       sanitized,
 			"request_count": count,
 			"limit":         limit,
 			"window_key":    windowKey,
-			"expire_at":     time.Now().UTC().Add(2 * time.Minute),
+			"expire_at":     now.Add(2 * time.Minute),
 		})
 	})
 	if err != nil {

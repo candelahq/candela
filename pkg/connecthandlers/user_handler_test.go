@@ -878,8 +878,8 @@ func TestPeriodConversion(t *testing.T) {
 	if got := stringToPeriod("daily"); got != typespb.BudgetPeriod_BUDGET_PERIOD_DAILY {
 		t.Errorf("stringToPeriod(daily) = %v, want DAILY", got)
 	}
-	if got := stringToPeriod("anything"); got != typespb.BudgetPeriod_BUDGET_PERIOD_DAILY {
-		t.Errorf("stringToPeriod(anything) = %v, want DAILY", got)
+	if got := stringToPeriod("anything"); got != typespb.BudgetPeriod_BUDGET_PERIOD_UNSPECIFIED {
+		t.Errorf("stringToPeriod(anything) = %v, want UNSPECIFIED", got)
 	}
 }
 

@@ -114,7 +114,15 @@ func (h *UserHandler) ListUsers(
 		}
 		if req.Msg.Pagination.PageToken != "" {
 			// Page token encodes the offset as a decimal string.
+			// CRIT-19: cap offset to prevent full-scan DoS via crafted page tokens.
+			// A caller sending page_token="999999999" would trigger a Firestore read
+			// with OFFSET 999999999, consuming read quota with no useful results.
+			const maxOffset = 100_000
 			if parsed, err := strconv.Atoi(req.Msg.Pagination.PageToken); err == nil && parsed > 0 {
+				if parsed > maxOffset {
+					return nil, connect.NewError(connect.CodeInvalidArgument,
+						fmt.Errorf("page_token exceeds maximum offset (%d)", maxOffset))
+				}
 				offset = parsed
 			}
 		}
@@ -156,7 +164,13 @@ func (h *UserHandler) GetUser(
 ) (*connect.Response[v1.GetUserResponse], error) {
 	user, err := h.store.GetUser(ctx, req.Msg.Id)
 	if err != nil {
-		return nil, connect.NewError(connect.CodeNotFound, fmt.Errorf("user not found"))
+		// CRIT-18: only map ErrNotFound to CodeNotFound. Firestore connection
+		// errors, permission errors, and timeouts previously all became 404,
+		// causing clients to treat transient failures as "user doesn't exist".
+		if errors.Is(err, storage.ErrNotFound) {
+			return nil, connect.NewError(connect.CodeNotFound, fmt.Errorf("user not found"))
+		}
+		return nil, internalError("failed to get user", err)
 	}
 
 	budget, err := h.store.GetBudget(ctx, user.ID)
@@ -186,7 +200,11 @@ func (h *UserHandler) UpdateUser(
 ) (*connect.Response[v1.UpdateUserResponse], error) {
 	user, err := h.store.GetUser(ctx, req.Msg.Id)
 	if err != nil {
-		return nil, connect.NewError(connect.CodeNotFound, fmt.Errorf("user not found"))
+		// CRIT-18: distinguish not-found from storage errors.
+		if errors.Is(err, storage.ErrNotFound) {
+			return nil, connect.NewError(connect.CodeNotFound, fmt.Errorf("user not found"))
+		}
+		return nil, internalError("failed to get user", err)
 	}
 
 	// Apply updates based on field mask (or all fields if no mask).
@@ -281,7 +299,11 @@ func (h *UserHandler) DeleteUser(
 ) (*connect.Response[v1.DeleteUserResponse], error) {
 	user, err := h.store.GetUser(ctx, req.Msg.Id)
 	if err != nil {
-		return nil, connect.NewError(connect.CodeNotFound, fmt.Errorf("user not found"))
+		// CRIT-18: distinguish not-found from storage errors.
+		if errors.Is(err, storage.ErrNotFound) {
+			return nil, connect.NewError(connect.CodeNotFound, fmt.Errorf("user not found"))
+		}
+		return nil, internalError("failed to get user", err)
 	}
 
 	// Gate: only inactive users can be deleted.
@@ -332,10 +354,14 @@ func (h *UserHandler) SetBudget(
 	if req.Msg.LimitUsd <= 0 {
 		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("budget limit must be positive"))
 	}
+	// CRIT-16: derive period type from the proto enum rather than a magic string.
+	// periodToString maps BUDGET_PERIOD_UNSPECIFIED → "daily" as the safe default,
+	// so existing callers that omit period_type continue to get daily budgets.
+	periodType := periodToString(req.Msg.PeriodType)
 	budget := &storage.BudgetRecord{
 		UserID:     req.Msg.UserId,
 		LimitUSD:   req.Msg.LimitUsd,
-		PeriodType: "daily", // All budgets are daily.
+		PeriodType: periodType,
 	}
 	if err := h.store.SetBudget(ctx, budget); err != nil {
 		return nil, internalError("failed to set budget", err)
@@ -780,12 +806,27 @@ func stringToStatus(s string) typespb.UserStatus {
 	}
 }
 
-func periodToString(_ typespb.BudgetPeriod) string {
-	return "daily" // All budgets are daily.
+// periodToString maps a proto BudgetPeriod enum to the storage string used in
+// Firestore period-spend doc keys. UNSPECIFIED defaults to "daily" so callers
+// that omit the field get the safe historical behaviour.
+// When new period types are added to the proto enum, add them here.
+func periodToString(p typespb.BudgetPeriod) string {
+	switch p {
+	case typespb.BudgetPeriod_BUDGET_PERIOD_DAILY:
+		return "daily"
+	default:
+		// BUDGET_PERIOD_UNSPECIFIED and any future unrecognised values → daily.
+		return "daily"
+	}
 }
 
-func stringToPeriod(_ string) typespb.BudgetPeriod {
-	return typespb.BudgetPeriod_BUDGET_PERIOD_DAILY
+func stringToPeriod(s string) typespb.BudgetPeriod {
+	switch s {
+	case "daily":
+		return typespb.BudgetPeriod_BUDGET_PERIOD_DAILY
+	default:
+		return typespb.BudgetPeriod_BUDGET_PERIOD_UNSPECIFIED
+	}
 }
 
 // mustJSON marshals v to a JSON string, falling back to a structured

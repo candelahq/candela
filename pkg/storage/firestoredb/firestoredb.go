@@ -58,6 +58,15 @@ var rateLimitValueCache struct {
 
 func init() {
 	rateLimitValueCache.entries = make(map[string]rlCacheEntry)
+	// CRIT-10: sweep expired entries on a background goroutine to prevent
+	// unbounded map growth in environments with high user-ID churn.
+	go func() {
+		ticker := time.NewTicker(rateLimitCacheTTL)
+		defer ticker.Stop()
+		for range ticker.C {
+			sweepRateLimitCache()
+		}
+	}()
 }
 
 type rlCacheEntry struct {
@@ -86,6 +95,17 @@ func setCachedRateLimit(userID string, limit int) {
 func evictRateLimitCache(userID string) {
 	rateLimitValueCache.mu.Lock()
 	delete(rateLimitValueCache.entries, userID)
+	rateLimitValueCache.mu.Unlock()
+}
+
+func sweepRateLimitCache() {
+	now := time.Now().UTC()
+	rateLimitValueCache.mu.Lock()
+	for k, e := range rateLimitValueCache.entries {
+		if now.After(e.expiresAt) {
+			delete(rateLimitValueCache.entries, k)
+		}
+	}
 	rateLimitValueCache.mu.Unlock()
 }
 
@@ -161,6 +181,122 @@ func firestoreToUser(fu *firestoreUser) *storage.UserRecord {
 		u.RateLimit = &fu.RateLimit
 	}
 	return u
+}
+
+// ── CRIT-1/2: Internal Firestore types for BudgetRecord, GrantRecord, AuditRecord ──
+// These types carry firestore:" tags so the shared storage types remain
+// backend-agnostic. Without these, the Firestore SDK falls back to lowercased
+// Go field names (e.g. "limitusd" instead of "limit_usd"), corrupting reads.
+
+type firestoreBudget struct {
+	UserID        string    `firestore:"user_id"`
+	LimitUSD      float64   `firestore:"limit_usd"`
+	SpentUSD      float64   `firestore:"spent_usd"`
+	TokensUsed    int64     `firestore:"tokens_used"`
+	AllTokensUsed int64     `firestore:"all_tokens_used"`
+	PeriodType    string    `firestore:"period_type,omitempty"`
+	PeriodKey     string    `firestore:"period_key,omitempty"`
+	PeriodStart   time.Time `firestore:"period_start,omitempty"`
+	PeriodEnd     time.Time `firestore:"period_end,omitempty"`
+}
+
+func budgetToFirestore(b *storage.BudgetRecord) *firestoreBudget {
+	return &firestoreBudget{
+		UserID:        b.UserID,
+		LimitUSD:      b.LimitUSD,
+		SpentUSD:      b.SpentUSD,
+		TokensUsed:    b.TokensUsed,
+		AllTokensUsed: b.AllTokensUsed,
+		PeriodType:    b.PeriodType,
+		PeriodKey:     b.PeriodKey,
+		PeriodStart:   b.PeriodStart,
+		PeriodEnd:     b.PeriodEnd,
+	}
+}
+
+func firestoreToBudget(fb *firestoreBudget) *storage.BudgetRecord {
+	return &storage.BudgetRecord{
+		UserID:        fb.UserID,
+		LimitUSD:      fb.LimitUSD,
+		SpentUSD:      fb.SpentUSD,
+		TokensUsed:    fb.TokensUsed,
+		AllTokensUsed: fb.AllTokensUsed,
+		PeriodType:    fb.PeriodType,
+		PeriodKey:     fb.PeriodKey,
+		PeriodStart:   fb.PeriodStart,
+		PeriodEnd:     fb.PeriodEnd,
+	}
+}
+
+type firestoreGrant struct {
+	ID        string    `firestore:"id"`
+	UserID    string    `firestore:"user_id"`
+	AmountUSD float64   `firestore:"amount_usd"`
+	SpentUSD  float64   `firestore:"spent_usd"`
+	Reason    string    `firestore:"reason,omitempty"`
+	GrantedBy string    `firestore:"granted_by,omitempty"`
+	StartsAt  time.Time `firestore:"starts_at,omitempty"`
+	ExpiresAt time.Time `firestore:"expires_at,omitempty"`
+	CreatedAt time.Time `firestore:"created_at,omitempty"`
+}
+
+func grantToFirestore(g *storage.GrantRecord) *firestoreGrant {
+	return &firestoreGrant{
+		ID:        g.ID,
+		UserID:    g.UserID,
+		AmountUSD: g.AmountUSD,
+		SpentUSD:  g.SpentUSD,
+		Reason:    g.Reason,
+		GrantedBy: g.GrantedBy,
+		StartsAt:  g.StartsAt,
+		ExpiresAt: g.ExpiresAt,
+		CreatedAt: g.CreatedAt,
+	}
+}
+
+func firestoreToGrant(fg *firestoreGrant) *storage.GrantRecord {
+	return &storage.GrantRecord{
+		ID:        fg.ID,
+		UserID:    fg.UserID,
+		AmountUSD: fg.AmountUSD,
+		SpentUSD:  fg.SpentUSD,
+		Reason:    fg.Reason,
+		GrantedBy: fg.GrantedBy,
+		StartsAt:  fg.StartsAt,
+		ExpiresAt: fg.ExpiresAt,
+		CreatedAt: fg.CreatedAt,
+	}
+}
+
+type firestoreAudit struct {
+	ID         string    `firestore:"id"`
+	UserID     string    `firestore:"user_id"`
+	ActorEmail string    `firestore:"actor_email"`
+	Action     string    `firestore:"action"`
+	Details    string    `firestore:"details,omitempty"`
+	Timestamp  time.Time `firestore:"timestamp"`
+}
+
+func auditToFirestore(a *storage.AuditRecord) *firestoreAudit {
+	return &firestoreAudit{
+		ID:         a.ID,
+		UserID:     a.UserID,
+		ActorEmail: a.ActorEmail,
+		Action:     a.Action,
+		Details:    a.Details,
+		Timestamp:  a.Timestamp,
+	}
+}
+
+func firestoreToAudit(fa *firestoreAudit) *storage.AuditRecord {
+	return &storage.AuditRecord{
+		ID:         fa.ID,
+		UserID:     fa.UserID,
+		ActorEmail: fa.ActorEmail,
+		Action:     fa.Action,
+		Details:    fa.Details,
+		Timestamp:  fa.Timestamp,
+	}
 }
 
 // ──────────────────────────────────────────
@@ -414,7 +550,7 @@ func (s *Store) SetBudget(ctx context.Context, budget *storage.BudgetRecord) err
 
 	// Write 2: today's spend doc — config fields only (Merge preserves counters).
 	ref := userRef.Collection(budgetsCol).Doc(budget.PeriodKey)
-	_, err = ref.Set(ctx, budget, firestore.Merge(
+	_, err = ref.Set(ctx, budgetToFirestore(budget), firestore.Merge(
 		firestore.FieldPath{"user_id"},
 		firestore.FieldPath{"limit_usd"},
 		firestore.FieldPath{"period_type"},
@@ -524,7 +660,7 @@ func (s *Store) CreateGrant(ctx context.Context, grant *storage.GrantRecord) err
 	userID := sanitizeID(grant.UserID)
 	ref := s.client.Collection(usersCol).Doc(userID).
 		Collection(grantsCol).Doc(grant.ID)
-	_, err := ref.Create(ctx, grant)
+	_, err := ref.Create(ctx, grantToFirestore(grant))
 	if err != nil {
 		return fmt.Errorf("firestoredb: creating grant: %w", err)
 	}
@@ -594,6 +730,24 @@ func (s *Store) RevokeGrant(ctx context.Context, userID, grantID string) error {
 // single Firestore transaction, but that would require reading grants inside
 // the DeductSpend transaction (significant latency increase on the hot path).
 func (s *Store) CheckBudget(ctx context.Context, userID string, estimatedCostUSD float64) (*storage.BudgetCheckResult, error) {
+	// CRIT-15: block inactive users regardless of grant balance.
+	// An admin who deactivates a user intends to block all LLM access, even if
+	// grants remain. Without this check, a deactivated user with an active grant
+	// would still pass the budget gate and be billed.
+	user, err := s.GetUser(ctx, userID)
+	if err != nil {
+		// Non-fatal: if we can't read user status, let budget/grant checks proceed
+		// rather than blocking all traffic on a transient Firestore read error.
+		slog.Warn("CheckBudget: could not read user status, proceeding",
+			"user_id", userID, "error", err)
+	} else if user != nil && user.Status == storage.StatusInactive {
+		return &storage.BudgetCheckResult{
+			Allowed:       false,
+			RemainingUSD:  0,
+			EstimatedCost: estimatedCostUSD,
+		}, nil
+	}
+
 	// Sum remaining grants.
 	grants, err := s.ListGrants(ctx, userID, true)
 	if err != nil {
@@ -628,6 +782,9 @@ func (s *Store) CheckBudget(ctx context.Context, userID string, estimatedCostUSD
 }
 
 func (s *Store) DeductSpend(ctx context.Context, userID string, costUSD float64, tokens int64) error {
+	// CRIT-5: capture time.Now() once before the transaction so retries see
+	// a consistent timestamp (avoids crossing a minute boundary on retry).
+	now := time.Now().UTC()
 	return s.client.RunTransaction(ctx, func(ctx context.Context, tx *firestore.Transaction) error {
 		// ── ALL READS FIRST (Firestore requirement) ──
 
@@ -635,40 +792,50 @@ func (s *Store) DeductSpend(ctx context.Context, userID string, costUSD float64,
 		// Firestore transactions auto-retry on contention — mutating the outer
 		// userID would cause it to be double-sanitized on each retry.
 		localUserID := sanitizeID(userID)
+		userRef := s.client.Collection(usersCol).Doc(localUserID)
+
 		// Read 1: Load active grants (earliest-expiring first).
-		grantsRef := s.client.Collection(usersCol).Doc(localUserID).
-			Collection(grantsCol)
+		grantsRef := userRef.Collection(grantsCol)
 		grantsSnaps, err := tx.Documents(grantsRef.
-			Where("expires_at", ">", time.Now().UTC()).
+			Where("expires_at", ">", now).
 			OrderBy("expires_at", firestore.Asc)).GetAll()
 		if err != nil {
 			return fmt.Errorf("firestoredb: loading grants in tx: %w", err)
 		}
 
-		// Read 2: Load daily budget (period spend doc).
-		periodKey := currentPeriodKey("daily")
-		userRef := s.client.Collection(usersCol).Doc(localUserID)
-		budgetRef := userRef.Collection(budgetsCol).Doc(periodKey)
-		budgetSnap, err := tx.Get(budgetRef)
-		if err != nil && status.Code(err) != codes.NotFound {
-			return fmt.Errorf("firestoredb: getting budget in tx: %w", err)
-		}
-
-		// Read 3: Config doc for auto-rollover (#9).
-		// When the period doc is NotFound (new day), read the stable config
-		// to get limit_usd and auto-create the spend doc in this transaction.
+		// Read 2 (CRIT-14): Config doc — read BEFORE the period spend doc so we
+		// can use the configured period_type to compute the correct period key.
+		// Previously this was read after the period doc (hardcoded "daily"), which
+		// meant monthly/weekly budgets always resolved to a daily spend doc and
+		// never exhausted across the full period.
 		configRef := userRef.Collection(budgetsCol).Doc(budgetConfigDocID)
 		configSnap, configErr := tx.Get(configRef)
 		if configErr != nil && status.Code(configErr) != codes.NotFound {
 			return fmt.Errorf("firestoredb: getting budget config in tx: %w", configErr)
 		}
 
+		// Derive the period type and key from config (falls back to "daily").
+		periodType := "daily"
+		if configSnap != nil && configSnap.Exists() {
+			if pt, _ := configSnap.Data()["period_type"].(string); pt != "" {
+				periodType = pt
+			}
+		}
+		periodKey := currentPeriodKey(periodType)
+
+		// Read 3: Load budget period spend doc using the correct period key.
+		budgetRef := userRef.Collection(budgetsCol).Doc(periodKey)
+		budgetSnap, err := tx.Get(budgetRef)
+		if err != nil && status.Code(err) != codes.NotFound {
+			return fmt.Errorf("firestoredb: getting budget in tx: %w", err)
+		}
+
 		// ── ALL WRITES AFTER READS ──
 
 		remaining := costUSD
 
-		// Write 1: Deduct from daily budget first.
-		// Budget is the developer's primary daily pool. Grants act as overflow
+		// Write 1: Deduct from budget first.
+		// Budget is the developer's primary pool. Grants act as overflow
 		// when the budget is exhausted (budget-first waterfall).
 		var b *storage.BudgetRecord
 		var isNewPeriod bool
@@ -678,18 +845,14 @@ func (s *Store) DeductSpend(ctx context.Context, userID string, costUSD float64,
 				return err
 			}
 		} else if configSnap != nil && configSnap.Exists() {
-			// #9: Auto-rollover — create today's spend doc from config.
+			// #9: Auto-rollover — create the period spend doc from config.
 			data := configSnap.Data()
 			// #E: firestoreFloat handles int64 (Firestore whole numbers) and float64.
 			limitUSD := firestoreFloat(data["limit_usd"])
-			periodType, _ := data["period_type"].(string)
-			if periodType == "" {
-				periodType = "daily"
-			}
 			b = &storage.BudgetRecord{
 				UserID:     localUserID,
 				LimitUSD:   limitUSD,
-				PeriodType: periodType,
+				PeriodType: periodType, // already derived above from config
 				PeriodKey:  periodKey,
 			}
 			isNewPeriod = true
@@ -738,7 +901,10 @@ func (s *Store) DeductSpend(ctx context.Context, userID string, costUSD float64,
 						TokensUsed:    budgetTokens,
 						AllTokensUsed: tokens,
 					}
-					if err := tx.Set(budgetRef, newDoc); err != nil {
+					// CRIT-11: use budgetToFirestore so the Firestore SDK writes
+					// snake_case field names (limit_usd, spent_usd …), not the
+					// lowercase Go field names (limitusd, spentusd …).
+					if err := tx.Set(budgetRef, budgetToFirestore(newDoc)); err != nil {
 						return fmt.Errorf("firestoredb: creating new period budget: %w", err)
 					}
 				} else {
@@ -781,6 +947,19 @@ func (s *Store) DeductSpend(ctx context.Context, userID string, costUSD float64,
 				return fmt.Errorf("firestoredb: deducting from grant %s: %w", g.ID, err)
 			}
 			remaining -= deduct
+		}
+
+		// CRIT-12: log a structured warning when spend exceeds available balance.
+		// This happens when a concurrent request drained the budget/grants between
+		// CheckBudget passing and this DeductSpend transaction committing (TOCTOU).
+		// We can't roll back the LLM call, but we create an audit trail and
+		// surface the amount that couldn't be absorbed by any pool.
+		if remaining > 0.000001 { // floating-point epsilon for near-zero residuals
+			slog.Warn("deduct_spend: unabsorbed cost — balance was exhausted by concurrent request",
+				"user_id", localUserID,
+				"total_cost_usd", costUSD,
+				"unabsorbed_usd", remaining,
+			)
 		}
 
 		return nil
@@ -861,7 +1040,7 @@ func (s *Store) LogAction(ctx context.Context, entry *storage.AuditRecord) error
 	userID := sanitizeID(entry.UserID)
 	ref := s.client.Collection(usersCol).Doc(userID).
 		Collection(auditCol).Doc(entry.ID)
-	_, err := ref.Create(ctx, entry)
+	_, err := ref.Create(ctx, auditToFirestore(entry))
 	if err != nil {
 		return fmt.Errorf("firestoredb: logging action: %w", err)
 	}
@@ -876,7 +1055,7 @@ func (s *Store) LogGlobalAction(ctx context.Context, entry *storage.AuditRecord)
 		entry.Timestamp = time.Now().UTC()
 	}
 	ref := s.client.Collection(globalAuditCol).Doc(entry.ID)
-	_, err := ref.Set(ctx, entry)
+	_, err := ref.Set(ctx, auditToFirestore(entry))
 	if err != nil {
 		return fmt.Errorf("firestoredb: logging global action: %w", err)
 	}
@@ -925,29 +1104,29 @@ func snapToUser(snap *firestore.DocumentSnapshot) (*storage.UserRecord, error) {
 }
 
 func snapToBudget(snap *firestore.DocumentSnapshot) (*storage.BudgetRecord, error) {
-	var b storage.BudgetRecord
-	if err := snap.DataTo(&b); err != nil {
+	var fb firestoreBudget
+	if err := snap.DataTo(&fb); err != nil {
 		return nil, fmt.Errorf("decoding budget: %w", err)
 	}
-	return &b, nil
+	return firestoreToBudget(&fb), nil
 }
 
 func snapToGrant(snap *firestore.DocumentSnapshot) (*storage.GrantRecord, error) {
-	var g storage.GrantRecord
-	if err := snap.DataTo(&g); err != nil {
+	var fg firestoreGrant
+	if err := snap.DataTo(&fg); err != nil {
 		return nil, fmt.Errorf("decoding grant: %w", err)
 	}
-	g.ID = snap.Ref.ID
-	return &g, nil
+	fg.ID = snap.Ref.ID
+	return firestoreToGrant(&fg), nil
 }
 
 func snapToAudit(snap *firestore.DocumentSnapshot) (*storage.AuditRecord, error) {
-	var a storage.AuditRecord
-	if err := snap.DataTo(&a); err != nil {
+	var fa firestoreAudit
+	if err := snap.DataTo(&fa); err != nil {
 		return nil, fmt.Errorf("decoding audit: %w", err)
 	}
-	a.ID = snap.Ref.ID
-	return &a, nil
+	fa.ID = snap.Ref.ID
+	return firestoreToAudit(&fa), nil
 }
 
 // currentPeriodKey returns the period key for the given period type.

@@ -72,6 +72,7 @@
             jdk21_headless    # Required by the Firestore emulator (Java 8+ JRE)
             jq
             yq-go
+            hurl              # HTTP functional test runner (Go/Rust parity suite)
 
             # Rust
             rustToolchain
@@ -96,6 +97,7 @@
             echo "   Buf:    $(buf --version 2>&1)"
             echo "   Node:   $(node --version)"
             echo "   Python: $(python3 --version | cut -d' ' -f2)"
+            echo "   Hurl:   $(hurl --version | head -1)"
           '';
         };
 

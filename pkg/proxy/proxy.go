@@ -924,11 +924,37 @@ func (p *Proxy) buildSpan(ctx context.Context, params spanParams) {
 	// with costUSD=0 is safe: it only updates token counters, not spent_usd.
 	if p.users != nil && span.UserID != "" && !isSA && span.GenAI != nil &&
 		(span.GenAI.CostUSD > 0 || span.GenAI.TotalTokens > 0) {
-		if err := p.users.DeductSpend(ctx, span.UserID, span.GenAI.CostUSD, span.GenAI.TotalTokens); err != nil {
-			slog.Error("failed to deduct spend",
+		// CRIT-13: retry DeductSpend up to 3 times with exponential backoff.
+		// A single Firestore ABORTED or UNAVAILABLE response (common under
+		// contention) used to silently skip billing — the LLM call was already
+		// made and the response sent, so the user would get a free call.
+		// RunTransaction retries internally for ABORTED, but only up to its
+		// SDK retry limit. This outer loop covers transient UNAVAILABLE errors
+		// and exhausted SDK retries.
+		const maxDeductAttempts = 3
+		var deductErr error
+		for attempt := 0; attempt < maxDeductAttempts; attempt++ {
+			if attempt > 0 {
+				backoff := time.Duration(attempt*attempt) * 200 * time.Millisecond
+				slog.Warn("deduct_spend: retrying after failure",
+					"user_id", span.UserID,
+					"attempt", attempt+1,
+					"backoff_ms", backoff.Milliseconds(),
+					"error", deductErr)
+				time.Sleep(backoff)
+			}
+			deductErr = p.users.DeductSpend(ctx, span.UserID, span.GenAI.CostUSD, span.GenAI.TotalTokens)
+			if deductErr == nil {
+				break
+			}
+		}
+		if deductErr != nil {
+			slog.Error("deduct_spend: all retries exhausted — spend not recorded",
 				"user_id", span.UserID,
 				"cost_usd", span.GenAI.CostUSD,
-				"error", err)
+				"tokens", span.GenAI.TotalTokens,
+				"attempts", maxDeductAttempts,
+				"error", deductErr)
 		} else if p.budgetCk != nil {
 			// Async: threshold notification is best-effort.
 			// Use a bounded context — an unbounded context.Background() leaks

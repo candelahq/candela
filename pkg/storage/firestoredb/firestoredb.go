@@ -99,7 +99,7 @@ func evictRateLimitCache(userID string) {
 }
 
 func sweepRateLimitCache() {
-	now := time.Now()
+	now := time.Now().UTC()
 	rateLimitValueCache.mu.Lock()
 	for k, e := range rateLimitValueCache.entries {
 		if now.After(e.expiresAt) {
@@ -730,6 +730,24 @@ func (s *Store) RevokeGrant(ctx context.Context, userID, grantID string) error {
 // single Firestore transaction, but that would require reading grants inside
 // the DeductSpend transaction (significant latency increase on the hot path).
 func (s *Store) CheckBudget(ctx context.Context, userID string, estimatedCostUSD float64) (*storage.BudgetCheckResult, error) {
+	// CRIT-15: block inactive users regardless of grant balance.
+	// An admin who deactivates a user intends to block all LLM access, even if
+	// grants remain. Without this check, a deactivated user with an active grant
+	// would still pass the budget gate and be billed.
+	user, err := s.GetUser(ctx, userID)
+	if err != nil {
+		// Non-fatal: if we can't read user status, let budget/grant checks proceed
+		// rather than blocking all traffic on a transient Firestore read error.
+		slog.Warn("CheckBudget: could not read user status, proceeding",
+			"user_id", userID, "error", err)
+	} else if user != nil && user.Status == storage.StatusInactive {
+		return &storage.BudgetCheckResult{
+			Allowed:       false,
+			RemainingUSD:  0,
+			EstimatedCost: estimatedCostUSD,
+		}, nil
+	}
+
 	// Sum remaining grants.
 	grants, err := s.ListGrants(ctx, userID, true)
 	if err != nil {
@@ -774,9 +792,10 @@ func (s *Store) DeductSpend(ctx context.Context, userID string, costUSD float64,
 		// Firestore transactions auto-retry on contention — mutating the outer
 		// userID would cause it to be double-sanitized on each retry.
 		localUserID := sanitizeID(userID)
+		userRef := s.client.Collection(usersCol).Doc(localUserID)
+
 		// Read 1: Load active grants (earliest-expiring first).
-		grantsRef := s.client.Collection(usersCol).Doc(localUserID).
-			Collection(grantsCol)
+		grantsRef := userRef.Collection(grantsCol)
 		grantsSnaps, err := tx.Documents(grantsRef.
 			Where("expires_at", ">", now).
 			OrderBy("expires_at", firestore.Asc)).GetAll()
@@ -784,30 +803,39 @@ func (s *Store) DeductSpend(ctx context.Context, userID string, costUSD float64,
 			return fmt.Errorf("firestoredb: loading grants in tx: %w", err)
 		}
 
-		// Read 2: Load daily budget (period spend doc).
-		periodKey := currentPeriodKey("daily")
-		userRef := s.client.Collection(usersCol).Doc(localUserID)
-		budgetRef := userRef.Collection(budgetsCol).Doc(periodKey)
-		budgetSnap, err := tx.Get(budgetRef)
-		if err != nil && status.Code(err) != codes.NotFound {
-			return fmt.Errorf("firestoredb: getting budget in tx: %w", err)
-		}
-
-		// Read 3: Config doc for auto-rollover (#9).
-		// When the period doc is NotFound (new day), read the stable config
-		// to get limit_usd and auto-create the spend doc in this transaction.
+		// Read 2 (CRIT-14): Config doc — read BEFORE the period spend doc so we
+		// can use the configured period_type to compute the correct period key.
+		// Previously this was read after the period doc (hardcoded "daily"), which
+		// meant monthly/weekly budgets always resolved to a daily spend doc and
+		// never exhausted across the full period.
 		configRef := userRef.Collection(budgetsCol).Doc(budgetConfigDocID)
 		configSnap, configErr := tx.Get(configRef)
 		if configErr != nil && status.Code(configErr) != codes.NotFound {
 			return fmt.Errorf("firestoredb: getting budget config in tx: %w", configErr)
 		}
 
+		// Derive the period type and key from config (falls back to "daily").
+		periodType := "daily"
+		if configSnap != nil && configSnap.Exists() {
+			if pt, _ := configSnap.Data()["period_type"].(string); pt != "" {
+				periodType = pt
+			}
+		}
+		periodKey := currentPeriodKey(periodType)
+
+		// Read 3: Load budget period spend doc using the correct period key.
+		budgetRef := userRef.Collection(budgetsCol).Doc(periodKey)
+		budgetSnap, err := tx.Get(budgetRef)
+		if err != nil && status.Code(err) != codes.NotFound {
+			return fmt.Errorf("firestoredb: getting budget in tx: %w", err)
+		}
+
 		// ── ALL WRITES AFTER READS ──
 
 		remaining := costUSD
 
-		// Write 1: Deduct from daily budget first.
-		// Budget is the developer's primary daily pool. Grants act as overflow
+		// Write 1: Deduct from budget first.
+		// Budget is the developer's primary pool. Grants act as overflow
 		// when the budget is exhausted (budget-first waterfall).
 		var b *storage.BudgetRecord
 		var isNewPeriod bool
@@ -817,18 +845,14 @@ func (s *Store) DeductSpend(ctx context.Context, userID string, costUSD float64,
 				return err
 			}
 		} else if configSnap != nil && configSnap.Exists() {
-			// #9: Auto-rollover — create today's spend doc from config.
+			// #9: Auto-rollover — create the period spend doc from config.
 			data := configSnap.Data()
 			// #E: firestoreFloat handles int64 (Firestore whole numbers) and float64.
 			limitUSD := firestoreFloat(data["limit_usd"])
-			periodType, _ := data["period_type"].(string)
-			if periodType == "" {
-				periodType = "daily"
-			}
 			b = &storage.BudgetRecord{
 				UserID:     localUserID,
 				LimitUSD:   limitUSD,
-				PeriodType: periodType,
+				PeriodType: periodType, // already derived above from config
 				PeriodKey:  periodKey,
 			}
 			isNewPeriod = true
@@ -877,7 +901,10 @@ func (s *Store) DeductSpend(ctx context.Context, userID string, costUSD float64,
 						TokensUsed:    budgetTokens,
 						AllTokensUsed: tokens,
 					}
-					if err := tx.Set(budgetRef, newDoc); err != nil {
+					// CRIT-11: use budgetToFirestore so the Firestore SDK writes
+					// snake_case field names (limit_usd, spent_usd …), not the
+					// lowercase Go field names (limitusd, spentusd …).
+					if err := tx.Set(budgetRef, budgetToFirestore(newDoc)); err != nil {
 						return fmt.Errorf("firestoredb: creating new period budget: %w", err)
 					}
 				} else {
@@ -920,6 +947,19 @@ func (s *Store) DeductSpend(ctx context.Context, userID string, costUSD float64,
 				return fmt.Errorf("firestoredb: deducting from grant %s: %w", g.ID, err)
 			}
 			remaining -= deduct
+		}
+
+		// CRIT-12: log a structured warning when spend exceeds available balance.
+		// This happens when a concurrent request drained the budget/grants between
+		// CheckBudget passing and this DeductSpend transaction committing (TOCTOU).
+		// We can't roll back the LLM call, but we create an audit trail and
+		// surface the amount that couldn't be absorbed by any pool.
+		if remaining > 0.000001 { // floating-point epsilon for near-zero residuals
+			slog.Warn("deduct_spend: unabsorbed cost — balance was exhausted by concurrent request",
+				"user_id", localUserID,
+				"total_cost_usd", costUSD,
+				"unabsorbed_usd", remaining,
+			)
 		}
 
 		return nil

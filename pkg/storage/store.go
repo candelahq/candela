@@ -112,6 +112,10 @@ type Span struct {
 	ServiceName   string            `json:"service_name,omitempty"`
 	UserID        string            `json:"user_id,omitempty"`
 	SessionID     string            `json:"session_id,omitempty"`
+	// TenantID identifies the downstream customer/tenant on whose behalf this LLM
+	// call was made. Set via X-Candela-Tenant-Id header or W3C Baggage
+	// (candela.tenant_id) for automatic propagation through ADK/OTel traces.
+	TenantID string `json:"tenant_id,omitempty"`
 }
 
 // TraceSummary is a lightweight summary for list views.
@@ -131,6 +135,7 @@ type TraceSummary struct {
 	PrimaryProvider string        `json:"primary_provider"`
 	UserID          string        `json:"user_id,omitempty"`
 	SessionID       string        `json:"session_id,omitempty"`
+	TenantID        string        `json:"tenant_id,omitempty"`
 }
 
 // Trace is a complete trace with all spans.
@@ -148,6 +153,7 @@ type Trace struct {
 	Spans        []Span        `json:"spans"`
 	UserID       string        `json:"user_id,omitempty"`
 	SessionID    string        `json:"session_id,omitempty"`
+	TenantID     string        `json:"tenant_id,omitempty"`
 }
 
 // TraceQuery defines filters for listing traces.
@@ -166,6 +172,7 @@ type TraceQuery struct {
 	PageToken   string
 	UserID      string // Filter by user (empty = all, for admins)
 	SessionID   string // Filter by session (empty = all)
+	TenantID    string // Filter by tenant (empty = all)
 }
 
 // TraceResult is the paginated result of a trace query.
@@ -186,6 +193,7 @@ type SpanQuery struct {
 	PageSize     int
 	PageToken    string
 	UserID       string // Filter by user (empty = all, for admins)
+	TenantID     string // Filter by tenant (empty = all)
 }
 
 // SpanResult is the paginated result of a span query.
@@ -214,11 +222,24 @@ type UsageQuery struct {
 	StartTime   time.Time
 	EndTime     time.Time
 	UserID      string // Filter by user (empty = all, for admins)
+	TenantID    string // Filter by tenant (empty = all)
 }
 
 // UserUsageSummary is a per-user aggregation for the team leaderboard.
 type UserUsageSummary struct {
 	UserID       string  `json:"user_id"`
+	CallCount    int64   `json:"call_count"`
+	TotalTokens  int64   `json:"total_tokens"`
+	CostUSD      float64 `json:"cost_usd"`
+	AvgLatencyMs float64 `json:"avg_latency_ms"`
+	TopModel     string  `json:"top_model"`
+}
+
+// TenantUsageSummary is a per-tenant aggregation for the tenant cost leaderboard.
+// TenantID values come from X-Candela-Tenant-Id headers or W3C Baggage
+// (candela.tenant_id) set by multitenant applications.
+type TenantUsageSummary struct {
+	TenantID     string  `json:"tenant_id"`
 	CallCount    int64   `json:"call_count"`
 	TotalTokens  int64   `json:"total_tokens"`
 	CostUSD      float64 `json:"cost_usd"`
@@ -268,6 +289,11 @@ type SpanReader interface {
 
 	// GetUserLeaderboard returns per-user usage ranked by cost (admin only).
 	GetUserLeaderboard(ctx context.Context, q UsageQuery, limit int) ([]UserUsageSummary, error)
+
+	// GetTenantLeaderboard returns per-tenant LLM cost aggregations ranked by
+	// cost (admin only). TenantIDs are set by multitenant applications via
+	// X-Candela-Tenant-Id header or W3C Baggage (candela.tenant_id).
+	GetTenantLeaderboard(ctx context.Context, q UsageQuery, limit int) ([]TenantUsageSummary, error)
 
 	// Ping verifies that the storage backend is reachable.
 	Ping(ctx context.Context) error

@@ -151,6 +151,12 @@ func buildAttributes(s storage.Span) []*commonpb.KeyValue {
 		add(stringAttr("enduser.id", s.UserID))
 	}
 
+	// Tenant identity — enables per-customer cost attribution in multitenant apps.
+	// Set via X-Candela-Tenant-Id header or W3C Baggage (candela.tenant_id).
+	if s.TenantID != "" {
+		add(stringAttr("candela.tenant_id", s.TenantID))
+	}
+
 	// Pass-through custom attributes — skip keys already set above to avoid duplicates.
 	for k, v := range s.Attributes {
 		if !setKeys[k] {

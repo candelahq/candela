@@ -526,7 +526,9 @@ func TestSpanCapture_JobID(t *testing.T) {
 	_ = resp.Body.Close()
 
 	found = false
-	for i := 0; i < 50; i++ {
+	// Give the async buildSpan goroutine time to submit.
+	time.Sleep(200 * time.Millisecond)
+	for i := 0; i < 40; i++ {
 		spans, searchErr = store.SearchSpans(context.Background(), storage.SpanQuery{
 			ProjectID: "local",
 			StartTime: time.Now().Add(-1 * time.Hour),

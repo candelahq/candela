@@ -967,7 +967,11 @@ func (p *Proxy) deductBudget(ctx context.Context, provider Provider, model, user
 				"attempt", attempt+1,
 				"backoff_ms", backoff.Milliseconds(),
 				"error", deductErr)
-			time.Sleep(backoff)
+select {
+			case <-ctx.Done():
+				return
+			case <-time.After(backoff):
+			}
 		}
 		deductErr = p.users.DeductSpend(ctx, userID, cost, totalTokens)
 		if deductErr == nil {

@@ -734,7 +734,7 @@ func (p *Proxy) handleStandardResponse(
 	// latency. Previously this ran inside the async span goroutine, causing
 	// CheckBudget to read stale spend data and allowing sequential calls to
 	// overshoot the budget (e.g. $9.45 spent on a $5 limit).
-	if cbAllow {
+if cbAllow && p.users != nil && effectiveUserID != "" {
 		model, _ := extractRequestInfo(provider.Name, reqBody)
 		_, inputTokens, outputTokens := extractResponseInfo(provider.Name, respBody)
 		deductCtx, deductCancel := context.WithTimeout(context.WithoutCancel(r.Context()), 15*time.Second)

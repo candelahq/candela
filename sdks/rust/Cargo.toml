@@ -1,0 +1,12 @@
+[package]
+name = "candela-sdk"
+version = "0.1.0"
+edition = "2021"
+description = "Lightweight enrichment SDK for Candela AI observability"
+license = "Apache-2.0"
+repository = "https://github.com/candelahq/candela"
+
+[dependencies]
+# Zero dependencies — only uses std
+
+[dev-dependencies]

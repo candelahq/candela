@@ -471,18 +471,29 @@ func TestSpanCapture_JobID(t *testing.T) {
 	resp, _ := http.DefaultClient.Do(req)
 	_ = resp.Body.Close()
 
-	// Poll for capture.
+	// Poll for capture. Use a generous timeout and poll for the specific
+	// field values rather than just any span — the async goroutine that
+	// calls buildSpan may not have scheduled yet under CI load.
 	var spans *storage.SpanResult
 	var searchErr error
-	for i := 0; i < 20; i++ {
+	var found bool
+	for i := 0; i < 50; i++ {
 		spans, searchErr = store.SearchSpans(context.Background(), storage.SpanQuery{
 			ProjectID: "local",
 			StartTime: time.Now().Add(-1 * time.Hour),
 			EndTime:   time.Now().Add(1 * time.Hour),
-			PageSize:  1,
+			PageSize:  10,
 		})
-		if searchErr == nil && spans != nil && len(spans.Spans) > 0 {
-			break
+		if searchErr == nil && spans != nil {
+			for _, s := range spans.Spans {
+				if s.TenantID == "t1" && s.JobID == "j1" {
+					found = true
+					break
+				}
+			}
+			if found {
+				break
+			}
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
@@ -490,15 +501,8 @@ func TestSpanCapture_JobID(t *testing.T) {
 	if searchErr != nil {
 		t.Fatalf("SearchSpans failed: %v", searchErr)
 	}
-	if spans == nil || len(spans.Spans) == 0 {
-		t.Fatal("no spans captured")
-	}
-	s := spans.Spans[0]
-	if s.TenantID != "t1" {
-		t.Errorf("got tenant %q, want t1", s.TenantID)
-	}
-	if s.JobID != "j1" {
-		t.Errorf("got job %q, want j1", s.JobID)
+	if !found {
+		t.Fatalf("span with tenant=t1, job=j1 not found within 5s; spans=%+v", spans)
 	}
 
 	// Test extraction from explicit header.
@@ -507,27 +511,28 @@ func TestSpanCapture_JobID(t *testing.T) {
 	resp, _ = http.DefaultClient.Do(req)
 	_ = resp.Body.Close()
 
-	for i := 0; i < 20; i++ {
+	found = false
+	for i := 0; i < 50; i++ {
 		spans, searchErr = store.SearchSpans(context.Background(), storage.SpanQuery{
 			ProjectID: "local",
 			StartTime: time.Now().Add(-1 * time.Hour),
 			EndTime:   time.Now().Add(1 * time.Hour),
 			PageSize:  10,
 		})
-		if searchErr == nil && spans != nil && len(spans.Spans) >= 2 {
-			break
+		if searchErr == nil && spans != nil {
+			for _, s := range spans.Spans {
+				if s.JobID == "j2" {
+					found = true
+					break
+				}
+			}
+			if found {
+				break
+			}
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
-
-	found := false
-	for _, s := range spans.Spans {
-		if s.JobID == "j2" {
-			found = true
-			break
-		}
-	}
 	if !found {
-		t.Error("job_id j2 not found in captured spans")
+		t.Errorf("job_id j2 not found in captured spans within 5s; spans=%+v", spans)
 	}
 }

@@ -491,3 +491,61 @@ func TestForwardHeaders_Anthropic_IncludesBeta(t *testing.T) {
 		t.Errorf("anthropic provider: Anthropic-Beta = %q, want 'messages-2024-12-19'", got)
 	}
 }
+
+// TestAnthropicDirect_CountTokens_NoSpan verifies that count_tokens requests
+// are proxied transparently but do NOT create an observability span (CRIT-17).
+func TestAnthropicDirect_CountTokens_NoSpan(t *testing.T) {
+	upstreamCalled := false
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		upstreamCalled = true
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprint(w, `{"input_tokens":42}`)
+	}))
+	defer upstream.Close()
+
+	submitter := &mockSubmitter{}
+	calc := costcalc.New()
+
+	p := New(Config{
+		Providers: []Provider{{Name: "anthropic-direct", UpstreamURL: upstream.URL}},
+		ProjectID: "test",
+	}, submitter, calc)
+
+	mux := http.NewServeMux()
+	p.RegisterRoutes(mux)
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	req, _ := http.NewRequest("POST",
+		srv.URL+"/proxy/anthropic-direct/v1/messages/count_tokens",
+		strings.NewReader(`{"model":"claude-sonnet-4-20250514","messages":[{"role":"user","content":"hello world"}]}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Api-Key", "sk-ant-test")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if !upstreamCalled {
+		t.Fatal("upstream was not called — proxy should forward count_tokens")
+	}
+	if resp.StatusCode != 200 {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status = %d, body = %s", resp.StatusCode, body)
+	}
+
+	var result map[string]any
+	_ = json.NewDecoder(resp.Body).Decode(&result)
+	if result["input_tokens"] != float64(42) {
+		t.Errorf("input_tokens = %v, want 42", result["input_tokens"])
+	}
+
+	time.Sleep(100 * time.Millisecond)
+
+	spans := submitter.getSpans()
+	if len(spans) > 0 {
+		t.Errorf("expected no span for count_tokens, got %d", len(spans))
+	}
+}

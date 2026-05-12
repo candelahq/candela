@@ -617,6 +617,16 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 	// Check circuit breaker — if open, skip observability but still forward.
 	cbAllow := p.breakers[providerName].AllowRequest()
 
+	// CRIT-17: Skip observability for utility endpoints (e.g. count_tokens,
+	// tokenize) that don't generate tokens. Parsing their response as a chat
+	// completion produces misleading 0-token spans and incorrect billing.
+	// The proxy still forwards transparently — only span/billing is suppressed.
+	if isUtilityEndpoint(upstreamPath) {
+		cbAllow = false
+		slog.Debug("skipping observability for utility endpoint",
+			"provider", providerName, "path", upstreamPath, "request_id", requestID)
+	}
+
 	if isStreaming && resp.StatusCode == http.StatusOK {
 		p.handleStreamingResponse(w, r, resp, provider, reqBody, startTime, ttfb, requestID, sessionID, effectiveUserID, tenantID, jobID, cbAllow, traceCtx, proxySpanID)
 	} else {
@@ -1243,4 +1253,15 @@ func toInt64(v interface{}) int64 {
 		return i
 	}
 	return 0
+}
+
+// isUtilityEndpoint returns true for API paths that are non-generative
+// utility calls (e.g. count_tokens, tokenize). These endpoints don't
+// produce chat completions, so parsing their response as one yields
+// misleading 0-token spans. The proxy still forwards them transparently.
+func isUtilityEndpoint(path string) bool {
+	return strings.HasSuffix(path, "/count_tokens") ||
+		strings.HasSuffix(path, "/tokenize") ||
+		strings.HasSuffix(path, "/models") ||
+		path == "/v1/models"
 }

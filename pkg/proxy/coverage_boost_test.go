@@ -284,3 +284,32 @@ func TestGeminiOAI_UsesOpenAIParser(t *testing.T) {
 		t.Errorf("model = %q", model)
 	}
 }
+
+// ── CRIT-17: isUtilityEndpoint ───────────────────────────────────────────────
+
+func TestIsUtilityEndpoint(t *testing.T) {
+	utility := []string{
+		"/v1/messages/count_tokens",
+		"/v1/count_tokens",
+		"/v1/tokenize",
+		"/v1/models",
+		"/v1/engines/gpt-4o/models",
+	}
+	for _, p := range utility {
+		if !isUtilityEndpoint(p) {
+			t.Errorf("isUtilityEndpoint(%q) = false, want true", p)
+		}
+	}
+
+	generative := []string{
+		"/v1/messages",
+		"/v1/chat/completions",
+		"/v1/completions",
+		"/v1/messages/batches",
+	}
+	for _, p := range generative {
+		if isUtilityEndpoint(p) {
+			t.Errorf("isUtilityEndpoint(%q) = true, want false", p)
+		}
+	}
+}

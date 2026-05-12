@@ -36,7 +36,7 @@ func TestLoadConfig_IndentedYAML(t *testing.T) {
 	dir := t.TempDir()
 	cfgPath := filepath.Join(dir, "candela.yaml")
 	err := os.WriteFile(cfgPath, []byte(`
-    # ~/.candela.yaml
+    # ~/.config/candela/config.yaml
     remote: https://candela-abc.run.app
     audience: 7890.apps.googleusercontent.com
     port: 8181

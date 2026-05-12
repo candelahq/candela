@@ -492,7 +492,28 @@ func (s *Store) GetTenantLeaderboard(ctx context.Context, q storage.UsageQuery, 
 }
 
 func (s *Store) GetJobLeaderboard(ctx context.Context, q storage.UsageQuery, limit int) ([]storage.JobUsageSummary, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT job_id, COUNT(*), COALESCE(SUM(gen_ai_total_tokens),0), COALESCE(SUM(gen_ai_cost_usd),0), COALESCE(AVG(duration_ns),0)/1000000.0, '' AS top_model FROM spans WHERE project_id = ? AND start_time >= ? AND start_time <= ? AND job_id IS NOT NULL AND job_id != '' GROUP BY job_id ORDER BY SUM(gen_ai_cost_usd) DESC LIMIT ?`, q.ProjectID, q.StartTime.Format(time.RFC3339Nano), q.EndTime.Format(time.RFC3339Nano), limit)
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT job_id, COUNT(*),
+			COALESCE(SUM(gen_ai_total_tokens), 0),
+			COALESCE(SUM(gen_ai_cost_usd), 0),
+			COALESCE(AVG(duration_ns), 0) / 1000000.0,
+			COALESCE((
+				SELECT s2.gen_ai_model FROM spans s2
+				WHERE s2.job_id = spans.job_id
+					AND s2.project_id = ? AND s2.start_time >= ? AND s2.start_time <= ?
+					AND s2.gen_ai_model != ''
+				GROUP BY s2.gen_ai_model
+				ORDER BY SUM(s2.gen_ai_cost_usd) DESC
+				LIMIT 1
+			), '') AS top_model
+		FROM spans
+		WHERE project_id = ? AND start_time >= ? AND start_time <= ?
+			AND job_id IS NOT NULL AND job_id != ''
+		GROUP BY job_id
+		ORDER BY SUM(gen_ai_cost_usd) DESC
+		LIMIT ?
+	`, q.ProjectID, q.StartTime.Format(time.RFC3339Nano), q.EndTime.Format(time.RFC3339Nano),
+		q.ProjectID, q.StartTime.Format(time.RFC3339Nano), q.EndTime.Format(time.RFC3339Nano), limit)
 	if err != nil {
 		return nil, fmt.Errorf("querying job leaderboard: %w", err)
 	}

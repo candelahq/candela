@@ -89,7 +89,7 @@ func (t *Transport) RoundTrip(req *http.Request) (*http.Response, error) {
 
 	// Append to existing Baggage header (don't clobber).
 	if len(parts) > 0 {
-		existing := r.Header.Get("Baggage")
+		existing := strings.Join(r.Header.Values("Baggage"), ",")
 		baggage := strings.Join(parts, ",")
 		if existing != "" {
 			baggage = existing + "," + baggage
@@ -128,7 +128,7 @@ func InjectHeaders(req *http.Request, opts ...Option) error {
 	}
 
 	if len(parts) > 0 {
-		existing := req.Header.Get("Baggage")
+		existing := strings.Join(req.Header.Values("Baggage"), ",")
 		baggage := strings.Join(parts, ",")
 		if existing != "" {
 			baggage = existing + "," + baggage

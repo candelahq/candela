@@ -136,8 +136,8 @@ impl CandelaSession {
 
     /// Inject enrichment headers into an `http::HeaderMap`.
     ///
-    /// This works with any `HeaderMap`-like structure that implements
-    /// `insert(key, value)`. For use with reqwest, hyper, etc.
+    /// Uses `append` for the Baggage header to preserve existing entries
+    /// from other instrumentation. For use with reqwest, hyper, etc.
     #[cfg(feature = "http")]
     pub fn inject_headers(&self, headers: &mut http::HeaderMap) {
         for (k, v) in self.headers() {
@@ -145,7 +145,11 @@ impl CandelaSession {
                 http::header::HeaderName::from_bytes(k.as_bytes()),
                 http::header::HeaderValue::from_str(&v),
             ) {
-                headers.insert(name, val);
+                if name.as_str().eq_ignore_ascii_case("baggage") {
+                    headers.append(name, val);
+                } else {
+                    headers.insert(name, val);
+                }
             }
         }
     }

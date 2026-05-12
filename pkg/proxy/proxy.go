@@ -727,13 +727,23 @@ func (p *Proxy) handleStandardResponse(
 	w.WriteHeader(resp.StatusCode)
 	_, _ = w.Write(clientBody)
 
-	// Create observability span (async — don't block the response).
-	// Use a bounded timeout (not WithoutCancel) to prevent goroutine leaks
-	// if downstream services (Firestore, storage) hang.
+	// ── Budget deduction (SYNCHRONOUS) ──
+	// Deduct BEFORE returning from the handler so the next request's
+	// CheckBudget sees the updated spend. This adds ~30ms (one Firestore
+	// transaction) AFTER the response is fully written — zero user-visible
+	// latency. Previously this ran inside the async span goroutine, causing
+	// CheckBudget to read stale spend data and allowing sequential calls to
+	// overshoot the budget (e.g. $9.45 spent on a $5 limit).
+if cbAllow && p.users != nil && effectiveUserID != "" {
+		model, _ := extractRequestInfo(provider.Name, reqBody)
+		_, inputTokens, outputTokens := extractResponseInfo(provider.Name, respBody)
+		deductCtx, deductCancel := context.WithTimeout(context.WithoutCancel(r.Context()), 15*time.Second)
+		p.deductBudget(deductCtx, provider, model, effectiveUserID, inputTokens, outputTokens)
+		deductCancel()
+	}
+
+	// Create observability span (async — don't block the handler).
 	if cbAllow {
-		// #D: Use WithoutCancel so the goroutine inherits trace context but is
-		// not cancelled when the client disconnects. The 30s timeout bounds the
-		// goroutine lifetime regardless of downstream Firestore latency.
 		spanCtx, spanCancel := context.WithTimeout(context.WithoutCancel(r.Context()), 30*time.Second)
 		go func() {
 			defer spanCancel()
@@ -878,9 +888,17 @@ func (p *Proxy) handleStreamingResponse(
 	if !streamCompleted {
 		streamStatus = storage.SpanStatusError
 	}
+	// ── Budget deduction (SYNCHRONOUS) — same rationale as handleStandardResponse.
+if cbAllow && p.users != nil && effectiveUserID != "" {
+		model, _ := extractRequestInfo(provider.Name, reqBody)
+		_, inputTokens, outputTokens := extractStreamingUsage(provider.Name, parseData)
+		deductCtx, deductCancel := context.WithTimeout(context.WithoutCancel(r.Context()), 15*time.Second)
+		p.deductBudget(deductCtx, provider, model, effectiveUserID, inputTokens, outputTokens)
+		deductCancel()
+	}
+
+	// Create observability span (async — don't block the handler).
 	if cbAllow {
-		// #D: Use WithoutCancel so the goroutine inherits trace context but is
-		// not cancelled when the client disconnects mid-stream.
 		spanCtx, spanCancel := context.WithTimeout(context.WithoutCancel(r.Context()), 30*time.Second)
 		go func() {
 			defer spanCancel()
@@ -915,7 +933,86 @@ type spanParams struct {
 	proxySpanID     string            // pre-generated span ID (for outgoing traceparent)
 }
 
+// deductBudget handles the synchronous budget deduction after a response is
+// written. This MUST run in the request handler goroutine (not async) so that
+// the next request's CheckBudget reads the updated spend from Firestore.
+// Extracted from buildSpan to decouple billing timing from span creation.
+func (p *Proxy) deductBudget(ctx context.Context, provider Provider, model, userID string, inputTokens, outputTokens int64) {
+	if p.users == nil || userID == "" {
+		return
+	}
+	if strings.HasSuffix(userID, ".gserviceaccount.com") {
+		return
+	}
+
+	totalTokens := inputTokens + outputTokens
+	cost := p.calc.Calculate(provider.Name, model, inputTokens, outputTokens)
+
+	// #10: DeductSpend is called when CostUSD>0 OR TotalTokens>0.
+	// The TotalTokens>0 case handles: unknown cloud models (cost=$0 from pricing
+	// gap), streaming calls where the buffer cap lost the usage chunk, and any
+	// other zero-cost path. We still want AllTokensUsed incremented for them.
+	if cost <= 0 && totalTokens <= 0 {
+		return
+	}
+
+	// CRIT-13: retry DeductSpend up to 3 times with exponential backoff.
+	const maxDeductAttempts = 3
+	var deductErr error
+	for attempt := 0; attempt < maxDeductAttempts; attempt++ {
+		if attempt > 0 {
+			backoff := time.Duration(attempt*attempt) * 200 * time.Millisecond
+			slog.Warn("deduct_spend: retrying after failure",
+				"user_id", userID,
+				"attempt", attempt+1,
+				"backoff_ms", backoff.Milliseconds(),
+				"error", deductErr)
+select {
+			case <-ctx.Done():
+				return
+			case <-time.After(backoff):
+			}
+		}
+		deductErr = p.users.DeductSpend(ctx, userID, cost, totalTokens)
+		if deductErr == nil {
+			break
+		}
+	}
+	if deductErr != nil {
+		slog.Error("deduct_spend: all retries exhausted — spend not recorded",
+			"user_id", userID,
+			"cost_usd", cost,
+			"tokens", totalTokens,
+			"attempts", maxDeductAttempts,
+			"error", deductErr)
+		return
+	}
+
+	// Async: threshold notification is best-effort.
+	if p.budgetCk != nil {
+		go func() {
+			bgCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			budget, err := p.users.GetBudget(bgCtx, userID)
+			if err == nil && budget != nil && budget.LimitUSD > 0 {
+				var email string
+				user, uerr := p.users.GetUser(bgCtx, userID)
+				if uerr == nil {
+					email = user.Email
+				}
+				p.budgetCk.CheckAndNotify(bgCtx, userID, email, budget.PeriodKey,
+					notify.DeductResult{
+						SpentUSD: budget.SpentUSD,
+						LimitUSD: budget.LimitUSD,
+					})
+			}
+		}()
+	}
+}
+
 // buildSpan constructs a storage.Span from parsed parameters and submits it.
+// Budget deduction is handled separately by deductBudget (called synchronously
+// in the request handler) — buildSpan only handles span creation and storage.
 func (p *Proxy) buildSpan(ctx context.Context, params spanParams) {
 	totalTokens := params.inputTokens + params.outputTokens
 	cost := p.calc.Calculate(params.provider.Name, params.model, params.inputTokens, params.outputTokens)
@@ -973,73 +1070,6 @@ func (p *Proxy) buildSpan(ctx context.Context, params spanParams) {
 
 	if p.submitter != nil {
 		p.submitter.SubmitBatch([]storage.Span{span})
-	}
-
-	// Budget deduction — SYNCHRONOUS to prevent billing bypass on crash.
-	// Notification is non-critical and remains async.
-	// Skip for service accounts — they have no budget entries.
-	isSA := strings.HasSuffix(span.UserID, ".gserviceaccount.com")
-	// #10: DeductSpend is called when CostUSD>0 OR TotalTokens>0.
-	// The TotalTokens>0 case handles: unknown cloud models (cost=$0 from pricing
-	// gap), streaming calls where the buffer cap lost the usage chunk, and any
-	// other zero-cost path. We still want AllTokensUsed incremented for them.
-	// Local models (isSA-like but provider=local) pass cost=$0 — DeductSpend
-	// with costUSD=0 is safe: it only updates token counters, not spent_usd.
-	if p.users != nil && span.UserID != "" && !isSA && span.GenAI != nil &&
-		(span.GenAI.CostUSD > 0 || span.GenAI.TotalTokens > 0) {
-		// CRIT-13: retry DeductSpend up to 3 times with exponential backoff.
-		// A single Firestore ABORTED or UNAVAILABLE response (common under
-		// contention) used to silently skip billing — the LLM call was already
-		// made and the response sent, so the user would get a free call.
-		// RunTransaction retries internally for ABORTED, but only up to its
-		// SDK retry limit. This outer loop covers transient UNAVAILABLE errors
-		// and exhausted SDK retries.
-		const maxDeductAttempts = 3
-		var deductErr error
-		for attempt := 0; attempt < maxDeductAttempts; attempt++ {
-			if attempt > 0 {
-				backoff := time.Duration(attempt*attempt) * 200 * time.Millisecond
-				slog.Warn("deduct_spend: retrying after failure",
-					"user_id", span.UserID,
-					"attempt", attempt+1,
-					"backoff_ms", backoff.Milliseconds(),
-					"error", deductErr)
-				time.Sleep(backoff)
-			}
-			deductErr = p.users.DeductSpend(ctx, span.UserID, span.GenAI.CostUSD, span.GenAI.TotalTokens)
-			if deductErr == nil {
-				break
-			}
-		}
-		if deductErr != nil {
-			slog.Error("deduct_spend: all retries exhausted — spend not recorded",
-				"user_id", span.UserID,
-				"cost_usd", span.GenAI.CostUSD,
-				"tokens", span.GenAI.TotalTokens,
-				"attempts", maxDeductAttempts,
-				"error", deductErr)
-		} else if p.budgetCk != nil {
-			// Async: threshold notification is best-effort.
-			// Use a bounded context — an unbounded context.Background() leaks
-			// goroutines if Firestore is degraded (blocked reads on every proxied call).
-			go func() {
-				bgCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-				defer cancel()
-				budget, err := p.users.GetBudget(bgCtx, span.UserID)
-				if err == nil && budget != nil && budget.LimitUSD > 0 {
-					var email string
-					user, uerr := p.users.GetUser(bgCtx, span.UserID)
-					if uerr == nil {
-						email = user.Email
-					}
-					p.budgetCk.CheckAndNotify(bgCtx, span.UserID, email, budget.PeriodKey,
-						notify.DeductResult{
-							SpentUSD: budget.SpentUSD,
-							LimitUSD: budget.LimitUSD,
-						})
-				}
-			}()
-		}
 	}
 
 	slog.Debug("proxied LLM call",

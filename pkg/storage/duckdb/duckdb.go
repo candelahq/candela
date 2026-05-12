@@ -296,7 +296,7 @@ func (s *Store) SearchSpans(ctx context.Context, q storage.SpanQuery) (*storage.
 	`, q.ProjectID, q.StartTime, q.EndTime,
 		int(q.Kind), int(q.Kind),
 		q.Model, q.Model,
-		storage.EscapeLike(q.NameContains), q.NameContains,
+		q.NameContains, storage.EscapeLike(q.NameContains),
 		q.UserID, q.UserID,
 		q.TenantID, q.TenantID,
 		q.JobID, q.JobID,

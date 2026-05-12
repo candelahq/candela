@@ -109,6 +109,10 @@ func DefaultProviders() []Provider {
 		// Anthropic via Vertex AI. Override upstream via config for your region/project:
 		// https://{REGION}-aiplatform.googleapis.com/v1/projects/{PROJECT}/locations/{REGION}/publishers/anthropic/models
 		{Name: "anthropic", UpstreamURL: "https://us-central1-aiplatform.googleapis.com"},
+		// Anthropic Direct — native Messages API passthrough to api.anthropic.com.
+		// No format translation, no Vertex AI, no ADC. Client provides its own API key.
+		// Use this for Claude Code, pencil.dev, and other tools that speak native Anthropic.
+		{Name: "anthropic-direct", UpstreamURL: "https://api.anthropic.com"},
 	}
 }
 
@@ -736,7 +740,7 @@ func (p *Proxy) handleStandardResponse(
 	// latency. Previously this ran inside the async span goroutine, causing
 	// CheckBudget to read stale spend data and allowing sequential calls to
 	// overshoot the budget (e.g. $9.45 spent on a $5 limit).
-if cbAllow && p.users != nil && effectiveUserID != "" {
+	if cbAllow && p.users != nil && effectiveUserID != "" {
 		model, _ := extractRequestInfo(provider.Name, reqBody)
 		_, inputTokens, outputTokens := extractResponseInfo(provider.Name, respBody)
 		deductCtx, deductCancel := context.WithTimeout(context.WithoutCancel(r.Context()), 15*time.Second)
@@ -891,7 +895,7 @@ func (p *Proxy) handleStreamingResponse(
 		streamStatus = storage.SpanStatusError
 	}
 	// ── Budget deduction (SYNCHRONOUS) — same rationale as handleStandardResponse.
-if cbAllow && p.users != nil && effectiveUserID != "" {
+	if cbAllow && p.users != nil && effectiveUserID != "" {
 		model, _ := extractRequestInfo(provider.Name, reqBody)
 		_, inputTokens, outputTokens := extractStreamingUsage(provider.Name, parseData)
 		deductCtx, deductCancel := context.WithTimeout(context.WithoutCancel(r.Context()), 15*time.Second)
@@ -969,7 +973,7 @@ func (p *Proxy) deductBudget(ctx context.Context, provider Provider, model, user
 				"attempt", attempt+1,
 				"backoff_ms", backoff.Milliseconds(),
 				"error", deductErr)
-select {
+			select {
 			case <-ctx.Done():
 				return
 			case <-time.After(backoff):
@@ -1198,7 +1202,15 @@ func forwardHeaders(src *http.Request, dst *http.Request, provider string) {
 	case "anthropic":
 		// Anthropic via Vertex AI uses Authorization: Bearer (ADC token).
 		// Direct API uses X-Api-Key. Forward both for flexibility.
-		for _, h := range []string{"X-Api-Key", "Anthropic-Version"} {
+		for _, h := range []string{"X-Api-Key", "Anthropic-Version", "Anthropic-Beta"} {
+			if v := src.Header.Get(h); v != "" {
+				dst.Header.Set(h, v)
+			}
+		}
+	case "anthropic-direct":
+		// Native Anthropic Messages API — forward all required headers.
+		// Claude Code requires anthropic-beta and anthropic-version to be forwarded.
+		for _, h := range []string{"X-Api-Key", "Anthropic-Version", "Anthropic-Beta"} {
 			if v := src.Header.Get(h); v != "" {
 				dst.Header.Set(h, v)
 			}

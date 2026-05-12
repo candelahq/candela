@@ -104,3 +104,43 @@ Baggage: other.service=foo,another.key=bar
 HTTP 200
 [Asserts]
 status == 200
+
+
+# ── TENANT-08: Path traversal in tenant ID is silently discarded ──────────
+# Ensures CRIT-2 (security) — slashes are not in the allowed character set.
+POST {{CANDELA_URL}}/proxy/openai/v1/chat/completions
+Authorization: Bearer sk-test
+Content-Type: application/json
+X-Candela-Tenant-Id: ../../etc/passwd
+{"model":"gpt-4o","messages":[{"role":"user","content":"path traversal test"}]}
+
+HTTP 200
+[Asserts]
+status == 200
+
+
+# ── TENANT-09: Case-insensitive Baggage key matching (RFC 8941) ──────────
+# Ensures CRIT-3 — Candela.Tenant_Id must match candela.tenant_id.
+POST {{CANDELA_URL}}/proxy/openai/v1/chat/completions
+Authorization: Bearer sk-test
+Content-Type: application/json
+Baggage: Candela.Tenant_Id=rfc-case-test
+{"model":"gpt-4o","messages":[{"role":"user","content":"case insensitive test"}]}
+
+HTTP 200
+[Asserts]
+status == 200
+
+
+# ── TENANT-10: Job ID via explicit header ─────────────────────────────────
+# Verify that X-Candela-Job-Id header is accepted alongside tenant_id.
+POST {{CANDELA_URL}}/proxy/openai/v1/chat/completions
+Authorization: Bearer sk-test
+Content-Type: application/json
+X-Candela-Tenant-Id: acme-corp
+X-Candela-Job-Id: experiment-42
+{"model":"gpt-4o","messages":[{"role":"user","content":"job id header test"}]}
+
+HTTP 200
+[Asserts]
+status == 200

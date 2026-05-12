@@ -63,7 +63,7 @@ type Config struct {
 	Proxy struct {
 		Enabled   bool     `yaml:"enabled"`
 		ProjectID string   `yaml:"project_id"`
-		Providers []string `yaml:"providers"` // e.g. ["openai", "google", "anthropic", "gemini-oai"]
+		Providers []string `yaml:"providers"` // e.g. ["openai", "google", "anthropic", "anthropic-direct", "gemini-oai"]
 		VertexAI  struct {
 			ProjectID string `yaml:"project_id"` // GCP project for Vertex AI
 			Region    string `yaml:"region"`     // e.g. "us-central1"

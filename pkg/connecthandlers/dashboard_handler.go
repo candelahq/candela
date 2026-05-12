@@ -30,11 +30,13 @@ func (h *DashboardHandler) GetUsageSummary(
 ) (*connect.Response[v1.GetUsageSummaryResponse], error) {
 	msg := req.Msg
 
+	attr := getAttribution(req)
 	q := storage.UsageQuery{
 		ProjectID:   msg.ProjectId,
 		Environment: msg.Environment,
 		UserID:      scopeUserID(ctx, h.users),
-		JobID:       req.Header().Get("X-Candela-Job-Id"),
+		JobID:       attr.JobID,
+		TenantID:    attr.TenantID,
 	}
 	if msg.TimeRange != nil {
 		if msg.TimeRange.Start != nil {
@@ -74,10 +76,12 @@ func (h *DashboardHandler) GetModelBreakdown(
 ) (*connect.Response[v1.GetModelBreakdownResponse], error) {
 	msg := req.Msg
 
+	attr := getAttribution(req)
 	q := storage.UsageQuery{
 		ProjectID: msg.ProjectId,
 		UserID:    scopeUserID(ctx, h.users),
-		JobID:     req.Header().Get("X-Candela-Job-Id"),
+		JobID:     attr.JobID,
+		TenantID:  attr.TenantID,
 	}
 	if msg.TimeRange != nil {
 		if msg.TimeRange.Start != nil {
@@ -155,10 +159,12 @@ func (h *DashboardHandler) GetMyUsage(
 	}
 
 	msg := req.Msg
+	attr := getAttribution(req)
 	q := storage.UsageQuery{
 		ProjectID: msg.ProjectId,
 		UserID:    userID,
-		JobID:     req.Header().Get("X-Candela-Job-Id"),
+		JobID:     attr.JobID,
+		TenantID:  attr.TenantID,
 	}
 	if msg.TimeRange != nil {
 		if msg.TimeRange.Start != nil {

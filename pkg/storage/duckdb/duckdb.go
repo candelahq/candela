@@ -296,7 +296,7 @@ func (s *Store) SearchSpans(ctx context.Context, q storage.SpanQuery) (*storage.
 	`, q.ProjectID, q.StartTime, q.EndTime,
 		int(q.Kind), int(q.Kind),
 		q.Model, q.Model,
-		q.NameContains, q.NameContains,
+		storage.EscapeLike(q.NameContains), q.NameContains,
 		q.UserID, q.UserID,
 		q.TenantID, q.TenantID,
 		q.JobID, q.JobID,
@@ -486,25 +486,38 @@ func (s *Store) GetJobLeaderboard(ctx context.Context, q storage.UsageQuery, lim
 	}
 
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT job_id,
-			COUNT(*)::BIGINT,
-			COALESCE(SUM(gen_ai_total_tokens), 0)::BIGINT,
-			COALESCE(SUM(gen_ai_cost_usd), 0)::DOUBLE,
-			COALESCE(AVG(duration_ns), 0)::DOUBLE / 1000000.0,
-			COALESCE((
-				SELECT s2.gen_ai_model FROM spans s2
-				WHERE s2.job_id = spans.job_id
-					AND s2.project_id = ? AND s2.start_time >= ? AND s2.start_time <= ?
-					AND s2.gen_ai_model != ''
-				GROUP BY s2.gen_ai_model
-				ORDER BY SUM(s2.gen_ai_cost_usd) DESC
-				LIMIT 1
-			), '') AS top_model
-		FROM spans
-		WHERE project_id = ? AND start_time >= ? AND start_time <= ?
-			AND job_id != ''
-		GROUP BY job_id
-		ORDER BY SUM(gen_ai_cost_usd) DESC
+		WITH job_stats AS (
+			SELECT
+				job_id,
+				COUNT(*)::BIGINT as call_count,
+				SUM(gen_ai_total_tokens)::BIGINT as total_tokens,
+				SUM(gen_ai_cost_usd)::DOUBLE as cost_usd,
+				AVG(duration_ns)::DOUBLE / 1000000.0 as avg_latency_ms
+			FROM spans
+			WHERE project_id = ? AND start_time >= ? AND start_time <= ?
+				AND job_id != ''
+			GROUP BY job_id
+		),
+		model_rank AS (
+			SELECT
+				job_id,
+				gen_ai_model,
+				ROW_NUMBER() OVER (PARTITION BY job_id ORDER BY SUM(gen_ai_cost_usd) DESC) as r
+			FROM spans
+			WHERE project_id = ? AND start_time >= ? AND start_time <= ?
+				AND job_id != '' AND gen_ai_model != ''
+			GROUP BY job_id, gen_ai_model
+		)
+		SELECT
+			s.job_id,
+			s.call_count,
+			COALESCE(s.total_tokens, 0),
+			COALESCE(s.cost_usd, 0),
+			COALESCE(s.avg_latency_ms, 0),
+			COALESCE(m.gen_ai_model, '')
+		FROM job_stats s
+		LEFT JOIN model_rank m ON s.job_id = m.job_id AND m.r = 1
+		ORDER BY s.cost_usd DESC
 		LIMIT ?
 	`, q.ProjectID, q.StartTime, q.EndTime,
 		q.ProjectID, q.StartTime, q.EndTime, limit)

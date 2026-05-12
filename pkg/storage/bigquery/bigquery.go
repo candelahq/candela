@@ -493,6 +493,8 @@ func (s *Store) QueryTraces(ctx context.Context, tq storage.TraceQuery) (*storag
 			TotalTokens:  trace.TotalTokens,
 			TotalCostUSD: trace.TotalCostUSD,
 			Environment:  trace.Environment,
+			TenantID:     trace.TenantID,
+			JobID:        trace.JobID,
 		})
 	}
 
@@ -524,7 +526,7 @@ func (s *Store) SearchSpans(ctx context.Context, sq storage.SpanQuery) (*storage
 		  AND start_time <= @endTime
 		  AND (@kind = 0 OR kind = @kind)
 		  AND (@model = '' OR gen_ai_model = @model)
-		  AND (@name = '' OR name LIKE CONCAT('%%', @name, '%%'))
+		  AND (@name = '' OR name LIKE CONCAT('%%', @name, '%%') ESCAPE '\\')
 		  AND (@userID = '' OR user_id = @userID)
 		  AND (@tenantID = '' OR tenant_id = @tenantID)
 		  AND (@jobID = '' OR job_id = @jobID)
@@ -539,7 +541,7 @@ func (s *Store) SearchSpans(ctx context.Context, sq storage.SpanQuery) (*storage
 		{Name: "endTime", Value: sq.EndTime},
 		{Name: "kind", Value: int(sq.Kind)},
 		{Name: "model", Value: sq.Model},
-		{Name: "name", Value: sq.NameContains},
+		{Name: "name", Value: storage.EscapeLike(sq.NameContains)},
 		{Name: "userID", Value: sq.UserID},
 		{Name: "tenantID", Value: sq.TenantID},
 		{Name: "jobID", Value: sq.JobID},

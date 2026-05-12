@@ -84,7 +84,8 @@ func (h *TraceHandler) ListTraces(
 		OrderBy:     msg.OrderBy,
 		Descending:  msg.Descending,
 		UserID:      scopeUserID(ctx, h.users),
-		JobID:       req.Header().Get("X-Candela-Job-Id"),
+		JobID:       getAttribution(req).JobID,
+		TenantID:    getAttribution(req).TenantID,
 	}
 
 	if msg.TimeRange != nil {
@@ -144,7 +145,8 @@ func (h *TraceHandler) SearchSpans(
 		Model:        msg.Model,
 		NameContains: msg.NameContains,
 		UserID:       scopeUserID(ctx, h.users),
-		JobID:        req.Header().Get("X-Candela-Job-Id"),
+		JobID:        getAttribution(req).JobID,
+		TenantID:     getAttribution(req).TenantID,
 	}
 
 	if msg.TimeRange != nil {

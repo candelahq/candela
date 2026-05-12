@@ -192,6 +192,7 @@ dependencies = [
  "candela-processor",
  "candela-proxy",
  "candela-storage",
+ "reqwest",
  "serde_json",
  "tokio",
  "tower-http",

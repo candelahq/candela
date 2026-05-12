@@ -15,7 +15,7 @@ use std::time::Instant;
 
 use axum::body::Body;
 use axum::extract::{Path, State};
-use axum::http::{HeaderMap, HeaderValue, StatusCode};
+use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use bytes::Bytes;
 use chrono::Utc;
@@ -32,6 +32,8 @@ use crate::{Proxy, SpanSubmitter};
 pub struct AppState {
     pub proxy: Arc<Proxy>,
     pub submitter: Arc<dyn SpanSubmitter>,
+    /// Shared HTTP client — reused across requests for connection pooling.
+    pub http_client: reqwest::Client,
 }
 
 /// Primary proxy handler — mounted at `/proxy/{provider}/*rest`.
@@ -100,10 +102,12 @@ pub async fn proxy_handler(
     let is_streaming = detect_streaming(&request_bytes);
 
     // ── 6. Build upstream URL ──
+    // SECURITY: Sanitize the rest path to prevent directory traversal.
+    let sanitized_rest = sanitize_path(&rest);
     let upstream_path = if let Some(ref rewriter) = provider.path_rewriter {
         rewriter.rewrite_path(&model, is_streaming)
     } else {
-        format!("/{rest}")
+        format!("/{sanitized_rest}")
     };
     let upstream_url = format!(
         "{}{upstream_path}",
@@ -111,8 +115,8 @@ pub async fn proxy_handler(
     );
 
     // ── 7. Forward request to upstream ──
-    let client = reqwest::Client::new();
-    let mut upstream_req = client.post(&upstream_url).body(upstream_body.to_vec());
+    // Reuse the shared HTTP client for connection pooling.
+    let mut upstream_req = state.http_client.post(&upstream_url).body(upstream_body);
 
     // Forward relevant headers (auth, content-type, accept).
     for key in [
@@ -122,19 +126,35 @@ pub async fn proxy_handler(
         "anthropic-version",
         "x-api-key",
     ] {
-        if let Some(val) = headers.get(key)
-            && let Ok(v) = val.to_str()
-        {
+        if let Some(v) = headers.get(key).and_then(|val| val.to_str().ok()) {
             upstream_req = upstream_req.header(key, v);
         }
     }
 
     let upstream_result = upstream_req.send().await;
 
-    let (response_status, response_bytes) = match upstream_result {
+    let (response_status, response_bytes, upstream_content_type) = match upstream_result {
         Ok(resp) => {
             let status = resp.status();
-            let body_bytes = resp.bytes().await.unwrap_or_default();
+            // Capture upstream Content-Type before consuming the body.
+            let content_type = resp
+                .headers()
+                .get("content-type")
+                .and_then(|v| v.to_str().ok())
+                .unwrap_or("application/json")
+                .to_string();
+            let body_bytes = match resp.bytes().await {
+                Ok(b) => b,
+                Err(e) => {
+                    error!(error = %e, "failed to read upstream response body");
+                    state.proxy.record_failure(&provider_name).await;
+                    return (
+                        StatusCode::BAD_GATEWAY,
+                        "failed to read upstream response body",
+                    )
+                        .into_response();
+                }
+            };
 
             if status.is_success() {
                 state.proxy.record_success(&provider_name).await;
@@ -142,7 +162,7 @@ pub async fn proxy_handler(
                 state.proxy.record_failure(&provider_name).await;
             }
 
-            (status, body_bytes)
+            (status, body_bytes, content_type)
         }
         Err(e) => {
             error!(error = %e, provider = %provider_name, upstream = %upstream_url, "upstream request failed");
@@ -239,6 +259,7 @@ pub async fn proxy_handler(
         service_name: extract_header_str(&headers, "x-service-name"),
         user_id,
         session_id,
+        tenant_id,
     };
 
     // ── 11. Submit span asynchronously ──
@@ -258,13 +279,11 @@ pub async fn proxy_handler(
     );
 
     // ── 12. Return response to client ──
+    // Forward the upstream Content-Type header instead of hardcoding.
     let mut response = Response::builder()
         .status(StatusCode::from_u16(response_status.as_u16()).unwrap_or(StatusCode::OK));
 
-    // Preserve content-type from upstream.
-    if let Ok(ct) = HeaderValue::from_str("application/json") {
-        response = response.header("content-type", ct);
-    }
+    response = response.header("content-type", upstream_content_type);
 
     response
         .body(Body::from(client_body))
@@ -291,29 +310,36 @@ fn detect_streaming(body: &[u8]) -> bool {
 }
 
 /// Extract token usage from upstream JSON response.
+///
+/// Supports both OpenAI (`prompt_tokens`/`completion_tokens`) and
+/// Anthropic (`input_tokens`/`output_tokens`) field names.
+/// Auto-computes `total_tokens` when not explicitly provided.
 fn extract_token_usage(body: &[u8]) -> TokenUsage {
     let val: serde_json::Value = match serde_json::from_slice(body) {
         Ok(v) => v,
         Err(_) => return TokenUsage::default(),
     };
 
-    // OpenAI format: { "usage": { "prompt_tokens": N, "completion_tokens": N, "total_tokens": N } }
     if let Some(usage) = val.get("usage") {
+        let input = usage
+            .get("prompt_tokens")
+            .or_else(|| usage.get("input_tokens"))
+            .and_then(|v| v.as_i64())
+            .unwrap_or(0);
+        let output = usage
+            .get("completion_tokens")
+            .or_else(|| usage.get("output_tokens"))
+            .and_then(|v| v.as_i64())
+            .unwrap_or(0);
+        let total = usage
+            .get("total_tokens")
+            .and_then(|v| v.as_i64())
+            .unwrap_or_else(|| input.saturating_add(output));
+
         return TokenUsage {
-            input_tokens: usage
-                .get("prompt_tokens")
-                .or_else(|| usage.get("input_tokens"))
-                .and_then(|v| v.as_i64())
-                .unwrap_or(0),
-            output_tokens: usage
-                .get("completion_tokens")
-                .or_else(|| usage.get("output_tokens"))
-                .and_then(|v| v.as_i64())
-                .unwrap_or(0),
-            total_tokens: usage
-                .get("total_tokens")
-                .and_then(|v| v.as_i64())
-                .unwrap_or(0),
+            input_tokens: input,
+            output_tokens: output,
+            total_tokens: total,
         };
     }
 
@@ -332,21 +358,33 @@ fn extract_header_str(headers: &HeaderMap, key: &str) -> Option<String> {
 ///
 /// Handles multiple Baggage headers (per W3C spec) and case-insensitive
 /// key matching for `candela.tenant_id`.
+#[allow(clippy::collapsible_if)] // Intentional: avoid unstable let_chains for stable Rust.
 fn extract_baggage_value(headers: &HeaderMap, key: &str) -> Option<String> {
     let key_lower = key.to_lowercase();
     for val in headers.get_all("baggage") {
         if let Ok(s) = val.to_str() {
             for member in s.split(',') {
                 let member = member.trim();
-                if let Some((k, v)) = member.split_once('=')
-                    && k.trim().to_lowercase() == key_lower
-                {
-                    return Some(v.trim().to_string());
+                if let Some((k, v)) = member.split_once('=') {
+                    if k.trim().to_lowercase() == key_lower {
+                        return Some(v.trim().to_string());
+                    }
                 }
             }
         }
     }
     None
+}
+
+/// Sanitize a URL path segment to prevent directory traversal attacks.
+///
+/// Removes `..` segments and normalizes the path to prevent requests like
+/// `/proxy/openai/../../admin/secret` from escaping the upstream API scope.
+fn sanitize_path(path: &str) -> String {
+    path.split('/')
+        .filter(|seg| !seg.is_empty() && *seg != ".." && *seg != ".")
+        .collect::<Vec<_>>()
+        .join("/")
 }
 
 #[cfg(test)]
@@ -468,5 +506,47 @@ mod tests {
     fn extract_header_str_absent() {
         let headers = HeaderMap::new();
         assert_eq!(extract_header_str(&headers, "x-user-id"), None);
+    }
+
+    // ── New unit tests ──
+
+    /// CRITICAL: Anthropic responses omit `total_tokens`. Ensure it's auto-computed.
+    #[test]
+    fn extract_token_usage_auto_computes_total() {
+        let body = br#"{"usage": {"input_tokens": 300, "output_tokens": 120}}"#;
+        let usage = extract_token_usage(body);
+        assert_eq!(usage.input_tokens, 300);
+        assert_eq!(usage.output_tokens, 120);
+        assert_eq!(
+            usage.total_tokens, 420,
+            "total_tokens must be auto-computed as input + output when absent"
+        );
+    }
+
+    /// CRITICAL: Path traversal must be sanitized to prevent upstream URL escape.
+    #[test]
+    fn sanitize_path_removes_traversal() {
+        assert_eq!(sanitize_path("../../admin/secret"), "admin/secret");
+        assert_eq!(sanitize_path("v1/../../../etc/passwd"), "v1/etc/passwd");
+        assert_eq!(
+            sanitize_path("./v1/./chat/completions"),
+            "v1/chat/completions"
+        );
+    }
+
+    /// Normal paths should pass through sanitization unmodified.
+    #[test]
+    fn sanitize_path_preserves_normal() {
+        assert_eq!(sanitize_path("v1/chat/completions"), "v1/chat/completions");
+        assert_eq!(sanitize_path("v1/models"), "v1/models");
+    }
+
+    /// Empty request body should produce zero token usage, not panic.
+    #[test]
+    fn extract_token_usage_empty_body() {
+        let usage = extract_token_usage(b"");
+        assert_eq!(usage.input_tokens, 0);
+        assert_eq!(usage.output_tokens, 0);
+        assert_eq!(usage.total_tokens, 0);
     }
 }

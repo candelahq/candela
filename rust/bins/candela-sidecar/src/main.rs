@@ -148,6 +148,7 @@ async fn main() -> anyhow::Result<()> {
     let app_state = Arc::new(AppState {
         proxy,
         submitter: Arc::new(LogSubmitter),
+        http_client: reqwest::Client::new(),
     });
 
     info!(

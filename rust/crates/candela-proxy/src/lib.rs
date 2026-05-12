@@ -65,7 +65,10 @@ pub struct Config {
 pub struct Proxy {
     providers: HashMap<String, Provider>,
     project_id: String,
-    breakers: RwLock<HashMap<String, circuit::CircuitBreaker>>,
+    /// Per-provider circuit breakers. The outer RwLock protects the map structure
+    /// (only write-locked when adding a new provider). Each breaker has its own
+    /// Mutex so concurrent requests to different providers don't contend.
+    breakers: RwLock<HashMap<String, tokio::sync::Mutex<circuit::CircuitBreaker>>>,
 }
 
 /// Default circuit breaker settings.
@@ -104,29 +107,55 @@ impl Proxy {
     }
 
     /// Check whether the circuit breaker allows a request to the given provider.
+    ///
+    /// Takes a read lock on the breaker map. Only escalates to a write lock
+    /// if the provider's breaker doesn't exist yet (first request to that provider).
     pub async fn check_circuit(&self, provider: &str) -> bool {
+        // Fast path: read lock — no contention between different providers.
+        {
+            let breakers = self.breakers.read().await;
+            if let Some(cb) = breakers.get(provider) {
+                return cb.lock().await.is_allowed();
+            }
+        }
+        // Slow path: write lock to insert a new breaker (once per provider).
         let mut breakers = self.breakers.write().await;
         let cb = breakers.entry(provider.to_string()).or_insert_with(|| {
-            circuit::CircuitBreaker::new(DEFAULT_CB_THRESHOLD, DEFAULT_CB_TIMEOUT)
+            tokio::sync::Mutex::new(circuit::CircuitBreaker::new(
+                DEFAULT_CB_THRESHOLD,
+                DEFAULT_CB_TIMEOUT,
+            ))
         });
-        cb.is_allowed()
+        cb.lock().await.is_allowed()
     }
 
     /// Record a successful upstream call for the given provider.
     pub async fn record_success(&self, provider: &str) {
-        let mut breakers = self.breakers.write().await;
-        if let Some(cb) = breakers.get_mut(provider) {
-            cb.record_success();
+        let breakers = self.breakers.read().await;
+        if let Some(cb) = breakers.get(provider) {
+            cb.lock().await.record_success();
         }
     }
 
     /// Record a failed upstream call for the given provider.
     pub async fn record_failure(&self, provider: &str) {
+        // Fast path: read lock.
+        {
+            let breakers = self.breakers.read().await;
+            if let Some(cb) = breakers.get(provider) {
+                cb.lock().await.record_failure();
+                return;
+            }
+        }
+        // Slow path: insert + record.
         let mut breakers = self.breakers.write().await;
         let cb = breakers.entry(provider.to_string()).or_insert_with(|| {
-            circuit::CircuitBreaker::new(DEFAULT_CB_THRESHOLD, DEFAULT_CB_TIMEOUT)
+            tokio::sync::Mutex::new(circuit::CircuitBreaker::new(
+                DEFAULT_CB_THRESHOLD,
+                DEFAULT_CB_TIMEOUT,
+            ))
         });
-        cb.record_failure();
+        cb.lock().await.record_failure();
     }
 }
 

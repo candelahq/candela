@@ -122,16 +122,17 @@ async fn flush(batch: &mut Vec<Span>, writers: &[Arc<dyn SpanWriter>], calc: &Co
     }
 
     // Enrich with cost data.
+    #[allow(clippy::collapsible_if)] // Intentional: avoid unstable let_chains for stable Rust.
     for span in batch.iter_mut() {
-        if let Some(ref mut gen_ai) = span.gen_ai
-            && gen_ai.cost_usd == 0.0
-        {
-            gen_ai.cost_usd = calc.calculate(
-                &gen_ai.provider,
-                &gen_ai.model,
-                gen_ai.input_tokens,
-                gen_ai.output_tokens,
-            );
+        if let Some(ref mut gen_ai) = span.gen_ai {
+            if gen_ai.cost_usd == 0.0 {
+                gen_ai.cost_usd = calc.calculate(
+                    &gen_ai.provider,
+                    &gen_ai.model,
+                    gen_ai.input_tokens,
+                    gen_ai.output_tokens,
+                );
+            }
         }
     }
 

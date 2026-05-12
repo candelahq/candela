@@ -477,14 +477,17 @@ func loadConfig(configPath string) *Config {
 		configPath = os.Getenv("CANDELA_CONFIG")
 	}
 	if configPath == "" {
-		home, err := os.UserHomeDir()
-		if err == nil {
-			// Check modern XDG location first.
-			xdgPath := filepath.Join(home, ".config", "candela", "config.yaml")
+		// Check modern XDG location first (os.UserConfigDir handles
+		// platform differences: ~/.config on Linux, ~/Library/Application Support on macOS).
+		if configDir, err := os.UserConfigDir(); err == nil {
+			xdgPath := filepath.Join(configDir, "candela", "config.yaml")
 			if _, err := os.Stat(xdgPath); err == nil {
 				configPath = xdgPath
-			} else {
-				// Fallback to legacy location.
+			}
+		}
+		// Fallback to legacy location.
+		if configPath == "" {
+			if home, err := os.UserHomeDir(); err == nil {
 				configPath = filepath.Join(home, ".candela.yaml")
 			}
 		}

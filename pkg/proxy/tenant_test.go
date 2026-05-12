@@ -29,7 +29,7 @@ func TestParseBaggage_ValidTenantID(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := parseBaggage(tc.header)
+			got, _ := parseBaggage(tc.header)
 			if got != tc.want {
 				t.Errorf("parseBaggage(%q) = %q, want %q", tc.header, got, tc.want)
 			}
@@ -51,7 +51,7 @@ func TestParseBaggage_InvalidTenantID_Discarded(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := parseBaggage(tc.header)
+			got, _ := parseBaggage(tc.header)
 			if got != "" {
 				t.Errorf("parseBaggage(%q) = %q, want empty (invalid value should be discarded)", tc.header, got)
 			}
@@ -61,10 +61,10 @@ func TestParseBaggage_InvalidTenantID_Discarded(t *testing.T) {
 
 // UNIT-3: Empty and no-match baggage headers return empty string without panicking.
 func TestParseBaggage_EmptyAndMissing(t *testing.T) {
-	if got := parseBaggage(""); got != "" {
+	if got, _ := parseBaggage(""); got != "" {
 		t.Errorf(`parseBaggage("") = %q, want ""`, got)
 	}
-	if got := parseBaggage("svc.version=1.0,other=stuff"); got != "" {
+	if got, _ := parseBaggage("svc.version=1.0,other=stuff"); got != "" {
 		t.Errorf("parseBaggage(no tenant key) = %q, want \"\"", got)
 	}
 }
@@ -73,19 +73,18 @@ func TestParseBaggage_EmptyAndMissing(t *testing.T) {
 func TestParseBaggage_InvalidFirstValidSecond(t *testing.T) {
 	// First value has a space (invalid), second is valid — should return second.
 	header := "candela.tenant_id=bad value,candela.tenant_id=good-tenant"
-	got := parseBaggage(header)
+	got, _ := parseBaggage(header)
 	if got != "good-tenant" {
 		t.Errorf("parseBaggage(%q) = %q, want good-tenant (invalid first entry should be skipped)", header, got)
 	}
 }
-
 
 // UNIT-4b: parseBaggageHeaders joins multiple header values (W3C allows multiple
 // Baggage: header instances in a single HTTP request).
 func TestParseBaggageHeaders_MultipleHeaders(t *testing.T) {
 	// Simulate two separate Baggage header lines — r.Header.Values returns both.
 	values := []string{"svc.version=1.0", "candela.tenant_id=multi-tenant,other=val"}
-	got := parseBaggageHeaders(values)
+	got, _ := parseBaggageHeaders(values)
 	if got != "multi-tenant" {
 		t.Errorf("parseBaggageHeaders(%v) = %q, want multi-tenant", values, got)
 	}
@@ -99,7 +98,7 @@ func TestParseBaggage_CaseInsensitiveKey(t *testing.T) {
 		"candela.TENANT_ID=acme-corp",
 	}
 	for _, h := range cases {
-		if got := parseBaggage(h); got != "acme-corp" {
+		if got, _ := parseBaggage(h); got != "acme-corp" {
 			t.Errorf("parseBaggage(%q) = %q, want acme-corp (key should be case-insensitive)", h, got)
 		}
 	}
@@ -108,7 +107,7 @@ func TestParseBaggage_CaseInsensitiveKey(t *testing.T) {
 // UNIT-4d: W3C Baggage spec — right-most occurrence wins if keys are duplicated.
 func TestParseBaggage_RightMostWins(t *testing.T) {
 	header := "candela.tenant_id=first,svc=test,candela.tenant_id=second"
-	got := parseBaggage(header)
+	got, _ := parseBaggage(header)
 	if got != "second" {
 		t.Errorf("parseBaggage(%q) = %q, want second (right-most occurrence must win)", header, got)
 	}
@@ -117,7 +116,7 @@ func TestParseBaggage_RightMostWins(t *testing.T) {
 // UNIT-4e: Malformed parts are skipped without affecting valid ones.
 func TestParseBaggage_MalformedParts(t *testing.T) {
 	header := "!!!, candela.tenant_id=valid-one, ==, key=val"
-	got := parseBaggage(header)
+	got, _ := parseBaggage(header)
 	if got != "valid-one" {
 		t.Errorf("parseBaggage(%q) = %q, want valid-one", header, got)
 	}
@@ -126,7 +125,7 @@ func TestParseBaggage_MalformedParts(t *testing.T) {
 // UNIT-4f: Properties (semicolon-separated) are ignored per spec.
 func TestParseBaggage_PropertiesIgnored(t *testing.T) {
 	header := "candela.tenant_id=acme;ttl=100;p2=val,other=foo"
-	got := parseBaggage(header)
+	got, _ := parseBaggage(header)
 	if got != "acme" {
 		t.Errorf("parseBaggage(%q) = %q, want acme (properties should be stripped)", header, got)
 	}

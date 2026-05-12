@@ -951,6 +951,8 @@ func buildTrace(traceID string, spans []storage.Span) *storage.Trace {
 		EndTime:     spans[0].EndTime,
 		ProjectID:   spans[0].ProjectID,
 		Environment: spans[0].Environment,
+		TenantID:    spans[0].TenantID,
+		JobID:       spans[0].JobID,
 		SpanCount:   len(spans),
 		Spans:       spans,
 	}

@@ -366,7 +366,7 @@ var requestIDPattern = regexp.MustCompile(`^[a-zA-Z0-9\-]{1,128}$`)
 // underscores for domain-style tenant IDs (e.g. "acme.corp", "tenant_42").
 var tenantIDPattern = regexp.MustCompile(`^[a-zA-Z0-9\-._]{1,128}$`)
 
-// parseBaggage extracts candela.tenant_id from W3C Baggage header value(s).
+// parseBaggage extracts candela.tenant_id and candela.job_id from W3C Baggage header value(s).
 // W3C Baggage format: "key1=val1;prop, key2=val2" (RFC 8941 list).
 // A single request may carry multiple Baggage headers; we join them all.
 // Baggage keys are case-insensitive per RFC 8941 — EqualFold is used.
@@ -374,19 +374,22 @@ var tenantIDPattern = regexp.MustCompile(`^[a-zA-Z0-9\-._]{1,128}$`)
 // set, making this the preferred propagation path for multitenant applications.
 //
 // If multiple candela.tenant_id entries are present (RFC 8941 allows duplicates),
-// the first valid one wins. Invalid values are warned and skipped.
-func parseBaggage(header string) string {
+// the right-most valid one wins (per W3C spec). Invalid values are warned and skipped.
+func parseBaggage(header string) (tenantID, jobID string) {
 	if header == "" {
-		return ""
+		return "", ""
 	}
-	var tenantID string
 	for _, member := range strings.Split(header, ",") {
 		// Each member may have properties after a semicolon: "key=value;prop".
 		kv := strings.SplitN(strings.TrimSpace(member), ";", 2)[0]
 		parts := strings.SplitN(kv, "=", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		key := strings.TrimSpace(parts[0])
+		val := strings.TrimSpace(parts[1])
 		// RFC 8941: Baggage keys are case-insensitive.
-		if len(parts) == 2 && strings.EqualFold(strings.TrimSpace(parts[0]), "candela.tenant_id") {
-			val := strings.TrimSpace(parts[1])
+		if strings.EqualFold(key, "candela.tenant_id") {
 			if tenantIDPattern.MatchString(val) {
 				// W3C spec: the right-most occurrence of a key wins.
 				tenantID = val
@@ -394,14 +397,21 @@ func parseBaggage(header string) string {
 				slog.Warn("skipping invalid candela.tenant_id in Baggage header",
 					"value", val)
 			}
+		} else if strings.EqualFold(key, "candela.job_id") {
+			if tenantIDPattern.MatchString(val) {
+				jobID = val
+			} else {
+				slog.Warn("skipping invalid candela.job_id in Baggage header",
+					"value", val)
+			}
 		}
 	}
-	return tenantID
+	return tenantID, jobID
 }
 
 // parseBaggageHeaders joins multiple Baggage header values (W3C allows multiple
 // header instances) and delegates to parseBaggage for extraction.
-func parseBaggageHeaders(values []string) string {
+func parseBaggageHeaders(values []string) (tenantID, jobID string) {
 	return parseBaggage(strings.Join(values, ","))
 }
 
@@ -422,12 +432,13 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 		sessionID = "" // invalid → discard
 	}
 
-	// ── Tenant ID extraction (for multitenant cost attribution) ──
-	// Precedence: W3C Baggage (candela.tenant_id) wins over X-Candela-Tenant-Id header.
+	// ── Tenant ID & Job ID extraction (for multitenant cost attribution) ──
+	// Precedence: W3C Baggage (candela.tenant_id / candela.job_id) wins over
+	// X-Candela-Tenant-Id / X-Candela-Job-Id headers.
 	//
 	// Use r.Header.Values (not .Get) to handle multiple Baggage header instances —
 	// W3C spec and some HTTP/1.1 proxies send separate Baggage lines per entry.
-	tenantID := parseBaggageHeaders(r.Header.Values("Baggage"))
+	tenantID, jobID := parseBaggageHeaders(r.Header.Values("Baggage"))
 	if tenantID == "" {
 		// Fallback: explicit header (non-OTel callers, tests, simple scripts).
 		hdr := r.Header.Get("X-Candela-Tenant-Id")
@@ -435,6 +446,14 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 			tenantID = hdr
 		} else if hdr != "" {
 			slog.Warn("discarding invalid X-Candela-Tenant-Id header", "value", hdr)
+		}
+	}
+	if jobID == "" {
+		hdr := r.Header.Get("X-Candela-Job-Id")
+		if tenantIDPattern.MatchString(hdr) {
+			jobID = hdr
+		} else if hdr != "" {
+			slog.Warn("discarding invalid X-Candela-Job-Id header", "value", hdr)
 		}
 	}
 
@@ -655,9 +674,9 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 	cbAllow := p.breakers[providerName].AllowRequest()
 
 	if isStreaming && resp.StatusCode == http.StatusOK {
-		p.handleStreamingResponse(w, r, resp, provider, reqBody, startTime, ttfb, requestID, sessionID, effectiveUserID, tenantID, cbAllow, traceCtx, proxySpanID)
+		p.handleStreamingResponse(w, r, resp, provider, reqBody, startTime, ttfb, requestID, sessionID, effectiveUserID, tenantID, jobID, cbAllow, traceCtx, proxySpanID)
 	} else {
-		p.handleStandardResponse(w, r, resp, provider, reqBody, startTime, ttfb, requestID, sessionID, effectiveUserID, tenantID, cbAllow, traceCtx, proxySpanID)
+		p.handleStandardResponse(w, r, resp, provider, reqBody, startTime, ttfb, requestID, sessionID, effectiveUserID, tenantID, jobID, cbAllow, traceCtx, proxySpanID)
 	}
 }
 
@@ -688,6 +707,7 @@ func (p *Proxy) handleStandardResponse(
 	sessionID string,
 	effectiveUserID string,
 	tenantID string,
+	jobID string,
 	cbAllow bool,
 	traceCtx *traceContext,
 	proxySpanID string,
@@ -753,7 +773,7 @@ func (p *Proxy) handleStandardResponse(
 		spanCtx, spanCancel := context.WithTimeout(context.WithoutCancel(r.Context()), 30*time.Second)
 		go func() {
 			defer spanCancel()
-			p.createSpan(spanCtx, provider, reqBody, respBody, startTime, endTime, resp.StatusCode, ttfb, requestID, sessionID, effectiveUserID, tenantID, traceCtx, proxySpanID)
+			p.createSpan(spanCtx, provider, reqBody, respBody, startTime, endTime, resp.StatusCode, ttfb, requestID, sessionID, effectiveUserID, tenantID, jobID, traceCtx, proxySpanID)
 		}()
 	} else {
 		slog.Debug("skipping span creation (circuit open)", "provider", provider.Name, "request_id", requestID)
@@ -769,6 +789,7 @@ func (p *Proxy) handleStreamingResponse(
 	sessionID string,
 	effectiveUserID string,
 	tenantID string,
+	jobID string,
 	cbAllow bool,
 	traceCtx *traceContext,
 	proxySpanID string,
@@ -908,7 +929,7 @@ func (p *Proxy) handleStreamingResponse(
 		spanCtx, spanCancel := context.WithTimeout(context.WithoutCancel(r.Context()), 30*time.Second)
 		go func() {
 			defer spanCancel()
-			p.createStreamingSpan(spanCtx, provider, reqBody, parseData, startTime, endTime, ttfb, ttft, requestID, sessionID, effectiveUserID, tenantID, streamStatus, traceCtx, proxySpanID)
+			p.createStreamingSpan(spanCtx, provider, reqBody, parseData, startTime, endTime, ttfb, ttft, requestID, sessionID, effectiveUserID, tenantID, jobID, streamStatus, traceCtx, proxySpanID)
 		}()
 	} else {
 		slog.Debug("skipping streaming span (circuit open)", "provider", provider.Name, "request_id", requestID)
@@ -924,6 +945,7 @@ type spanParams struct {
 	sessionID       string
 	effectiveUserID string // resolved end-user identity (auth email > auth UID)
 	tenantID        string // downstream customer/tenant (from Baggage or header)
+	jobID           string // experiment/job ID (from Baggage or header)
 	inputContent    string
 	outputContent   string
 	inputTokens     int64
@@ -1074,6 +1096,9 @@ func (p *Proxy) buildSpan(ctx context.Context, params spanParams) {
 	// Set tenant ID for multitenant cost attribution.
 	span.TenantID = params.tenantID
 
+	// Set job ID for experiment/job-level cost attribution.
+	span.JobID = params.jobID
+
 	if p.submitter != nil {
 		p.submitter.SubmitBatch([]storage.Span{span})
 	}
@@ -1099,6 +1124,7 @@ func (p *Proxy) createSpan(
 	sessionID string,
 	effectiveUserID string,
 	tenantID string,
+	jobID string,
 	traceCtx *traceContext,
 	proxySpanID string,
 ) {
@@ -1115,6 +1141,7 @@ func (p *Proxy) createSpan(
 		model:           model,
 		effectiveUserID: effectiveUserID,
 		tenantID:        tenantID,
+		jobID:           jobID,
 		inputContent:    inputContent,
 		outputContent:   outputContent,
 		inputTokens:     inputTokens,
@@ -1144,6 +1171,7 @@ func (p *Proxy) createStreamingSpan(
 	sessionID string,
 	effectiveUserID string,
 	tenantID string,
+	jobID string,
 	streamStatus storage.SpanStatus,
 	traceCtx *traceContext,
 	proxySpanID string,
@@ -1156,6 +1184,7 @@ func (p *Proxy) createStreamingSpan(
 		model:           model,
 		effectiveUserID: effectiveUserID,
 		tenantID:        tenantID,
+		jobID:           jobID,
 		inputContent:    inputContent,
 		outputContent:   outputContent,
 		inputTokens:     inputTokens,

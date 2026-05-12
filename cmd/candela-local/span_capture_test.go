@@ -405,6 +405,7 @@ func TestSpanCapture_TenantID_Baggage(t *testing.T) {
 	for i := 0; i < 50; i++ {
 		spans, err = store.SearchSpans(context.Background(), storage.SpanQuery{
 			ProjectID: "local",
+			TenantID:  "baggage-tenant",
 			StartTime: time.Now().Add(-1 * time.Hour),
 			EndTime:   time.Now().Add(1 * time.Hour),
 			PageSize:  10,

@@ -801,9 +801,6 @@ func (s *Store) GetTenantLeaderboard(ctx context.Context, uq storage.UsageQuery,
 }
 
 func (s *Store) GetJobLeaderboard(ctx context.Context, uq storage.UsageQuery, limit int) ([]storage.JobUsageSummary, error) {
-	if limit <= 0 {
-		limit = 20
-	}
 	query := fmt.Sprintf(`SELECT job_id, COUNT(*) AS call_count, COALESCE(SUM(gen_ai_total_tokens),0) AS total_tokens, COALESCE(SUM(gen_ai_cost_usd),0) AS total_cost_usd, COALESCE(AVG(duration_ns),0) AS avg_duration_ns FROM %s WHERE project_id = @projectID AND start_time >= @startTime AND start_time <= @endTime AND job_id IS NOT NULL AND job_id != '' GROUP BY job_id ORDER BY total_cost_usd DESC LIMIT @limit`, quoteTable(s.tableID))
 	q := s.client.Query(query)
 	q.Parameters = []bigquery.QueryParameter{{Name: "projectID", Value: uq.ProjectID}, {Name: "startTime", Value: uq.StartTime}, {Name: "endTime", Value: uq.EndTime}, {Name: "limit", Value: limit}}

@@ -473,20 +473,24 @@ func TestSpanCapture_JobID(t *testing.T) {
 
 	// Poll for capture.
 	var spans *storage.SpanResult
+	var searchErr error
 	for i := 0; i < 20; i++ {
-		spans, _ = store.SearchSpans(context.Background(), storage.SpanQuery{
+		spans, searchErr = store.SearchSpans(context.Background(), storage.SpanQuery{
 			ProjectID: "local",
 			StartTime: time.Now().Add(-1 * time.Hour),
 			EndTime:   time.Now().Add(1 * time.Hour),
 			PageSize:  1,
 		})
-		if len(spans.Spans) > 0 {
+		if searchErr == nil && spans != nil && len(spans.Spans) > 0 {
 			break
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
 
-	if len(spans.Spans) == 0 {
+	if searchErr != nil {
+		t.Fatalf("SearchSpans failed: %v", searchErr)
+	}
+	if spans == nil || len(spans.Spans) == 0 {
 		t.Fatal("no spans captured")
 	}
 	s := spans.Spans[0]
@@ -504,13 +508,13 @@ func TestSpanCapture_JobID(t *testing.T) {
 	_ = resp.Body.Close()
 
 	for i := 0; i < 20; i++ {
-		spans, _ = store.SearchSpans(context.Background(), storage.SpanQuery{
+		spans, searchErr = store.SearchSpans(context.Background(), storage.SpanQuery{
 			ProjectID: "local",
 			StartTime: time.Now().Add(-1 * time.Hour),
 			EndTime:   time.Now().Add(1 * time.Hour),
 			PageSize:  10,
 		})
-		if len(spans.Spans) >= 2 {
+		if searchErr == nil && spans != nil && len(spans.Spans) >= 2 {
 			break
 		}
 		time.Sleep(100 * time.Millisecond)

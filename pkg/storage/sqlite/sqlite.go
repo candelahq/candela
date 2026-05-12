@@ -33,10 +33,17 @@ func New(cfg Config) (*Store, error) {
 		cfg.Path = "candela.db"
 	}
 
-	db, err := sql.Open("sqlite", cfg.Path)
+	dsn := cfg.Path
+	if dsn == ":memory:" {
+		dsn = "file::memory:?cache=shared"
+	}
+	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("opening sqlite: %w", err)
 	}
+	// SQLite does not support concurrent writers; constraining to 1 connection
+	// also ensures :memory: databases share a single in-memory instance.
+	db.SetMaxOpenConns(1)
 
 	// SQLite performance tuning.
 	for _, pragma := range []string{
@@ -104,6 +111,9 @@ func (s *Store) migrate() error {
 		// Migration: add tenant_id for multitenant cost attribution.
 		`ALTER TABLE spans ADD COLUMN tenant_id TEXT DEFAULT ''`,
 		`CREATE INDEX IF NOT EXISTS idx_spans_tenant ON spans(tenant_id)`,
+		// Migration: add job_id for job-level cost attribution.
+		`ALTER TABLE spans ADD COLUMN job_id TEXT DEFAULT ''`,
+		`CREATE INDEX IF NOT EXISTS idx_spans_job ON spans(job_id)`,
 	}
 
 	for _, q := range queries {
@@ -129,8 +139,8 @@ func (s *Store) IngestSpans(ctx context.Context, spans []storage.Span) error {
 		start_time, end_time, duration_ns, project_id, environment, service_name,
 		gen_ai_model, gen_ai_provider, gen_ai_input_tokens, gen_ai_output_tokens,
 		gen_ai_total_tokens, gen_ai_cost_usd, gen_ai_temperature, gen_ai_max_tokens,
-		gen_ai_input_content, gen_ai_output_content, attributes_json, user_id, session_id, tenant_id
-	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+		gen_ai_input_content, gen_ai_output_content, attributes_json, user_id, session_id, tenant_id, job_id
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
 	if err != nil {
 		return fmt.Errorf("preparing stmt: %w", err)
 	}
@@ -162,6 +172,7 @@ func (s *Store) IngestSpans(ctx context.Context, spans []storage.Span) error {
 			span.UserID,
 			span.SessionID,
 			span.TenantID,
+			span.JobID,
 		)
 		if err != nil {
 			return fmt.Errorf("inserting span: %w", err)
@@ -177,7 +188,7 @@ func (s *Store) GetTrace(ctx context.Context, traceID string) (*storage.Trace, e
 			start_time, end_time, duration_ns, project_id, environment, service_name,
 			gen_ai_model, gen_ai_provider, gen_ai_input_tokens, gen_ai_output_tokens,
 			gen_ai_total_tokens, gen_ai_cost_usd, gen_ai_temperature, gen_ai_max_tokens,
-			gen_ai_input_content, gen_ai_output_content, attributes_json, user_id, session_id, tenant_id
+			gen_ai_input_content, gen_ai_output_content, attributes_json, user_id, session_id, tenant_id, job_id
 		FROM spans WHERE trace_id = ? ORDER BY start_time ASC
 	`, traceID)
 	if err != nil {
@@ -287,7 +298,7 @@ func (s *Store) SearchSpans(ctx context.Context, q storage.SpanQuery) (*storage.
 			start_time, end_time, duration_ns, project_id, environment, service_name,
 			gen_ai_model, gen_ai_provider, gen_ai_input_tokens, gen_ai_output_tokens,
 			gen_ai_total_tokens, gen_ai_cost_usd, gen_ai_temperature, gen_ai_max_tokens,
-			gen_ai_input_content, gen_ai_output_content, attributes_json, user_id, session_id, tenant_id
+			gen_ai_input_content, gen_ai_output_content, attributes_json, user_id, session_id, tenant_id, job_id
 		FROM spans
 		WHERE project_id = ? AND start_time >= ? AND start_time <= ?
 			AND (? = 0 OR kind = ?)
@@ -481,9 +492,6 @@ func (s *Store) GetTenantLeaderboard(ctx context.Context, q storage.UsageQuery, 
 }
 
 func (s *Store) GetJobLeaderboard(ctx context.Context, q storage.UsageQuery, limit int) ([]storage.JobUsageSummary, error) {
-	if limit <= 0 {
-		limit = 20
-	}
 	rows, err := s.db.QueryContext(ctx, `SELECT job_id, COUNT(*), COALESCE(SUM(gen_ai_total_tokens),0), COALESCE(SUM(gen_ai_cost_usd),0), COALESCE(AVG(duration_ns),0)/1000000.0, '' AS top_model FROM spans WHERE project_id = ? AND start_time >= ? AND start_time <= ? AND job_id IS NOT NULL AND job_id != '' GROUP BY job_id ORDER BY SUM(gen_ai_cost_usd) DESC LIMIT ?`, q.ProjectID, q.StartTime.Format(time.RFC3339Nano), q.EndTime.Format(time.RFC3339Nano), limit)
 	if err != nil {
 		return nil, fmt.Errorf("querying job leaderboard: %w", err)
@@ -533,6 +541,7 @@ func scanSpans(rows *sql.Rows) ([]storage.Span, error) {
 			&span.UserID,
 			&span.SessionID,
 			&span.TenantID,
+			&span.JobID,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("scanning span: %w", err)

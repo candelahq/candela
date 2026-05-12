@@ -469,9 +469,6 @@ func (s *Store) GetTenantLeaderboard(ctx context.Context, q storage.UsageQuery, 
 }
 
 func (s *Store) GetJobLeaderboard(ctx context.Context, q storage.UsageQuery, limit int) ([]storage.JobUsageSummary, error) {
-	if limit <= 0 {
-		limit = 20
-	}
 	rows, err := s.db.QueryContext(ctx, `SELECT job_id, COUNT(*)::BIGINT, COALESCE(SUM(gen_ai_total_tokens),0)::BIGINT, COALESCE(SUM(gen_ai_cost_usd),0)::DOUBLE, COALESCE(AVG(duration_ns),0)::DOUBLE/1000000.0, '' AS top_model FROM spans WHERE project_id = ? AND start_time >= ? AND start_time <= ? AND job_id IS NOT NULL AND job_id != '' GROUP BY job_id ORDER BY SUM(gen_ai_cost_usd) DESC LIMIT ?`, q.ProjectID, q.StartTime, q.EndTime, limit)
 	if err != nil {
 		return nil, fmt.Errorf("querying job leaderboard: %w", err)

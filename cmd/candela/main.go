@@ -1,17 +1,19 @@
-// candela-local is a lightweight reverse proxy that runs on a developer's
-// machine. It injects an IAP-compatible OIDC identity token (via Application
-// Default Credentials) into every outbound request to the remote Candela
-// server, making authentication seamless for tools like Zed, OpenCode, etc.
+// candela is a lightweight reverse proxy and CLI for LLM observability.
+// It runs on a developer's machine, providing traces, costs, and budgets
+// for AI-powered dev tools.
 //
 // Usage:
 //
-//	candela-local                      # reads ~/.config/candela/config.yaml
-//	candela-local --config ./my.yaml   # custom config
-//	candela-local --remote https://candela-xxx.run.app --audience 12345 --port 8181
+//	candela start                      # start proxy in background
+//	candela stop                       # stop the background proxy
+//	candela status                     # check if proxy is running
+//	candela run                        # run in foreground (debug)
+//	candela run --config ./my.yaml     # custom config
+//	candela version                    # print version info
 //
 // Install:
 //
-//	go install github.com/candelahq/candela/cmd/candela-local@latest
+//	brew install candelahq/tap/candela
 package main
 
 import (
@@ -29,6 +31,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -88,12 +91,249 @@ type VertexAIConfig struct {
 	Region  string `yaml:"region"`  // GCP region (default: us-central1)
 }
 
+// version is set at build time via ldflags.
+var version = "dev"
+
+// pidFilePath returns the path to the PID file: ~/.candela/candela.pid
+func pidFilePath() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(home, ".candela", "candela.pid")
+}
+
 func main() {
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
 		Level: slog.LevelInfo,
 	}))
 	slog.SetDefault(logger)
 
+	// Subcommand dispatch.
+	cmd := ""
+	if len(os.Args) > 1 {
+		cmd = os.Args[1]
+	}
+
+	switch cmd {
+	case "run":
+		// Strip "run" from os.Args so flag.Parse sees the flags.
+		os.Args = append(os.Args[:1], os.Args[2:]...)
+		runForeground()
+	case "start":
+		cmdStart()
+	case "stop":
+		cmdStop()
+	case "status":
+		cmdStatus()
+	case "version":
+		fmt.Printf("candela %s\n", version)
+	default:
+		// No subcommand or unknown → show help.
+		fmt.Fprintf(os.Stderr, `candela — LLM observability proxy
+
+Usage:
+  candela start          Start proxy in background
+  candela stop           Stop the background proxy
+  candela status         Show proxy status
+  candela run [flags]    Run in foreground
+  candela version        Print version
+
+Run flags:
+  --config <path>        Config file (default: ~/.config/candela/config.yaml)
+  --remote <url>         Remote Candela server URL
+  --audience <id>        IAP OAuth Client ID
+  --port <port>          Local port (default: 8181)
+`)
+		os.Exit(1)
+	}
+}
+
+// cmdStart launches `candela run` as a background process and writes a PID file.
+func cmdStart() {
+	pidPath := pidFilePath()
+	if pidPath == "" {
+		slog.Error("cannot determine home directory")
+		os.Exit(1)
+	}
+
+	// Check if already running.
+	if data, err := os.ReadFile(pidPath); err == nil {
+		if pid, err := strconv.Atoi(strings.TrimSpace(string(data))); err == nil {
+			if process, err := os.FindProcess(pid); err == nil {
+				// Signal 0 checks if process exists.
+				if process.Signal(syscall.Signal(0)) == nil {
+					fmt.Printf("🕯️ candela is already running (PID %d)\n", pid)
+					return
+				}
+			}
+		}
+		// Stale PID file — clean up.
+		_ = os.Remove(pidPath)
+	}
+
+	// Ensure ~/.candela/ exists.
+	if err := os.MkdirAll(filepath.Dir(pidPath), 0o700); err != nil {
+		slog.Error("failed to create candela directory", "error", err)
+		os.Exit(1)
+	}
+
+	// Find our own executable.
+	exe, err := os.Executable()
+	if err != nil {
+		slog.Error("cannot find candela executable", "error", err)
+		os.Exit(1)
+	}
+
+	// Open log file for the background process.
+	// Rotate: truncate if over 10 MB to prevent unbounded growth.
+	logPath := filepath.Join(filepath.Dir(pidPath), "candela.log")
+	const maxLogSize = 10 << 20 // 10 MB
+	if info, err := os.Stat(logPath); err == nil && info.Size() > maxLogSize {
+		_ = os.Truncate(logPath, 0)
+	}
+	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	if err != nil {
+		slog.Warn("cannot open log file — background output will be lost", "path", logPath, "error", err)
+	}
+
+	// Forward any extra args after "start" to "run".
+	args := append([]string{"run"}, os.Args[2:]...)
+	cmd := exec.Command(exe, args...)
+	cmd.Stdout = logFile
+	cmd.Stderr = logFile
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+
+	if err := cmd.Start(); err != nil {
+		slog.Error("failed to start candela", "error", err)
+		os.Exit(1)
+	}
+
+	// Write PID file.
+	if err := os.WriteFile(pidPath, []byte(strconv.Itoa(cmd.Process.Pid)), 0o644); err != nil {
+		slog.Warn("failed to write PID file", "path", pidPath, "error", err)
+	}
+
+	// Resolve port from args or config for display.
+	port := resolvePort(os.Args[2:])
+
+	fmt.Printf("🕯️ candela started (PID %d)\n", cmd.Process.Pid)
+	fmt.Printf("   proxy: http://127.0.0.1:%d\n", port)
+	fmt.Printf("   UI:    http://127.0.0.1:%d/_local/\n", port)
+	fmt.Printf("   logs:  %s\n", logPath)
+}
+
+// cmdStop reads the PID file and sends SIGTERM.
+func cmdStop() {
+	pidPath := pidFilePath()
+	if pidPath == "" {
+		slog.Error("cannot determine home directory")
+		os.Exit(1)
+	}
+
+	data, err := os.ReadFile(pidPath)
+	if err != nil {
+		fmt.Println("candela is not running (no PID file)")
+		return
+	}
+
+	pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
+	if err != nil {
+		fmt.Println("candela is not running (invalid PID file)")
+		_ = os.Remove(pidPath)
+		return
+	}
+
+	process, err := os.FindProcess(pid)
+	if err != nil || process.Signal(syscall.Signal(0)) != nil {
+		fmt.Println("candela is not running (stale PID file)")
+		_ = os.Remove(pidPath)
+		return
+	}
+
+	// Send SIGTERM for graceful shutdown.
+	if err := process.Signal(syscall.SIGTERM); err != nil {
+		slog.Error("failed to stop candela", "pid", pid, "error", err)
+		os.Exit(1)
+	}
+
+	// Wait for process to exit before removing PID file.
+	for i := 0; i < 10; i++ {
+		if process.Signal(syscall.Signal(0)) != nil {
+			break
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+
+	_ = os.Remove(pidPath)
+	fmt.Printf("🛑 candela stopped (PID %d)\n", pid)
+}
+
+// cmdStatus checks the PID file and health endpoint.
+func cmdStatus() {
+	pidPath := pidFilePath()
+	if pidPath == "" {
+		fmt.Println("● candela: stopped")
+		return
+	}
+
+	data, err := os.ReadFile(pidPath)
+	if err != nil {
+		fmt.Println("● candela: stopped")
+		return
+	}
+
+	pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
+	if err != nil {
+		fmt.Println("● candela: stopped (invalid PID file)")
+		return
+	}
+
+	process, err := os.FindProcess(pid)
+	if err != nil || process.Signal(syscall.Signal(0)) != nil {
+		fmt.Println("● candela: stopped (stale PID file)")
+		_ = os.Remove(pidPath)
+		return
+	}
+
+	// Check health endpoint — /_local/ is always served regardless of mode.
+	port := resolvePort(nil)
+	client := &http.Client{Timeout: 2 * time.Second}
+	resp, err := client.Get(fmt.Sprintf("http://127.0.0.1:%d/_local/", port))
+	status := "running (not responding)"
+	if err == nil {
+		defer func() { _ = resp.Body.Close() }()
+		if resp.StatusCode == 200 {
+			status = "running"
+		}
+	}
+
+	fmt.Printf("● candela: %s\n", status)
+	fmt.Printf("  PID:   %d\n", pid)
+	fmt.Printf("  proxy: http://127.0.0.1:%d\n", port)
+	fmt.Printf("  UI:    http://127.0.0.1:%d/_local/\n", port)
+}
+
+// resolvePort returns the configured port by checking args then config file.
+func resolvePort(args []string) int {
+	// Check --port in args.
+	for i, arg := range args {
+		if arg == "--port" && i+1 < len(args) {
+			if p, err := strconv.Atoi(args[i+1]); err == nil {
+				return p
+			}
+		}
+	}
+	// Check config file.
+	cfg := loadConfig("")
+	if cfg.Port != 0 {
+		return cfg.Port
+	}
+	return 8181
+}
+
+// runForeground runs the proxy in the foreground (the original main behavior).
+func runForeground() {
 	// ── Flags ──
 	var (
 		configPath string
@@ -220,7 +460,7 @@ func main() {
 
 				// Preserve the original path.
 				if _, ok := req.Header["User-Agent"]; !ok {
-					req.Header.Set("User-Agent", "candela-local/1.0")
+					req.Header.Set("User-Agent", "candela/1.0")
 				}
 			},
 			ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
@@ -256,7 +496,7 @@ func main() {
 				}
 				req.URL.Path = singleJoiningSlash(localURL.Path, stripped)
 				if _, ok := req.Header["User-Agent"]; !ok {
-					req.Header.Set("User-Agent", "candela-local/1.0")
+					req.Header.Set("User-Agent", "candela/1.0")
 				}
 			},
 			ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
@@ -404,10 +644,10 @@ func main() {
 
 	go func() {
 		if soloMode {
-			slog.Info("🕯️ candela-local started (solo mode)",
+			slog.Info("🕯️ candela started (solo mode)",
 				"local", fmt.Sprintf("http://%s", addr))
 		} else {
-			slog.Info("🕯️ candela-local proxy started",
+			slog.Info("🕯️ candela proxy started",
 				"local", fmt.Sprintf("http://%s", addr),
 				"remote", cfg.Remote,
 				"audience", cfg.Audience[:min(20, len(cfg.Audience))]+"...")
@@ -467,7 +707,7 @@ func main() {
 	if stateDB != nil {
 		_ = stateDB.Close()
 	}
-	slog.Info("candela-local stopped")
+	slog.Info("candela stopped")
 }
 
 // loadConfig reads the candela-local config file.
@@ -579,7 +819,7 @@ func buildLocalProxy(upstream string) *httputil.ReverseProxy {
 			req.URL.Host = u.Host
 			req.Host = u.Host
 			if _, ok := req.Header["User-Agent"]; !ok {
-				req.Header.Set("User-Agent", "candela-local/1.0")
+				req.Header.Set("User-Agent", "candela/1.0")
 			}
 		},
 		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {

@@ -193,7 +193,7 @@ func main() {
 		connecthandlers.NewIngestionHandlerDirect(proc))
 	mux.Handle(ingestionPath, ingestionH)
 
-	dashboardPath, dashboardH := candelav1connect.NewDashboardServiceHandlerWithJob(
+	dashboardPath, dashboardH := candelav1connect.NewDashboardServiceHandler(
 		connecthandlers.NewDashboardHandler(reader, userStore))
 	mux.Handle(dashboardPath, dashboardH)
 

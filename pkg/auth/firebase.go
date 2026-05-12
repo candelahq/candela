@@ -285,7 +285,7 @@ func NewServiceAccountAllowlist(emails []string) *ServiceAccountAllowlist {
 // IsAllowed reports whether the given email is on the allowlist.
 // Returns false if the allowlist is empty (deny-by-default).
 func (a *ServiceAccountAllowlist) IsAllowed(email string) bool {
-	return a.allowed[strings.ToLower(email)]
+	return a.allowed[strings.ToLower(strings.TrimSpace(email))]
 }
 
 // Len returns the number of entries in the allowlist.

@@ -307,3 +307,79 @@ func TestSearchSpans(t *testing.T) {
 		t.Errorf("got %d spans, want 1 (LLM only)", len(result.Spans))
 	}
 }
+func TestGetTenantLeaderboard(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(time.Microsecond)
+
+	spans := []storage.Span{
+		{
+			SpanID: "s1", TraceID: "t1", Name: "llm.chat",
+			Kind: storage.SpanKindLLM, Status: storage.SpanStatusOK,
+			StartTime: now, EndTime: now.Add(time.Second), Duration: time.Second,
+			ProjectID: "proj-1", TenantID: "tenant-a",
+			GenAI: &storage.GenAIAttributes{
+				Model: "gpt-4o", Provider: "openai",
+				InputTokens: 100, OutputTokens: 50, TotalTokens: 150, CostUSD: 0.01,
+			},
+		},
+		{
+			SpanID: "s2", TraceID: "t1", Name: "llm.chat",
+			Kind: storage.SpanKindLLM, Status: storage.SpanStatusOK,
+			StartTime: now, EndTime: now.Add(time.Second), Duration: time.Second,
+			ProjectID: "proj-1", TenantID: "tenant-a",
+			GenAI: &storage.GenAIAttributes{
+				Model: "gpt-4o", Provider: "openai",
+				InputTokens: 100, OutputTokens: 50, TotalTokens: 150, CostUSD: 0.01,
+			},
+		},
+		{
+			SpanID: "s3", TraceID: "t2", Name: "llm.chat",
+			Kind: storage.SpanKindLLM, Status: storage.SpanStatusOK,
+			StartTime: now, EndTime: now.Add(time.Second), Duration: time.Second,
+			ProjectID: "proj-1", TenantID: "tenant-b",
+			GenAI: &storage.GenAIAttributes{
+				Model: "claude-3-opus", Provider: "anthropic",
+				InputTokens: 200, OutputTokens: 100, TotalTokens: 300, CostUSD: 0.05,
+			},
+		},
+	}
+
+	if err := s.IngestSpans(ctx, spans); err != nil {
+		t.Fatalf("ingest failed: %v", err)
+	}
+
+	leaderboard, err := s.GetTenantLeaderboard(ctx, storage.UsageQuery{
+		ProjectID: "proj-1",
+		StartTime: now.Add(-time.Hour),
+		EndTime:   now.Add(time.Hour),
+	}, 10)
+	if err != nil {
+		t.Fatalf("leaderboard failed: %v", err)
+	}
+
+	if len(leaderboard) != 2 {
+		t.Fatalf("got %d tenants, want 2", len(leaderboard))
+	}
+
+	// tenant-b should be first (cost 0.05 vs 0.02).
+	if leaderboard[0].TenantID != "tenant-b" {
+		t.Errorf("first tenant = %s, want tenant-b", leaderboard[0].TenantID)
+	}
+	if leaderboard[0].CostUSD != 0.05 {
+		t.Errorf("tenant-b cost = %f, want 0.05", leaderboard[0].CostUSD)
+	}
+	if leaderboard[0].TopModel != "claude-3-opus" {
+		t.Errorf("tenant-b top_model = %q, want claude-3-opus", leaderboard[0].TopModel)
+	}
+
+	if leaderboard[1].TenantID != "tenant-a" {
+		t.Errorf("second tenant = %s, want tenant-a", leaderboard[1].TenantID)
+	}
+	if leaderboard[1].CallCount != 2 {
+		t.Errorf("tenant-a calls = %d, want 2", leaderboard[1].CallCount)
+	}
+	if leaderboard[1].CostUSD != 0.02 {
+		t.Errorf("tenant-a cost = %f, want 0.02", leaderboard[1].CostUSD)
+	}
+}

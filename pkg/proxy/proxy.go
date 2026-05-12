@@ -26,6 +26,7 @@ import (
 
 	"golang.org/x/oauth2"
 
+	"github.com/candelahq/candela/pkg/attribution"
 	"github.com/candelahq/candela/pkg/auth"
 	"github.com/candelahq/candela/pkg/costcalc"
 	"github.com/candelahq/candela/pkg/notify"
@@ -109,6 +110,10 @@ func DefaultProviders() []Provider {
 		// Anthropic via Vertex AI. Override upstream via config for your region/project:
 		// https://{REGION}-aiplatform.googleapis.com/v1/projects/{PROJECT}/locations/{REGION}/publishers/anthropic/models
 		{Name: "anthropic", UpstreamURL: "https://us-central1-aiplatform.googleapis.com"},
+		// Anthropic Direct — native Messages API passthrough to api.anthropic.com.
+		// No format translation, no Vertex AI, no ADC. Client provides its own API key.
+		// Use this for Claude Code, pencil.dev, and other tools that speak native Anthropic.
+		{Name: "anthropic-direct", UpstreamURL: "https://api.anthropic.com"},
 	}
 }
 
@@ -358,45 +363,19 @@ func rewriteModelField(body []byte, newModel string) []byte {
 // Also used to validate X-Session-Id and X-Candela-Tenant-Id.
 var requestIDPattern = regexp.MustCompile(`^[a-zA-Z0-9\-]{1,128}$`)
 
-// tenantIDPattern is slightly looser than requestIDPattern — allows dots and
-// underscores for domain-style tenant IDs (e.g. "acme.corp", "tenant_42").
-var tenantIDPattern = regexp.MustCompile(`^[a-zA-Z0-9\-._]{1,128}$`)
+// tenantIDPattern delegates to attribution.IDPattern for backward compatibility
+// with tests in this package.
+var tenantIDPattern = attribution.IDPattern
 
-// parseBaggage extracts candela.tenant_id from W3C Baggage header value(s).
-// W3C Baggage format: "key1=val1;prop, key2=val2" (RFC 8941 list).
-// A single request may carry multiple Baggage headers; we join them all.
-// Baggage keys are case-insensitive per RFC 8941 — EqualFold is used.
-// ADK's OTel propagator injects Baggage automatically when context has baggage
-// set, making this the preferred propagation path for multitenant applications.
-//
-// If multiple candela.tenant_id entries are present (RFC 8941 allows duplicates),
-// the first valid one wins. Invalid values are warned and skipped.
-func parseBaggage(header string) string {
-	if header == "" {
-		return ""
-	}
-	for _, member := range strings.Split(header, ",") {
-		// Each member may have properties after a semicolon: "key=value;prop".
-		kv := strings.SplitN(strings.TrimSpace(member), ";", 2)[0]
-		parts := strings.SplitN(kv, "=", 2)
-		// RFC 8941: Baggage keys are case-insensitive.
-		if len(parts) == 2 && strings.EqualFold(strings.TrimSpace(parts[0]), "candela.tenant_id") {
-			val := strings.TrimSpace(parts[1])
-			if tenantIDPattern.MatchString(val) {
-				return val
-			}
-			slog.Warn("skipping invalid candela.tenant_id in Baggage header",
-				"value", val)
-			// Continue scanning — there may be a valid duplicate entry later.
-		}
-	}
-	return ""
+// parseBaggage delegates to the shared attribution package.
+// Kept as a package-level function for test compatibility.
+func parseBaggage(header string) (tenantID, jobID string) {
+	return attribution.ParseBaggage(header)
 }
 
-// parseBaggageHeaders joins multiple Baggage header values (W3C allows multiple
-// header instances) and delegates to parseBaggage for extraction.
-func parseBaggageHeaders(values []string) string {
-	return parseBaggage(strings.Join(values, ","))
+// parseBaggageHeaders delegates to the shared attribution package.
+func parseBaggageHeaders(values []string) (tenantID, jobID string) {
+	return attribution.ParseBaggageHeaders(values)
 }
 
 func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
@@ -416,21 +395,9 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 		sessionID = "" // invalid → discard
 	}
 
-	// ── Tenant ID extraction (for multitenant cost attribution) ──
-	// Precedence: W3C Baggage (candela.tenant_id) wins over X-Candela-Tenant-Id header.
-	//
-	// Use r.Header.Values (not .Get) to handle multiple Baggage header instances —
-	// W3C spec and some HTTP/1.1 proxies send separate Baggage lines per entry.
-	tenantID := parseBaggageHeaders(r.Header.Values("Baggage"))
-	if tenantID == "" {
-		// Fallback: explicit header (non-OTel callers, tests, simple scripts).
-		hdr := r.Header.Get("X-Candela-Tenant-Id")
-		if tenantIDPattern.MatchString(hdr) {
-			tenantID = hdr
-		} else if hdr != "" {
-			slog.Warn("discarding invalid X-Candela-Tenant-Id header", "value", hdr)
-		}
-	}
+	// ── Tenant ID & Job ID extraction (for multitenant cost attribution) ──
+	attr := attribution.FromRequest(r)
+	tenantID, jobID := attr.TenantID, attr.JobID
 
 	// Extract W3C Trace Context for trace correlation with OTel-instrumented
 	// callers (e.g. Google ADK, LangChain). When present, the proxy span
@@ -649,9 +616,9 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 	cbAllow := p.breakers[providerName].AllowRequest()
 
 	if isStreaming && resp.StatusCode == http.StatusOK {
-		p.handleStreamingResponse(w, r, resp, provider, reqBody, startTime, ttfb, requestID, sessionID, effectiveUserID, tenantID, cbAllow, traceCtx, proxySpanID)
+		p.handleStreamingResponse(w, r, resp, provider, reqBody, startTime, ttfb, requestID, sessionID, effectiveUserID, tenantID, jobID, cbAllow, traceCtx, proxySpanID)
 	} else {
-		p.handleStandardResponse(w, r, resp, provider, reqBody, startTime, ttfb, requestID, sessionID, effectiveUserID, tenantID, cbAllow, traceCtx, proxySpanID)
+		p.handleStandardResponse(w, r, resp, provider, reqBody, startTime, ttfb, requestID, sessionID, effectiveUserID, tenantID, jobID, cbAllow, traceCtx, proxySpanID)
 	}
 }
 
@@ -682,6 +649,7 @@ func (p *Proxy) handleStandardResponse(
 	sessionID string,
 	effectiveUserID string,
 	tenantID string,
+	jobID string,
 	cbAllow bool,
 	traceCtx *traceContext,
 	proxySpanID string,
@@ -734,7 +702,7 @@ func (p *Proxy) handleStandardResponse(
 	// latency. Previously this ran inside the async span goroutine, causing
 	// CheckBudget to read stale spend data and allowing sequential calls to
 	// overshoot the budget (e.g. $9.45 spent on a $5 limit).
-if cbAllow && p.users != nil && effectiveUserID != "" {
+	if cbAllow && p.users != nil && effectiveUserID != "" {
 		model, _ := extractRequestInfo(provider.Name, reqBody)
 		_, inputTokens, outputTokens := extractResponseInfo(provider.Name, respBody)
 		deductCtx, deductCancel := context.WithTimeout(context.WithoutCancel(r.Context()), 15*time.Second)
@@ -747,7 +715,7 @@ if cbAllow && p.users != nil && effectiveUserID != "" {
 		spanCtx, spanCancel := context.WithTimeout(context.WithoutCancel(r.Context()), 30*time.Second)
 		go func() {
 			defer spanCancel()
-			p.createSpan(spanCtx, provider, reqBody, respBody, startTime, endTime, resp.StatusCode, ttfb, requestID, sessionID, effectiveUserID, tenantID, traceCtx, proxySpanID)
+			p.createSpan(spanCtx, provider, reqBody, respBody, startTime, endTime, resp.StatusCode, ttfb, requestID, sessionID, effectiveUserID, tenantID, jobID, traceCtx, proxySpanID)
 		}()
 	} else {
 		slog.Debug("skipping span creation (circuit open)", "provider", provider.Name, "request_id", requestID)
@@ -763,6 +731,7 @@ func (p *Proxy) handleStreamingResponse(
 	sessionID string,
 	effectiveUserID string,
 	tenantID string,
+	jobID string,
 	cbAllow bool,
 	traceCtx *traceContext,
 	proxySpanID string,
@@ -889,7 +858,7 @@ func (p *Proxy) handleStreamingResponse(
 		streamStatus = storage.SpanStatusError
 	}
 	// ── Budget deduction (SYNCHRONOUS) — same rationale as handleStandardResponse.
-if cbAllow && p.users != nil && effectiveUserID != "" {
+	if cbAllow && p.users != nil && effectiveUserID != "" {
 		model, _ := extractRequestInfo(provider.Name, reqBody)
 		_, inputTokens, outputTokens := extractStreamingUsage(provider.Name, parseData)
 		deductCtx, deductCancel := context.WithTimeout(context.WithoutCancel(r.Context()), 15*time.Second)
@@ -902,7 +871,7 @@ if cbAllow && p.users != nil && effectiveUserID != "" {
 		spanCtx, spanCancel := context.WithTimeout(context.WithoutCancel(r.Context()), 30*time.Second)
 		go func() {
 			defer spanCancel()
-			p.createStreamingSpan(spanCtx, provider, reqBody, parseData, startTime, endTime, ttfb, ttft, requestID, sessionID, effectiveUserID, tenantID, streamStatus, traceCtx, proxySpanID)
+			p.createStreamingSpan(spanCtx, provider, reqBody, parseData, startTime, endTime, ttfb, ttft, requestID, sessionID, effectiveUserID, tenantID, jobID, streamStatus, traceCtx, proxySpanID)
 		}()
 	} else {
 		slog.Debug("skipping streaming span (circuit open)", "provider", provider.Name, "request_id", requestID)
@@ -918,6 +887,7 @@ type spanParams struct {
 	sessionID       string
 	effectiveUserID string // resolved end-user identity (auth email > auth UID)
 	tenantID        string // downstream customer/tenant (from Baggage or header)
+	jobID           string // experiment/job ID (from Baggage or header)
 	inputContent    string
 	outputContent   string
 	inputTokens     int64
@@ -967,7 +937,7 @@ func (p *Proxy) deductBudget(ctx context.Context, provider Provider, model, user
 				"attempt", attempt+1,
 				"backoff_ms", backoff.Milliseconds(),
 				"error", deductErr)
-select {
+			select {
 			case <-ctx.Done():
 				return
 			case <-time.After(backoff):
@@ -1068,6 +1038,9 @@ func (p *Proxy) buildSpan(ctx context.Context, params spanParams) {
 	// Set tenant ID for multitenant cost attribution.
 	span.TenantID = params.tenantID
 
+	// Set job ID for experiment/job-level cost attribution.
+	span.JobID = params.jobID
+
 	if p.submitter != nil {
 		p.submitter.SubmitBatch([]storage.Span{span})
 	}
@@ -1093,6 +1066,7 @@ func (p *Proxy) createSpan(
 	sessionID string,
 	effectiveUserID string,
 	tenantID string,
+	jobID string,
 	traceCtx *traceContext,
 	proxySpanID string,
 ) {
@@ -1109,6 +1083,7 @@ func (p *Proxy) createSpan(
 		model:           model,
 		effectiveUserID: effectiveUserID,
 		tenantID:        tenantID,
+		jobID:           jobID,
 		inputContent:    inputContent,
 		outputContent:   outputContent,
 		inputTokens:     inputTokens,
@@ -1138,6 +1113,7 @@ func (p *Proxy) createStreamingSpan(
 	sessionID string,
 	effectiveUserID string,
 	tenantID string,
+	jobID string,
 	streamStatus storage.SpanStatus,
 	traceCtx *traceContext,
 	proxySpanID string,
@@ -1150,6 +1126,7 @@ func (p *Proxy) createStreamingSpan(
 		model:           model,
 		effectiveUserID: effectiveUserID,
 		tenantID:        tenantID,
+		jobID:           jobID,
 		inputContent:    inputContent,
 		outputContent:   outputContent,
 		inputTokens:     inputTokens,
@@ -1196,7 +1173,15 @@ func forwardHeaders(src *http.Request, dst *http.Request, provider string) {
 	case "anthropic":
 		// Anthropic via Vertex AI uses Authorization: Bearer (ADC token).
 		// Direct API uses X-Api-Key. Forward both for flexibility.
-		for _, h := range []string{"X-Api-Key", "Anthropic-Version"} {
+		for _, h := range []string{"X-Api-Key", "Anthropic-Version", "Anthropic-Beta"} {
+			if v := src.Header.Get(h); v != "" {
+				dst.Header.Set(h, v)
+			}
+		}
+	case "anthropic-direct":
+		// Native Anthropic Messages API — forward all required headers.
+		// Claude Code requires anthropic-beta and anthropic-version to be forwarded.
+		for _, h := range []string{"X-Api-Key", "Anthropic-Version", "Anthropic-Beta"} {
 			if v := src.Header.Get(h); v != "" {
 				dst.Header.Set(h, v)
 			}

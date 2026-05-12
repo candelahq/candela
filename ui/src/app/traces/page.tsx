@@ -139,6 +139,16 @@ export default function TracesPage() {
                 <option value="error">Error</option>
               </select>
             </div>
+            <div className="filter-group">
+              <label className="filter-label">Job ID</label>
+              <input
+                type="text"
+                placeholder="e.g. experiment-1"
+                value={filters.jobId}
+                onChange={(e) => updateFilters({ jobId: e.target.value })}
+                className="filter-input"
+              />
+            </div>
             {hasActiveFilters && (
               <button className="btn filter-reset-btn" onClick={clearFilters}>
                 ✕ Clear all
@@ -218,6 +228,7 @@ export default function TracesPage() {
                   <th>Cost</th>
                   <th>Latency</th>
                   <th>Status</th>
+                  <th>Job ID</th>
                   <th>Time</th>
                 </tr>
               </thead>
@@ -245,6 +256,9 @@ export default function TracesPage() {
                       <td>{t.durationMs.toFixed(0)}ms</td>
                       <td>
                         <span className={`badge ${st.cls}`}>{st.text}</span>
+                      </td>
+                      <td className="mono" style={{ fontSize: 11 }}>
+                        {t.jobId || "—"}
                       </td>
                       <td style={{ color: "var(--text-muted)", fontSize: 12 }}>
                         {t.startTime}

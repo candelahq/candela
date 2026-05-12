@@ -35,6 +35,8 @@ type spanJSON struct {
 	Status       string  `json:"status"`
 	Timestamp    string  `json:"timestamp"`
 	Name         string  `json:"name"`
+	TenantID     string  `json:"tenant_id,omitempty"`
+	JobID        string  `json:"job_id,omitempty"`
 }
 
 func newTracesHandler(reader storage.SpanReader) http.Handler {
@@ -75,6 +77,8 @@ func (h *tracesHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		EndTime:   now,
 		Kind:      storage.SpanKindLLM,
 		PageSize:  limit,
+		TenantID:  r.URL.Query().Get("tenant_id"),
+		JobID:     r.URL.Query().Get("job_id"),
 	})
 	if err != nil {
 		slog.Error("failed to query traces", "error", err)
@@ -94,6 +98,8 @@ func (h *tracesHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			DurationMs: float64(s.Duration.Milliseconds()),
 			Status:     statusString(s.Status),
 			Timestamp:  s.StartTime.Format(time.RFC3339),
+			TenantID:   s.TenantID,
+			JobID:      s.JobID,
 		}
 		if s.GenAI != nil {
 			sj.Model = s.GenAI.Model

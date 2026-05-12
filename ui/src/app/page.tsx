@@ -137,6 +137,51 @@ export default function DashboardPage() {
           </div>
         </div>
 
+        {/* Job Leaderboard */}
+        <div className="table-container animate-in" style={{ animationDelay: "0.08s", marginBottom: 24 }}>
+          <div className="table-header">
+            <span className="table-title">Top Experiments (Job Leaderboard)</span>
+          </div>
+          {!summary || summary.jobLeaderboard.length === 0 ? (
+            <div className="empty-state" style={{ minHeight: 120 }}>
+              <div className="empty-state-title">No job data yet</div>
+            </div>
+          ) : (
+            <table>
+              <thead>
+                <tr>
+                  <th>Job ID</th>
+                  <th>Requests</th>
+                  <th>Tokens</th>
+                  <th>Total Cost</th>
+                  <th style={{ width: 120 }}>Cost Distribution</th>
+                </tr>
+              </thead>
+              <tbody>
+                {summary.jobLeaderboard.map((j) => {
+                  const percent = summary.totalCostUsd > 0 ? (j.costUsd / summary.totalCostUsd) * 100 : 0;
+                  return (
+                    <tr key={j.jobId}>
+                      <td className="mono">{j.jobId}</td>
+                      <td>{j.callCount.toLocaleString()}</td>
+                      <td>{j.totalTokens.toLocaleString()}</td>
+                      <td>${j.costUsd.toFixed(4)}</td>
+                      <td>
+                        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                          <div style={{ flex: 1, height: 4, background: "var(--bg-tertiary)", borderRadius: 2 }}>
+                            <div style={{ height: "100%", width: `${Math.min(100, percent)}%`, background: "var(--accent)", borderRadius: 2 }} />
+                          </div>
+                          <span style={{ fontSize: 11, color: "var(--text-muted)", width: 30 }}>{percent.toFixed(0)}%</span>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          )}
+        </div>
+
         {/* Recent Traces */}
         <div className="table-container animate-in" style={{ animationDelay: "0.1s" }}>
           <div className="table-header">

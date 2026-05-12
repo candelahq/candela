@@ -108,6 +108,28 @@ func TestBuildTrace_NoGenAI(t *testing.T) {
 	}
 }
 
+func TestBuildTrace_MultiSpanDuration(t *testing.T) {
+	now := time.Now().UTC()
+	spans := []storage.Span{
+		{
+			SpanID:    "s1",
+			StartTime: now.Add(1 * time.Second),
+			EndTime:   now.Add(3 * time.Second),
+		},
+		{
+			SpanID:    "s2",
+			StartTime: now,
+			EndTime:   now.Add(2 * time.Second),
+		},
+	}
+
+	trace := buildTrace("t1", spans)
+	// Duration should be from now (s2 start) to now+3s (s1 end) = 3s.
+	if trace.Duration != 3*time.Second {
+		t.Errorf("Duration = %v, want 3s", trace.Duration)
+	}
+}
+
 func TestBuildTrace_EmptySpans(t *testing.T) {
 	trace := buildTrace("trace-empty", nil)
 
@@ -137,6 +159,7 @@ func TestSpanRowRoundtrip(t *testing.T) {
 		ServiceName:   "candela-proxy",
 		UserID:        "user-abc123",
 		SessionID:     "session-xyz789",
+		TenantID:      "tenant-42",
 		GenAI: &storage.GenAIAttributes{
 			Model:         "gpt-4o",
 			Provider:      "openai",
@@ -204,5 +227,20 @@ func TestSpanRowRoundtrip(t *testing.T) {
 	}
 	if roundtripped.Attributes["http.request_id"] != "req-123" {
 		t.Errorf("Attributes[http.request_id] = %q, want req-123", roundtripped.Attributes["http.request_id"])
+	}
+
+	// Tenant ID.
+	if roundtripped.TenantID != original.TenantID {
+		t.Errorf("TenantID = %q, want %q", roundtripped.TenantID, original.TenantID)
+	}
+}
+
+func TestBuildTrace_TenantIDPreserved(t *testing.T) {
+	spans := []storage.Span{
+		{SpanID: "s1", TenantID: "acme-corp", StartTime: time.Now()},
+	}
+	trace := buildTrace("t1", spans)
+	if trace.Spans[0].TenantID != "acme-corp" {
+		t.Errorf("TenantID = %q, want acme-corp", trace.Spans[0].TenantID)
 	}
 }

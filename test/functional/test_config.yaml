@@ -1,0 +1,7 @@
+storage:
+  backend: sqlite
+  sqlite:
+    dsn: ":memory:"
+providers:
+  - name: openai
+    upstream_url: http://localhost:9999

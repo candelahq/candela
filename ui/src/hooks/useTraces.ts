@@ -48,6 +48,8 @@ function mapTrace(t: {
   spanCount: number;
   llmCallCount: number;
   startTime?: { seconds: bigint; nanos: number };
+  tenantId?: string;
+  jobId?: string;
 }): TraceSummaryRow {
   const durSeconds = Number(t.duration?.seconds ?? 0);
   const durNanos = Number(t.duration?.nanos ?? 0);
@@ -69,6 +71,8 @@ function mapTrace(t: {
             Math.floor(Number(t.startTime.nanos) / 1e6)
         ).toLocaleString()
       : "—",
+    tenantId: t.tenantId,
+    jobId: t.jobId,
   };
 }
 
@@ -97,6 +101,8 @@ export function useTraces() {
         status: f.status === "ok" ? 1 : f.status === "error" ? 2 : 0,
         orderBy: f.orderBy,
         descending: f.descending,
+      }, {
+        headers: f.jobId ? { "X-Candela-Job-Id": f.jobId } : {},
       })
       .then((res) => {
         dispatch({
@@ -133,7 +139,8 @@ export function useTraces() {
     state.filters.search ||
     state.filters.model ||
     state.filters.provider ||
-    state.filters.status
+    state.filters.status ||
+    state.filters.jobId
   );
 
   const refresh = useCallback(

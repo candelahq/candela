@@ -90,6 +90,13 @@ impl CostCalculator {
         let output_cost = (output_tokens as f64 / 1_000_000.0) * output_rate;
         input_cost + output_cost
     }
+
+    /// Returns true if the model has pricing configured.
+    /// Used by the pricing gate to block calls to unknown models (which would
+    /// be billed at $0, letting users make free API calls).
+    pub fn has_pricing(&self, model: &str) -> bool {
+        self.prices.contains_key(model)
+    }
 }
 
 impl Default for CostCalculator {
@@ -183,5 +190,20 @@ mod tests {
         let calc = CostCalculator::new();
         let cost = calc.calculate("openai", "gpt-4o", 0, 0);
         assert_eq!(cost, 0.0);
+    }
+
+    #[test]
+    fn has_pricing_known_model() {
+        let calc = CostCalculator::new();
+        assert!(calc.has_pricing("gpt-4o"));
+        assert!(calc.has_pricing("claude-opus-4-20250514"));
+        assert!(calc.has_pricing("gemini-2.5-flash"));
+    }
+
+    #[test]
+    fn has_pricing_unknown_model() {
+        let calc = CostCalculator::new();
+        assert!(!calc.has_pricing("unknown-model-xyz"));
+        assert!(!calc.has_pricing(""));
     }
 }

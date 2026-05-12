@@ -112,10 +112,8 @@ type Span struct {
 	ServiceName   string            `json:"service_name,omitempty"`
 	UserID        string            `json:"user_id,omitempty"`
 	SessionID     string            `json:"session_id,omitempty"`
-	// TenantID identifies the downstream customer/tenant on whose behalf this LLM
-	// call was made. Set via X-Candela-Tenant-Id header or W3C Baggage
-	// (candela.tenant_id) for automatic propagation through ADK/OTel traces.
-	TenantID string `json:"tenant_id,omitempty"`
+	TenantID      string            `json:"tenant_id,omitempty"`
+	JobID         string            `json:"job_id,omitempty"`
 }
 
 // TraceSummary is a lightweight summary for list views.
@@ -132,10 +130,11 @@ type TraceSummary struct {
 	TotalCostUSD    float64       `json:"total_cost_usd"`
 	Status          SpanStatus    `json:"status"`
 	PrimaryModel    string        `json:"primary_model"`
-	PrimaryProvider string        `json:"primary_provider"`
+	PrimaryProvider string        `json:"primary_provider,omitempty"`
 	UserID          string        `json:"user_id,omitempty"`
 	SessionID       string        `json:"session_id,omitempty"`
 	TenantID        string        `json:"tenant_id,omitempty"`
+	JobID           string        `json:"job_id,omitempty"`
 }
 
 // Trace is a complete trace with all spans.
@@ -154,6 +153,7 @@ type Trace struct {
 	UserID       string        `json:"user_id,omitempty"`
 	SessionID    string        `json:"session_id,omitempty"`
 	TenantID     string        `json:"tenant_id,omitempty"`
+	JobID        string        `json:"job_id,omitempty"`
 }
 
 // TraceQuery defines filters for listing traces.
@@ -173,9 +173,12 @@ type TraceQuery struct {
 	UserID      string // Filter by user (empty = all, for admins)
 	SessionID   string // Filter by session (empty = all)
 	TenantID    string // Filter by tenant (empty = all)
+	JobID       string // Filter by job (empty = all)
 }
 
 // TraceResult is the paginated result of a trace query.
+// PageToken should be treated as an opaque string by clients, but
+// backends typically implement it as a base64-encoded offset or timestamp.
 type TraceResult struct {
 	Traces        []TraceSummary
 	NextPageToken string
@@ -194,6 +197,7 @@ type SpanQuery struct {
 	PageToken    string
 	UserID       string // Filter by user (empty = all, for admins)
 	TenantID     string // Filter by tenant (empty = all)
+	JobID        string // Filter by job (empty = all)
 }
 
 // SpanResult is the paginated result of a span query.
@@ -221,8 +225,9 @@ type UsageQuery struct {
 	Environment string
 	StartTime   time.Time
 	EndTime     time.Time
-	UserID      string // Filter by user (empty = all, for admins)
+	UserID      string
 	TenantID    string // Filter by tenant (empty = all)
+	JobID       string // Filter by job (empty = all)
 }
 
 // UserUsageSummary is a per-user aggregation for the team leaderboard.
@@ -240,6 +245,16 @@ type UserUsageSummary struct {
 // (candela.tenant_id) set by multitenant applications.
 type TenantUsageSummary struct {
 	TenantID     string  `json:"tenant_id"`
+	CallCount    int64   `json:"call_count"`
+	TotalTokens  int64   `json:"total_tokens"`
+	CostUSD      float64 `json:"cost_usd"`
+	AvgLatencyMs float64 `json:"avg_latency_ms"`
+	TopModel     string  `json:"top_model"`
+}
+
+// JobUsageSummary is a per-job aggregation for experiment cost tracking.
+type JobUsageSummary struct {
+	JobID        string  `json:"job_id"`
 	CallCount    int64   `json:"call_count"`
 	TotalTokens  int64   `json:"total_tokens"`
 	CostUSD      float64 `json:"cost_usd"`
@@ -294,6 +309,10 @@ type SpanReader interface {
 	// cost (admin only). TenantIDs are set by multitenant applications via
 	// X-Candela-Tenant-Id header or W3C Baggage (candela.tenant_id).
 	GetTenantLeaderboard(ctx context.Context, q UsageQuery, limit int) ([]TenantUsageSummary, error)
+
+	// GetJobLeaderboard returns per-job LLM cost aggregations ranked by cost.
+	// JobIDs are set via X-Candela-Job-Id header or W3C Baggage (candela.job_id).
+	GetJobLeaderboard(ctx context.Context, q UsageQuery, limit int) ([]JobUsageSummary, error)
 
 	// Ping verifies that the storage backend is reachable.
 	Ping(ctx context.Context) error

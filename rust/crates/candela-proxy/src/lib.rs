@@ -5,6 +5,7 @@
 //!
 //! Ported from: `pkg/proxy/`
 
+pub mod attribution;
 pub mod circuit;
 pub mod handler;
 pub mod ids;

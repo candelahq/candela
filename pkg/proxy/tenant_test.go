@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -28,7 +29,7 @@ func TestParseBaggage_ValidTenantID(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := parseBaggage(tc.header)
+			got, _ := parseBaggage(tc.header)
 			if got != tc.want {
 				t.Errorf("parseBaggage(%q) = %q, want %q", tc.header, got, tc.want)
 			}
@@ -50,7 +51,7 @@ func TestParseBaggage_InvalidTenantID_Discarded(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := parseBaggage(tc.header)
+			got, _ := parseBaggage(tc.header)
 			if got != "" {
 				t.Errorf("parseBaggage(%q) = %q, want empty (invalid value should be discarded)", tc.header, got)
 			}
@@ -60,10 +61,10 @@ func TestParseBaggage_InvalidTenantID_Discarded(t *testing.T) {
 
 // UNIT-3: Empty and no-match baggage headers return empty string without panicking.
 func TestParseBaggage_EmptyAndMissing(t *testing.T) {
-	if got := parseBaggage(""); got != "" {
+	if got, _ := parseBaggage(""); got != "" {
 		t.Errorf(`parseBaggage("") = %q, want ""`, got)
 	}
-	if got := parseBaggage("svc.version=1.0,other=stuff"); got != "" {
+	if got, _ := parseBaggage("svc.version=1.0,other=stuff"); got != "" {
 		t.Errorf("parseBaggage(no tenant key) = %q, want \"\"", got)
 	}
 }
@@ -72,7 +73,7 @@ func TestParseBaggage_EmptyAndMissing(t *testing.T) {
 func TestParseBaggage_InvalidFirstValidSecond(t *testing.T) {
 	// First value has a space (invalid), second is valid — should return second.
 	header := "candela.tenant_id=bad value,candela.tenant_id=good-tenant"
-	got := parseBaggage(header)
+	got, _ := parseBaggage(header)
 	if got != "good-tenant" {
 		t.Errorf("parseBaggage(%q) = %q, want good-tenant (invalid first entry should be skipped)", header, got)
 	}
@@ -83,7 +84,7 @@ func TestParseBaggage_InvalidFirstValidSecond(t *testing.T) {
 func TestParseBaggageHeaders_MultipleHeaders(t *testing.T) {
 	// Simulate two separate Baggage header lines — r.Header.Values returns both.
 	values := []string{"svc.version=1.0", "candela.tenant_id=multi-tenant,other=val"}
-	got := parseBaggageHeaders(values)
+	got, _ := parseBaggageHeaders(values)
 	if got != "multi-tenant" {
 		t.Errorf("parseBaggageHeaders(%v) = %q, want multi-tenant", values, got)
 	}
@@ -97,9 +98,36 @@ func TestParseBaggage_CaseInsensitiveKey(t *testing.T) {
 		"candela.TENANT_ID=acme-corp",
 	}
 	for _, h := range cases {
-		if got := parseBaggage(h); got != "acme-corp" {
+		if got, _ := parseBaggage(h); got != "acme-corp" {
 			t.Errorf("parseBaggage(%q) = %q, want acme-corp (key should be case-insensitive)", h, got)
 		}
+	}
+}
+
+// UNIT-4d: W3C Baggage spec — right-most occurrence wins if keys are duplicated.
+func TestParseBaggage_RightMostWins(t *testing.T) {
+	header := "candela.tenant_id=first,svc=test,candela.tenant_id=second"
+	got, _ := parseBaggage(header)
+	if got != "second" {
+		t.Errorf("parseBaggage(%q) = %q, want second (right-most occurrence must win)", header, got)
+	}
+}
+
+// UNIT-4e: Malformed parts are skipped without affecting valid ones.
+func TestParseBaggage_MalformedParts(t *testing.T) {
+	header := "!!!, candela.tenant_id=valid-one, ==, key=val"
+	got, _ := parseBaggage(header)
+	if got != "valid-one" {
+		t.Errorf("parseBaggage(%q) = %q, want valid-one", header, got)
+	}
+}
+
+// UNIT-4f: Properties (semicolon-separated) are ignored per spec.
+func TestParseBaggage_PropertiesIgnored(t *testing.T) {
+	header := "candela.tenant_id=acme;ttl=100;p2=val,other=foo"
+	got, _ := parseBaggage(header)
+	if got != "acme" {
+		t.Errorf("parseBaggage(%q) = %q, want acme (properties should be stripped)", header, got)
 	}
 }
 
@@ -325,5 +353,124 @@ func TestProxy_TenantID_InvalidHeaderRejected(t *testing.T) {
 	}
 	if got := sub.getSpans()[0].TenantID; got != "" {
 		t.Errorf("TenantID = %q, want empty (injection attempt must be rejected)", got)
+	}
+}
+
+// INTEG-5: Multiple Baggage header lines are joined and correctly parsed (W3C spec compliance).
+func TestProxy_TenantID_MultiBaggageHeaders(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"id":"chatcmpl-m","object":"chat.completion","model":"gpt-4o",
+			"choices":[{"message":{"role":"assistant","content":"multi"},"finish_reason":"stop","index":0}],
+			"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}
+		}`))
+	}))
+	defer upstream.Close()
+
+	sub := &mockSubmitter{}
+	p := New(Config{
+		Providers: []Provider{{Name: "openai", UpstreamURL: upstream.URL}},
+		ProjectID: "proj-test",
+	}, sub, costcalc.New())
+
+	mux := http.NewServeMux()
+	p.RegisterRoutes(mux)
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	body := `{"model":"gpt-4o","messages":[{"role":"user","content":"hi"}]}`
+	req, _ := http.NewRequest(http.MethodPost, srv.URL+"/proxy/openai/v1/chat/completions", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer sk-test")
+
+	// Add multiple Baggage headers.
+	req.Header.Add("Baggage", "svc.name=my-service,svc.version=1.2.3")
+	req.Header.Add("Baggage", "candela.tenant_id=multi-header-tenant")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("request: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+
+	if !waitForSpan(sub) {
+		t.Fatal("no spans submitted within timeout")
+	}
+	if got := sub.getSpans()[0].TenantID; got != "multi-header-tenant" {
+		t.Errorf("TenantID = %q, want multi-header-tenant", got)
+	}
+}
+
+// INTEG-6: W3C Baggage takes precedence over X-Candela-Tenant-Id header.
+func TestProxy_TenantID_Precedence(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"chatcmpl-p","object":"chat.completion","model":"gpt-4o","choices":[],"usage":{"total_tokens":1}}`))
+	}))
+	defer upstream.Close()
+
+	sub := &mockSubmitter{}
+	p := New(Config{
+		Providers: []Provider{{Name: "openai", UpstreamURL: upstream.URL}},
+		ProjectID: "proj-test",
+	}, sub, costcalc.New())
+
+	mux := http.NewServeMux()
+	p.RegisterRoutes(mux)
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	body := `{"model":"gpt-4o","messages":[]}`
+	req, _ := http.NewRequest(http.MethodPost, srv.URL+"/proxy/openai/v1/chat/completions", strings.NewReader(body))
+	req.Header.Set("X-Candela-Tenant-Id", "header-tenant")
+	req.Header.Set("Baggage", "candela.tenant_id=baggage-tenant")
+
+	resp, _ := http.DefaultClient.Do(req)
+	_ = resp.Body.Close()
+
+	if !waitForSpan(sub) {
+		t.Fatal("no spans submitted within timeout")
+	}
+	if got := sub.getSpans()[0].TenantID; got != "baggage-tenant" {
+		t.Errorf("TenantID = %q, want baggage-tenant (Baggage must win over header)", got)
+	}
+}
+
+// INTEG-7: Tenant ID is correctly attributed for streaming responses.
+func TestProxy_TenantID_Streaming(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}\n\ndata: [DONE]\n\n"))
+	}))
+	defer upstream.Close()
+
+	sub := &mockSubmitter{}
+	p := New(Config{
+		Providers: []Provider{{Name: "openai", UpstreamURL: upstream.URL}},
+		ProjectID: "proj-test",
+	}, sub, costcalc.New())
+
+	mux := http.NewServeMux()
+	p.RegisterRoutes(mux)
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	body := `{"model":"gpt-4o","messages":[],"stream":true}`
+	req, _ := http.NewRequest(http.MethodPost, srv.URL+"/proxy/openai/v1/chat/completions", strings.NewReader(body))
+	req.Header.Set("X-Candela-Tenant-Id", "stream-tenant")
+
+	resp, _ := http.DefaultClient.Do(req)
+	_, _ = io.ReadAll(resp.Body)
+	_ = resp.Body.Close()
+
+	if !waitForSpan(sub) {
+		t.Fatal("no spans submitted within timeout")
+	}
+	if got := sub.getSpans()[0].TenantID; got != "stream-tenant" {
+		t.Errorf("TenantID = %q, want stream-tenant", got)
 	}
 }

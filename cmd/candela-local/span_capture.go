@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/candelahq/candela/pkg/attribution"
 	"github.com/candelahq/candela/pkg/processor"
 	"github.com/candelahq/candela/pkg/session"
 	"github.com/candelahq/candela/pkg/storage"
@@ -92,6 +93,10 @@ func (s *spanCapture) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Extract tenant and job IDs for attribution.
+	attr := attribution.FromRequest(r)
+	tenantID, jobID := attr.TenantID, attr.JobID
+
 	// Capture response.
 	rec := &responseCapture{ResponseWriter: w}
 	s.next.ServeHTTP(rec, r)
@@ -99,10 +104,10 @@ func (s *spanCapture) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	duration := time.Since(start)
 
 	// Build the span asynchronously to not block the response.
-	go s.buildSpan(chatReq.Model, chatReq.Stream, inputContent, rec.body.Bytes(), rec.statusCode, start, duration, sessionID)
+	go s.buildSpan(chatReq.Model, chatReq.Stream, inputContent, rec.body.Bytes(), rec.statusCode, start, duration, sessionID, tenantID, jobID)
 }
 
-func (s *spanCapture) buildSpan(model string, stream *bool, inputContent string, respBody []byte, statusCode int, start time.Time, duration time.Duration, sessionID string) {
+func (s *spanCapture) buildSpan(model string, stream *bool, inputContent string, respBody []byte, statusCode int, start time.Time, duration time.Duration, sessionID, tenantID, jobID string) {
 	var inputTokens, outputTokens, totalTokens int64
 
 	isStreaming := stream != nil && *stream
@@ -146,6 +151,8 @@ func (s *spanCapture) buildSpan(model string, stream *bool, inputContent string,
 		Duration:  duration,
 		ProjectID: "local",
 		SessionID: sessionID,
+		TenantID:  tenantID,
+		JobID:     jobID,
 		GenAI: &storage.GenAIAttributes{
 			Model:        model,
 			Provider:     "local",

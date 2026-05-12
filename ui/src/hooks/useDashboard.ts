@@ -19,6 +19,12 @@ export interface DashboardSummary {
   tracesOverTime: DataPoint[];
   costOverTime: DataPoint[];
   tokensOverTime: DataPoint[];
+  jobLeaderboard: Array<{
+    jobId: string;
+    callCount: number;
+    totalTokens: number;
+    costUsd: number;
+  }>;
 }
 
 export interface RecentTrace {
@@ -125,8 +131,17 @@ export function useDashboard() {
       pagination: { pageSize: 5 },
     });
 
-    Promise.all([summaryPromise, tracesPromise])
-      .then(([res, tracesRes]) => {
+    const jobLeaderboardPromise = dashboardClient.getJobLeaderboard({
+      projectId: DEFAULT_PROJECT_ID,
+      timeRange: {
+        start: timestampFromDate(start),
+        end: timestampFromDate(now),
+      },
+      limit: 10,
+    });
+
+    Promise.all([summaryPromise, tracesPromise, jobLeaderboardPromise])
+      .then(([res, tracesRes, jobRes]) => {
         if (cancelled) return;
         dispatch({
           type: "success",
@@ -142,6 +157,12 @@ export function useDashboard() {
             tracesOverTime: toDataPoints(res.tracesOverTime, state.timeRange),
             costOverTime: toDataPoints(res.costOverTime, state.timeRange),
             tokensOverTime: toDataPoints(res.tokensOverTime, state.timeRange),
+            jobLeaderboard: (jobRes.jobs || []).map((j) => ({
+              jobId: j.jobId,
+              callCount: Number(j.callCount),
+              totalTokens: Number(j.totalTokens),
+              costUsd: j.costUsd,
+            })),
           },
           recentTraces: (tracesRes.traces || []).map((t) => {
             const durSeconds = Number(t.duration?.seconds ?? 0);

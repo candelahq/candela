@@ -1,0 +1,360 @@
+{
+  "documents": [{
+    "name": "projects/test-project/databases/(default)/documents/users/audit@example.com",
+    "fields": {
+      "id": {
+        "stringValue": "audit@example.com"
+      },
+      "email": {
+        "stringValue": "audit@example.com"
+      },
+      "role": {
+        "stringValue": "developer"
+      },
+      "status": {
+        "stringValue": "provisioned"
+      },
+      "created_at": {
+        "timestampValue": "2026-05-10T06:51:07.089061Z"
+      }
+    },
+    "createTime": "2026-05-10T06:51:07.091748Z",
+    "updateTime": "2026-05-10T06:51:07.091748Z"
+  }, {
+    "name": "projects/test-project/databases/(default)/documents/users/budget@example.com",
+    "fields": {
+      "status": {
+        "stringValue": "provisioned"
+      },
+      "created_at": {
+        "timestampValue": "2026-05-10T06:51:06.948924Z"
+      },
+      "id": {
+        "stringValue": "budget@example.com"
+      },
+      "email": {
+        "stringValue": "budget@example.com"
+      },
+      "role": {
+        "stringValue": "developer"
+      }
+    },
+    "createTime": "2026-05-10T06:51:06.953238Z",
+    "updateTime": "2026-05-10T06:51:06.953238Z"
+  }, {
+    "name": "projects/test-project/databases/(default)/documents/users/check@example.com",
+    "fields": {
+      "id": {
+        "stringValue": "check@example.com"
+      },
+      "email": {
+        "stringValue": "check@example.com"
+      },
+      "role": {
+        "stringValue": "developer"
+      },
+      "status": {
+        "stringValue": "provisioned"
+      },
+      "created_at": {
+        "timestampValue": "2026-05-10T06:51:06.990518Z"
+      }
+    },
+    "createTime": "2026-05-10T06:51:06.994523Z",
+    "updateTime": "2026-05-10T06:51:06.994523Z"
+  }, {
+    "name": "projects/test-project/databases/(default)/documents/users/config-i3-1778395866835162000@test.com",
+    "fields": {
+      "created_at": {
+        "timestampValue": "2026-05-10T06:51:06.835164Z"
+      },
+      "id": {
+        "stringValue": "config-i3-1778395866835162000@test.com"
+      },
+      "email": {
+        "stringValue": "config-i3-1778395866835162000@test.com"
+      },
+      "role": {
+        "stringValue": "developer"
+      },
+      "status": {
+        "stringValue": "provisioned"
+      }
+    },
+    "createTime": "2026-05-10T06:51:06.839170Z",
+    "updateTime": "2026-05-10T06:51:06.839170Z"
+  }, {
+    "name": "projects/test-project/databases/(default)/documents/users/deduct@example.com",
+    "fields": {
+      "created_at": {
+        "timestampValue": "2026-05-10T06:51:07.019104Z"
+      },
+      "id": {
+        "stringValue": "deduct@example.com"
+      },
+      "email": {
+        "stringValue": "deduct@example.com"
+      },
+      "role": {
+        "stringValue": "developer"
+      },
+      "status": {
+        "stringValue": "provisioned"
+      }
+    },
+    "createTime": "2026-05-10T06:51:07.037510Z",
+    "updateTime": "2026-05-10T06:51:07.037510Z"
+  }, {
+    "name": "projects/test-project/databases/(default)/documents/users/fallback-i2-1778395866821302000@test.com",
+    "fields": {
+      "id": {
+        "stringValue": "fallback-i2-1778395866821302000@test.com"
+      },
+      "email": {
+        "stringValue": "fallback-i2-1778395866821302000@test.com"
+      },
+      "role": {
+        "stringValue": "developer"
+      },
+      "status": {
+        "stringValue": "provisioned"
+      },
+      "created_at": {
+        "timestampValue": "2026-05-10T06:51:06.821304Z"
+      }
+    },
+    "createTime": "2026-05-10T06:51:06.824978Z",
+    "updateTime": "2026-05-10T06:51:06.824978Z"
+  }, {
+    "name": "projects/test-project/databases/(default)/documents/users/grant@example.com",
+    "fields": {
+      "id": {
+        "stringValue": "grant@example.com"
+      },
+      "email": {
+        "stringValue": "grant@example.com"
+      },
+      "role": {
+        "stringValue": "developer"
+      },
+      "status": {
+        "stringValue": "provisioned"
+      },
+      "created_at": {
+        "timestampValue": "2026-05-10T06:51:06.968623Z"
+      }
+    },
+    "createTime": "2026-05-10T06:51:06.974228Z",
+    "updateTime": "2026-05-10T06:51:06.974228Z"
+  }, {
+    "name": "projects/test-project/databases/(default)/documents/users/intlimit-i4-1778395866855449000@test.com",
+    "fields": {
+      "id": {
+        "stringValue": "intlimit-i4-1778395866855449000@test.com"
+      },
+      "email": {
+        "stringValue": "intlimit-i4-1778395866855449000@test.com"
+      },
+      "role": {
+        "stringValue": "developer"
+      },
+      "status": {
+        "stringValue": "provisioned"
+      },
+      "created_at": {
+        "timestampValue": "2026-05-10T06:51:06.855484Z"
+      }
+    },
+    "createTime": "2026-05-10T06:51:06.860142Z",
+    "updateTime": "2026-05-10T06:51:06.860142Z"
+  }, {
+    "name": "projects/test-project/databases/(default)/documents/users/monthly-i9-1778395867116351000@test.com",
+    "fields": {
+      "id": {
+        "stringValue": "monthly-i9-1778395867116351000@test.com"
+      },
+      "email": {
+        "stringValue": "monthly-i9-1778395867116351000@test.com"
+      },
+      "role": {
+        "stringValue": "developer"
+      },
+      "status": {
+        "stringValue": "provisioned"
+      },
+      "created_at": {
+        "timestampValue": "2026-05-10T06:51:07.116352Z"
+      }
+    },
+    "createTime": "2026-05-10T06:51:07.120944Z",
+    "updateTime": "2026-05-10T06:51:07.120944Z"
+  }, {
+    "name": "projects/test-project/databases/(default)/documents/users/overdraft-i6-1778395866891229000@test.com",
+    "fields": {
+      "created_at": {
+        "timestampValue": "2026-05-10T06:51:06.891231Z"
+      },
+      "id": {
+        "stringValue": "overdraft-i6-1778395866891229000@test.com"
+      },
+      "email": {
+        "stringValue": "overdraft-i6-1778395866891229000@test.com"
+      },
+      "role": {
+        "stringValue": "developer"
+      },
+      "status": {
+        "stringValue": "provisioned"
+      }
+    },
+    "createTime": "2026-05-10T06:51:06.895Z",
+    "updateTime": "2026-05-10T06:51:06.895Z"
+  }, {
+    "name": "projects/test-project/databases/(default)/documents/users/reset-i10-1778395867131398000@test.com",
+    "fields": {
+      "id": {
+        "stringValue": "reset-i10-1778395867131398000@test.com"
+      },
+      "email": {
+        "stringValue": "reset-i10-1778395867131398000@test.com"
+      },
+      "role": {
+        "stringValue": "developer"
+      },
+      "status": {
+        "stringValue": "provisioned"
+      },
+      "created_at": {
+        "timestampValue": "2026-05-10T06:51:07.131400Z"
+      }
+    },
+    "createTime": "2026-05-10T06:51:07.134005Z",
+    "updateTime": "2026-05-10T06:51:07.134005Z"
+  }, {
+    "name": "projects/test-project/databases/(default)/documents/users/reset-i11-1778395867145273000@test.com",
+    "fields": {
+      "email": {
+        "stringValue": "reset-i11-1778395867145273000@test.com"
+      },
+      "role": {
+        "stringValue": "developer"
+      },
+      "status": {
+        "stringValue": "provisioned"
+      },
+      "created_at": {
+        "timestampValue": "2026-05-10T06:51:07.145275Z"
+      },
+      "id": {
+        "stringValue": "reset-i11-1778395867145273000@test.com"
+      }
+    },
+    "createTime": "2026-05-10T06:51:07.147789Z",
+    "updateTime": "2026-05-10T06:51:07.147789Z"
+  }, {
+    "name": "projects/test-project/databases/(default)/documents/users/reset@example.com",
+    "fields": {
+      "id": {
+        "stringValue": "reset@example.com"
+      },
+      "email": {
+        "stringValue": "reset@example.com"
+      },
+      "role": {
+        "stringValue": "developer"
+      },
+      "status": {
+        "stringValue": "provisioned"
+      },
+      "created_at": {
+        "timestampValue": "2026-05-10T06:51:07.099539Z"
+      }
+    },
+    "createTime": "2026-05-10T06:51:07.102971Z",
+    "updateTime": "2026-05-10T06:51:07.102971Z"
+  }, {
+    "name": "projects/test-project/databases/(default)/documents/users/rollover-i1-1778395866800033000@test.com",
+    "fields": {
+      "id": {
+        "stringValue": "rollover-i1-1778395866800033000@test.com"
+      },
+      "email": {
+        "stringValue": "rollover-i1-1778395866800033000@test.com"
+      },
+      "role": {
+        "stringValue": "developer"
+      },
+      "status": {
+        "stringValue": "provisioned"
+      },
+      "created_at": {
+        "timestampValue": "2026-05-10T06:51:06.800046Z"
+      }
+    },
+    "createTime": "2026-05-10T06:51:06.806001Z",
+    "updateTime": "2026-05-10T06:51:06.806001Z"
+  }, {
+    "name": "projects/test-project/databases/(default)/documents/users/tokenonly-i5-1778395866870025000@test.com",
+    "fields": {
+      "id": {
+        "stringValue": "tokenonly-i5-1778395866870025000@test.com"
+      },
+      "email": {
+        "stringValue": "tokenonly-i5-1778395866870025000@test.com"
+      },
+      "role": {
+        "stringValue": "developer"
+      },
+      "status": {
+        "stringValue": "provisioned"
+      },
+      "created_at": {
+        "timestampValue": "2026-05-10T06:51:06.870027Z"
+      }
+    },
+    "createTime": "2026-05-10T06:51:06.874229Z",
+    "updateTime": "2026-05-10T06:51:06.874229Z"
+  }, {
+    "name": "projects/test-project/databases/(default)/documents/users/tokens@example.com",
+    "fields": {
+      "id": {
+        "stringValue": "tokens@example.com"
+      },
+      "email": {
+        "stringValue": "tokens@example.com"
+      },
+      "role": {
+        "stringValue": "developer"
+      },
+      "status": {
+        "stringValue": "provisioned"
+      },
+      "created_at": {
+        "timestampValue": "2026-05-10T06:51:07.069215Z"
+      }
+    },
+    "createTime": "2026-05-10T06:51:07.073881Z",
+    "updateTime": "2026-05-10T06:51:07.073881Z"
+  }, {
+    "name": "projects/test-project/databases/(default)/documents/users/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+    "fields": {
+      "id": {
+        "stringValue": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      },
+      "email": {
+        "stringValue": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      },
+      "role": {
+        "stringValue": "developer"
+      },
+      "status": {
+        "stringValue": "provisioned"
+      },
+      "created_at": {
+        "timestampValue": "2026-05-10T06:51:07.160681Z"
+      }
+    },
+    "createTime": "2026-05-10T06:51:07.163749Z",
+    "updateTime": "2026-05-10T06:51:07.163749Z"
+  }]
+}

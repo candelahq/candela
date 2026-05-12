@@ -63,7 +63,7 @@ type Config struct {
 	Proxy struct {
 		Enabled   bool     `yaml:"enabled"`
 		ProjectID string   `yaml:"project_id"`
-		Providers []string `yaml:"providers"` // e.g. ["openai", "google", "anthropic", "gemini-oai"]
+		Providers []string `yaml:"providers"` // e.g. ["openai", "google", "anthropic", "anthropic-direct", "gemini-oai"]
 		VertexAI  struct {
 			ProjectID string `yaml:"project_id"` // GCP project for Vertex AI
 			Region    string `yaml:"region"`     // e.g. "us-central1"
@@ -193,7 +193,7 @@ func main() {
 		connecthandlers.NewIngestionHandlerDirect(proc))
 	mux.Handle(ingestionPath, ingestionH)
 
-	dashboardPath, dashboardH := candelav1connect.NewDashboardServiceHandlerWithTenant(
+	dashboardPath, dashboardH := candelav1connect.NewDashboardServiceHandler(
 		connecthandlers.NewDashboardHandler(reader, userStore))
 	mux.Handle(dashboardPath, dashboardH)
 
@@ -593,7 +593,7 @@ func corsMiddleware(next http.Handler, origins []string) http.Handler {
 		}
 
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Accept, Authorization, Content-Type, Connect-Protocol-Version, Connect-Timeout-Ms, Traceparent, Tracestate, X-Request-ID, X-Session-Id")
+		w.Header().Set("Access-Control-Allow-Headers", "Accept, Authorization, Content-Type, Connect-Protocol-Version, Connect-Timeout-Ms, Traceparent, Tracestate, X-Request-ID, X-Session-Id, X-Candela-Tenant-Id, X-Candela-Job-Id")
 		w.Header().Set("Access-Control-Expose-Headers", "Connect-Content-Encoding")
 		w.Header().Set("Access-Control-Max-Age", "86400")
 

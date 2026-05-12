@@ -923,3 +923,78 @@ footer {
   background: rgba(255,255,255,0.05);
   color: var(--text-muted);
 }
+
+/* ── Tenant Leaderboard ── */
+.leaderboard-content {
+  overflow-x: auto;
+}
+
+.leaderboard-table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 0.85rem;
+}
+
+.leaderboard-table th {
+  text-align: left;
+  padding: 0.75rem 0.5rem;
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  border-bottom: 1px solid var(--border);
+}
+
+.leaderboard-table td {
+  padding: 0.85rem 0.5rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.02);
+  vertical-align: middle;
+}
+
+.leaderboard-table tr:last-child td {
+  border-bottom: none;
+}
+
+.leaderboard-tenant {
+  font-weight: 600;
+  color: var(--text);
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.tenant-id-pill {
+  padding: 0.15rem 0.4rem;
+  background: var(--accent-glow);
+  color: var(--accent);
+  border-radius: 4px;
+  font-family: 'SF Mono', monospace;
+  font-size: 0.75rem;
+}
+
+.leaderboard-count {
+  font-variant-numeric: tabular-nums;
+  color: var(--text-muted);
+}
+
+.leaderboard-tokens {
+  font-variant-numeric: tabular-nums;
+  color: var(--text-muted);
+}
+
+.leaderboard-cost {
+  font-weight: 600;
+  color: var(--green);
+  font-variant-numeric: tabular-nums;
+}
+
+.leaderboard-model {
+  font-size: 0.75rem;
+  color: var(--text-dim);
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

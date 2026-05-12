@@ -261,6 +261,16 @@ export type Span = Message<"candela.types.Span"> & {
   userId: string;
 
   /**
+   * @generated from field: string tenant_id = 44;
+   */
+  tenantId: string;
+
+  /**
+   * @generated from field: string job_id = 45;
+   */
+  jobId: string;
+
+  /**
    * Events (OTel span events)
    *
    * @generated from field: repeated candela.types.SpanEvent events = 50;
@@ -370,6 +380,16 @@ export type Trace = Message<"candela.types.Trace"> & {
   userId: string;
 
   /**
+   * @generated from field: string tenant_id = 12;
+   */
+  tenantId: string;
+
+  /**
+   * @generated from field: string job_id = 13;
+   */
+  jobId: string;
+
+  /**
    * All spans in the trace
    *
    * @generated from field: repeated candela.types.Span spans = 20;
@@ -463,6 +483,16 @@ export type TraceSummary = Message<"candela.types.TraceSummary"> & {
    * @generated from field: string user_id = 17;
    */
   userId: string;
+
+  /**
+   * @generated from field: string tenant_id = 18;
+   */
+  tenantId: string;
+
+  /**
+   * @generated from field: string job_id = 19;
+   */
+  jobId: string;
 };
 
 /**

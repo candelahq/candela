@@ -636,7 +636,65 @@ function formatTime(iso) {
   return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 }
 
-$('#btn-refresh-traces').addEventListener('click', refreshTraces);
+// ── Leaderboard ──
+
+async function refreshLeaderboard() {
+  try {
+    const resp = await fetch('/_local/api/leaderboard?limit=10');
+    if (!resp.ok) {
+      const el = $('#leaderboard-content');
+      el.innerHTML = '<div class="empty-state">Leaderboard not available</div>';
+      return;
+    }
+    const data = await resp.json();
+    renderLeaderboard(data);
+  } catch (e) {
+    console.warn('leaderboard fetch failed:', e);
+    const el = $('#leaderboard-content');
+    el.innerHTML = '<div class="empty-state">Could not load leaderboard</div>';
+  }
+}
+
+function renderLeaderboard(data) {
+  const content = $('#leaderboard-content');
+  const tenants = data.tenants || [];
+
+  if (tenants.length === 0) {
+    content.innerHTML = '<div class="empty-state">No tenant data yet — propagate "X-Candela-Tenant-Id" or OTel baggage "candela.tenant_id"</div>';
+    return;
+  }
+
+  content.innerHTML = `
+    <table class="leaderboard-table">
+      <thead>
+        <tr>
+          <th>Tenant</th>
+          <th>Calls</th>
+          <th>Tokens</th>
+          <th>Cost</th>
+          <th>Top Model</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${tenants.map(t => `
+          <tr>
+            <td>
+              <div class="leaderboard-tenant">
+                <span class="tenant-id-pill">${escapeHtml(t.tenant_id)}</span>
+              </div>
+            </td>
+            <td class="leaderboard-count">${t.call_count || 0}</td>
+            <td class="leaderboard-tokens">${formatTokens(t.total_tokens || 0)}</td>
+            <td class="leaderboard-cost">$${(t.cost_usd || 0).toFixed(4)}</td>
+            <td class="leaderboard-model" title="${escapeAttr(t.top_model)}">${escapeHtml(t.top_model) || '—'}</td>
+          </tr>
+        `).join('')}
+      </tbody>
+    </table>
+  `;
+}
+
+$('#btn-refresh-leaderboard').addEventListener('click', refreshLeaderboard);
 
 // ── Initialize ──
 
@@ -649,6 +707,7 @@ async function init() {
     refreshPulls(),
     renderPopularModels(),
     refreshTraces(),
+    refreshLeaderboard(),
   ]);
 
   // Poll health every 5 seconds (updates badge only, not models).
@@ -656,6 +715,9 @@ async function init() {
 
   // Auto-refresh traces every 10 seconds.
   setInterval(refreshTraces, 10000);
+
+  // Auto-refresh leaderboard every 30 seconds.
+  setInterval(refreshLeaderboard, 30000);
 }
 
 init();

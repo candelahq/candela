@@ -13,6 +13,8 @@ export interface TraceSummaryRow {
   startTime: string;
   spanCount: number;
   llmCallCount: number;
+  tenantId?: string;
+  jobId?: string;
 }
 
 export interface TraceFilters {
@@ -22,6 +24,8 @@ export interface TraceFilters {
   status: "" | "ok" | "error";
   orderBy: string;
   descending: boolean;
+  tenantId: string;
+  jobId: string;
 }
 
 export const DEFAULT_FILTERS: TraceFilters = {
@@ -31,4 +35,6 @@ export const DEFAULT_FILTERS: TraceFilters = {
   status: "",
   orderBy: "start_time",
   descending: true,
+  tenantId: "",
+  jobId: "",
 };

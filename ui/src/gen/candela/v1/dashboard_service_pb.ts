@@ -472,6 +472,94 @@ export const UserUsageSchema: GenMessage<UserUsage> = /*@__PURE__*/
   messageDesc(file_candela_v1_dashboard_service, 12);
 
 /**
+ * @generated from message candela.v1.GetJobLeaderboardRequest
+ */
+export type GetJobLeaderboardRequest = Message<"candela.v1.GetJobLeaderboardRequest"> & {
+  /**
+   * @generated from field: string project_id = 1;
+   */
+  projectId: string;
+
+  /**
+   * @generated from field: candela.types.TimeRange time_range = 2;
+   */
+  timeRange?: TimeRange | undefined;
+
+  /**
+   * default: 20
+   *
+   * @generated from field: int32 limit = 3;
+   */
+  limit: number;
+};
+
+/**
+ * Describes the message candela.v1.GetJobLeaderboardRequest.
+ * Use `create(GetJobLeaderboardRequestSchema)` to create a new message.
+ */
+export const GetJobLeaderboardRequestSchema: GenMessage<GetJobLeaderboardRequest> = /*@__PURE__*/
+  messageDesc(file_candela_v1_dashboard_service, 13);
+
+/**
+ * @generated from message candela.v1.GetJobLeaderboardResponse
+ */
+export type GetJobLeaderboardResponse = Message<"candela.v1.GetJobLeaderboardResponse"> & {
+  /**
+   * @generated from field: repeated candela.v1.JobUsage jobs = 1;
+   */
+  jobs: JobUsage[];
+};
+
+/**
+ * Describes the message candela.v1.GetJobLeaderboardResponse.
+ * Use `create(GetJobLeaderboardResponseSchema)` to create a new message.
+ */
+export const GetJobLeaderboardResponseSchema: GenMessage<GetJobLeaderboardResponse> = /*@__PURE__*/
+  messageDesc(file_candela_v1_dashboard_service, 14);
+
+/**
+ * @generated from message candela.v1.JobUsage
+ */
+export type JobUsage = Message<"candela.v1.JobUsage"> & {
+  /**
+   * @generated from field: string job_id = 1;
+   */
+  jobId: string;
+
+  /**
+   * @generated from field: int64 call_count = 2;
+   */
+  callCount: bigint;
+
+  /**
+   * @generated from field: int64 total_tokens = 3;
+   */
+  totalTokens: bigint;
+
+  /**
+   * @generated from field: double cost_usd = 4;
+   */
+  costUsd: number;
+
+  /**
+   * @generated from field: double avg_latency_ms = 5;
+   */
+  avgLatencyMs: number;
+
+  /**
+   * @generated from field: string top_model = 6;
+   */
+  topModel: string;
+};
+
+/**
+ * Describes the message candela.v1.JobUsage.
+ * Use `create(JobUsageSchema)` to create a new message.
+ */
+export const JobUsageSchema: GenMessage<JobUsage> = /*@__PURE__*/
+  messageDesc(file_candela_v1_dashboard_service, 15);
+
+/**
  * DashboardService provides aggregated metrics and usage data.
  * Exposed via ConnectRPC for the web UI dashboards.
  *
@@ -528,6 +616,16 @@ export const DashboardService: GenService<{
     methodKind: "unary";
     input: typeof GetTeamLeaderboardRequestSchema;
     output: typeof GetTeamLeaderboardResponseSchema;
+  },
+  /**
+   * GetJobLeaderboard returns per-job usage rankings.
+   *
+   * @generated from rpc candela.v1.DashboardService.GetJobLeaderboard
+   */
+  getJobLeaderboard: {
+    methodKind: "unary";
+    input: typeof GetJobLeaderboardRequestSchema;
+    output: typeof GetJobLeaderboardResponseSchema;
   },
 }> = /*@__PURE__*/
   serviceDesc(file_candela_v1_dashboard_service, 0);

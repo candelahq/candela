@@ -21,6 +21,8 @@ var (
 	// tenantIDPattern enforces the allowed character set and length limits for tenant IDs.
 	// Matches the implementation in pkg/proxy/proxy.go.
 	tenantIDPattern = regexp.MustCompile(`^[a-zA-Z0-9\-._]{1,128}$`)
+	// jobIDPattern enforces the same limits for job IDs.
+	jobIDPattern = regexp.MustCompile(`^[a-zA-Z0-9\-._]{1,128}$`)
 )
 
 // spanCapture wraps an HTTP handler (typically the local proxy) and captures
@@ -100,13 +102,19 @@ func (s *spanCapture) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Extract tenant ID for attribution.
-	// We check Baggage (W3C standard) first, then the explicit header.
-	tenantID := parseBaggageHeaders(r.Header.Values("Baggage"))
+	// Extract tenant and job IDs for attribution.
+	// We check Baggage (W3C standard) first, then the explicit headers.
+	tenantID, jobID := parseBaggageHeaders(r.Header.Values("Baggage"))
 	if tenantID == "" {
 		tenantID = r.Header.Get("X-Candela-Tenant-Id")
 		if !tenantIDPattern.MatchString(tenantID) {
 			tenantID = ""
+		}
+	}
+	if jobID == "" {
+		jobID = r.Header.Get("X-Candela-Job-Id")
+		if !jobIDPattern.MatchString(jobID) {
+			jobID = ""
 		}
 	}
 
@@ -117,10 +125,10 @@ func (s *spanCapture) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	duration := time.Since(start)
 
 	// Build the span asynchronously to not block the response.
-	go s.buildSpan(chatReq.Model, chatReq.Stream, inputContent, rec.body.Bytes(), rec.statusCode, start, duration, sessionID, tenantID)
+	go s.buildSpan(chatReq.Model, chatReq.Stream, inputContent, rec.body.Bytes(), rec.statusCode, start, duration, sessionID, tenantID, jobID)
 }
 
-func (s *spanCapture) buildSpan(model string, stream *bool, inputContent string, respBody []byte, statusCode int, start time.Time, duration time.Duration, sessionID, tenantID string) {
+func (s *spanCapture) buildSpan(model string, stream *bool, inputContent string, respBody []byte, statusCode int, start time.Time, duration time.Duration, sessionID, tenantID, jobID string) {
 	var inputTokens, outputTokens, totalTokens int64
 
 	isStreaming := stream != nil && *stream
@@ -165,6 +173,7 @@ func (s *spanCapture) buildSpan(model string, stream *bool, inputContent string,
 		ProjectID: "local",
 		SessionID: sessionID,
 		TenantID:  tenantID,
+		JobID:     jobID,
 		GenAI: &storage.GenAIAttributes{
 			Model:        model,
 			Provider:     "local",
@@ -274,23 +283,21 @@ func generateID(size int) string {
 
 // --- Tenant ID & Baggage parsing ---
 
-// parseBaggageHeaders joins multiple Baggage headers and extracts candela.tenant_id.
-func parseBaggageHeaders(values []string) string {
+// parseBaggageHeaders joins multiple Baggage headers and extracts candela.tenant_id and candela.job_id.
+func parseBaggageHeaders(values []string) (string, string) {
 	if len(values) == 0 {
-		return ""
+		return "", ""
 	}
-	// W3C spec allows multiple Baggage header instances; they are logically joined with commas.
 	return parseBaggage(strings.Join(values, ","))
 }
 
-// parseBaggage extracts the candela.tenant_id value from a W3C Baggage header string.
-// Matching is case-insensitive for the key; values are validated against tenantIDPattern.
-func parseBaggage(header string) string {
+// parseBaggage extracts the candela.tenant_id and candela.job_id values from a W3C Baggage header string.
+func parseBaggage(header string) (string, string) {
 	if header == "" {
-		return ""
+		return "", ""
 	}
 
-	var tenantID string
+	var tenantID, jobID string
 	parts := strings.Split(header, ",")
 	for _, part := range parts {
 		kv := strings.SplitN(strings.TrimSpace(part), "=", 2)
@@ -298,20 +305,21 @@ func parseBaggage(header string) string {
 			continue
 		}
 		keyPart := strings.SplitN(strings.TrimSpace(kv[0]), ";", 2)[0]
-		if !strings.EqualFold(keyPart, "candela.tenant_id") {
-			continue
-		}
-
-		// Values can have properties (e.g. key=val;prop=1). Strip them.
 		val := strings.TrimSpace(kv[1])
 		if idx := strings.Index(val, ";"); idx >= 0 {
 			val = strings.TrimSpace(val[:idx])
 		}
 
-		if tenantIDPattern.MatchString(val) {
-			tenantID = val
+		if strings.EqualFold(keyPart, "candela.tenant_id") {
+			if tenantIDPattern.MatchString(val) {
+				tenantID = val
+			}
+		} else if strings.EqualFold(keyPart, "candela.job_id") {
+			if jobIDPattern.MatchString(val) {
+				jobID = val
+			}
 		}
 	}
 
-	return tenantID
+	return tenantID, jobID
 }

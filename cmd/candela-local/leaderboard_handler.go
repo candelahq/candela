@@ -49,15 +49,22 @@ func (h *leaderboardHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}, limit)
 	if err != nil {
 		slog.Error("failed to query tenant leaderboard", "error", err)
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusInternalServerError)
-		_ = json.NewEncoder(w).Encode(map[string]string{"error": "failed to query leaderboard"})
-		return
+		// Don't fail the whole request if one leaderboard fails.
+	}
+
+	jobs, err := h.reader.GetJobLeaderboard(r.Context(), storage.UsageQuery{
+		ProjectID: "local",
+		StartTime: monthAgo,
+		EndTime:   now,
+	}, limit)
+	if err != nil {
+		slog.Error("failed to query job leaderboard", "error", err)
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{
 		"tenants": tenants,
-		"count":   len(tenants),
+		"jobs":    jobs,
+		"count":   len(tenants) + len(jobs),
 	})
 }

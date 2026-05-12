@@ -156,6 +156,9 @@ func buildAttributes(s storage.Span) []*commonpb.KeyValue {
 	if s.TenantID != "" {
 		add(stringAttr("candela.tenant_id", s.TenantID))
 	}
+	if s.JobID != "" {
+		add(stringAttr("candela.job_id", s.JobID))
+	}
 
 	// Pass-through custom attributes — skip keys already set above to avoid duplicates.
 	for k, v := range s.Attributes {

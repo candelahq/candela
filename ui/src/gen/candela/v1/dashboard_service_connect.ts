@@ -3,7 +3,7 @@
 /* eslint-disable */
 // @ts-nocheck
 
-import { GetLatencyPercentilesRequest, GetLatencyPercentilesResponse, GetModelBreakdownRequest, GetModelBreakdownResponse, GetMyUsageRequest, GetMyUsageResponse, GetTeamLeaderboardRequest, GetTeamLeaderboardResponse, GetUsageSummaryRequest, GetUsageSummaryResponse } from "./dashboard_service_pb.js";
+import { GetJobLeaderboardRequest, GetJobLeaderboardResponse, GetLatencyPercentilesRequest, GetLatencyPercentilesResponse, GetModelBreakdownRequest, GetModelBreakdownResponse, GetMyUsageRequest, GetMyUsageResponse, GetTeamLeaderboardRequest, GetTeamLeaderboardResponse, GetUsageSummaryRequest, GetUsageSummaryResponse } from "./dashboard_service_pb.js";
 import { MethodKind } from "@bufbuild/protobuf";
 
 /**
@@ -69,6 +69,17 @@ export const DashboardService = {
       name: "GetTeamLeaderboard",
       I: GetTeamLeaderboardRequest,
       O: GetTeamLeaderboardResponse,
+      kind: MethodKind.Unary,
+    },
+    /**
+     * GetJobLeaderboard returns per-job usage rankings.
+     *
+     * @generated from rpc candela.v1.DashboardService.GetJobLeaderboard
+     */
+    getJobLeaderboard: {
+      name: "GetJobLeaderboard",
+      I: GetJobLeaderboardRequest,
+      O: GetJobLeaderboardResponse,
       kind: MethodKind.Unary,
     },
   }

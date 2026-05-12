@@ -84,6 +84,7 @@ func (h *TraceHandler) ListTraces(
 		OrderBy:     msg.OrderBy,
 		Descending:  msg.Descending,
 		UserID:      scopeUserID(ctx, h.users),
+		JobID:       req.Header().Get("X-Candela-Job-Id"),
 	}
 
 	if msg.TimeRange != nil {
@@ -143,6 +144,7 @@ func (h *TraceHandler) SearchSpans(
 		Model:        msg.Model,
 		NameContains: msg.NameContains,
 		UserID:       scopeUserID(ctx, h.users),
+		JobID:        req.Header().Get("X-Candela-Job-Id"),
 	}
 
 	if msg.TimeRange != nil {
@@ -198,6 +200,9 @@ func traceToProto(t *storage.Trace) *typespb.Trace {
 		TotalTokens:  t.TotalTokens,
 		TotalCostUsd: t.TotalCostUSD,
 		RootSpanName: t.RootSpanName,
+		UserId:       t.UserID,
+		TenantId:     t.TenantID,
+		JobId:        t.JobID,
 	}
 
 	for _, s := range t.Spans {
@@ -222,6 +227,9 @@ func spanToProto(s *storage.Span) *typespb.Span {
 		ProjectId:     s.ProjectID,
 		Environment:   s.Environment,
 		ServiceName:   s.ServiceName,
+		UserId:        s.UserID,
+		TenantId:      s.TenantID,
+		JobId:         s.JobID,
 	}
 
 	if s.GenAI != nil {
@@ -264,6 +272,9 @@ func traceSummaryToProto(t *storage.TraceSummary) *typespb.TraceSummary {
 		Status:          typespb.SpanStatus(t.Status),
 		PrimaryModel:    t.PrimaryModel,
 		PrimaryProvider: t.PrimaryProvider,
+		UserId:          t.UserID,
+		TenantId:        t.TenantID,
+		JobId:           t.JobID,
 	}
 }
 

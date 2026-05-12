@@ -446,3 +446,84 @@ func TestSpanCapture_TenantID_Invalid(t *testing.T) {
 		t.Errorf("got tenant %q, want empty for invalid input", spans.Spans[0].TenantID)
 	}
 }
+
+func TestSpanCapture_JobID(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"choices": [{"message": {"content": "ok"}}]}`))
+	}))
+	defer upstream.Close()
+
+	store, _ := sqlitestore.New(sqlitestore.Config{Path: ":memory:"})
+	proc := processor.New([]storage.SpanWriter{store}, costcalc.New(), 1)
+	go proc.Run(context.Background())
+	defer proc.Stop()
+
+	handler := newSpanCapture(proxyTo(upstream.URL), proc, nil)
+	srv := httptest.NewServer(handler)
+	defer srv.Close()
+
+	// Test extraction from Baggage.
+	body := `{"model": "test", "messages": []}`
+	req, _ := http.NewRequest("POST", srv.URL+"/v1/chat/completions", strings.NewReader(body))
+	req.Header.Add("Baggage", "candela.tenant_id=t1,candela.job_id=j1")
+
+	resp, _ := http.DefaultClient.Do(req)
+	_ = resp.Body.Close()
+
+	// Poll for capture.
+	var spans *storage.SpanResult
+	for i := 0; i < 20; i++ {
+		spans, _ = store.SearchSpans(context.Background(), storage.SpanQuery{
+			ProjectID: "local",
+			StartTime: time.Now().Add(-1 * time.Hour),
+			EndTime:   time.Now().Add(1 * time.Hour),
+			PageSize:  1,
+		})
+		if len(spans.Spans) > 0 {
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+
+	if len(spans.Spans) == 0 {
+		t.Fatal("no spans captured")
+	}
+	s := spans.Spans[0]
+	if s.TenantID != "t1" {
+		t.Errorf("got tenant %q, want t1", s.TenantID)
+	}
+	if s.JobID != "j1" {
+		t.Errorf("got job %q, want j1", s.JobID)
+	}
+
+	// Test extraction from explicit header.
+	req, _ = http.NewRequest("POST", srv.URL+"/v1/chat/completions", strings.NewReader(body))
+	req.Header.Set("X-Candela-Job-Id", "j2")
+	resp, _ = http.DefaultClient.Do(req)
+	_ = resp.Body.Close()
+
+	for i := 0; i < 20; i++ {
+		spans, _ = store.SearchSpans(context.Background(), storage.SpanQuery{
+			ProjectID: "local",
+			StartTime: time.Now().Add(-1 * time.Hour),
+			EndTime:   time.Now().Add(1 * time.Hour),
+			PageSize:  10,
+		})
+		if len(spans.Spans) >= 2 {
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+
+	found := false
+	for _, s := range spans.Spans {
+		if s.JobID == "j2" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("job_id j2 not found in captured spans")
+	}
+}

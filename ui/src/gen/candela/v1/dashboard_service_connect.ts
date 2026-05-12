@@ -72,7 +72,7 @@ export const DashboardService = {
       kind: MethodKind.Unary,
     },
     /**
-     * GetJobLeaderboard returns per-job usage rankings.
+     * GetJobLeaderboard returns per-job usage for cost attribution.
      *
      * @generated from rpc candela.v1.DashboardService.GetJobLeaderboard
      */

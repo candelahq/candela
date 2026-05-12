@@ -90,6 +90,24 @@
   "description": "Conversation/session identifier for grouping related spans."
  },
  {
+  "name": "tenant_id",
+  "type": "STRING",
+  "mode": "NULLABLE",
+  "description": "Downstream tenant for multitenant cost attribution."
+ },
+ {
+  "name": "job_id",
+  "type": "STRING",
+  "mode": "NULLABLE",
+  "description": "Job/experiment identifier."
+ },
+ {
+  "name": "trace_group",
+  "type": "STRING",
+  "mode": "NULLABLE",
+  "description": "Logical trace group for multi-step agent correlation."
+ },
+ {
   "name": "gen_ai_model",
   "type": "STRING",
   "mode": "NULLABLE",
@@ -154,6 +172,26 @@
   "type": "RECORD",
   "mode": "REPEATED",
   "description": "Structured attributes from OpenTelemetry key-value pairs.",
+  "fields": [
+   {
+    "name": "key",
+    "type": "STRING",
+    "mode": "REQUIRED",
+    "description": "The attribute key."
+   },
+   {
+    "name": "value",
+    "type": "STRING",
+    "mode": "REQUIRED",
+    "description": "The attribute value (stringified)."
+   }
+  ]
+ },
+ {
+  "name": "labels",
+  "type": "RECORD",
+  "mode": "REPEATED",
+  "description": "User-defined labels for custom filtering and cost attribution.\n Set via X-Candela-Labels header (comma-separated k=v pairs).",
   "fields": [
    {
     "name": "key",

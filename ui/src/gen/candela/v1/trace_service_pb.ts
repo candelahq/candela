@@ -14,7 +14,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file candela/v1/trace_service.proto.
  */
 export const file_candela_v1_trace_service: GenFile = /*@__PURE__*/
-  fileDesc("Ch5jYW5kZWxhL3YxL3RyYWNlX3NlcnZpY2UucHJvdG8SCmNhbmRlbGEudjEiIwoPR2V0VHJhY2VSZXF1ZXN0EhAKCHRyYWNlX2lkGAEgASgJIjcKEEdldFRyYWNlUmVzcG9uc2USIwoFdHJhY2UYASABKAsyFC5jYW5kZWxhLnR5cGVzLlRyYWNlIqICChFMaXN0VHJhY2VzUmVxdWVzdBISCgpwcm9qZWN0X2lkGAEgASgJEhMKC2Vudmlyb25tZW50GAIgASgJEiwKCnRpbWVfcmFuZ2UYAyABKAsyGC5jYW5kZWxhLnR5cGVzLlRpbWVSYW5nZRINCgVtb2RlbBgKIAEoCRIQCghwcm92aWRlchgLIAEoCRIpCgZzdGF0dXMYDCABKA4yGS5jYW5kZWxhLnR5cGVzLlNwYW5TdGF0dXMSDgoGc2VhcmNoGA0gASgJEjQKCnBhZ2luYXRpb24YFCABKAsyIC5jYW5kZWxhLnR5cGVzLlBhZ2luYXRpb25SZXF1ZXN0EhAKCG9yZGVyX2J5GB4gASgJEhIKCmRlc2NlbmRpbmcYHyABKAgieAoSTGlzdFRyYWNlc1Jlc3BvbnNlEisKBnRyYWNlcxgBIAMoCzIbLmNhbmRlbGEudHlwZXMuVHJhY2VTdW1tYXJ5EjUKCnBhZ2luYXRpb24YAiABKAsyIS5jYW5kZWxhLnR5cGVzLlBhZ2luYXRpb25SZXNwb25zZSLZAQoSU2VhcmNoU3BhbnNSZXF1ZXN0EhIKCnByb2plY3RfaWQYASABKAkSLAoKdGltZV9yYW5nZRgCIAEoCzIYLmNhbmRlbGEudHlwZXMuVGltZVJhbmdlEiUKBGtpbmQYCiABKA4yFy5jYW5kZWxhLnR5cGVzLlNwYW5LaW5kEg0KBW1vZGVsGAsgASgJEhUKDW5hbWVfY29udGFpbnMYDCABKAkSNAoKcGFnaW5hdGlvbhgUIAEoCzIgLmNhbmRlbGEudHlwZXMuUGFnaW5hdGlvblJlcXVlc3QicAoTU2VhcmNoU3BhbnNSZXNwb25zZRIiCgVzcGFucxgBIAMoCzITLmNhbmRlbGEudHlwZXMuU3BhbhI1CgpwYWdpbmF0aW9uGAIgASgLMiEuY2FuZGVsYS50eXBlcy5QYWdpbmF0aW9uUmVzcG9uc2Uy8gEKDFRyYWNlU2VydmljZRJFCghHZXRUcmFjZRIbLmNhbmRlbGEudjEuR2V0VHJhY2VSZXF1ZXN0GhwuY2FuZGVsYS52MS5HZXRUcmFjZVJlc3BvbnNlEksKCkxpc3RUcmFjZXMSHS5jYW5kZWxhLnYxLkxpc3RUcmFjZXNSZXF1ZXN0Gh4uY2FuZGVsYS52MS5MaXN0VHJhY2VzUmVzcG9uc2USTgoLU2VhcmNoU3BhbnMSHi5jYW5kZWxhLnYxLlNlYXJjaFNwYW5zUmVxdWVzdBofLmNhbmRlbGEudjEuU2VhcmNoU3BhbnNSZXNwb25zZUKmAQoOY29tLmNhbmRlbGEudjFCEVRyYWNlU2VydmljZVByb3RvUAFaOGdpdGh1Yi5jb20vY2FuZGVsYWhxL2NhbmRlbGEvZ2VuL2dvL2NhbmRlbGEvdjE7Y2FuZGVsYXYxogIDQ1hYqgIKQ2FuZGVsYS5WMcoCCkNhbmRlbGFcVjHiAhZDYW5kZWxhXFYxXEdQQk1ldGFkYXRh6gILQ2FuZGVsYTo6VjFiBnByb3RvMw", [file_candela_types_common, file_candela_types_trace]);
+  fileDesc("Ch5jYW5kZWxhL3YxL3RyYWNlX3NlcnZpY2UucHJvdG8SCmNhbmRlbGEudjEiIwoPR2V0VHJhY2VSZXF1ZXN0EhAKCHRyYWNlX2lkGAEgASgJIjcKEEdldFRyYWNlUmVzcG9uc2USIwoFdHJhY2UYASABKAsyFC5jYW5kZWxhLnR5cGVzLlRyYWNlItoCChFMaXN0VHJhY2VzUmVxdWVzdBISCgpwcm9qZWN0X2lkGAEgASgJEhMKC2Vudmlyb25tZW50GAIgASgJEiwKCnRpbWVfcmFuZ2UYAyABKAsyGC5jYW5kZWxhLnR5cGVzLlRpbWVSYW5nZRINCgVtb2RlbBgKIAEoCRIQCghwcm92aWRlchgLIAEoCRIpCgZzdGF0dXMYDCABKA4yGS5jYW5kZWxhLnR5cGVzLlNwYW5TdGF0dXMSDgoGc2VhcmNoGA0gASgJEhEKCXRlbmFudF9pZBgOIAEoCRIOCgZqb2JfaWQYDyABKAkSEwoLdHJhY2VfZ3JvdXAYECABKAkSNAoKcGFnaW5hdGlvbhgUIAEoCzIgLmNhbmRlbGEudHlwZXMuUGFnaW5hdGlvblJlcXVlc3QSEAoIb3JkZXJfYnkYHiABKAkSEgoKZGVzY2VuZGluZxgfIAEoCCJ4ChJMaXN0VHJhY2VzUmVzcG9uc2USKwoGdHJhY2VzGAEgAygLMhsuY2FuZGVsYS50eXBlcy5UcmFjZVN1bW1hcnkSNQoKcGFnaW5hdGlvbhgCIAEoCzIhLmNhbmRlbGEudHlwZXMuUGFnaW5hdGlvblJlc3BvbnNlIpECChJTZWFyY2hTcGFuc1JlcXVlc3QSEgoKcHJvamVjdF9pZBgBIAEoCRIsCgp0aW1lX3JhbmdlGAIgASgLMhguY2FuZGVsYS50eXBlcy5UaW1lUmFuZ2USJQoEa2luZBgKIAEoDjIXLmNhbmRlbGEudHlwZXMuU3BhbktpbmQSDQoFbW9kZWwYCyABKAkSFQoNbmFtZV9jb250YWlucxgMIAEoCRIRCgl0ZW5hbnRfaWQYDSABKAkSDgoGam9iX2lkGA4gASgJEhMKC3RyYWNlX2dyb3VwGA8gASgJEjQKCnBhZ2luYXRpb24YFCABKAsyIC5jYW5kZWxhLnR5cGVzLlBhZ2luYXRpb25SZXF1ZXN0InAKE1NlYXJjaFNwYW5zUmVzcG9uc2USIgoFc3BhbnMYASADKAsyEy5jYW5kZWxhLnR5cGVzLlNwYW4SNQoKcGFnaW5hdGlvbhgCIAEoCzIhLmNhbmRlbGEudHlwZXMuUGFnaW5hdGlvblJlc3BvbnNlMvIBCgxUcmFjZVNlcnZpY2USRQoIR2V0VHJhY2USGy5jYW5kZWxhLnYxLkdldFRyYWNlUmVxdWVzdBocLmNhbmRlbGEudjEuR2V0VHJhY2VSZXNwb25zZRJLCgpMaXN0VHJhY2VzEh0uY2FuZGVsYS52MS5MaXN0VHJhY2VzUmVxdWVzdBoeLmNhbmRlbGEudjEuTGlzdFRyYWNlc1Jlc3BvbnNlEk4KC1NlYXJjaFNwYW5zEh4uY2FuZGVsYS52MS5TZWFyY2hTcGFuc1JlcXVlc3QaHy5jYW5kZWxhLnYxLlNlYXJjaFNwYW5zUmVzcG9uc2VCpgEKDmNvbS5jYW5kZWxhLnYxQhFUcmFjZVNlcnZpY2VQcm90b1ABWjhnaXRodWIuY29tL2NhbmRlbGFocS9jYW5kZWxhL2dlbi9nby9jYW5kZWxhL3YxO2NhbmRlbGF2MaICA0NYWKoCCkNhbmRlbGEuVjHKAgpDYW5kZWxhXFYx4gIWQ2FuZGVsYVxWMVxHUEJNZXRhZGF0YeoCC0NhbmRlbGE6OlYxYgZwcm90bzM", [file_candela_types_common, file_candela_types_trace]);
 
 /**
  * @generated from message candela.v1.GetTraceRequest
@@ -102,6 +102,27 @@ export type ListTracesRequest = Message<"candela.v1.ListTracesRequest"> & {
   search: string;
 
   /**
+   * Filter by tenant
+   *
+   * @generated from field: string tenant_id = 14;
+   */
+  tenantId: string;
+
+  /**
+   * Filter by job/experiment
+   *
+   * @generated from field: string job_id = 15;
+   */
+  jobId: string;
+
+  /**
+   * Filter by trace group
+   *
+   * @generated from field: string trace_group = 16;
+   */
+  traceGroup: string;
+
+  /**
    * Pagination
    *
    * @generated from field: candela.types.PaginationRequest pagination = 20;
@@ -182,6 +203,27 @@ export type SearchSpansRequest = Message<"candela.v1.SearchSpansRequest"> & {
    * @generated from field: string name_contains = 12;
    */
   nameContains: string;
+
+  /**
+   * Filter by tenant
+   *
+   * @generated from field: string tenant_id = 13;
+   */
+  tenantId: string;
+
+  /**
+   * Filter by job/experiment
+   *
+   * @generated from field: string job_id = 14;
+   */
+  jobId: string;
+
+  /**
+   * Filter by trace group
+   *
+   * @generated from field: string trace_group = 15;
+   */
+  traceGroup: string;
 
   /**
    * @generated from field: candela.types.PaginationRequest pagination = 20;

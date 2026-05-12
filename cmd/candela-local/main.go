@@ -5,7 +5,7 @@
 //
 // Usage:
 //
-//	candela-local                      # reads ~/.candela.yaml
+//	candela-local                      # reads ~/.config/candela/config.yaml
 //	candela-local --config ./my.yaml   # custom config
 //	candela-local --remote https://candela-xxx.run.app --audience 12345 --port 8181
 //
@@ -101,7 +101,7 @@ func main() {
 		audience   string
 		port       int
 	)
-	flag.StringVar(&configPath, "config", "", "path to config file (default: ~/.candela.yaml)")
+	flag.StringVar(&configPath, "config", "", "path to config file (default: ~/.config/candela/config.yaml)")
 	flag.StringVar(&remote, "remote", "", "remote Candela server URL")
 	flag.StringVar(&audience, "audience", "", "IAP OAuth Client ID")
 	flag.IntVar(&port, "port", 0, "local port (default: 8181)")
@@ -163,7 +163,7 @@ func main() {
 		}
 	} else {
 		if cfg.Audience == "" {
-			slog.Error("audience is required when remote is set (set in ~/.candela.yaml or --audience)")
+			slog.Error("audience is required when remote is set (set in ~/.config/candela/config.yaml or --audience)")
 			os.Exit(1)
 		}
 
@@ -471,7 +471,7 @@ func main() {
 }
 
 // loadConfig reads the candela-local config file.
-// Search order: --config flag → $CANDELA_CONFIG → ~/.candela.yaml
+// Search order: --config flag → $CANDELA_CONFIG → ~/.config/candela/config.yaml → ~/.candela.yaml (legacy)
 func loadConfig(configPath string) *Config {
 	if configPath == "" {
 		configPath = os.Getenv("CANDELA_CONFIG")
@@ -597,7 +597,7 @@ func buildCloudProxy(cfg Config, submitter *processor.SpanProcessor) (*proxy.Pro
 		}
 	}
 	if project == "" {
-		slog.Error("vertex_ai.project is required for direct cloud providers — set it in ~/.candela.yaml")
+		slog.Error("vertex_ai.project is required for direct cloud providers — set it in ~/.config/candela/config.yaml")
 		return nil, nil
 	}
 

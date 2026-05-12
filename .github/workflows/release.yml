@@ -6,7 +6,8 @@ on:
       - "v*"
 
 permissions:
-  contents: write   # Create GitHub releases and upload assets
+  contents: write    # Create GitHub releases and upload assets
+  packages: read     # Pull ghcr.io/candelahq/candela-dev container
 
 jobs:
   goreleaser:

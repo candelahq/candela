@@ -8,6 +8,7 @@ import (
 	"time"
 
 	connect "connectrpc.com/connect"
+	types "github.com/candelahq/candela/gen/go/candela/types"
 	v1 "github.com/candelahq/candela/gen/go/candela/v1"
 	"github.com/candelahq/candela/pkg/auth"
 	"github.com/candelahq/candela/pkg/storage"
@@ -30,13 +31,10 @@ func (h *DashboardHandler) GetUsageSummary(
 ) (*connect.Response[v1.GetUsageSummaryResponse], error) {
 	msg := req.Msg
 
-	attr := getAttribution(req)
 	q := storage.UsageQuery{
 		ProjectID:   msg.ProjectId,
 		Environment: msg.Environment,
 		UserID:      scopeUserID(ctx, h.users),
-		JobID:       attr.JobID,
-		TenantID:    attr.TenantID,
 	}
 	if msg.TimeRange != nil {
 		if msg.TimeRange.Start != nil {
@@ -76,13 +74,7 @@ func (h *DashboardHandler) GetModelBreakdown(
 ) (*connect.Response[v1.GetModelBreakdownResponse], error) {
 	msg := req.Msg
 
-	attr := getAttribution(req)
-	q := storage.UsageQuery{
-		ProjectID: msg.ProjectId,
-		UserID:    scopeUserID(ctx, h.users),
-		JobID:     attr.JobID,
-		TenantID:  attr.TenantID,
-	}
+	q := storage.UsageQuery{ProjectID: msg.ProjectId, UserID: scopeUserID(ctx, h.users)}
 	if msg.TimeRange != nil {
 		if msg.TimeRange.Start != nil {
 			q.StartTime = msg.TimeRange.Start.AsTime()
@@ -159,12 +151,9 @@ func (h *DashboardHandler) GetMyUsage(
 	}
 
 	msg := req.Msg
-	attr := getAttribution(req)
 	q := storage.UsageQuery{
 		ProjectID: msg.ProjectId,
 		UserID:    userID,
-		JobID:     attr.JobID,
-		TenantID:  attr.TenantID,
 	}
 	if msg.TimeRange != nil {
 		if msg.TimeRange.Start != nil {
@@ -321,6 +310,40 @@ func (h *DashboardHandler) GetTeamLeaderboard(
 	}), nil
 }
 
+// leaderboardRequest is the common interface for leaderboard RPC messages.
+type leaderboardRequest interface {
+	GetProjectId() string
+	GetTimeRange() *types.TimeRange
+	GetLimit() int32
+}
+
+// parseLeaderboardParams extracts the shared UsageQuery and limit from any leaderboard request.
+func parseLeaderboardParams(msg leaderboardRequest) (storage.UsageQuery, int) {
+	q := storage.UsageQuery{ProjectID: msg.GetProjectId()}
+	if msg.GetTimeRange() != nil {
+		if msg.GetTimeRange().Start != nil {
+			q.StartTime = msg.GetTimeRange().Start.AsTime()
+		}
+		if msg.GetTimeRange().End != nil {
+			q.EndTime = msg.GetTimeRange().End.AsTime()
+		}
+	}
+	if q.StartTime.IsZero() {
+		q.StartTime = time.Now().Add(-30 * 24 * time.Hour)
+	}
+	if q.EndTime.IsZero() {
+		q.EndTime = time.Now()
+	}
+	limit := int(msg.GetLimit())
+	if limit <= 0 {
+		limit = 20
+	}
+	if limit > 100 {
+		limit = 100
+	}
+	return q, limit
+}
+
 // GetTenantLeaderboard returns per-tenant LLM cost aggregations ranked by spend (admin only).
 // Tenant identity is captured from X-Candela-Tenant-Id header or W3C Baggage (candela.tenant_id).
 func (h *DashboardHandler) GetTenantLeaderboard(
@@ -333,30 +356,7 @@ func (h *DashboardHandler) GetTenantLeaderboard(
 			fmt.Errorf("tenant leaderboard is admin-only"))
 	}
 
-	msg := req.Msg
-	q := storage.UsageQuery{ProjectID: msg.GetProjectId()}
-	if msg.GetTimeRange() != nil {
-		if msg.GetTimeRange().Start != nil {
-			q.StartTime = msg.GetTimeRange().Start.AsTime()
-		}
-		if msg.GetTimeRange().End != nil {
-			q.EndTime = msg.GetTimeRange().End.AsTime()
-		}
-	}
-	if q.StartTime.IsZero() {
-		q.StartTime = time.Now().Add(-30 * 24 * time.Hour) // default: last 30 days
-	}
-	if q.EndTime.IsZero() {
-		q.EndTime = time.Now()
-	}
-
-	limit := int(msg.GetLimit())
-	if limit <= 0 {
-		limit = 20
-	}
-	if limit > 100 {
-		limit = 100
-	}
+	q, limit := parseLeaderboardParams(req.Msg)
 
 	tenants, err := h.store.GetTenantLeaderboard(ctx, q, limit)
 	if err != nil {
@@ -386,61 +386,15 @@ func (h *DashboardHandler) GetTenantLeaderboard(
 	}), nil
 }
 
-// GetJobLeaderboard returns per-job LLM cost aggregations ranked by spend.
-// Job identity is captured from X-Candela-Job-Id header or W3C Baggage (candela.job_id).
-func (h *DashboardHandler) GetJobLeaderboard(
-	ctx context.Context,
-	req *connect.Request[v1.GetJobLeaderboardRequest],
-) (*connect.Response[v1.GetJobLeaderboardResponse], error) {
-	msg := req.Msg
-	q := storage.UsageQuery{ProjectID: msg.GetProjectId()}
-	if msg.GetTimeRange() != nil {
-		if msg.GetTimeRange().Start != nil {
-			q.StartTime = msg.GetTimeRange().Start.AsTime()
-		}
-		if msg.GetTimeRange().End != nil {
-			q.EndTime = msg.GetTimeRange().End.AsTime()
-		}
-	}
-	if q.StartTime.IsZero() {
-		q.StartTime = time.Now().Add(-30 * 24 * time.Hour) // default: last 30 days
-	}
-	if q.EndTime.IsZero() {
-		q.EndTime = time.Now()
-	}
-
-	limit := int(msg.GetLimit())
-	if limit <= 0 {
-		limit = 20
-	}
-	if limit > 100 {
-		limit = 100
-	}
-
+func (h *DashboardHandler) GetJobLeaderboard(ctx context.Context, req *connect.Request[v1.GetJobLeaderboardRequest]) (*connect.Response[v1.GetJobLeaderboardResponse], error) {
+	q, limit := parseLeaderboardParams(req.Msg)
 	jobs, err := h.store.GetJobLeaderboard(ctx, q, limit)
 	if err != nil {
 		return nil, internalError("failed to get job leaderboard", err)
 	}
-
 	var pbJobs []*v1.JobUsage
 	for _, j := range jobs {
-		pbJobs = append(pbJobs, &v1.JobUsage{
-			JobId:        j.JobID,
-			CallCount:    j.CallCount,
-			TotalTokens:  j.TotalTokens,
-			CostUsd:      j.CostUSD,
-			AvgLatencyMs: j.AvgLatencyMs,
-			TopModel:     j.TopModel,
-		})
+		pbJobs = append(pbJobs, &v1.JobUsage{JobId: j.JobID, CallCount: j.CallCount, TotalTokens: j.TotalTokens, CostUsd: j.CostUSD, AvgLatencyMs: j.AvgLatencyMs, TopModel: j.TopModel})
 	}
-
-	slog.Info("job leaderboard fetched",
-		"project_id", q.ProjectID,
-		"job_count", len(jobs),
-		"limit", limit,
-	)
-
-	return connect.NewResponse(&v1.GetJobLeaderboardResponse{
-		Jobs: pbJobs,
-	}), nil
+	return connect.NewResponse(&v1.GetJobLeaderboardResponse{Jobs: pbJobs}), nil
 }

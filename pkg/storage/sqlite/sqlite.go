@@ -5,7 +5,6 @@ package sqlite
 import (
 	"context"
 	"database/sql"
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -34,17 +33,17 @@ func New(cfg Config) (*Store, error) {
 		cfg.Path = "candela.db"
 	}
 
-	db, err := sql.Open("sqlite", cfg.Path)
+	dsn := cfg.Path
+	if dsn == ":memory:" {
+		dsn = "file::memory:?cache=shared"
+	}
+	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("opening sqlite: %w", err)
 	}
-
-	if cfg.Path == ":memory:" {
-		// For in-memory DBs, we MUST restrict to a single connection,
-		// otherwise different goroutines (e.g. processor vs test) will
-		// get different, isolated databases.
-		db.SetMaxOpenConns(1)
-	}
+	// SQLite does not support concurrent writers; constraining to 1 connection
+	// also ensures :memory: databases share a single in-memory instance.
+	db.SetMaxOpenConns(1)
 
 	// SQLite performance tuning.
 	for _, pragma := range []string{
@@ -109,12 +108,12 @@ func (s *Store) migrate() error {
 		`ALTER TABLE spans ADD COLUMN user_id TEXT DEFAULT ''`,
 		// Migration: add session_id column to existing tables.
 		`ALTER TABLE spans ADD COLUMN session_id TEXT DEFAULT ''`,
+		// Migration: add tenant_id for multitenant cost attribution.
 		`ALTER TABLE spans ADD COLUMN tenant_id TEXT DEFAULT ''`,
 		`CREATE INDEX IF NOT EXISTS idx_spans_tenant ON spans(tenant_id)`,
-		`CREATE INDEX IF NOT EXISTS idx_spans_tenant_time ON spans(project_id, tenant_id, start_time)`,
+		// Migration: add job_id for job-level cost attribution.
 		`ALTER TABLE spans ADD COLUMN job_id TEXT DEFAULT ''`,
 		`CREATE INDEX IF NOT EXISTS idx_spans_job ON spans(job_id)`,
-		`CREATE INDEX IF NOT EXISTS idx_spans_job_time ON spans(project_id, job_id, start_time)`,
 	}
 
 	for _, q := range queries {
@@ -232,14 +231,6 @@ func (s *Store) QueryTraces(ctx context.Context, q storage.TraceQuery) (*storage
 		dir = "ASC"
 	}
 
-	// Implement offset-based pagination using PageToken.
-	var offset int
-	if q.PageToken != "" {
-		if b, err := base64.StdEncoding.DecodeString(q.PageToken); err == nil {
-			_, _ = fmt.Sscanf(string(b), "%d", &offset)
-		}
-	}
-
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT
 			trace_id,
@@ -252,20 +243,17 @@ func (s *Store) QueryTraces(ctx context.Context, q storage.TraceQuery) (*storage
 			MAX(CASE WHEN parent_span_id = '' THEN name ELSE '' END) as root_name,
 			MAX(gen_ai_model) as primary_model,
 			MAX(gen_ai_provider) as primary_provider,
-			MAX(status) as status,
-			MAX(tenant_id) as tenant_id,
-			MAX(job_id) as job_id
+			MAX(status) as status
 		FROM spans
 		WHERE project_id = ? AND start_time >= ? AND start_time <= ?
 			AND (? = '' OR user_id = ?)
 			AND (? = '' OR tenant_id = ?)
-			AND (? = '' OR job_id = ?)
 			AND (? = '' OR environment = ?)
 		GROUP BY trace_id
 		ORDER BY `+orderExpr+` `+dir+`
-		LIMIT ? OFFSET ?
+		LIMIT ?
 	`, q.ProjectID, q.StartTime.Format(time.RFC3339Nano), q.EndTime.Format(time.RFC3339Nano),
-		q.UserID, q.UserID, q.TenantID, q.TenantID, q.JobID, q.JobID, q.Environment, q.Environment, q.PageSize, offset)
+		q.UserID, q.UserID, q.TenantID, q.TenantID, q.Environment, q.Environment, q.PageSize)
 	if err != nil {
 		return nil, fmt.Errorf("querying traces: %w", err)
 	}
@@ -280,7 +268,7 @@ func (s *Store) QueryTraces(ctx context.Context, q storage.TraceQuery) (*storage
 		err := rows.Scan(
 			&t.TraceID, &startStr, &endStr, &t.SpanCount, &t.LLMCallCount,
 			&t.TotalTokens, &t.TotalCostUSD, &t.RootSpanName,
-			&t.PrimaryModel, &t.PrimaryProvider, &status, &t.TenantID, &t.JobID,
+			&t.PrimaryModel, &t.PrimaryProvider, &status,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("scanning trace: %w", err)
@@ -297,12 +285,7 @@ func (s *Store) QueryTraces(ctx context.Context, q storage.TraceQuery) (*storage
 		return nil, fmt.Errorf("iterating traces: %w", err)
 	}
 
-	result := &storage.TraceResult{Traces: traces, TotalCount: len(traces)}
-	if len(traces) == q.PageSize {
-		nextOffset := offset + q.PageSize
-		result.NextPageToken = base64.StdEncoding.EncodeToString([]byte(fmt.Sprintf("%d", nextOffset)))
-	}
-	return result, nil
+	return &storage.TraceResult{Traces: traces, TotalCount: len(traces)}, nil
 }
 
 func (s *Store) SearchSpans(ctx context.Context, q storage.SpanQuery) (*storage.SpanResult, error) {
@@ -323,7 +306,6 @@ func (s *Store) SearchSpans(ctx context.Context, q storage.SpanQuery) (*storage.
 			AND (? = '' OR name LIKE '%' || ? || '%' ESCAPE '\')
 			AND (? = '' OR user_id = ?)
 			AND (? = '' OR tenant_id = ?)
-			AND (? = '' OR job_id = ?)
 		ORDER BY start_time DESC
 		LIMIT ?
 	`, q.ProjectID,
@@ -333,7 +315,6 @@ func (s *Store) SearchSpans(ctx context.Context, q storage.SpanQuery) (*storage.
 		q.NameContains, storage.EscapeLike(q.NameContains),
 		q.UserID, q.UserID,
 		q.TenantID, q.TenantID,
-		q.JobID, q.JobID,
 		q.PageSize,
 	)
 	if err != nil {
@@ -367,9 +348,7 @@ func (s *Store) GetUsageSummary(ctx context.Context, q storage.UsageQuery) (*sto
 		WHERE project_id = ? AND start_time >= ? AND start_time <= ?
 			AND (? = '' OR user_id = ?)
 			AND (? = '' OR tenant_id = ?)
-			AND (? = '' OR job_id = ?)
-	`, q.ProjectID, q.StartTime.Format(time.RFC3339Nano), q.EndTime.Format(time.RFC3339Nano),
-		q.UserID, q.UserID, q.TenantID, q.TenantID, q.JobID, q.JobID).Scan(
+	`, q.ProjectID, q.StartTime.Format(time.RFC3339Nano), q.EndTime.Format(time.RFC3339Nano), q.UserID, q.UserID, q.TenantID, q.TenantID).Scan(
 		&summary.TotalTraces, &summary.TotalSpans, &summary.TotalLLMCalls,
 		&summary.TotalInputTokens, &summary.TotalOutputTokens, &summary.TotalCostUSD,
 		&summary.AvgLatencyMs, &summary.ErrorRate,
@@ -390,11 +369,9 @@ func (s *Store) GetModelBreakdown(ctx context.Context, q storage.UsageQuery) ([]
 			AND gen_ai_model != ''
 			AND (? = '' OR user_id = ?)
 			AND (? = '' OR tenant_id = ?)
-			AND (? = '' OR job_id = ?)
 		GROUP BY gen_ai_model, gen_ai_provider
 		ORDER BY SUM(gen_ai_cost_usd) DESC
-	`, q.ProjectID, q.StartTime.Format(time.RFC3339Nano), q.EndTime.Format(time.RFC3339Nano),
-		q.UserID, q.UserID, q.TenantID, q.TenantID, q.JobID, q.JobID)
+	`, q.ProjectID, q.StartTime.Format(time.RFC3339Nano), q.EndTime.Format(time.RFC3339Nano), q.UserID, q.UserID, q.TenantID, q.TenantID)
 	if err != nil {
 		return nil, fmt.Errorf("querying model breakdown: %w", err)
 	}
@@ -515,52 +492,20 @@ func (s *Store) GetTenantLeaderboard(ctx context.Context, q storage.UsageQuery, 
 }
 
 func (s *Store) GetJobLeaderboard(ctx context.Context, q storage.UsageQuery, limit int) ([]storage.JobUsageSummary, error) {
-	if limit <= 0 {
-		limit = 20
-	}
-
-	rows, err := s.db.QueryContext(ctx, `
-		SELECT job_id,
-			COUNT(*),
-			COALESCE(SUM(gen_ai_total_tokens), 0),
-			COALESCE(SUM(gen_ai_cost_usd), 0),
-			COALESCE(AVG(duration_ns), 0) / 1000000.0,
-			COALESCE((
-				SELECT s2.gen_ai_model FROM spans s2
-				WHERE s2.job_id = spans.job_id
-					AND s2.project_id = ? AND s2.start_time >= ? AND s2.start_time <= ?
-					AND s2.gen_ai_model != ''
-				GROUP BY s2.gen_ai_model
-				ORDER BY SUM(s2.gen_ai_cost_usd) DESC
-				LIMIT 1
-			), '') AS top_model
-		FROM spans
-		WHERE project_id = ? AND start_time >= ? AND start_time <= ?
-			AND job_id != ''
-		GROUP BY job_id
-		ORDER BY SUM(gen_ai_cost_usd) DESC
-		LIMIT ?
-	`, q.ProjectID, q.StartTime.Format(time.RFC3339Nano), q.EndTime.Format(time.RFC3339Nano),
-		q.ProjectID, q.StartTime.Format(time.RFC3339Nano), q.EndTime.Format(time.RFC3339Nano), limit)
+	rows, err := s.db.QueryContext(ctx, `SELECT job_id, COUNT(*), COALESCE(SUM(gen_ai_total_tokens),0), COALESCE(SUM(gen_ai_cost_usd),0), COALESCE(AVG(duration_ns),0)/1000000.0, '' AS top_model FROM spans WHERE project_id = ? AND start_time >= ? AND start_time <= ? AND job_id IS NOT NULL AND job_id != '' GROUP BY job_id ORDER BY SUM(gen_ai_cost_usd) DESC LIMIT ?`, q.ProjectID, q.StartTime.Format(time.RFC3339Nano), q.EndTime.Format(time.RFC3339Nano), limit)
 	if err != nil {
 		return nil, fmt.Errorf("querying job leaderboard: %w", err)
 	}
 	defer func() { _ = rows.Close() }()
-
 	var jobs []storage.JobUsageSummary
 	for rows.Next() {
 		var j storage.JobUsageSummary
-		err := rows.Scan(&j.JobID, &j.CallCount, &j.TotalTokens,
-			&j.CostUSD, &j.AvgLatencyMs, &j.TopModel)
-		if err != nil {
+		if err := rows.Scan(&j.JobID, &j.CallCount, &j.TotalTokens, &j.CostUSD, &j.AvgLatencyMs, &j.TopModel); err != nil {
 			return nil, fmt.Errorf("scanning job: %w", err)
 		}
 		jobs = append(jobs, j)
 	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterating jobs: %w", err)
-	}
-	return jobs, nil
+	return jobs, rows.Err()
 }
 
 func (s *Store) Ping(ctx context.Context) error {

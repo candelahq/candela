@@ -9,7 +9,6 @@ package bigquery
 
 import (
 	"context"
-	"encoding/base64"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -110,7 +109,6 @@ type spanRow struct {
 	// TenantID identifies the downstream customer on whose behalf this LLM call
 	// was made. Populated from X-Candela-Tenant-Id header or W3C Baggage.
 	TenantID string `bigquery:"tenant_id"`
-	JobID    string `bigquery:"job_id"`
 }
 
 func spanToRow(span storage.Span) spanRow {
@@ -131,7 +129,6 @@ func spanToRow(span storage.Span) spanRow {
 		UserID:        span.UserID,
 		SessionID:     span.SessionID,
 		TenantID:      span.TenantID,
-		JobID:         span.JobID,
 	}
 
 	if span.GenAI != nil {
@@ -172,7 +169,6 @@ func rowToSpan(row spanRow) storage.Span {
 		UserID:        row.UserID,
 		SessionID:     row.SessionID,
 		TenantID:      row.TenantID,
-		JobID:         row.JobID,
 	}
 
 	if row.GenAIModel != "" {
@@ -227,7 +223,7 @@ func (s *Store) ensureSchema(ctx context.Context) error {
 			Type:  bigquery.DayPartitioningType,
 		},
 		Clustering: &bigquery.Clustering{
-			Fields: []string{"project_id", "tenant_id", "job_id", "user_id"},
+			Fields: []string{"project_id", "tenant_id", "user_id", "trace_id"},
 		},
 	}
 	if err := table.Create(ctx, tableMeta); err != nil {
@@ -384,14 +380,6 @@ func (s *Store) QueryTraces(ctx context.Context, tq storage.TraceQuery) (*storag
 		tq.PageSize = 20
 	}
 
-	// Implement offset-based pagination using PageToken.
-	var offset int
-	if tq.PageToken != "" {
-		if b, err := base64.StdEncoding.DecodeString(tq.PageToken); err == nil {
-			_, _ = fmt.Sscanf(string(b), "%d", &offset)
-		}
-	}
-
 	query := fmt.Sprintf(`
 		SELECT trace_id, MIN(start_time) AS earliest
 		FROM %s
@@ -399,11 +387,9 @@ func (s *Store) QueryTraces(ctx context.Context, tq storage.TraceQuery) (*storag
 		  AND start_time >= @startTime
 		  AND start_time <= @endTime
 		  AND (@userID = '' OR user_id = @userID)
-		  AND (@tenantID = '' OR tenant_id = @tenantID)
-		  AND (@jobID = '' OR job_id = @jobID)
 		GROUP BY trace_id
 		ORDER BY earliest DESC
-		LIMIT @pageSize OFFSET @offset
+		LIMIT @pageSize
 	`, quoteTable(s.tableID))
 
 	q := s.client.Query(query)
@@ -412,10 +398,7 @@ func (s *Store) QueryTraces(ctx context.Context, tq storage.TraceQuery) (*storag
 		{Name: "startTime", Value: tq.StartTime},
 		{Name: "endTime", Value: tq.EndTime},
 		{Name: "userID", Value: tq.UserID},
-		{Name: "tenantID", Value: tq.TenantID},
-		{Name: "jobID", Value: tq.JobID},
 		{Name: "pageSize", Value: tq.PageSize},
-		{Name: "offset", Value: offset},
 	}
 
 	it, err := q.Read(ctx)
@@ -453,9 +436,10 @@ func (s *Store) QueryTraces(ctx context.Context, tq storage.TraceQuery) (*storag
 		SELECT span_id, trace_id, parent_span_id, name, kind, status, status_message,
 		       start_time, end_time, duration_ns, project_id, environment, service_name,
 		       gen_ai_model, gen_ai_provider,
-		       gen_ai_input_tokens, gen_ai_output_tokens, gen_ai_total_tokens, gen_ai_cost_usd, gen_ai_temperature, gen_ai_max_tokens,
-			'' AS gen_ai_input_content, '' AS gen_ai_output_content, attributes,
-			user_id, session_id, tenant_id, job_id
+		       gen_ai_input_tokens, gen_ai_output_tokens, gen_ai_total_tokens,
+		       gen_ai_cost_usd, gen_ai_temperature, gen_ai_max_tokens,
+		       '' AS gen_ai_input_content, '' AS gen_ai_output_content,
+		       attributes, user_id, session_id
 		FROM %s
 		WHERE trace_id IN UNNEST(@traceIDs)
 		ORDER BY start_time ASC, span_id ASC
@@ -493,17 +477,10 @@ func (s *Store) QueryTraces(ctx context.Context, tq storage.TraceQuery) (*storag
 			TotalTokens:  trace.TotalTokens,
 			TotalCostUSD: trace.TotalCostUSD,
 			Environment:  trace.Environment,
-			TenantID:     trace.TenantID,
-			JobID:        trace.JobID,
 		})
 	}
 
-	result := &storage.TraceResult{Traces: traces, TotalCount: len(traces)}
-	if len(traces) == tq.PageSize {
-		nextOffset := offset + tq.PageSize
-		result.NextPageToken = base64.StdEncoding.EncodeToString([]byte(fmt.Sprintf("%d", nextOffset)))
-	}
-	return result, nil
+	return &storage.TraceResult{Traces: traces, TotalCount: len(traces)}, nil
 }
 
 // SearchSpans searches spans with filtering.
@@ -513,25 +490,17 @@ func (s *Store) SearchSpans(ctx context.Context, sq storage.SpanQuery) (*storage
 	}
 
 	query := fmt.Sprintf(`
-		SELECT span_id, trace_id, parent_span_id, name, kind, status, status_message,
-			start_time, end_time, duration_ns, project_id, environment, service_name,
-			gen_ai_model, gen_ai_provider,
-			gen_ai_input_tokens, gen_ai_output_tokens,
-			gen_ai_total_tokens, gen_ai_cost_usd, gen_ai_temperature, gen_ai_max_tokens,
-			gen_ai_input_content, gen_ai_output_content, attributes,
-			user_id, session_id, tenant_id, job_id
-		FROM %s
+		SELECT * FROM %s
 		WHERE project_id = @projectID
 		  AND start_time >= @startTime
 		  AND start_time <= @endTime
 		  AND (@kind = 0 OR kind = @kind)
 		  AND (@model = '' OR gen_ai_model = @model)
-		  AND (@name = '' OR name LIKE CONCAT('%%', @name, '%%') ESCAPE '\\')
+		  AND (@nameContains = '' OR name LIKE CONCAT('%%', @escapedName, '%%'))
 		  AND (@userID = '' OR user_id = @userID)
 		  AND (@tenantID = '' OR tenant_id = @tenantID)
-		  AND (@jobID = '' OR job_id = @jobID)
 		ORDER BY start_time DESC
-		LIMIT @limit
+		LIMIT @pageSize
 	`, quoteTable(s.tableID))
 
 	q := s.client.Query(query)
@@ -541,11 +510,11 @@ func (s *Store) SearchSpans(ctx context.Context, sq storage.SpanQuery) (*storage
 		{Name: "endTime", Value: sq.EndTime},
 		{Name: "kind", Value: int(sq.Kind)},
 		{Name: "model", Value: sq.Model},
-		{Name: "name", Value: storage.EscapeLike(sq.NameContains)},
+		{Name: "nameContains", Value: sq.NameContains},
+		{Name: "escapedName", Value: storage.EscapeLike(sq.NameContains)},
 		{Name: "userID", Value: sq.UserID},
 		{Name: "tenantID", Value: sq.TenantID},
-		{Name: "jobID", Value: sq.JobID},
-		{Name: "limit", Value: sq.PageSize},
+		{Name: "pageSize", Value: sq.PageSize},
 	}
 
 	spans, err := s.querySpans(ctx, q)
@@ -574,7 +543,6 @@ func (s *Store) GetUsageSummary(ctx context.Context, uq storage.UsageQuery) (*st
 		  AND start_time <= @endTime
 		  AND (@userID = '' OR user_id = @userID)
 		  AND (@tenantID = '' OR tenant_id = @tenantID)
-		  AND (@jobID = '' OR job_id = @jobID)
 	`, quoteTable(s.tableID))
 
 	q := s.client.Query(query)
@@ -585,7 +553,6 @@ func (s *Store) GetUsageSummary(ctx context.Context, uq storage.UsageQuery) (*st
 		{Name: "llmKind", Value: int(storage.SpanKindLLM)},
 		{Name: "userID", Value: uq.UserID},
 		{Name: "tenantID", Value: uq.TenantID},
-		{Name: "jobID", Value: uq.JobID},
 	}
 
 	it, err := q.Read(ctx)
@@ -642,7 +609,6 @@ func (s *Store) GetModelBreakdown(ctx context.Context, uq storage.UsageQuery) ([
 		  AND gen_ai_model != ''
 		  AND (@userID = '' OR user_id = @userID)
 		  AND (@tenantID = '' OR tenant_id = @tenantID)
-		  AND (@jobID = '' OR job_id = @jobID)
 		GROUP BY gen_ai_model, gen_ai_provider
 		ORDER BY total_cost_usd DESC
 	`, quoteTable(s.tableID))
@@ -654,7 +620,6 @@ func (s *Store) GetModelBreakdown(ctx context.Context, uq storage.UsageQuery) ([
 		{Name: "endTime", Value: uq.EndTime},
 		{Name: "userID", Value: uq.UserID},
 		{Name: "tenantID", Value: uq.TenantID},
-		{Name: "jobID", Value: uq.JobID},
 	}
 
 	it, err := q.Read(ctx)
@@ -707,23 +672,12 @@ func (s *Store) GetUserLeaderboard(ctx context.Context, uq storage.UsageQuery, l
 			COUNT(*) AS call_count,
 			COALESCE(SUM(gen_ai_total_tokens), 0) AS total_tokens,
 			COALESCE(SUM(gen_ai_cost_usd), 0) AS total_cost_usd,
-			COALESCE(AVG(duration_ns), 0) AS avg_duration_ns,
-			COALESCE(
-				(SELECT m FROM UNNEST(ARRAY_AGG(gen_ai_model ORDER BY cnt DESC LIMIT 1)) AS m),
-				''
-			) AS top_model
-		FROM (
-			SELECT
-				user_id, gen_ai_model, gen_ai_total_tokens, gen_ai_cost_usd,
-				duration_ns,
-				COUNT(*) OVER (PARTITION BY user_id, gen_ai_model) AS cnt
-			FROM %s
-			WHERE project_id = @projectID
-			  AND start_time >= @startTime
-			  AND start_time <= @endTime
-			  AND user_id != ''
-			  AND (@tenantID = '' OR tenant_id = @tenantID)
-		)
+			COALESCE(AVG(duration_ns), 0) AS avg_duration_ns
+		FROM %s
+		WHERE project_id = @projectID
+		  AND start_time >= @startTime
+		  AND start_time <= @endTime
+		  AND user_id != ''
 		GROUP BY user_id
 		ORDER BY total_cost_usd DESC
 		LIMIT @limit
@@ -734,7 +688,6 @@ func (s *Store) GetUserLeaderboard(ctx context.Context, uq storage.UsageQuery, l
 		{Name: "projectID", Value: uq.ProjectID},
 		{Name: "startTime", Value: uq.StartTime},
 		{Name: "endTime", Value: uq.EndTime},
-		{Name: "tenantID", Value: uq.TenantID},
 		{Name: "limit", Value: limit},
 	}
 
@@ -751,7 +704,6 @@ func (s *Store) GetUserLeaderboard(ctx context.Context, uq storage.UsageQuery, l
 			TotalTokens   int64   `bigquery:"total_tokens"`
 			TotalCostUSD  float64 `bigquery:"total_cost_usd"`
 			AvgDurationNs float64 `bigquery:"avg_duration_ns"`
-			TopModel      string  `bigquery:"top_model"`
 		}
 		err := it.Next(&row)
 		if err == iterator.Done {
@@ -766,7 +718,6 @@ func (s *Store) GetUserLeaderboard(ctx context.Context, uq storage.UsageQuery, l
 			TotalTokens:  row.TotalTokens,
 			CostUSD:      row.TotalCostUSD,
 			AvgLatencyMs: float64(row.AvgDurationNs) / 1e6,
-			TopModel:     row.TopModel,
 		})
 	}
 
@@ -849,52 +800,22 @@ func (s *Store) GetTenantLeaderboard(ctx context.Context, uq storage.UsageQuery,
 	return tenants, nil
 }
 
-// GetJobLeaderboard returns aggregated metrics grouped by job ID.
 func (s *Store) GetJobLeaderboard(ctx context.Context, uq storage.UsageQuery, limit int) ([]storage.JobUsageSummary, error) {
-	if limit <= 0 {
-		limit = 20
-	}
-
-	query := fmt.Sprintf(`
-		SELECT
-			job_id,
-			COUNT(*) AS call_count,
-			COALESCE(SUM(gen_ai_total_tokens), 0) AS total_tokens,
-			COALESCE(SUM(gen_ai_cost_usd), 0) AS total_cost,
-			COALESCE(AVG(duration_ns), 0) / 1000000.0 AS avg_latency_ms,
-			ARRAY_AGG(gen_ai_model ORDER BY gen_ai_cost_usd DESC LIMIT 1)[OFFSET(0)] AS top_model
-		FROM %s
-		WHERE project_id = @projectID
-		  AND start_time >= @startTime
-		  AND start_time <= @endTime
-		  AND job_id != ''
-		GROUP BY job_id
-		ORDER BY total_cost DESC
-		LIMIT @limit
-	`, quoteTable(s.tableID))
-
+	query := fmt.Sprintf(`SELECT job_id, COUNT(*) AS call_count, COALESCE(SUM(gen_ai_total_tokens),0) AS total_tokens, COALESCE(SUM(gen_ai_cost_usd),0) AS total_cost_usd, COALESCE(AVG(duration_ns),0) AS avg_duration_ns FROM %s WHERE project_id = @projectID AND start_time >= @startTime AND start_time <= @endTime AND job_id IS NOT NULL AND job_id != '' GROUP BY job_id ORDER BY total_cost_usd DESC LIMIT @limit`, quoteTable(s.tableID))
 	q := s.client.Query(query)
-	q.Parameters = []bigquery.QueryParameter{
-		{Name: "projectID", Value: uq.ProjectID},
-		{Name: "startTime", Value: uq.StartTime},
-		{Name: "endTime", Value: uq.EndTime},
-		{Name: "limit", Value: limit},
-	}
-
+	q.Parameters = []bigquery.QueryParameter{{Name: "projectID", Value: uq.ProjectID}, {Name: "startTime", Value: uq.StartTime}, {Name: "endTime", Value: uq.EndTime}, {Name: "limit", Value: limit}}
 	it, err := q.Read(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("querying job leaderboard: %w", err)
 	}
-
 	var jobs []storage.JobUsageSummary
 	for {
 		var row struct {
-			JobID        string  `bigquery:"job_id"`
-			CallCount    int64   `bigquery:"call_count"`
-			TotalTokens  int64   `bigquery:"total_tokens"`
-			TotalCost    float64 `bigquery:"total_cost"`
-			AvgLatencyMs float64 `bigquery:"avg_latency_ms"`
-			TopModel     string  `bigquery:"top_model"`
+			JobID         string  `bigquery:"job_id"`
+			CallCount     int64   `bigquery:"call_count"`
+			TotalTokens   int64   `bigquery:"total_tokens"`
+			TotalCostUSD  float64 `bigquery:"total_cost_usd"`
+			AvgDurationNs float64 `bigquery:"avg_duration_ns"`
 		}
 		err := it.Next(&row)
 		if err == iterator.Done {
@@ -903,16 +824,8 @@ func (s *Store) GetJobLeaderboard(ctx context.Context, uq storage.UsageQuery, li
 		if err != nil {
 			return nil, fmt.Errorf("iterating job leaderboard: %w", err)
 		}
-		jobs = append(jobs, storage.JobUsageSummary{
-			JobID:        row.JobID,
-			CallCount:    row.CallCount,
-			TotalTokens:  row.TotalTokens,
-			CostUSD:      row.TotalCost,
-			AvgLatencyMs: row.AvgLatencyMs,
-			TopModel:     row.TopModel,
-		})
+		jobs = append(jobs, storage.JobUsageSummary{JobID: row.JobID, CallCount: row.CallCount, TotalTokens: row.TotalTokens, CostUSD: row.TotalCostUSD, AvgLatencyMs: float64(row.AvgDurationNs) / 1e6})
 	}
-
 	return jobs, nil
 }
 
@@ -941,38 +854,28 @@ func (s *Store) querySpans(ctx context.Context, q *bigquery.Query) ([]storage.Sp
 
 // buildTrace assembles a Trace from a list of spans.
 func buildTrace(traceID string, spans []storage.Span) *storage.Trace {
-	if len(spans) == 0 {
-		return &storage.Trace{TraceID: traceID}
-	}
-
 	trace := &storage.Trace{
-		TraceID:     traceID,
-		StartTime:   spans[0].StartTime,
-		EndTime:     spans[0].EndTime,
-		ProjectID:   spans[0].ProjectID,
-		Environment: spans[0].Environment,
-		TenantID:    spans[0].TenantID,
-		JobID:       spans[0].JobID,
-		SpanCount:   len(spans),
-		Spans:       spans,
+		TraceID:   traceID,
+		Spans:     spans,
+		SpanCount: len(spans),
 	}
 
-	for _, sp := range spans {
-		if sp.StartTime.Before(trace.StartTime) {
-			trace.StartTime = sp.StartTime
+	if len(spans) > 0 {
+		trace.StartTime = spans[0].StartTime
+		trace.Environment = spans[0].Environment
+	}
+
+	for _, span := range spans {
+		if span.ParentSpanID == "" {
+			trace.RootSpanName = span.Name
+			trace.Duration = span.EndTime.Sub(span.StartTime)
 		}
-		if sp.EndTime.After(trace.EndTime) {
-			trace.EndTime = sp.EndTime
-		}
-		if sp.ParentSpanID == "" {
-			trace.RootSpanName = sp.Name
-		}
-		if sp.GenAI != nil {
-			trace.TotalTokens += sp.GenAI.TotalTokens
-			trace.TotalCostUSD += sp.GenAI.CostUSD
+		if span.GenAI != nil {
+			trace.TotalTokens += span.GenAI.TotalTokens
+			trace.TotalCostUSD += span.GenAI.CostUSD
 		}
 	}
-	trace.Duration = trace.EndTime.Sub(trace.StartTime)
+
 	return trace
 }
 

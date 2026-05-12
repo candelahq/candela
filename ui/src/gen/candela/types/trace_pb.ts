@@ -15,7 +15,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file candela/types/trace.proto.
  */
 export const file_candela_types_trace: GenFile = /*@__PURE__*/
-  fileDesc("ChljYW5kZWxhL3R5cGVzL3RyYWNlLnByb3RvEg1jYW5kZWxhLnR5cGVzIrsCCg9HZW5BSUF0dHJpYnV0ZXMSDQoFbW9kZWwYASABKAkSEAoIcHJvdmlkZXIYAiABKAkSFAoMaW5wdXRfdG9rZW5zGAogASgDEhUKDW91dHB1dF90b2tlbnMYCyABKAMSFAoMdG90YWxfdG9rZW5zGAwgASgDEhAKCGNvc3RfdXNkGBQgASgBEhMKC3RlbXBlcmF0dXJlGB4gASgBEhIKCm1heF90b2tlbnMYHyABKAMSDQoFdG9wX3AYICABKAESIAoNaW5wdXRfY29udGVudBgoIAEoCUIJukgGcgQYgIBAEiEKDm91dHB1dF9jb250ZW50GCkgASgJQgm6SAZyBBiAgEASGQoRaW5wdXRfY29udGVudF9yZWYYKiABKAkSGgoSb3V0cHV0X2NvbnRlbnRfcmVmGCsgASgJIkwKDlRvb2xBdHRyaWJ1dGVzEhEKCXRvb2xfbmFtZRgBIAEoCRISCgp0b29sX2lucHV0GAIgASgJEhMKC3Rvb2xfb3V0cHV0GAMgASgJIskECgRTcGFuEg8KB3NwYW5faWQYASABKAkSEAoIdHJhY2VfaWQYAiABKAkSFgoOcGFyZW50X3NwYW5faWQYAyABKAkSDAoEbmFtZRgEIAEoCRIlCgRraW5kGAUgASgOMhcuY2FuZGVsYS50eXBlcy5TcGFuS2luZBIpCgZzdGF0dXMYBiABKA4yGS5jYW5kZWxhLnR5cGVzLlNwYW5TdGF0dXMSFgoOc3RhdHVzX21lc3NhZ2UYByABKAkSLgoKc3RhcnRfdGltZRgKIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASLAoIZW5kX3RpbWUYCyABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEisKCGR1cmF0aW9uGAwgASgLMhkuZ29vZ2xlLnByb3RvYnVmLkR1cmF0aW9uEi4KBmdlbl9haRgUIAEoCzIeLmNhbmRlbGEudHlwZXMuR2VuQUlBdHRyaWJ1dGVzEisKBHRvb2wYFSABKAsyHS5jYW5kZWxhLnR5cGVzLlRvb2xBdHRyaWJ1dGVzEiwKCmF0dHJpYnV0ZXMYHiADKAsyGC5jYW5kZWxhLnR5cGVzLkF0dHJpYnV0ZRISCgpwcm9qZWN0X2lkGCggASgJEhMKC2Vudmlyb25tZW50GCkgASgJEhQKDHNlcnZpY2VfbmFtZRgqIAEoCRIPCgd1c2VyX2lkGCsgASgJEigKBmV2ZW50cxgyIAMoCzIYLmNhbmRlbGEudHlwZXMuU3BhbkV2ZW50InYKCVNwYW5FdmVudBIMCgRuYW1lGAEgASgJEi0KCXRpbWVzdGFtcBgCIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASLAoKYXR0cmlidXRlcxgDIAMoCzIYLmNhbmRlbGEudHlwZXMuQXR0cmlidXRlItwCCgVUcmFjZRIQCgh0cmFjZV9pZBgBIAEoCRIuCgpzdGFydF90aW1lGAIgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBIsCghlbmRfdGltZRgDIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASKwoIZHVyYXRpb24YBCABKAsyGS5nb29nbGUucHJvdG9idWYuRHVyYXRpb24SEgoKcHJvamVjdF9pZBgFIAEoCRITCgtlbnZpcm9ubWVudBgGIAEoCRISCgpzcGFuX2NvdW50GAcgASgFEhQKDHRvdGFsX3Rva2VucxgIIAEoAxIWCg50b3RhbF9jb3N0X3VzZBgJIAEoARIWCg5yb290X3NwYW5fbmFtZRgKIAEoCRIPCgd1c2VyX2lkGAsgASgJEiIKBXNwYW5zGBQgAygLMhMuY2FuZGVsYS50eXBlcy5TcGFuIoUDCgxUcmFjZVN1bW1hcnkSEAoIdHJhY2VfaWQYASABKAkSLgoKc3RhcnRfdGltZRgCIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASKwoIZHVyYXRpb24YAyABKAsyGS5nb29nbGUucHJvdG9idWYuRHVyYXRpb24SFgoOcm9vdF9zcGFuX25hbWUYBCABKAkSEgoKcHJvamVjdF9pZBgFIAEoCRITCgtlbnZpcm9ubWVudBgGIAEoCRISCgpzcGFuX2NvdW50GAogASgFEhYKDmxsbV9jYWxsX2NvdW50GAsgASgFEhQKDHRvdGFsX3Rva2VucxgMIAEoAxIWCg50b3RhbF9jb3N0X3VzZBgNIAEoARIpCgZzdGF0dXMYDiABKA4yGS5jYW5kZWxhLnR5cGVzLlNwYW5TdGF0dXMSFQoNcHJpbWFyeV9tb2RlbBgPIAEoCRIYChBwcmltYXJ5X3Byb3ZpZGVyGBAgASgJEg8KB3VzZXJfaWQYESABKAkqvwEKCFNwYW5LaW5kEhkKFVNQQU5fS0lORF9VTlNQRUNJRklFRBAAEhEKDVNQQU5fS0lORF9MTE0QARITCg9TUEFOX0tJTkRfQUdFTlQQAhISCg5TUEFOX0tJTkRfVE9PTBADEhcKE1NQQU5fS0lORF9SRVRSSUVWQUwQBBIXChNTUEFOX0tJTkRfRU1CRURESU5HEAUSEwoPU1BBTl9LSU5EX0NIQUlOEAYSFQoRU1BBTl9LSU5EX0dFTkVSQUwQBypUCgpTcGFuU3RhdHVzEhsKF1NQQU5fU1RBVFVTX1VOU1BFQ0lGSUVEEAASEgoOU1BBTl9TVEFUVVNfT0sQARIVChFTUEFOX1NUQVRVU19FUlJPUhACQqcBChFjb20uY2FuZGVsYS50eXBlc0IKVHJhY2VQcm90b1ABWjFnaXRodWIuY29tL2NhbmRlbGFocS9jYW5kZWxhL2dlbi9nby9jYW5kZWxhL3R5cGVzogIDQ1RYqgINQ2FuZGVsYS5UeXBlc8oCDUNhbmRlbGFcVHlwZXPiAhlDYW5kZWxhXFR5cGVzXEdQQk1ldGFkYXRh6gIOQ2FuZGVsYTo6VHlwZXNiBnByb3RvMw", [file_buf_validate_validate, file_candela_types_common, file_google_protobuf_duration, file_google_protobuf_timestamp]);
+  fileDesc("ChljYW5kZWxhL3R5cGVzL3RyYWNlLnByb3RvEg1jYW5kZWxhLnR5cGVzIrsCCg9HZW5BSUF0dHJpYnV0ZXMSDQoFbW9kZWwYASABKAkSEAoIcHJvdmlkZXIYAiABKAkSFAoMaW5wdXRfdG9rZW5zGAogASgDEhUKDW91dHB1dF90b2tlbnMYCyABKAMSFAoMdG90YWxfdG9rZW5zGAwgASgDEhAKCGNvc3RfdXNkGBQgASgBEhMKC3RlbXBlcmF0dXJlGB4gASgBEhIKCm1heF90b2tlbnMYHyABKAMSDQoFdG9wX3AYICABKAESIAoNaW5wdXRfY29udGVudBgoIAEoCUIJukgGcgQYgIBAEiEKDm91dHB1dF9jb250ZW50GCkgASgJQgm6SAZyBBiAgEASGQoRaW5wdXRfY29udGVudF9yZWYYKiABKAkSGgoSb3V0cHV0X2NvbnRlbnRfcmVmGCsgASgJIkwKDlRvb2xBdHRyaWJ1dGVzEhEKCXRvb2xfbmFtZRgBIAEoCRISCgp0b29sX2lucHV0GAIgASgJEhMKC3Rvb2xfb3V0cHV0GAMgASgJIvUFCgRTcGFuEg8KB3NwYW5faWQYASABKAkSEAoIdHJhY2VfaWQYAiABKAkSFgoOcGFyZW50X3NwYW5faWQYAyABKAkSDAoEbmFtZRgEIAEoCRIlCgRraW5kGAUgASgOMhcuY2FuZGVsYS50eXBlcy5TcGFuS2luZBIpCgZzdGF0dXMYBiABKA4yGS5jYW5kZWxhLnR5cGVzLlNwYW5TdGF0dXMSFgoOc3RhdHVzX21lc3NhZ2UYByABKAkSLgoKc3RhcnRfdGltZRgKIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASLAoIZW5kX3RpbWUYCyABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEisKCGR1cmF0aW9uGAwgASgLMhkuZ29vZ2xlLnByb3RvYnVmLkR1cmF0aW9uEi4KBmdlbl9haRgUIAEoCzIeLmNhbmRlbGEudHlwZXMuR2VuQUlBdHRyaWJ1dGVzEisKBHRvb2wYFSABKAsyHS5jYW5kZWxhLnR5cGVzLlRvb2xBdHRyaWJ1dGVzEiwKCmF0dHJpYnV0ZXMYHiADKAsyGC5jYW5kZWxhLnR5cGVzLkF0dHJpYnV0ZRISCgpwcm9qZWN0X2lkGCggASgJEhMKC2Vudmlyb25tZW50GCkgASgJEhQKDHNlcnZpY2VfbmFtZRgqIAEoCRIPCgd1c2VyX2lkGCsgASgJEhIKCnNlc3Npb25faWQYLCABKAkSEQoJdGVuYW50X2lkGC0gASgJEg4KBmpvYl9pZBguIAEoCRITCgt0cmFjZV9ncm91cBgvIAEoCRIvCgZsYWJlbHMYMCADKAsyHy5jYW5kZWxhLnR5cGVzLlNwYW4uTGFiZWxzRW50cnkSKAoGZXZlbnRzGDIgAygLMhguY2FuZGVsYS50eXBlcy5TcGFuRXZlbnQaLQoLTGFiZWxzRW50cnkSCwoDa2V5GAEgASgJEg0KBXZhbHVlGAIgASgJOgI4ASJ2CglTcGFuRXZlbnQSDAoEbmFtZRgBIAEoCRItCgl0aW1lc3RhbXAYAiABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEiwKCmF0dHJpYnV0ZXMYAyADKAsyGC5jYW5kZWxhLnR5cGVzLkF0dHJpYnV0ZSKoAwoFVHJhY2USEAoIdHJhY2VfaWQYASABKAkSLgoKc3RhcnRfdGltZRgCIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASLAoIZW5kX3RpbWUYAyABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEisKCGR1cmF0aW9uGAQgASgLMhkuZ29vZ2xlLnByb3RvYnVmLkR1cmF0aW9uEhIKCnByb2plY3RfaWQYBSABKAkSEwoLZW52aXJvbm1lbnQYBiABKAkSEgoKc3Bhbl9jb3VudBgHIAEoBRIUCgx0b3RhbF90b2tlbnMYCCABKAMSFgoOdG90YWxfY29zdF91c2QYCSABKAESFgoOcm9vdF9zcGFuX25hbWUYCiABKAkSDwoHdXNlcl9pZBgLIAEoCRISCgpzZXNzaW9uX2lkGAwgASgJEhEKCXRlbmFudF9pZBgNIAEoCRIOCgZqb2JfaWQYDiABKAkSEwoLdHJhY2VfZ3JvdXAYDyABKAkSIgoFc3BhbnMYFCADKAsyEy5jYW5kZWxhLnR5cGVzLlNwYW4i0QMKDFRyYWNlU3VtbWFyeRIQCgh0cmFjZV9pZBgBIAEoCRIuCgpzdGFydF90aW1lGAIgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBIrCghkdXJhdGlvbhgDIAEoCzIZLmdvb2dsZS5wcm90b2J1Zi5EdXJhdGlvbhIWCg5yb290X3NwYW5fbmFtZRgEIAEoCRISCgpwcm9qZWN0X2lkGAUgASgJEhMKC2Vudmlyb25tZW50GAYgASgJEhIKCnNwYW5fY291bnQYCiABKAUSFgoObGxtX2NhbGxfY291bnQYCyABKAUSFAoMdG90YWxfdG9rZW5zGAwgASgDEhYKDnRvdGFsX2Nvc3RfdXNkGA0gASgBEikKBnN0YXR1cxgOIAEoDjIZLmNhbmRlbGEudHlwZXMuU3BhblN0YXR1cxIVCg1wcmltYXJ5X21vZGVsGA8gASgJEhgKEHByaW1hcnlfcHJvdmlkZXIYECABKAkSDwoHdXNlcl9pZBgRIAEoCRISCgpzZXNzaW9uX2lkGBIgASgJEhEKCXRlbmFudF9pZBgTIAEoCRIOCgZqb2JfaWQYFCABKAkSEwoLdHJhY2VfZ3JvdXAYFSABKAkqvwEKCFNwYW5LaW5kEhkKFVNQQU5fS0lORF9VTlNQRUNJRklFRBAAEhEKDVNQQU5fS0lORF9MTE0QARITCg9TUEFOX0tJTkRfQUdFTlQQAhISCg5TUEFOX0tJTkRfVE9PTBADEhcKE1NQQU5fS0lORF9SRVRSSUVWQUwQBBIXChNTUEFOX0tJTkRfRU1CRURESU5HEAUSEwoPU1BBTl9LSU5EX0NIQUlOEAYSFQoRU1BBTl9LSU5EX0dFTkVSQUwQBypUCgpTcGFuU3RhdHVzEhsKF1NQQU5fU1RBVFVTX1VOU1BFQ0lGSUVEEAASEgoOU1BBTl9TVEFUVVNfT0sQARIVChFTUEFOX1NUQVRVU19FUlJPUhACQqcBChFjb20uY2FuZGVsYS50eXBlc0IKVHJhY2VQcm90b1ABWjFnaXRodWIuY29tL2NhbmRlbGFocS9jYW5kZWxhL2dlbi9nby9jYW5kZWxhL3R5cGVzogIDQ1RYqgINQ2FuZGVsYS5UeXBlc8oCDUNhbmRlbGFcVHlwZXPiAhlDYW5kZWxhXFR5cGVzXEdQQk1ldGFkYXRh6gIOQ2FuZGVsYTo6VHlwZXNiBnByb3RvMw", [file_buf_validate_validate, file_candela_types_common, file_google_protobuf_duration, file_google_protobuf_timestamp]);
 
 /**
  * GenAI-specific attributes extracted from OTel semantic conventions.
@@ -261,14 +261,45 @@ export type Span = Message<"candela.types.Span"> & {
   userId: string;
 
   /**
-   * @generated from field: string tenant_id = 44;
+   * Conversation/session identifier for grouping related proxy calls.
+   * Set via X-Session-Id header by candela-local.
+   *
+   * @generated from field: string session_id = 44;
+   */
+  sessionId: string;
+
+  /**
+   * Downstream customer/tenant for multitenant cost attribution.
+   * Set via X-Candela-Tenant-Id header or W3C Baggage (candela.tenant_id).
+   *
+   * @generated from field: string tenant_id = 45;
    */
   tenantId: string;
 
   /**
-   * @generated from field: string job_id = 45;
+   * Job/experiment/workflow identifier for cost attribution and A/B grouping.
+   * Set via X-Candela-Job header or W3C Baggage (candela.job_id).
+   *
+   * @generated from field: string job_id = 46;
    */
   jobId: string;
+
+  /**
+   * Logical trace group for correlating multi-step agent sessions.
+   * All proxy calls within one agent run share this ID.
+   * Set via X-Candela-Trace-Group header or W3C Baggage (candela.trace_group).
+   *
+   * @generated from field: string trace_group = 47;
+   */
+  traceGroup: string;
+
+  /**
+   * Arbitrary user-defined key-value labels for custom filtering.
+   * Set via X-Candela-Labels header (comma-separated k=v pairs).
+   *
+   * @generated from field: map<string, string> labels = 48;
+   */
+  labels: { [key: string]: string };
 
   /**
    * Events (OTel span events)
@@ -380,14 +411,24 @@ export type Trace = Message<"candela.types.Trace"> & {
   userId: string;
 
   /**
-   * @generated from field: string tenant_id = 12;
+   * @generated from field: string session_id = 12;
+   */
+  sessionId: string;
+
+  /**
+   * @generated from field: string tenant_id = 13;
    */
   tenantId: string;
 
   /**
-   * @generated from field: string job_id = 13;
+   * @generated from field: string job_id = 14;
    */
   jobId: string;
+
+  /**
+   * @generated from field: string trace_group = 15;
+   */
+  traceGroup: string;
 
   /**
    * All spans in the trace
@@ -485,14 +526,24 @@ export type TraceSummary = Message<"candela.types.TraceSummary"> & {
   userId: string;
 
   /**
-   * @generated from field: string tenant_id = 18;
+   * @generated from field: string session_id = 18;
+   */
+  sessionId: string;
+
+  /**
+   * @generated from field: string tenant_id = 19;
    */
   tenantId: string;
 
   /**
-   * @generated from field: string job_id = 19;
+   * @generated from field: string job_id = 20;
    */
   jobId: string;
+
+  /**
+   * @generated from field: string trace_group = 21;
+   */
+  traceGroup: string;
 };
 
 /**

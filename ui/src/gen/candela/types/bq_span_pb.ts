@@ -14,7 +14,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file candela/types/bq_span.proto.
  */
 export const file_candela_types_bq_span: GenFile = /*@__PURE__*/
-  fileDesc("ChtjYW5kZWxhL3R5cGVzL2JxX3NwYW4ucHJvdG8SDWNhbmRlbGEudHlwZXMi6QUKCUJxU3BhblJvdxIWCgdzcGFuX2lkGAEgASgJQgXqPwIIARIXCgh0cmFjZV9pZBgCIAEoCUIF6j8CCAESFgoOcGFyZW50X3NwYW5faWQYAyABKAkSEwoEbmFtZRgEIAEoCUIF6j8CCAESEwoEa2luZBgFIAEoBUIF6j8CCAESFQoGc3RhdHVzGAYgASgFQgXqPwIIARIWCg5zdGF0dXNfbWVzc2FnZRgHIAEoCRI1CgpzdGFydF90aW1lGAogASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcEIF6j8CCAESMwoIZW5kX3RpbWUYCyABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wQgXqPwIIARIaCgtkdXJhdGlvbl9ucxgMIAEoA0IF6j8CCAESEgoKcHJvamVjdF9pZBgUIAEoCRITCgtlbnZpcm9ubWVudBgVIAEoCRIUCgxzZXJ2aWNlX25hbWUYFiABKAkSDwoHdXNlcl9pZBgXIAEoCRISCgpzZXNzaW9uX2lkGBggASgJEhQKDGdlbl9haV9tb2RlbBgeIAEoCRIXCg9nZW5fYWlfcHJvdmlkZXIYHyABKAkSGwoTZ2VuX2FpX2lucHV0X3Rva2VucxggIAEoAxIcChRnZW5fYWlfb3V0cHV0X3Rva2VucxghIAEoAxIbChNnZW5fYWlfdG90YWxfdG9rZW5zGCIgASgDEhcKD2dlbl9haV9jb3N0X3VzZBgjIAEoARIaChJnZW5fYWlfdGVtcGVyYXR1cmUYJCABKAESGQoRZ2VuX2FpX21heF90b2tlbnMYJSABKAMSHAoUZ2VuX2FpX2lucHV0X2NvbnRlbnQYJiABKAkSHQoVZ2VuX2FpX291dHB1dF9jb250ZW50GCcgASgJEi4KCmF0dHJpYnV0ZXMYKCADKAsyGi5jYW5kZWxhLnR5cGVzLkJxQXR0cmlidXRlOgrqPwcKBXNwYW5zIjcKC0JxQXR0cmlidXRlEhIKA2tleRgBIAEoCUIF6j8CCAESFAoFdmFsdWUYAiABKAlCBeo/AggBQqgBChFjb20uY2FuZGVsYS50eXBlc0ILQnFTcGFuUHJvdG9QAVoxZ2l0aHViLmNvbS9jYW5kZWxhaHEvY2FuZGVsYS9nZW4vZ28vY2FuZGVsYS90eXBlc6ICA0NUWKoCDUNhbmRlbGEuVHlwZXPKAg1DYW5kZWxhXFR5cGVz4gIZQ2FuZGVsYVxUeXBlc1xHUEJNZXRhZGF0YeoCDkNhbmRlbGE6OlR5cGVzYgZwcm90bzM", [file_bq_field, file_bq_table, file_google_protobuf_timestamp]);
+  fileDesc("ChtjYW5kZWxhL3R5cGVzL2JxX3NwYW4ucHJvdG8SDWNhbmRlbGEudHlwZXMizQYKCUJxU3BhblJvdxIWCgdzcGFuX2lkGAEgASgJQgXqPwIIARIXCgh0cmFjZV9pZBgCIAEoCUIF6j8CCAESFgoOcGFyZW50X3NwYW5faWQYAyABKAkSEwoEbmFtZRgEIAEoCUIF6j8CCAESEwoEa2luZBgFIAEoBUIF6j8CCAESFQoGc3RhdHVzGAYgASgFQgXqPwIIARIWCg5zdGF0dXNfbWVzc2FnZRgHIAEoCRI1CgpzdGFydF90aW1lGAogASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcEIF6j8CCAESMwoIZW5kX3RpbWUYCyABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wQgXqPwIIARIaCgtkdXJhdGlvbl9ucxgMIAEoA0IF6j8CCAESEgoKcHJvamVjdF9pZBgUIAEoCRITCgtlbnZpcm9ubWVudBgVIAEoCRIUCgxzZXJ2aWNlX25hbWUYFiABKAkSDwoHdXNlcl9pZBgXIAEoCRISCgpzZXNzaW9uX2lkGBggASgJEhEKCXRlbmFudF9pZBgZIAEoCRIOCgZqb2JfaWQYGiABKAkSEwoLdHJhY2VfZ3JvdXAYGyABKAkSFAoMZ2VuX2FpX21vZGVsGB4gASgJEhcKD2dlbl9haV9wcm92aWRlchgfIAEoCRIbChNnZW5fYWlfaW5wdXRfdG9rZW5zGCAgASgDEhwKFGdlbl9haV9vdXRwdXRfdG9rZW5zGCEgASgDEhsKE2dlbl9haV90b3RhbF90b2tlbnMYIiABKAMSFwoPZ2VuX2FpX2Nvc3RfdXNkGCMgASgBEhoKEmdlbl9haV90ZW1wZXJhdHVyZRgkIAEoARIZChFnZW5fYWlfbWF4X3Rva2VucxglIAEoAxIcChRnZW5fYWlfaW5wdXRfY29udGVudBgmIAEoCRIdChVnZW5fYWlfb3V0cHV0X2NvbnRlbnQYJyABKAkSLgoKYXR0cmlidXRlcxgoIAMoCzIaLmNhbmRlbGEudHlwZXMuQnFBdHRyaWJ1dGUSKgoGbGFiZWxzGCkgAygLMhouY2FuZGVsYS50eXBlcy5CcUF0dHJpYnV0ZToK6j8HCgVzcGFucyI3CgtCcUF0dHJpYnV0ZRISCgNrZXkYASABKAlCBeo/AggBEhQKBXZhbHVlGAIgASgJQgXqPwIIAUKoAQoRY29tLmNhbmRlbGEudHlwZXNCC0JxU3BhblByb3RvUAFaMWdpdGh1Yi5jb20vY2FuZGVsYWhxL2NhbmRlbGEvZ2VuL2dvL2NhbmRlbGEvdHlwZXOiAgNDVFiqAg1DYW5kZWxhLlR5cGVzygINQ2FuZGVsYVxUeXBlc+ICGUNhbmRlbGFcVHlwZXNcR1BCTWV0YWRhdGHqAg5DYW5kZWxhOjpUeXBlc2IGcHJvdG8z", [file_bq_field, file_bq_table, file_google_protobuf_timestamp]);
 
 /**
  * BqSpanRow is the flattened BigQuery projection of a Span.
@@ -132,6 +132,27 @@ export type BqSpanRow = Message<"candela.types.BqSpanRow"> & {
   sessionId: string;
 
   /**
+   * Downstream tenant for multitenant cost attribution.
+   *
+   * @generated from field: string tenant_id = 25;
+   */
+  tenantId: string;
+
+  /**
+   * Job/experiment identifier.
+   *
+   * @generated from field: string job_id = 26;
+   */
+  jobId: string;
+
+  /**
+   * Logical trace group for multi-step agent correlation.
+   *
+   * @generated from field: string trace_group = 27;
+   */
+  traceGroup: string;
+
+  /**
    * GenAI model identifier (e.g., gpt-4o, gemini-2.5-pro).
    *
    * @generated from field: string gen_ai_model = 30;
@@ -207,6 +228,14 @@ export type BqSpanRow = Message<"candela.types.BqSpanRow"> & {
    * @generated from field: repeated candela.types.BqAttribute attributes = 40;
    */
   attributes: BqAttribute[];
+
+  /**
+   * User-defined labels for custom filtering and cost attribution.
+   * Set via X-Candela-Labels header (comma-separated k=v pairs).
+   *
+   * @generated from field: repeated candela.types.BqAttribute labels = 41;
+   */
+  labels: BqAttribute[];
 };
 
 /**

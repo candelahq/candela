@@ -49,6 +49,11 @@ var selfServicePaths = map[string]bool{
 
 func FirebaseAuthMiddleware(next http.Handler, fbAuth *fbauth.Client, cloudRunAudience string, userAuth UserAuthorizer, devMode bool, allowedSAs []string) http.Handler {
 	saAllowlist := NewServiceAccountAllowlist(allowedSAs)
+	if saAllowlist.Len() > 0 {
+		slog.Info("🔐 service account allowlist active", "count", saAllowlist.Len())
+	} else {
+		slog.Info("🔐 service account allowlist empty — all SAs will be denied")
+	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Skip auth for health checks.
 		if r.URL.Path == "/healthz" {
@@ -135,7 +140,7 @@ func FirebaseAuthMiddleware(next http.Handler, fbAuth *fbauth.Client, cloudRunAu
 							"service account not authorized — use personal credentials (gcloud auth application-default login) or contact your admin to allowlist this SA")
 						return
 					}
-					slog.Info("service account authenticated (allowlisted)",
+					slog.Debug("service account authenticated (allowlisted)",
 						"email", user.Email, "path", r.URL.Path)
 				} else if !isSelfService && !verifyRegistered(r.Context(), w, user, userAuth) {
 					return
@@ -153,7 +158,20 @@ func FirebaseAuthMiddleware(next http.Handler, fbAuth *fbauth.Client, cloudRunAu
 		// Validates via Google's userinfo endpoint.
 		user, err := validateAccessToken(r.Context(), token)
 		if err == nil {
-			if !isSelfService && !verifyRegistered(r.Context(), w, user, userAuth) {
+			// Service account check must also apply to OAuth2 tokens —
+			// otherwise SAs can bypass the allowlist by using an access
+			// token instead of an ID token.
+			if strings.HasSuffix(user.Email, ".gserviceaccount.com") {
+				if !saAllowlist.IsAllowed(user.Email) {
+					slog.Warn("service account not in allowlist — access denied (OAuth2)",
+						"email", user.Email, "path", r.URL.Path)
+					writeError(w, http.StatusForbidden,
+						"service account not authorized — use personal credentials (gcloud auth application-default login) or contact your admin to allowlist this SA")
+					return
+				}
+				slog.Debug("service account authenticated via OAuth2 (allowlisted)",
+					"email", user.Email, "path", r.URL.Path)
+			} else if !isSelfService && !verifyRegistered(r.Context(), w, user, userAuth) {
 				return
 			}
 			slog.Debug("authenticated via OAuth2 access token",
@@ -255,7 +273,11 @@ type ServiceAccountAllowlist struct {
 func NewServiceAccountAllowlist(emails []string) *ServiceAccountAllowlist {
 	m := make(map[string]bool, len(emails))
 	for _, e := range emails {
-		m[strings.ToLower(e)] = true
+		trimmed := strings.TrimSpace(e)
+		if trimmed == "" {
+			continue // skip blank entries from YAML formatting
+		}
+		m[strings.ToLower(trimmed)] = true
 	}
 	return &ServiceAccountAllowlist{allowed: m}
 }

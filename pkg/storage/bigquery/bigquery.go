@@ -738,19 +738,19 @@ func (s *Store) GetTenantLeaderboard(ctx context.Context, uq storage.UsageQuery,
 			COALESCE(SUM(gen_ai_cost_usd), 0) AS total_cost_usd,
 			COALESCE(AVG(duration_ns), 0) AS avg_duration_ns,
 			COALESCE(
-				(SELECT m FROM UNNEST(ARRAY_AGG(gen_ai_model ORDER BY cnt DESC LIMIT 1)) AS m),
+				(SELECT m FROM UNNEST(ARRAY_AGG(gen_ai_model ORDER BY model_cost DESC LIMIT 1)) AS m),
 				''
 			) AS top_model
 		FROM (
 			SELECT
 				tenant_id, gen_ai_model, gen_ai_total_tokens, gen_ai_cost_usd,
 				duration_ns,
-				COUNT(*) OVER (PARTITION BY tenant_id, gen_ai_model) AS cnt
+				SUM(gen_ai_cost_usd) OVER (PARTITION BY tenant_id, gen_ai_model) AS model_cost
 			FROM %s
 			WHERE project_id = @projectID
 			  AND start_time >= @startTime
 			  AND start_time <= @endTime
-			  AND tenant_id IS NOT NULL AND tenant_id != ''
+			  AND tenant_id IS NOT NULL AND tenant_id != '' AND gen_ai_model != ''
 		)
 		GROUP BY tenant_id
 		ORDER BY total_cost_usd DESC

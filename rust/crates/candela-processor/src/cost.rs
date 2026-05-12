@@ -14,31 +14,56 @@ pub struct CostCalculator {
 
 impl CostCalculator {
     /// Create a new calculator with default model pricing.
+    ///
+    /// Prices are list prices in USD per 1 million tokens (as of April 2026).
     pub fn new() -> Self {
         let mut prices = HashMap::new();
 
-        // OpenAI
+        // ── Google Gemini ─────────────────────────────────────────
+        // Gemini 3.1 (latest)
+        prices.insert("gemini-3.1-pro".into(), (2.00, 12.00));
+        // Gemini 2.5
+        prices.insert("gemini-2.5-pro".into(), (1.25, 10.00));
+        prices.insert("gemini-2.5-flash".into(), (0.30, 2.50));
+        prices.insert("gemini-2.5-flash-lite".into(), (0.10, 0.40));
+        // Gemini 2.0
+        prices.insert("gemini-2.0-flash".into(), (0.10, 0.40));
+        prices.insert("gemini-2.0-pro".into(), (1.25, 10.00));
+        // Gemini 1.5 (legacy)
+        prices.insert("gemini-1.5-flash".into(), (0.075, 0.30));
+        prices.insert("gemini-1.5-pro".into(), (1.25, 5.00));
+
+        // ── OpenAI ───────────────────────────────────────────────
+        // GPT-5.4 (latest, March 2026)
+        prices.insert("gpt-5.4-pro".into(), (30.00, 180.00));
+        prices.insert("gpt-5.4".into(), (2.50, 15.00));
+        prices.insert("gpt-5.4-mini".into(), (0.75, 4.50));
+        prices.insert("gpt-5.4-nano".into(), (0.20, 1.25));
+        // GPT-4o
         prices.insert("gpt-4o".into(), (2.50, 10.00));
         prices.insert("gpt-4o-mini".into(), (0.15, 0.60));
+        // GPT-4 (legacy)
         prices.insert("gpt-4-turbo".into(), (10.00, 30.00));
-        prices.insert("gpt-4".into(), (30.00, 60.00));
         prices.insert("gpt-3.5-turbo".into(), (0.50, 1.50));
+        // Reasoning models
+        prices.insert("o3".into(), (10.00, 40.00));
+        prices.insert("o3-mini".into(), (1.10, 4.40));
         prices.insert("o1".into(), (15.00, 60.00));
         prices.insert("o1-mini".into(), (3.00, 12.00));
-        prices.insert("o3-mini".into(), (1.10, 4.40));
 
-        // Anthropic
+        // ── Anthropic (via Vertex AI or direct) ──────────────────
+        // Claude 4.6/4.7 (latest)
+        prices.insert("claude-opus-4.7".into(), (5.00, 25.00));
+        prices.insert("claude-opus-4.6".into(), (5.00, 25.00));
+        prices.insert("claude-sonnet-4.6".into(), (3.00, 15.00));
+        prices.insert("claude-haiku-4.5".into(), (1.00, 5.00));
+        // Claude 4 (Vertex AI model IDs)
         prices.insert("claude-sonnet-4-20250514".into(), (3.00, 15.00));
+        prices.insert("claude-opus-4-20250514".into(), (5.00, 25.00));
+        // Claude 3.5 (legacy)
         prices.insert("claude-3-5-sonnet-20241022".into(), (3.00, 15.00));
-        prices.insert("claude-3-5-haiku-20241022".into(), (0.80, 4.00));
+        prices.insert("claude-haiku-3-5-20241022".into(), (0.80, 4.00));
         prices.insert("claude-3-opus-20240229".into(), (15.00, 75.00));
-        prices.insert("claude-3-haiku-20240307".into(), (0.25, 1.25));
-
-        // Google Gemini
-        prices.insert("gemini-2.0-flash".into(), (0.10, 0.40));
-        prices.insert("gemini-2.0-flash-lite".into(), (0.075, 0.30));
-        prices.insert("gemini-1.5-pro".into(), (1.25, 5.00));
-        prices.insert("gemini-1.5-flash".into(), (0.075, 0.30));
 
         Self { prices }
     }
@@ -94,6 +119,27 @@ mod tests {
     }
 
     #[test]
+    fn claude_opus4_uses_correct_pricing() {
+        let calc = CostCalculator::new();
+        // claude-opus-4-20250514 should be $5/$25, NOT the legacy $15/$75
+        let cost = calc.calculate("anthropic", "claude-opus-4-20250514", 1_000_000, 1_000_000);
+        // 1M input @ $5.00/M + 1M output @ $25.00/M = $5.00 + $25.00 = $30.00
+        assert!(
+            (cost - 30.00).abs() < 0.001,
+            "got {cost}, want 30.00 — was this set to legacy Claude 3 Opus pricing?"
+        );
+    }
+
+    #[test]
+    fn claude3_opus_legacy_pricing() {
+        let calc = CostCalculator::new();
+        // claude-3-opus-20240229 (legacy) should be $15/$75
+        let cost = calc.calculate("anthropic", "claude-3-opus-20240229", 1_000_000, 1_000_000);
+        // 1M input @ $15.00/M + 1M output @ $75.00/M = $15.00 + $75.00 = $90.00
+        assert!((cost - 90.00).abs() < 0.001);
+    }
+
+    #[test]
     fn unknown_model_returns_zero() {
         let calc = CostCalculator::new();
         assert_eq!(calc.calculate("openai", "unknown-model", 1000, 1000), 0.0);
@@ -105,6 +151,22 @@ mod tests {
         let cost = calc.calculate("google", "gemini-2.0-flash", 1_000_000, 1_000_000);
         // 1M input @ $0.10/M + 1M output @ $0.40/M = $0.10 + $0.40 = $0.50
         assert!((cost - 0.50).abs() < 0.001);
+    }
+
+    #[test]
+    fn gemini_25_flash_pricing() {
+        let calc = CostCalculator::new();
+        let cost = calc.calculate("google", "gemini-2.5-flash", 1_000_000, 1_000_000);
+        // 1M input @ $0.30/M + 1M output @ $2.50/M = $0.30 + $2.50 = $2.80
+        assert!((cost - 2.80).abs() < 0.001);
+    }
+
+    #[test]
+    fn gpt54_pricing() {
+        let calc = CostCalculator::new();
+        let cost = calc.calculate("openai", "gpt-5.4", 1_000_000, 1_000_000);
+        // 1M input @ $2.50/M + 1M output @ $15.00/M = $2.50 + $15.00 = $17.50
+        assert!((cost - 17.50).abs() < 0.001);
     }
 
     #[test]

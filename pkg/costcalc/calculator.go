@@ -263,7 +263,7 @@ func (c *Calculator) loadDefaults() {
 		{Provider: "anthropic", Model: "claude-haiku-4.5", InputPerMillion: 1.00, OutputPerMillion: 5.00},
 		// Claude 4 (Vertex AI model IDs)
 		{Provider: "anthropic", Model: "claude-sonnet-4-20250514", InputPerMillion: 3.00, OutputPerMillion: 15.00},
-		{Provider: "anthropic", Model: "claude-opus-4-20250514", InputPerMillion: 15.00, OutputPerMillion: 75.00},
+		{Provider: "anthropic", Model: "claude-opus-4-20250514", InputPerMillion: 5.00, OutputPerMillion: 25.00},
 		// Claude 3.5 (legacy)
 		{Provider: "anthropic", Model: "claude-3-5-sonnet-20241022", InputPerMillion: 3.00, OutputPerMillion: 15.00},
 		{Provider: "anthropic", Model: "claude-haiku-3-5-20241022", InputPerMillion: 0.80, OutputPerMillion: 4.00},

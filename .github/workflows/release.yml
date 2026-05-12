@@ -1,0 +1,37 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write   # Create GitHub releases and upload assets
+
+jobs:
+  goreleaser:
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/candelahq/candela-dev:latest
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # GoReleaser needs full history for changelog
+
+      - name: Fix git ownership for Nix flake
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+      - name: Install GoReleaser
+        run: |
+          nix develop . --command bash -c "
+            go install github.com/goreleaser/goreleaser/v2@latest
+          "
+
+      - name: Run GoReleaser
+        run: nix develop . --command goreleaser release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}

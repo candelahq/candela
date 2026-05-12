@@ -85,10 +85,25 @@ git push --tags
 
 ## 🚀 Quick Start
 
-You can get Candela running in less than 60 seconds using either a local binary or Docker.
+You can get Candela running in less than 60 seconds.
 
-### Option A: Local Binary (Fastest)
-Ideal for local development. Uses **DuckDB** by default.
+### Option A: Homebrew (Fastest)
+
+Ideal for quick local setup. Uses **SQLite** by default.
+
+```bash
+# Install the local dev proxy (macOS / Linux)
+brew install candelahq/tap/candela-local
+
+# Or install the Desktop app (macOS)
+brew install --cask candelahq/tap/candela
+```
+
+> **💡 Tip**: `candela-local` starts on `:8181` (proxy + UI at `/_local/`) + `:1234` (LM-compatible endpoint). Point your IDE or app at it immediately.
+
+### Option B: From Source
+
+Ideal for contributors or custom builds. Uses **DuckDB** by default.
 
 ```bash
 # Clone and enter the nix shell (or ensure Go 1.26 is installed)
@@ -103,7 +118,7 @@ cd ui && pnpm install && pnpm run dev
 
 > **💡 Quick Start Tip**: Copy `config.example.yaml` to `config.yaml` to use port 8181 and enable all features.
 
-### Option B: Docker Compose (Full Stack)
+### Option C: Docker Compose (Full Stack)
 Ideal for testing the full multi-service experience.
 
 ```bash

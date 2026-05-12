@@ -85,6 +85,7 @@ type Proxy struct {
 	client    *http.Client
 	projectID string
 	breakers  map[string]*CircuitBreaker
+	spanSem   chan struct{} // bounds concurrent async span-creation goroutines
 
 	// Optional dependencies for team-mode features.
 	users    storage.UserStore     // Budget deduction (nil = no budget tracking)
@@ -133,6 +134,7 @@ func New(cfg Config, submitter SpanSubmitter, calc *costcalc.Calculator) *Proxy 
 		calc:      calc,
 		projectID: cfg.ProjectID,
 		breakers:  breakers,
+		spanSem:   make(chan struct{}, 200), // CRIT-16: cap concurrent span goroutines
 		client: &http.Client{
 			Timeout: 5 * time.Minute, // LLM calls can be slow
 		},
@@ -615,6 +617,16 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 	// Check circuit breaker — if open, skip observability but still forward.
 	cbAllow := p.breakers[providerName].AllowRequest()
 
+	// CRIT-17: Skip observability for utility endpoints (e.g. count_tokens,
+	// tokenize) that don't generate tokens. Parsing their response as a chat
+	// completion produces misleading 0-token spans and incorrect billing.
+	// The proxy still forwards transparently — only span/billing is suppressed.
+	if isUtilityEndpoint(upstreamPath) {
+		cbAllow = false
+		slog.Debug("skipping observability for utility endpoint",
+			"provider", providerName, "path", upstreamPath, "request_id", requestID)
+	}
+
 	if isStreaming && resp.StatusCode == http.StatusOK {
 		p.handleStreamingResponse(w, r, resp, provider, reqBody, startTime, ttfb, requestID, sessionID, effectiveUserID, tenantID, jobID, cbAllow, traceCtx, proxySpanID)
 	} else {
@@ -654,8 +666,10 @@ func (p *Proxy) handleStandardResponse(
 	traceCtx *traceContext,
 	proxySpanID string,
 ) {
-	// Read the full response (reject if over 50MB to prevent OOM/truncation).
-	const respLimit = int64(50 << 20)
+	// Read the full response (reject if over 10MB to prevent OOM under concurrent load).
+	// CRIT-15: Previously 50MB — with 100 concurrent requests that's 5GB of heap.
+	// Matches the 10MB request body limit for symmetry.
+	const respLimit = int64(10 << 20)
 	respBody, err := io.ReadAll(io.LimitReader(resp.Body, respLimit+1))
 	if err != nil {
 		http.Error(w, "failed to read upstream response", http.StatusBadGateway)
@@ -711,12 +725,21 @@ func (p *Proxy) handleStandardResponse(
 	}
 
 	// Create observability span (async — don't block the handler).
+	// CRIT-16: Use bounded semaphore to prevent goroutine accumulation
+	// under Firestore contention (previously unbounded).
 	if cbAllow {
 		spanCtx, spanCancel := context.WithTimeout(context.WithoutCancel(r.Context()), 30*time.Second)
-		go func() {
-			defer spanCancel()
-			p.createSpan(spanCtx, provider, reqBody, respBody, startTime, endTime, resp.StatusCode, ttfb, requestID, sessionID, effectiveUserID, tenantID, jobID, traceCtx, proxySpanID)
-		}()
+		select {
+		case p.spanSem <- struct{}{}:
+			go func() {
+				defer func() { <-p.spanSem }()
+				defer spanCancel()
+				p.createSpan(spanCtx, provider, reqBody, respBody, startTime, endTime, resp.StatusCode, ttfb, requestID, sessionID, effectiveUserID, tenantID, jobID, traceCtx, proxySpanID)
+			}()
+		default:
+			spanCancel()
+			slog.Warn("span dropped: too many pending", "provider", provider.Name, "request_id", requestID)
+		}
 	} else {
 		slog.Debug("skipping span creation (circuit open)", "provider", provider.Name, "request_id", requestID)
 	}
@@ -867,12 +890,20 @@ func (p *Proxy) handleStreamingResponse(
 	}
 
 	// Create observability span (async — don't block the handler).
+	// CRIT-16: Use bounded semaphore to prevent goroutine accumulation.
 	if cbAllow {
 		spanCtx, spanCancel := context.WithTimeout(context.WithoutCancel(r.Context()), 30*time.Second)
-		go func() {
-			defer spanCancel()
-			p.createStreamingSpan(spanCtx, provider, reqBody, parseData, startTime, endTime, ttfb, ttft, requestID, sessionID, effectiveUserID, tenantID, jobID, streamStatus, traceCtx, proxySpanID)
-		}()
+		select {
+		case p.spanSem <- struct{}{}:
+			go func() {
+				defer func() { <-p.spanSem }()
+				defer spanCancel()
+				p.createStreamingSpan(spanCtx, provider, reqBody, parseData, startTime, endTime, ttfb, ttft, requestID, sessionID, effectiveUserID, tenantID, jobID, streamStatus, traceCtx, proxySpanID)
+			}()
+		default:
+			spanCancel()
+			slog.Warn("streaming span dropped: too many pending", "provider", provider.Name, "request_id", requestID)
+		}
 	} else {
 		slog.Debug("skipping streaming span (circuit open)", "provider", provider.Name, "request_id", requestID)
 	}
@@ -1222,4 +1253,15 @@ func toInt64(v interface{}) int64 {
 		return i
 	}
 	return 0
+}
+
+// isUtilityEndpoint returns true for API paths that are non-generative
+// utility calls (e.g. count_tokens, tokenize). These endpoints don't
+// produce chat completions, so parsing their response as one yields
+// misleading 0-token spans. The proxy still forwards them transparently.
+func isUtilityEndpoint(path string) bool {
+	return strings.HasSuffix(path, "/count_tokens") ||
+		strings.HasSuffix(path, "/tokenize") ||
+		strings.HasSuffix(path, "/models") ||
+		path == "/v1/models"
 }

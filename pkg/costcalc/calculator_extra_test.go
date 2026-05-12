@@ -111,3 +111,53 @@ func TestCalculator_LocalProvider_AlwaysFree(t *testing.T) {
 		t.Error("HasPricing should return true for local provider")
 	}
 }
+
+// ─── Provider alias: anthropic-direct → anthropic ────────────────────────────
+
+func TestCalculator_AnthropicDirect_HasPricing(t *testing.T) {
+	c := New()
+	// anthropic-direct should resolve to anthropic pricing via alias.
+	if !c.HasPricing("anthropic-direct", "claude-sonnet-4-20250514") {
+		t.Error("HasPricing(anthropic-direct, claude-sonnet-4-20250514) should be true via alias")
+	}
+	if !c.HasPricing("anthropic-direct", "claude-opus-4-20250514") {
+		t.Error("HasPricing(anthropic-direct, claude-opus-4-20250514) should be true via alias")
+	}
+}
+
+func TestCalculator_AnthropicDirect_CalculateParity(t *testing.T) {
+	c := New()
+	// Cost must be identical to anthropic — same models, same pricing.
+	direct := c.Calculate("anthropic-direct", "claude-sonnet-4-20250514", 100_000, 50_000)
+	canonical := c.Calculate("anthropic", "claude-sonnet-4-20250514", 100_000, 50_000)
+	if direct != canonical {
+		t.Errorf("anthropic-direct cost = %f, anthropic cost = %f — must be identical", direct, canonical)
+	}
+	if direct == 0 {
+		t.Error("cost should be non-zero for a known model")
+	}
+}
+
+func TestCalculator_AnthropicDirect_ConfigOverrideInherited(t *testing.T) {
+	c := New()
+	// Override anthropic pricing — anthropic-direct should inherit it.
+	c.LoadFromConfig(PricingConfig{
+		Models: []ModelPricing{
+			{Provider: "anthropic", Model: "claude-sonnet-4-20250514", InputPerMillion: 1.00, OutputPerMillion: 5.00},
+		},
+	})
+
+	directCost := c.Calculate("anthropic-direct", "claude-sonnet-4-20250514", 1_000_000, 1_000_000)
+	want := 6.0 // 1.00 + 5.00 (overridden rate)
+	if directCost < want-0.001 || directCost > want+0.001 {
+		t.Errorf("anthropic-direct cost = %f, want %f (should inherit anthropic override)", directCost, want)
+	}
+}
+
+func TestCalculator_AnthropicDirect_UnknownModelStillBlocked(t *testing.T) {
+	c := New()
+	// A model that doesn't exist under anthropic should also not exist under anthropic-direct.
+	if c.HasPricing("anthropic-direct", "claude-nonexistent-99") {
+		t.Error("HasPricing should be false for unknown model even via alias")
+	}
+}

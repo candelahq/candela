@@ -889,7 +889,7 @@ func (p *Proxy) handleStreamingResponse(
 		streamStatus = storage.SpanStatusError
 	}
 	// ── Budget deduction (SYNCHRONOUS) — same rationale as handleStandardResponse.
-	if cbAllow {
+if cbAllow && p.users != nil && effectiveUserID != "" {
 		model, _ := extractRequestInfo(provider.Name, reqBody)
 		_, inputTokens, outputTokens := extractStreamingUsage(provider.Name, parseData)
 		deductCtx, deductCancel := context.WithTimeout(context.WithoutCancel(r.Context()), 15*time.Second)

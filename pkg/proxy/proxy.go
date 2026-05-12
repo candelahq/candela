@@ -111,6 +111,11 @@ func DefaultProviders() []Provider {
 		// Anthropic via Vertex AI. Override upstream via config for your region/project:
 		// https://{REGION}-aiplatform.googleapis.com/v1/projects/{PROJECT}/locations/{REGION}/publishers/anthropic/models
 		{Name: "anthropic", UpstreamURL: "https://us-central1-aiplatform.googleapis.com"},
+		// Anthropic via Vertex AI (native Messages API) — for Claude Code LLM gateway mode.
+		// No format translation. Client speaks native Anthropic, routed via Vertex rawPredict.
+		// Candela handles GCP auth (ADC) — no ANTHROPIC_API_KEY needed.
+		// Use this with: ANTHROPIC_BASE_URL=http://localhost:8181/proxy/anthropic-vertex
+		{Name: "anthropic-vertex", UpstreamURL: "https://us-central1-aiplatform.googleapis.com"},
 		// Anthropic Direct — native Messages API passthrough to api.anthropic.com.
 		// No format translation, no Vertex AI, no ADC. Client provides its own API key.
 		// Use this for Claude Code, pencil.dev, and other tools that speak native Anthropic.
@@ -550,8 +555,14 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 	// --- Path rewriting ---
 	// If the provider has a PathRewriter, rewrite the upstream URL path
 	// (e.g. Vertex AI project-scoped model endpoints).
-	if provider.PathRewriter != nil && translatedModel != "" {
-		upstreamPath = provider.PathRewriter.RewritePath(translatedModel, isStreaming)
+	// When FormatTranslator is nil (e.g. anthropic-vertex), the model comes
+	// from the request body rather than from translation.
+	modelForPath := translatedModel
+	if modelForPath == "" && provider.PathRewriter != nil {
+		modelForPath, _ = extractRequestInfo(providerName, reqBody)
+	}
+	if provider.PathRewriter != nil && modelForPath != "" {
+		upstreamPath = provider.PathRewriter.RewritePath(modelForPath, isStreaming)
 	}
 
 	// Build the upstream request.
@@ -1213,6 +1224,15 @@ func forwardHeaders(src *http.Request, dst *http.Request, provider string) {
 		// Native Anthropic Messages API — forward all required headers.
 		// Claude Code requires anthropic-beta and anthropic-version to be forwarded.
 		for _, h := range []string{"X-Api-Key", "Anthropic-Version", "Anthropic-Beta"} {
+			if v := src.Header.Get(h); v != "" {
+				dst.Header.Set(h, v)
+			}
+		}
+	case "anthropic-vertex":
+		// Native Anthropic Messages API routed via Vertex AI.
+		// Claude Code requires anthropic-beta and anthropic-version to be forwarded.
+		// Auth is handled by ADC TokenSource — no client API key needed.
+		for _, h := range []string{"Anthropic-Version", "Anthropic-Beta"} {
 			if v := src.Header.Get(h); v != "" {
 				dst.Header.Set(h, v)
 			}

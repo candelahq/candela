@@ -20,11 +20,36 @@
 //! Ported from: `cmd/candela-sidecar/main.go`
 
 use std::env;
+use std::sync::Arc;
 
 use axum::{Router, routing::get};
 use tokio::net::TcpListener;
 use tower_http::cors::{AllowOrigin, CorsLayer};
 use tracing::info;
+
+use candela_core::Span;
+use candela_proxy::handler::{self, AppState};
+use candela_proxy::{Config, Provider, SpanSubmitter};
+
+/// Log-only span submitter for development / initial wiring.
+struct LogSubmitter;
+
+impl SpanSubmitter for LogSubmitter {
+    fn submit_batch(&self, spans: Vec<Span>) {
+        for span in &spans {
+            info!(
+                trace_id = %span.trace_id,
+                span_id = %span.span_id,
+                name = %span.name,
+                duration_ms = span.duration.as_millis() as u64,
+                model = span.gen_ai.as_ref().map(|g| g.model.as_str()).unwrap_or(""),
+                input_tokens = span.gen_ai.as_ref().map(|g| g.input_tokens).unwrap_or(0),
+                output_tokens = span.gen_ai.as_ref().map(|g| g.output_tokens).unwrap_or(0),
+                "span captured"
+            );
+        }
+    }
+}
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -39,19 +64,55 @@ async fn main() -> anyhow::Result<()> {
 
     // ── Configuration ──
     let port = env_or("PORT", "8080");
-    let _gcp_project = env::var("GCP_PROJECT").unwrap_or_default();
+    let gcp_project = env::var("GCP_PROJECT").unwrap_or_default();
     let _vertex_region = env_or("VERTEX_REGION", "us-central1");
-    let _project_id = env_or("CANDELA_PROJECT_ID", &_gcp_project);
+    let project_id = env_or("CANDELA_PROJECT_ID", &gcp_project);
 
-    if _project_id.is_empty() {
+    if project_id.is_empty() {
         tracing::warn!(
             "CANDELA_PROJECT_ID and GCP_PROJECT are both unset — spans will have an empty project_id"
         );
     }
 
+    // ── Build providers from env ──
+    let providers_csv = env_or("PROVIDERS", "openai,anthropic");
+    let providers: Vec<Provider> = providers_csv
+        .split(',')
+        .filter_map(|name| {
+            let name = name.trim();
+            if name.is_empty() {
+                return None;
+            }
+            let upstream_url = match name {
+                "openai" => "https://api.openai.com".to_string(),
+                "anthropic" => "https://api.anthropic.com".to_string(),
+                _ => {
+                    // Check for env-provided upstream: {NAME}_UPSTREAM_URL
+                    let env_key = format!("{}_UPSTREAM_URL", name.to_uppercase().replace('-', "_"));
+                    match env::var(&env_key) {
+                        Ok(url) => url,
+                        Err(_) => {
+                            tracing::warn!(provider = name, "no upstream URL — skipping");
+                            return None;
+                        }
+                    }
+                }
+            };
+            Some(Provider {
+                name: name.to_string(),
+                upstream_url,
+                format_translator: None,
+                path_rewriter: None,
+            })
+        })
+        .collect();
+
+    info!(
+        providers = ?providers.iter().map(|p| &p.name).collect::<Vec<_>>(),
+        "configured providers"
+    );
+
     // ── CORS configuration ──
-    // Parse CORS_ORIGINS env var into allowed origins.
-    // Default "*" is permissive; production should set explicit origins.
     let cors_origins = env_or("CORS_ORIGINS", "*");
     let cors_layer = if cors_origins == "*" {
         CorsLayer::permissive()
@@ -78,24 +139,35 @@ async fn main() -> anyhow::Result<()> {
         }
     };
 
+    // ── Build proxy ──
+    let proxy = Arc::new(candela_proxy::Proxy::new(Config {
+        providers,
+        project_id: project_id.clone(),
+    }));
+
+    let app_state = Arc::new(AppState {
+        proxy,
+        submitter: Arc::new(LogSubmitter),
+        http_client: reqwest::Client::new(),
+    });
+
     info!(
         port = %port,
-        gcp_project = %_gcp_project,
-        vertex_region = %_vertex_region,
-        project_id = %_project_id,
+        project_id = %project_id,
         cors_origins = %cors_origins,
         "🕯️ candela-sidecar starting"
     );
-
-    // TODO: Initialize span writers (#125)
-    // TODO: Initialize span processor (#124)
-    // TODO: Initialize LLM proxy (#123)
 
     // ── HTTP server ──
     let app = Router::new()
         .route("/healthz", get(healthz))
         .route("/readyz", get(readyz))
-        .layer(cors_layer);
+        .route(
+            "/proxy/{provider}/{*rest}",
+            axum::routing::any(handler::proxy_handler),
+        )
+        .layer(cors_layer)
+        .with_state(app_state);
 
     let addr = format!("0.0.0.0:{port}");
     let listener = TcpListener::bind(&addr).await?;

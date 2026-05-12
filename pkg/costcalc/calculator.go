@@ -31,8 +31,16 @@ type Calculator struct {
 	defaults       map[string]ModelPricing // key: "provider/model" — built-in list prices
 	overrides      map[string]ModelPricing // key: "provider/model" — config overrides
 	fallback       map[string]ModelPricing // key: "model" — deterministic name-only match
+	aliases        map[string]string       // provider name aliases (e.g. "anthropic-direct" → "anthropic")
 	globalDiscount float64                 // 0.0–1.0
 	loggedUnknown  sync.Map                // key: "provider/model" — track logged warnings
+}
+
+// providerAliases maps proxy route names to their canonical pricing provider.
+// This ensures that passthrough routes (e.g. anthropic-direct) share pricing
+// with their canonical provider, including config overrides.
+var providerAliases = map[string]string{
+	"anthropic-direct": "anthropic",
 }
 
 // New creates a Calculator with default pricing for all supported cloud models.
@@ -41,6 +49,7 @@ func New() *Calculator {
 		defaults:  make(map[string]ModelPricing),
 		overrides: make(map[string]ModelPricing),
 		fallback:  make(map[string]ModelPricing),
+		aliases:   providerAliases,
 	}
 	c.loadDefaults()
 	c.rebuildFallback()
@@ -153,7 +162,14 @@ func (c *Calculator) HasPricing(provider, model string) bool {
 
 // resolve looks up pricing: config overrides first, then built-in defaults,
 // then precomputed provider-agnostic fallback.
+// Provider aliases (e.g. "anthropic-direct" → "anthropic") are resolved before
+// lookup so passthrough routes inherit canonical pricing and config overrides.
 func (c *Calculator) resolve(provider, model string) (ModelPricing, bool) {
+	// Resolve provider alias (e.g. "anthropic-direct" → "anthropic").
+	if canonical, ok := c.aliases[strings.ToLower(provider)]; ok {
+		provider = canonical
+	}
+
 	key := c.key(provider, model)
 
 	// 1. Config override (exact match)

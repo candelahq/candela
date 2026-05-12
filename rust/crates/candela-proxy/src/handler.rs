@@ -216,6 +216,7 @@ pub async fn proxy_handler(
     let user_id = extract_header_str(&headers, "x-user-id");
     let session_id = extract_header_str(&headers, "x-session-id");
     let tenant_id = extract_baggage_value(&headers, "candela.tenant_id");
+    let job_id = extract_baggage_value(&headers, "candela.job_id");
 
     let mut attributes = BTreeMap::new();
     attributes.insert("http.method".into(), "POST".into());
@@ -260,6 +261,7 @@ pub async fn proxy_handler(
         user_id,
         session_id,
         tenant_id,
+        job_id,
     };
 
     // ── 11. Submit span asynchronously ──

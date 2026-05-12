@@ -137,8 +137,6 @@ export default function DashboardPage() {
           </div>
         </div>
 
-        </div>
-
         {/* Job Leaderboard */}
         <div className="table-container animate-in" style={{ animationDelay: "0.08s", marginBottom: 24 }}>
           <div className="table-header">

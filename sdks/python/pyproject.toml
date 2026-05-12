@@ -1,0 +1,21 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "candela-sdk"
+version = "0.1.0"
+description = "Lightweight enrichment SDK for Candela AI observability"
+readme = "README.md"
+requires-python = ">=3.9"
+license = "Apache-2.0"
+authors = [{ name = "Candela HQ", email = "eng@candelahq.com" }]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+]
+
+[project.urls]
+Homepage = "https://candelahq.com"
+Repository = "https://github.com/candelahq/candela"

@@ -47,7 +47,8 @@ var selfServicePaths = map[string]bool{
 	"/candela.v1.UserService/GetMyBudget":    true,
 }
 
-func FirebaseAuthMiddleware(next http.Handler, fbAuth *fbauth.Client, cloudRunAudience string, userAuth UserAuthorizer, devMode bool) http.Handler {
+func FirebaseAuthMiddleware(next http.Handler, fbAuth *fbauth.Client, cloudRunAudience string, userAuth UserAuthorizer, devMode bool, allowedSAs []string) http.Handler {
+	saAllowlist := NewServiceAccountAllowlist(allowedSAs)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Skip auth for health checks.
 		if r.URL.Path == "/healthz" {
@@ -123,11 +124,18 @@ func FirebaseAuthMiddleware(next http.Handler, fbAuth *fbauth.Client, cloudRunAu
 					ID:    payload.Subject,
 					Email: strings.ToLower(email),
 				}
-				// Service accounts (candela-local with SA credentials) are
-				// authorized by Cloud Run IAM — skip user-store registration
-				// check. User identity is resolved from the auth token.
+				// Service accounts must be explicitly allowlisted via
+				// auth.allowed_service_accounts. Deny by default to prevent
+				// untracked usage (SAs bypass budget deduction).
 				if strings.HasSuffix(user.Email, ".gserviceaccount.com") {
-					slog.Info("service account authenticated — skipping registration check",
+					if !saAllowlist.IsAllowed(user.Email) {
+						slog.Warn("service account not in allowlist — access denied",
+							"email", user.Email, "path", r.URL.Path)
+						writeError(w, http.StatusForbidden,
+							"service account not authorized — use personal credentials (gcloud auth application-default login) or contact your admin to allowlist this SA")
+						return
+					}
+					slog.Info("service account authenticated (allowlisted)",
 						"email", user.Email, "path", r.URL.Path)
 				} else if !isSelfService && !verifyRegistered(r.Context(), w, user, userAuth) {
 					return
@@ -233,4 +241,32 @@ func extractBearerToken(r *http.Request) string {
 		return ""
 	}
 	return parts[1]
+}
+
+// ServiceAccountAllowlist controls which GCP service accounts are permitted
+// to authenticate. Deny-by-default: if the list is empty, ALL service
+// accounts are rejected. Emails are matched case-insensitively.
+type ServiceAccountAllowlist struct {
+	allowed map[string]bool
+}
+
+// NewServiceAccountAllowlist creates an allowlist from the given emails.
+// An empty or nil slice means "deny all service accounts".
+func NewServiceAccountAllowlist(emails []string) *ServiceAccountAllowlist {
+	m := make(map[string]bool, len(emails))
+	for _, e := range emails {
+		m[strings.ToLower(e)] = true
+	}
+	return &ServiceAccountAllowlist{allowed: m}
+}
+
+// IsAllowed reports whether the given email is on the allowlist.
+// Returns false if the allowlist is empty (deny-by-default).
+func (a *ServiceAccountAllowlist) IsAllowed(email string) bool {
+	return a.allowed[strings.ToLower(email)]
+}
+
+// Len returns the number of entries in the allowlist.
+func (a *ServiceAccountAllowlist) Len() int {
+	return len(a.allowed)
 }

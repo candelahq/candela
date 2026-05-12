@@ -82,6 +82,9 @@ test.describe("Dashboard", () => {
       traces: [],
       pagination: { totalCount: 0, nextPageToken: "" },
     });
+    await mockConnectRPC(page, "/candela.v1.DashboardService/GetJobLeaderboard", {
+      jobs: [],
+    });
 
     await page.goto("/");
     await expect(page.locator(".card-value").first()).toHaveText("42");
@@ -606,6 +609,9 @@ test.describe("Dashboard time range", () => {
     await mockConnectRPC(page, "/candela.v1.TraceService/ListTraces", {
       traces: [],
       pagination: { totalCount: 0, nextPageToken: "" },
+    });
+    await mockConnectRPC(page, "/candela.v1.DashboardService/GetJobLeaderboard", {
+      jobs: [],
     });
 
     await page.goto("/");

@@ -26,6 +26,7 @@ import (
 
 	"golang.org/x/oauth2"
 
+	"github.com/candelahq/candela/pkg/attribution"
 	"github.com/candelahq/candela/pkg/auth"
 	"github.com/candelahq/candela/pkg/costcalc"
 	"github.com/candelahq/candela/pkg/notify"
@@ -362,57 +363,19 @@ func rewriteModelField(body []byte, newModel string) []byte {
 // Also used to validate X-Session-Id and X-Candela-Tenant-Id.
 var requestIDPattern = regexp.MustCompile(`^[a-zA-Z0-9\-]{1,128}$`)
 
-// tenantIDPattern is slightly looser than requestIDPattern — allows dots and
-// underscores for domain-style tenant IDs (e.g. "acme.corp", "tenant_42").
-var tenantIDPattern = regexp.MustCompile(`^[a-zA-Z0-9\-._]{1,128}$`)
+// tenantIDPattern delegates to attribution.IDPattern for backward compatibility
+// with tests in this package.
+var tenantIDPattern = attribution.IDPattern
 
-// parseBaggage extracts candela.tenant_id and candela.job_id from W3C Baggage header value(s).
-// W3C Baggage format: "key1=val1;prop, key2=val2" (RFC 8941 list).
-// A single request may carry multiple Baggage headers; we join them all.
-// Baggage keys are case-insensitive per RFC 8941 — EqualFold is used.
-// ADK's OTel propagator injects Baggage automatically when context has baggage
-// set, making this the preferred propagation path for multitenant applications.
-//
-// If multiple candela.tenant_id entries are present (RFC 8941 allows duplicates),
-// the right-most valid one wins (per W3C spec). Invalid values are warned and skipped.
+// parseBaggage delegates to the shared attribution package.
+// Kept as a package-level function for test compatibility.
 func parseBaggage(header string) (tenantID, jobID string) {
-	if header == "" {
-		return "", ""
-	}
-	for _, member := range strings.Split(header, ",") {
-		// Each member may have properties after a semicolon: "key=value;prop".
-		kv := strings.SplitN(strings.TrimSpace(member), ";", 2)[0]
-		parts := strings.SplitN(kv, "=", 2)
-		if len(parts) != 2 {
-			continue
-		}
-		key := strings.TrimSpace(parts[0])
-		val := strings.TrimSpace(parts[1])
-		// RFC 8941: Baggage keys are case-insensitive.
-		if strings.EqualFold(key, "candela.tenant_id") {
-			if tenantIDPattern.MatchString(val) {
-				// W3C spec: the right-most occurrence of a key wins.
-				tenantID = val
-			} else {
-				slog.Warn("skipping invalid candela.tenant_id in Baggage header",
-					"value", val)
-			}
-		} else if strings.EqualFold(key, "candela.job_id") {
-			if tenantIDPattern.MatchString(val) {
-				jobID = val
-			} else {
-				slog.Warn("skipping invalid candela.job_id in Baggage header",
-					"value", val)
-			}
-		}
-	}
-	return tenantID, jobID
+	return attribution.ParseBaggage(header)
 }
 
-// parseBaggageHeaders joins multiple Baggage header values (W3C allows multiple
-// header instances) and delegates to parseBaggage for extraction.
+// parseBaggageHeaders delegates to the shared attribution package.
 func parseBaggageHeaders(values []string) (tenantID, jobID string) {
-	return parseBaggage(strings.Join(values, ","))
+	return attribution.ParseBaggageHeaders(values)
 }
 
 func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
@@ -433,29 +396,8 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// ── Tenant ID & Job ID extraction (for multitenant cost attribution) ──
-	// Precedence: W3C Baggage (candela.tenant_id / candela.job_id) wins over
-	// X-Candela-Tenant-Id / X-Candela-Job-Id headers.
-	//
-	// Use r.Header.Values (not .Get) to handle multiple Baggage header instances —
-	// W3C spec and some HTTP/1.1 proxies send separate Baggage lines per entry.
-	tenantID, jobID := parseBaggageHeaders(r.Header.Values("Baggage"))
-	if tenantID == "" {
-		// Fallback: explicit header (non-OTel callers, tests, simple scripts).
-		hdr := r.Header.Get("X-Candela-Tenant-Id")
-		if tenantIDPattern.MatchString(hdr) {
-			tenantID = hdr
-		} else if hdr != "" {
-			slog.Warn("discarding invalid X-Candela-Tenant-Id header", "value", hdr)
-		}
-	}
-	if jobID == "" {
-		hdr := r.Header.Get("X-Candela-Job-Id")
-		if tenantIDPattern.MatchString(hdr) {
-			jobID = hdr
-		} else if hdr != "" {
-			slog.Warn("discarding invalid X-Candela-Job-Id header", "value", hdr)
-		}
-	}
+	attr := attribution.FromRequest(r)
+	tenantID, jobID := attr.TenantID, attr.JobID
 
 	// Extract W3C Trace Context for trace correlation with OTel-instrumented
 	// callers (e.g. Google ADK, LangChain). When present, the proxy span

@@ -8,21 +8,12 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
-	"regexp"
-	"strings"
 	"time"
 
+	"github.com/candelahq/candela/pkg/attribution"
 	"github.com/candelahq/candela/pkg/processor"
 	"github.com/candelahq/candela/pkg/session"
 	"github.com/candelahq/candela/pkg/storage"
-)
-
-var (
-	// tenantIDPattern enforces the allowed character set and length limits for tenant IDs.
-	// Matches the implementation in pkg/proxy/proxy.go.
-	tenantIDPattern = regexp.MustCompile(`^[a-zA-Z0-9\-._]{1,128}$`)
-	// jobIDPattern enforces the same limits for job IDs.
-	jobIDPattern = regexp.MustCompile(`^[a-zA-Z0-9\-._]{1,128}$`)
 )
 
 // spanCapture wraps an HTTP handler (typically the local proxy) and captures
@@ -103,20 +94,8 @@ func (s *spanCapture) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Extract tenant and job IDs for attribution.
-	// We check Baggage (W3C standard) first, then the explicit headers.
-	tenantID, jobID := parseBaggageHeaders(r.Header.Values("Baggage"))
-	if tenantID == "" {
-		tenantID = r.Header.Get("X-Candela-Tenant-Id")
-		if !tenantIDPattern.MatchString(tenantID) {
-			tenantID = ""
-		}
-	}
-	if jobID == "" {
-		jobID = r.Header.Get("X-Candela-Job-Id")
-		if !jobIDPattern.MatchString(jobID) {
-			jobID = ""
-		}
-	}
+	attr := attribution.FromRequest(r)
+	tenantID, jobID := attr.TenantID, attr.JobID
 
 	// Capture response.
 	rec := &responseCapture{ResponseWriter: w}
@@ -279,47 +258,4 @@ func generateID(size int) string {
 		panic("crypto/rand failed: " + err.Error())
 	}
 	return hex.EncodeToString(b)
-}
-
-// --- Tenant ID & Baggage parsing ---
-
-// parseBaggageHeaders joins multiple Baggage headers and extracts candela.tenant_id and candela.job_id.
-func parseBaggageHeaders(values []string) (string, string) {
-	if len(values) == 0 {
-		return "", ""
-	}
-	return parseBaggage(strings.Join(values, ","))
-}
-
-// parseBaggage extracts the candela.tenant_id and candela.job_id values from a W3C Baggage header string.
-func parseBaggage(header string) (string, string) {
-	if header == "" {
-		return "", ""
-	}
-
-	var tenantID, jobID string
-	parts := strings.Split(header, ",")
-	for _, part := range parts {
-		kv := strings.SplitN(strings.TrimSpace(part), "=", 2)
-		if len(kv) != 2 {
-			continue
-		}
-		keyPart := strings.SplitN(strings.TrimSpace(kv[0]), ";", 2)[0]
-		val := strings.TrimSpace(kv[1])
-		if idx := strings.Index(val, ";"); idx >= 0 {
-			val = strings.TrimSpace(val[:idx])
-		}
-
-		if strings.EqualFold(keyPart, "candela.tenant_id") {
-			if tenantIDPattern.MatchString(val) {
-				tenantID = val
-			}
-		} else if strings.EqualFold(keyPart, "candela.job_id") {
-			if jobIDPattern.MatchString(val) {
-				jobID = val
-			}
-		}
-	}
-
-	return tenantID, jobID
 }

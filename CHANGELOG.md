@@ -4,6 +4,47 @@ All notable changes to Candela are documented here, organized by development pha
 
 ## Latest
 
+### Documentation Audit & Site Expansion
+- Added 3 missing proxy routes to README and docs site (`anthropic-vertex`, `anthropic-direct`, `gemini-oai`)
+- New docs site pages: Claude Code IDE guide, Cursor/Windsurf IDE guide, Security & Auth, Multitenancy, Operations Runbook
+- Updated Desktop component docs with Today View and Traces Screen features
+- Added LICENSE files to `candela-desktop`, `candela-docs`, and `candela-protos` repos
+
+### Token Counting & Cost Accuracy (#179)
+- Fix Anthropic and Gemini over-reporting by correctly distinguishing cache/thinking tokens from standard usage
+- Implement `strings.Builder` for streaming content concatenation (Gemini)
+- Update test model pricing configurations
+
+### Unified CLI — `candela-local` → `candela` (#178)
+
+**⚠️ Breaking Change:**
+- Renamed binary from `candela-local` to `candela` with `start`/`stop`/`status` subcommands
+- Config path moved from `~/.candela.yaml` to `~/.config/candela/config.yaml` (legacy path still supported)
+- Updated all internal docs, README, and Homebrew formula
+- Homebrew: `brew install candelahq/tap/candela`
+
+### Service Account Deny-by-Default (#177)
+
+**⚠️ Breaking Change:**
+- All service account tokens rejected with 403 unless explicitly allowlisted in `auth.allowed_service_accounts`
+- Prevents unmetered cost vectors from automated systems
+
+### Anthropic Vertex Provider — Claude Code Gateway (#176)
+- New `/proxy/anthropic-vertex/` route for native Anthropic Messages API via Vertex AI
+- New `/proxy/anthropic-direct/` route for direct Anthropic API passthrough
+- New `/proxy/gemini-oai/` route for Gemini via OpenAI-compatible format
+- Enables Claude Code integration via `ANTHROPIC_BASE_URL`
+
+### Enrichment SDKs (#175)
+- Zero-dependency SDKs for Python, TypeScript, Go, Kotlin, and Rust
+- Inject `X-Candela-Tenant-Id`, `X-Candela-Job-Id`, and W3C Baggage headers
+- Proxy strips enrichment headers before forwarding to upstream LLMs
+- Per-tenant and per-job cost attribution in dashboard
+
+---
+
+## Previous
+
 ### API Hardening & Proto Centralization (#113)
 
 **⚠️ Breaking Changes:**

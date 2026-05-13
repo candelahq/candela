@@ -22,8 +22,8 @@ Drop Candela into your existing app by just changing your `base_url`. No instrum
 - **Google Gemini**: `http://localhost:8181/proxy/google/`
 - **Gemini (OpenAI-compat)**: `http://localhost:8181/proxy/gemini-oai/v1`
 - **Anthropic (via Vertex AI)**: `http://localhost:8181/proxy/anthropic/`
-- **Anthropic Vertex (native)**: `http://localhost:8181/proxy/anthropic-vertex/` _(Claude Code via Vertex AI)_
-- **Anthropic Direct**: `http://localhost:8181/proxy/anthropic-direct/` _(client provides API key)_
+- **Anthropic Vertex (native)**: `http://localhost:8181/proxy/anthropic-vertex` _(Claude Code via Vertex AI)_
+- **Anthropic Direct**: `http://localhost:8181/proxy/anthropic-direct` _(client provides API key)_
 
 > **📍 Port Configuration**: Candela uses port `8181` by default. See [Port Configuration](#-port-configuration) for details.
 

@@ -490,17 +490,14 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 	// Check if this is a streaming request (check BEFORE translation).
 	isStreaming := isStreamingRequest(providerName, reqBody)
 
-	// ── Pricing gate (#6) + budget pre-flight with model-aware floor (#7) ──
-	// These checks run after body read so we can extract the model name.
-	if p.users != nil && effectiveUserID != "" && !isServiceAccount {
+	// ── Pricing gate (#6) — blocks unpriced cloud models universally ──
+	// This runs for ALL requests (solo, team, local) to prevent untracked
+	// API calls that would show $0 cost. Only "local" provider is exempt.
+	{
 		model, _ := extractRequestInfo(providerName, reqBody)
-
-		// #6: Block calls to cloud models with no pricing configured.
-		// Unknown models would be billed $0, letting users make free API calls.
 		if model != "" && strings.ToLower(providerName) != "local" && !p.calc.HasPricing(providerName, model) {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusPaymentRequired)
-			// Marshal the full error object so the model name is always safely escaped.
 			errBody, _ := json.Marshal(map[string]any{
 				"error": map[string]any{
 					"message": "no pricing configured for model " + model + " — contact your admin",
@@ -513,7 +510,11 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 				"user_id", effectiveUserID, "provider", providerName, "model", model)
 			return
 		}
+	}
 
+	// ── Budget pre-flight with model-aware floor (#7) ──
+	// Only applies in team mode (UserStore configured).
+	if p.users != nil && effectiveUserID != "" && !isServiceAccount {
 		// #7: Budget check with a per-call floor so even a $0.001-remaining
 		// user can't fire a $50 request. Floor = minimum meaningful API cost.
 		const budgetCheckFloor = 0.001 // $0.001 — lower than any cloud model's minimum call

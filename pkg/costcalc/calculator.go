@@ -17,6 +17,14 @@ type ModelPricing struct {
 	InputPerMillion  float64 `yaml:"input_per_million" json:"input_per_million"`                   // USD per 1M input tokens
 	OutputPerMillion float64 `yaml:"output_per_million" json:"output_per_million"`                 // USD per 1M output tokens
 	DiscountPercent  float64 `yaml:"discount_percent,omitempty" json:"discount_percent,omitempty"` // 0.0–1.0, model-specific discount
+
+	// Tiered pricing: some models (e.g. Gemini 2.5 Pro) charge higher rates
+	// when the input context exceeds a threshold. If TierThresholdTokens > 0
+	// and inputTokens > TierThresholdTokens, the high-tier rates are used.
+	// Zero values mean "no tiered pricing — use base rates for all contexts."
+	InputPerMillionHigh  float64 `yaml:"input_per_million_high,omitempty" json:"input_per_million_high,omitempty"`
+	OutputPerMillionHigh float64 `yaml:"output_per_million_high,omitempty" json:"output_per_million_high,omitempty"`
+	TierThresholdTokens  int64   `yaml:"tier_threshold_tokens,omitempty" json:"tier_threshold_tokens,omitempty"`
 }
 
 // PricingConfig holds pricing configuration loaded from config.yaml.
@@ -41,6 +49,7 @@ type Calculator struct {
 // with their canonical provider, including config overrides.
 var providerAliases = map[string]string{
 	"anthropic-direct": "anthropic",
+	"anthropic-vertex": "anthropic",
 }
 
 // New creates a Calculator with default pricing for all supported cloud models.
@@ -81,8 +90,21 @@ func (c *Calculator) Calculate(provider, model string, inputTokens, outputTokens
 		return 0 // Unknown model — this is a gap, not a feature
 	}
 
-	inputCost := float64(inputTokens) / 1_000_000 * p.InputPerMillion
-	outputCost := float64(outputTokens) / 1_000_000 * p.OutputPerMillion
+	// Select pricing tier. Models with TierThresholdTokens > 0 charge higher
+	// rates when the prompt exceeds that threshold (e.g. Gemini 2.5 Pro >200K).
+	inputRate := p.InputPerMillion
+	outputRate := p.OutputPerMillion
+	if p.TierThresholdTokens > 0 && inputTokens > p.TierThresholdTokens {
+		if p.InputPerMillionHigh > 0 {
+			inputRate = p.InputPerMillionHigh
+		}
+		if p.OutputPerMillionHigh > 0 {
+			outputRate = p.OutputPerMillionHigh
+		}
+	}
+
+	inputCost := float64(inputTokens) / 1_000_000 * inputRate
+	outputCost := float64(outputTokens) / 1_000_000 * outputRate
 	baseCost := inputCost + outputCost
 
 	// Apply model-level discount, then global discount.
@@ -243,7 +265,8 @@ func (c *Calculator) loadDefaults() {
 		// Gemini 3.1 (latest)
 		{Provider: "google", Model: "gemini-3.1-pro", InputPerMillion: 2.00, OutputPerMillion: 12.00},
 		// Gemini 2.5
-		{Provider: "google", Model: "gemini-2.5-pro", InputPerMillion: 1.25, OutputPerMillion: 10.00},
+		{Provider: "google", Model: "gemini-2.5-pro", InputPerMillion: 1.25, OutputPerMillion: 10.00,
+			InputPerMillionHigh: 2.50, OutputPerMillionHigh: 15.00, TierThresholdTokens: 200_000},
 		{Provider: "google", Model: "gemini-2.5-flash", InputPerMillion: 0.30, OutputPerMillion: 2.50},
 		{Provider: "google", Model: "gemini-2.5-flash-lite", InputPerMillion: 0.10, OutputPerMillion: 0.40},
 		// Gemini 2.0

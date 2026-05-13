@@ -73,6 +73,9 @@ func (p *SpanProcessor) Run(ctx context.Context) {
 		}
 
 		// Enrich with cost data.
+		// NOTE: Proxy-generated spans already have CostUSD set by buildSpan,
+		// so the CostUSD==0 guard below is a no-op for them. This path exists
+		// for SDK-ingested spans (enrichment SDKs, OTel) that arrive without cost.
 		for i := range batch {
 			if batch[i].GenAI != nil && batch[i].GenAI.CostUSD == 0 {
 				batch[i].GenAI.CostUSD = p.calc.Calculate(

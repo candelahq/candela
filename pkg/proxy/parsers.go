@@ -1,7 +1,9 @@
 package proxy
 
 import (
+	"bytes"
 	"encoding/json"
+	"math"
 	"strings"
 )
 
@@ -159,7 +161,17 @@ func (p *anthropicParser) ParseResponse(body []byte) (content string, inputToken
 	}
 
 	if usage, ok := resp["usage"].(map[string]interface{}); ok {
-		inputTokens = toInt64(usage["input_tokens"])
+		// Anthropic reports cache tokens separately with different billing rates:
+		//   input_tokens:          1.0× base rate
+		//   cache_read_input_tokens:  0.1× base rate (90% savings)
+		//   cache_creation_input_tokens: 1.25× base rate
+		// We normalize to cost-equivalent token counts at the base rate so the
+		// Calculator's per-million-token math produces correct costs.
+		cacheRead := toInt64(usage["cache_read_input_tokens"])
+		cacheCreation := toInt64(usage["cache_creation_input_tokens"])
+		inputTokens = toInt64(usage["input_tokens"]) +
+			int64(math.Round(float64(cacheRead)*0.1)) +
+			int64(math.Round(float64(cacheCreation)*1.25))
 		outputTokens = toInt64(usage["output_tokens"])
 	}
 	if contentArr, ok := resp["content"].([]interface{}); ok && len(contentArr) > 0 {
@@ -200,7 +212,12 @@ func (p *anthropicParser) ParseStreamingResponse(data []byte) (content string, i
 		}
 		if msg, ok := chunk["message"].(map[string]interface{}); ok {
 			if usage, ok := msg["usage"].(map[string]interface{}); ok {
-				inputTokens = toInt64(usage["input_tokens"])
+				// Normalize cache tokens to cost-equivalent values — see ParseResponse.
+				cacheRead := toInt64(usage["cache_read_input_tokens"])
+				cacheCreation := toInt64(usage["cache_creation_input_tokens"])
+				inputTokens = toInt64(usage["input_tokens"]) +
+					int64(math.Round(float64(cacheRead)*0.1)) +
+					int64(math.Round(float64(cacheCreation)*1.25))
 			}
 		}
 	}
@@ -241,7 +258,11 @@ func (p *googleParser) ParseResponse(body []byte) (content string, inputTokens, 
 
 	if meta, ok := resp["usageMetadata"].(map[string]interface{}); ok {
 		inputTokens = toInt64(meta["promptTokenCount"])
-		outputTokens = toInt64(meta["candidatesTokenCount"])
+		// Gemini 2.5 "thinking" models report reasoning tokens separately.
+		// These are billed at the output rate but NOT included in candidatesTokenCount.
+		// Without this, thinking-heavy responses undercount output by 2-10×.
+		outputTokens = toInt64(meta["candidatesTokenCount"]) +
+			toInt64(meta["thoughtsTokenCount"])
 	}
 	if candidates, ok := resp["candidates"].([]interface{}); ok && len(candidates) > 0 {
 		if c, ok := candidates[0].(map[string]interface{}); ok {
@@ -258,9 +279,77 @@ func (p *googleParser) ParseResponse(body []byte) (content string, inputTokens, 
 }
 
 func (p *googleParser) ParseStreamingResponse(data []byte) (content string, inputTokens, outputTokens int64) {
-	// Google streaming uses a different endpoint — not SSE-based in the same way.
-	// Fall back to standard parsing of the accumulated data.
-	return p.ParseResponse(data)
+	// Google streaming (streamGenerateContent) returns newline-delimited JSON
+	// objects, not SSE. The usage metadata appears in the LAST chunk only.
+	// Try parsing the accumulated data as a single response first (works if
+	// only one chunk was buffered), then fall back to scanning for the last
+	// usageMetadata block in the concatenated stream.
+	content, inputTokens, outputTokens = p.ParseResponse(data)
+	if inputTokens > 0 || outputTokens > 0 {
+		return
+	}
+
+	// Google streaming (streamGenerateContent) returns a JSON array:
+	// [{chunk1},{chunk2},...] where objects can span multiple lines.
+	// Use json.Decoder to correctly parse multi-line JSON objects.
+	var lastMeta map[string]interface{}
+	var contentBuilder strings.Builder
+
+	// First try: parse as a JSON array of objects.
+	var chunks []map[string]interface{}
+	if err := json.Unmarshal(data, &chunks); err == nil && len(chunks) > 0 {
+		for _, chunk := range chunks {
+			if meta, ok := chunk["usageMetadata"].(map[string]interface{}); ok {
+				lastMeta = meta
+			}
+			if candidates, ok := chunk["candidates"].([]interface{}); ok && len(candidates) > 0 {
+				if c, ok := candidates[0].(map[string]interface{}); ok {
+					if cont, ok := c["content"].(map[string]interface{}); ok {
+						if parts, ok := cont["parts"].([]interface{}); ok && len(parts) > 0 {
+							if part, ok := parts[0].(map[string]interface{}); ok {
+								if text, ok := part["text"].(string); ok {
+									contentBuilder.WriteString(text)
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+	} else {
+		// Fallback: try json.Decoder for newline-delimited JSON objects.
+		dec := json.NewDecoder(bytes.NewReader(data))
+		for dec.More() {
+			var chunk map[string]interface{}
+			if err := dec.Decode(&chunk); err != nil {
+				break
+			}
+			if meta, ok := chunk["usageMetadata"].(map[string]interface{}); ok {
+				lastMeta = meta
+			}
+			if candidates, ok := chunk["candidates"].([]interface{}); ok && len(candidates) > 0 {
+				if c, ok := candidates[0].(map[string]interface{}); ok {
+					if cont, ok := c["content"].(map[string]interface{}); ok {
+						if parts, ok := cont["parts"].([]interface{}); ok && len(parts) > 0 {
+							if part, ok := parts[0].(map[string]interface{}); ok {
+								if text, ok := part["text"].(string); ok {
+									contentBuilder.WriteString(text)
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
+	content = contentBuilder.String()
+	if lastMeta != nil {
+		inputTokens = toInt64(lastMeta["promptTokenCount"])
+		outputTokens = toInt64(lastMeta["candidatesTokenCount"]) +
+			toInt64(lastMeta["thoughtsTokenCount"])
+	}
+	return
 }
 
 // ──────────────────────────────────────────

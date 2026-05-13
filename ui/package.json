@@ -30,5 +30,13 @@
     "eslint": "^9",
     "eslint-config-next": "16.2.1",
     "typescript": "^5"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "@firebase/util",
+      "protobufjs",
+      "sharp",
+      "unrs-resolver"
+    ]
   }
 }

@@ -7,9 +7,6 @@
 /candela-sidecar
 /backfill-budget-config
 
-# Generated code
-/gen/
-
 # Build artifacts
 /dist/
 *.exe

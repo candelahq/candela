@@ -104,7 +104,7 @@ test.describe("Dashboard", () => {
     await page.route(`${API_BASE}/**`, (route) => route.abort());
     await page.goto("/");
     await expect(
-      page.locator(".card-title").filter({ hasText: "Backend Unavailable" })
+      page.locator(".card-title").filter({ hasText: "Dashboard Error" })
     ).toBeVisible();
   });
 });

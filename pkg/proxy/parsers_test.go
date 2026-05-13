@@ -28,9 +28,10 @@ func TestAnthropicParser_ParseResponse_CacheTokens(t *testing.T) {
 	if content != "hello" {
 		t.Errorf("content = %q, want %q", content, "hello")
 	}
-	// Total input = 21 + 188086 + 500 = 188607
-	if inputTokens != 188607 {
-		t.Errorf("inputTokens = %d, want 188607 (21 + 188086 cache_read + 500 cache_creation)", inputTokens)
+	// Cost-equivalent input = 21 + round(188086 * 0.1) + round(500 * 1.25)
+	//                       = 21 + 18809 + 625 = 19455
+	if inputTokens != 19455 {
+		t.Errorf("inputTokens = %d, want 19455 (21 + 18809 cache_read@0.1x + 625 cache_creation@1.25x)", inputTokens)
 	}
 	if outputTokens != 393 {
 		t.Errorf("outputTokens = %d, want 393", outputTokens)
@@ -70,9 +71,10 @@ data: [DONE]
 	if content != "hello" {
 		t.Errorf("content = %q, want %q", content, "hello")
 	}
-	// Total input = 10 + 50000 + 200 = 50210
-	if inputTokens != 50210 {
-		t.Errorf("inputTokens = %d, want 50210 (10 + 50000 cache_read + 200 cache_creation)", inputTokens)
+	// Cost-equivalent input = 10 + round(50000 * 0.1) + round(200 * 1.25)
+	//                       = 10 + 5000 + 250 = 5260
+	if inputTokens != 5260 {
+		t.Errorf("inputTokens = %d, want 5260 (10 + 5000 cache_read@0.1x + 250 cache_creation@1.25x)", inputTokens)
 	}
 	if outputTokens != 42 {
 		t.Errorf("outputTokens = %d, want 42", outputTokens)

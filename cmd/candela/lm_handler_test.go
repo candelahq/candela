@@ -914,6 +914,11 @@ func TestLMHandler_ModelAlias_CloudModel(t *testing.T) {
 	defer cloudUpstream.Close()
 
 	calc := costcalc.New()
+	// The universal pricing gate blocks unpriced models, so register this preview model.
+	calc.SetPricing(costcalc.ModelPricing{
+		Provider: "gemini-oai", Model: "gemini-2.5-pro-preview-05-06",
+		InputPerMillion: 1.25, OutputPerMillion: 10.00,
+	})
 	cp := proxy.New(proxy.Config{
 		Providers: []proxy.Provider{{Name: "gemini-oai", UpstreamURL: cloudUpstream.URL}},
 		ProjectID: "local",

@@ -3,6 +3,7 @@ package proxy
 import (
 	"bytes"
 	"encoding/json"
+	"math"
 	"strings"
 )
 
@@ -160,12 +161,17 @@ func (p *anthropicParser) ParseResponse(body []byte) (content string, inputToken
 	}
 
 	if usage, ok := resp["usage"].(map[string]interface{}); ok {
-		// Anthropic reports cache tokens separately. The real total input is:
-		// input_tokens + cache_read_input_tokens + cache_creation_input_tokens.
-		// Without this, cached Claude Code conversations undercount input by 90%+.
+		// Anthropic reports cache tokens separately with different billing rates:
+		//   input_tokens:          1.0× base rate
+		//   cache_read_input_tokens:  0.1× base rate (90% savings)
+		//   cache_creation_input_tokens: 1.25× base rate
+		// We normalize to cost-equivalent token counts at the base rate so the
+		// Calculator's per-million-token math produces correct costs.
+		cacheRead := toInt64(usage["cache_read_input_tokens"])
+		cacheCreation := toInt64(usage["cache_creation_input_tokens"])
 		inputTokens = toInt64(usage["input_tokens"]) +
-			toInt64(usage["cache_read_input_tokens"]) +
-			toInt64(usage["cache_creation_input_tokens"])
+			int64(math.Round(float64(cacheRead)*0.1)) +
+			int64(math.Round(float64(cacheCreation)*1.25))
 		outputTokens = toInt64(usage["output_tokens"])
 	}
 	if contentArr, ok := resp["content"].([]interface{}); ok && len(contentArr) > 0 {
@@ -206,10 +212,12 @@ func (p *anthropicParser) ParseStreamingResponse(data []byte) (content string, i
 		}
 		if msg, ok := chunk["message"].(map[string]interface{}); ok {
 			if usage, ok := msg["usage"].(map[string]interface{}); ok {
-				// Include cache tokens — see ParseResponse for rationale.
+				// Normalize cache tokens to cost-equivalent values — see ParseResponse.
+				cacheRead := toInt64(usage["cache_read_input_tokens"])
+				cacheCreation := toInt64(usage["cache_creation_input_tokens"])
 				inputTokens = toInt64(usage["input_tokens"]) +
-					toInt64(usage["cache_read_input_tokens"]) +
-					toInt64(usage["cache_creation_input_tokens"])
+					int64(math.Round(float64(cacheRead)*0.1)) +
+					int64(math.Round(float64(cacheCreation)*1.25))
 			}
 		}
 	}
@@ -285,6 +293,7 @@ func (p *googleParser) ParseStreamingResponse(data []byte) (content string, inpu
 	// [{chunk1},{chunk2},...] where objects can span multiple lines.
 	// Use json.Decoder to correctly parse multi-line JSON objects.
 	var lastMeta map[string]interface{}
+	var contentBuilder strings.Builder
 
 	// First try: parse as a JSON array of objects.
 	var chunks []map[string]interface{}
@@ -299,7 +308,7 @@ func (p *googleParser) ParseStreamingResponse(data []byte) (content string, inpu
 						if parts, ok := cont["parts"].([]interface{}); ok && len(parts) > 0 {
 							if part, ok := parts[0].(map[string]interface{}); ok {
 								if text, ok := part["text"].(string); ok {
-									content = text
+									contentBuilder.WriteString(text)
 								}
 							}
 						}
@@ -324,7 +333,7 @@ func (p *googleParser) ParseStreamingResponse(data []byte) (content string, inpu
 						if parts, ok := cont["parts"].([]interface{}); ok && len(parts) > 0 {
 							if part, ok := parts[0].(map[string]interface{}); ok {
 								if text, ok := part["text"].(string); ok {
-									content = text
+									contentBuilder.WriteString(text)
 								}
 							}
 						}
@@ -334,6 +343,7 @@ func (p *googleParser) ParseStreamingResponse(data []byte) (content string, inpu
 		}
 	}
 
+	content = contentBuilder.String()
 	if lastMeta != nil {
 		inputTokens = toInt64(lastMeta["promptTokenCount"])
 		outputTokens = toInt64(lastMeta["candidatesTokenCount"]) +

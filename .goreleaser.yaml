@@ -64,7 +64,7 @@ brews:
       name: homebrew-tap
       # Fine-grained PAT with contents:write on candelahq/homebrew-tap.
       token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
-    folder: Formula
+    directory: Formula
     name: candela
     homepage: "https://github.com/candelahq/candela"
     description: "Local LLM observability proxy — traces, costs, and budgets for AI-powered dev tools"

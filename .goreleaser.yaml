@@ -1,7 +1,7 @@
 # yaml-language-server: $schema=https://goreleaser.com/static/schema.json
 version: 2
 
-project_name: candela-local
+project_name: candela
 
 before:
   hooks:
@@ -9,9 +9,9 @@ before:
     - buf generate
 
 builds:
-  - id: candela-local
-    main: ./cmd/candela-local
-    binary: candela-local
+  - id: candela
+    main: ./cmd/candela
+    binary: candela
     env:
       - CGO_ENABLED=0
     goos:
@@ -23,16 +23,14 @@ builds:
     ldflags:
       - -s -w
       - -X main.version={{.Version}}
-      - -X main.commit={{.Commit}}
-      - -X main.date={{.Date}}
 
 # Create macOS universal binaries (fat binaries: arm64 + amd64).
 universal_binaries:
-  - id: candela-local-universal
+  - id: candela-universal
     ids:
-      - candela-local
+      - candela
     replace: true
-    name_template: candela-local
+    name_template: candela
 
 archives:
   - id: default
@@ -67,20 +65,27 @@ brews:
       # Fine-grained PAT with contents:write on candelahq/homebrew-tap.
       token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
     folder: Formula
+    name: candela
     homepage: "https://github.com/candelahq/candela"
     description: "Local LLM observability proxy — traces, costs, and budgets for AI-powered dev tools"
     license: "Apache-2.0"
     skip_upload: auto   # Skip on pre-releases
     install: |
-      bin.install "candela-local"
+      bin.install "candela"
     test: |
-      system "#{bin}/candela-local", "--help"
+      system "#{bin}/candela", "version"
+    # Homebrew services integration — enables `brew services start candela`.
+    service: |
+      run [opt_bin/"candela", "run"]
+      keep_alive true
+      log_path var/"log/candela.log"
+      error_log_path var/"log/candela.log"
     # Post-install caveats shown to the user.
     caveats: |
       To get started, create a config file:
 
-        mkdir -p ~/.candela
-        cat > ~/.candela.yaml <<EOF
+        mkdir -p ~/.config/candela
+        cat > ~/.config/candela/config.yaml <<EOF
         port: 8181
         providers:
           - name: google
@@ -91,6 +96,11 @@ brews:
         EOF
 
       Then run:
-        candela-local
+        candela start          # background daemon
+        candela status         # check running state
+        candela run            # foreground (debug)
 
       Management UI: http://127.0.0.1:8181/_local/
+
+      Or as a login service:
+        brew services start candela

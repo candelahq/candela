@@ -5,6 +5,7 @@ import { dashboardClient, traceClient } from "@/lib/api";
 import { DEFAULT_PROJECT_ID } from "@/lib/constants";
 import { timestampFromDate } from "@bufbuild/protobuf/wkt";
 import type { DataPoint } from "@/components/chart";
+import type { GetJobLeaderboardResponse, JobUsage } from "@/gen/candela/v1/dashboard_service_pb";
 
 export interface DashboardSummary {
   totalTraces: number;
@@ -157,7 +158,7 @@ export function useDashboard() {
             tracesOverTime: toDataPoints(res.tracesOverTime, state.timeRange),
             costOverTime: toDataPoints(res.costOverTime, state.timeRange),
             tokensOverTime: toDataPoints(res.tokensOverTime, state.timeRange),
-            jobLeaderboard: ((jobRes as any).jobs || []).map((j: any) => ({
+            jobLeaderboard: (jobRes as Pick<GetJobLeaderboardResponse, "jobs">).jobs.map((j: JobUsage) => ({
               jobId: j.jobId,
               callCount: Number(j.callCount),
               totalTokens: Number(j.totalTokens),

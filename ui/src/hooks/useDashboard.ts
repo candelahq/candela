@@ -138,7 +138,7 @@ export function useDashboard() {
         end: timestampFromDate(now),
       },
       limit: 10,
-    });
+    }).catch(() => ({ jobs: [] })); // Degrade gracefully if job_id column missing
 
     Promise.all([summaryPromise, tracesPromise, jobLeaderboardPromise])
       .then(([res, tracesRes, jobRes]) => {
@@ -157,7 +157,7 @@ export function useDashboard() {
             tracesOverTime: toDataPoints(res.tracesOverTime, state.timeRange),
             costOverTime: toDataPoints(res.costOverTime, state.timeRange),
             tokensOverTime: toDataPoints(res.tokensOverTime, state.timeRange),
-            jobLeaderboard: (jobRes.jobs || []).map((j) => ({
+            jobLeaderboard: ((jobRes as any).jobs || []).map((j: any) => ({
               jobId: j.jobId,
               callCount: Number(j.callCount),
               totalTokens: Number(j.totalTokens),

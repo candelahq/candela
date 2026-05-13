@@ -16,20 +16,24 @@ All notable changes to Candela are documented here, organized by development pha
 - Update test model pricing configurations
 
 ### Unified CLI — `candela-local` → `candela` (#178)
+
+**⚠️ Breaking Change:**
 - Renamed binary from `candela-local` to `candela` with `start`/`stop`/`status` subcommands
 - Config path moved from `~/.candela.yaml` to `~/.config/candela/config.yaml` (legacy path still supported)
 - Updated all internal docs, README, and Homebrew formula
 - Homebrew: `brew install candelahq/tap/candela`
+
+### Service Account Deny-by-Default (#177)
+
+**⚠️ Breaking Change:**
+- All service account tokens rejected with 403 unless explicitly allowlisted in `auth.allowed_service_accounts`
+- Prevents unmetered cost vectors from automated systems
 
 ### Anthropic Vertex Provider — Claude Code Gateway (#176)
 - New `/proxy/anthropic-vertex/` route for native Anthropic Messages API via Vertex AI
 - New `/proxy/anthropic-direct/` route for direct Anthropic API passthrough
 - New `/proxy/gemini-oai/` route for Gemini via OpenAI-compatible format
 - Enables Claude Code integration via `ANTHROPIC_BASE_URL`
-
-### Service Account Deny-by-Default (#177)
-- All service account tokens rejected with 403 unless explicitly allowlisted in `auth.allowed_service_accounts`
-- Prevents unmetered cost vectors from automated systems
 
 ### Enrichment SDKs (#175)
 - Zero-dependency SDKs for Python, TypeScript, Go, Kotlin, and Rust

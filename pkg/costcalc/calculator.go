@@ -300,7 +300,10 @@ func (c *Calculator) loadDefaults() {
 		{Provider: "anthropic", Model: "claude-opus-4.6", InputPerMillion: 5.00, OutputPerMillion: 25.00},
 		{Provider: "anthropic", Model: "claude-sonnet-4.6", InputPerMillion: 3.00, OutputPerMillion: 15.00},
 		{Provider: "anthropic", Model: "claude-haiku-4.5", InputPerMillion: 1.00, OutputPerMillion: 5.00},
-		// Claude 4 (Vertex AI model IDs)
+		// Claude 4 (short names — used by editors and Claude Code)
+		{Provider: "anthropic", Model: "claude-sonnet-4", InputPerMillion: 3.00, OutputPerMillion: 15.00},
+		{Provider: "anthropic", Model: "claude-opus-4", InputPerMillion: 5.00, OutputPerMillion: 25.00},
+		// Claude 4 (Vertex AI model IDs with date suffix)
 		{Provider: "anthropic", Model: "claude-sonnet-4-20250514", InputPerMillion: 3.00, OutputPerMillion: 15.00},
 		{Provider: "anthropic", Model: "claude-opus-4-20250514", InputPerMillion: 5.00, OutputPerMillion: 25.00},
 		// Claude 3.5 (legacy)

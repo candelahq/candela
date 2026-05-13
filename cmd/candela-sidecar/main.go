@@ -133,10 +133,9 @@ func main() {
 		}
 
 		for i, p := range allProviders {
-			if p.Name == "anthropic" {
+			if p.Name == "anthropic" || p.Name == "anthropic-vertex" {
 				allProviders[i].UpstreamURL = fmt.Sprintf(
 					"https://%s-aiplatform.googleapis.com", vertexRegion)
-				allProviders[i].FormatTranslator = &proxy.AnthropicFormatTranslator{}
 				allProviders[i].PathRewriter = &proxy.VertexAIPathRewriter{
 					ProjectID: gcpProject,
 					Region:    vertexRegion,
@@ -144,9 +143,15 @@ func main() {
 				if tokenSource != nil {
 					allProviders[i].TokenSource = tokenSource
 				}
+				// Only add format translation for the OpenAI-compat "anthropic" provider.
+				// anthropic-vertex is a native Messages API passthrough (for Claude Code).
+				if p.Name == "anthropic" {
+					allProviders[i].FormatTranslator = &proxy.AnthropicFormatTranslator{}
+				}
 				slog.Info("🔐 Anthropic via Vertex AI configured",
-					"project", gcpProject, "region", vertexRegion)
-				break
+					"provider", p.Name,
+					"project", gcpProject, "region", vertexRegion,
+					"format_translation", p.Name == "anthropic")
 			}
 		}
 	}

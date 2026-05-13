@@ -27,6 +27,7 @@ var parserRegistry = map[string]ProviderParser{
 	"gemini-oai":       &openaiParser{}, // Gemini OpenAI-compat returns standard OpenAI format.
 	"anthropic":        &anthropicParser{},
 	"anthropic-direct": &anthropicParser{}, // Same wire format, just no Vertex AI translation.
+	"anthropic-vertex": &anthropicParser{}, // Native Anthropic format routed via Vertex AI.
 	"google":           &googleParser{},
 }
 

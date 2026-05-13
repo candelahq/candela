@@ -405,6 +405,7 @@ func TestSpanCapture_TenantID_Baggage(t *testing.T) {
 	for i := 0; i < 50; i++ {
 		spans, err = store.SearchSpans(context.Background(), storage.SpanQuery{
 			ProjectID: "local",
+			TenantID:  "baggage-tenant",
 			StartTime: time.Now().Add(-1 * time.Hour),
 			EndTime:   time.Now().Add(1 * time.Hour),
 			PageSize:  10,
@@ -491,7 +492,8 @@ func TestSpanCapture_JobID(t *testing.T) {
 	var spans *storage.SpanResult
 	var searchErr error
 	var found bool
-	for i := 0; i < 50; i++ {
+	time.Sleep(200 * time.Millisecond)
+	for i := 0; i < 40; i++ {
 		spans, searchErr = store.SearchSpans(context.Background(), storage.SpanQuery{
 			ProjectID: "local",
 			StartTime: time.Now().Add(-1 * time.Hour),
@@ -499,8 +501,8 @@ func TestSpanCapture_JobID(t *testing.T) {
 			PageSize:  10,
 		})
 		if searchErr == nil && spans != nil {
-			for _, s := range spans.Spans {
-				if s.TenantID == "t1" && s.JobID == "j1" {
+			for _, sp := range spans.Spans {
+				if sp.TenantID == "t1" && sp.JobID == "j1" {
 					found = true
 					break
 				}
@@ -526,7 +528,9 @@ func TestSpanCapture_JobID(t *testing.T) {
 	_ = resp.Body.Close()
 
 	found = false
-	for i := 0; i < 50; i++ {
+	// Give the async buildSpan goroutine time to submit.
+	time.Sleep(200 * time.Millisecond)
+	for i := 0; i < 40; i++ {
 		spans, searchErr = store.SearchSpans(context.Background(), storage.SpanQuery{
 			ProjectID: "local",
 			StartTime: time.Now().Add(-1 * time.Hour),
@@ -534,8 +538,8 @@ func TestSpanCapture_JobID(t *testing.T) {
 			PageSize:  10,
 		})
 		if searchErr == nil && spans != nil {
-			for _, s := range spans.Spans {
-				if s.JobID == "j2" {
+			for _, sp := range spans.Spans {
+				if sp.JobID == "j2" {
 					found = true
 					break
 				}
@@ -546,6 +550,7 @@ func TestSpanCapture_JobID(t *testing.T) {
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
+
 	if !found {
 		t.Errorf("job_id j2 not found in captured spans within 5s; spans=%+v", spans)
 	}

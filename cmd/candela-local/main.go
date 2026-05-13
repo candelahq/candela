@@ -471,18 +471,34 @@ func main() {
 }
 
 // loadConfig reads the candela-local config file.
-// Search order: --config flag → $CANDELA_CONFIG → ~/.config/candela/config.yaml → ~/.candela.yaml (legacy)
+// Search order:
+//  1. --config flag
+//  2. $CANDELA_CONFIG env var
+//  3. ~/.config/candela/config.yaml  (preferred — works on all platforms)
+//  4. os.UserConfigDir()/candela/config.yaml  (~/Library/Application Support on macOS)
+//  5. ~/.candela.yaml  (legacy)
 func loadConfig(configPath string) *Config {
 	if configPath == "" {
 		configPath = os.Getenv("CANDELA_CONFIG")
 	}
 	if configPath == "" {
-		// Check modern XDG location first (os.UserConfigDir handles
-		// platform differences: ~/.config on Linux, ~/Library/Application Support on macOS).
+		// Check ~/.config/candela/config.yaml explicitly — this is the
+		// documented preferred location and works cross-platform regardless
+		// of what os.UserConfigDir() returns (which is ~/Library/Application
+		// Support on macOS, not ~/.config).
+		if home, err := os.UserHomeDir(); err == nil {
+			dotConfigPath := filepath.Join(home, ".config", "candela", "config.yaml")
+			if _, err := os.Stat(dotConfigPath); err == nil {
+				configPath = dotConfigPath
+			}
+		}
+	}
+	if configPath == "" {
+		// Platform-native config dir (e.g. ~/Library/Application Support on macOS).
 		if configDir, err := os.UserConfigDir(); err == nil {
-			xdgPath := filepath.Join(configDir, "candela", "config.yaml")
-			if _, err := os.Stat(xdgPath); err == nil {
-				configPath = xdgPath
+			nativePath := filepath.Join(configDir, "candela", "config.yaml")
+			if _, err := os.Stat(nativePath); err == nil {
+				configPath = nativePath
 			}
 		}
 		// Fallback to legacy location.

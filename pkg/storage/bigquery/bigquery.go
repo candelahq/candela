@@ -801,7 +801,25 @@ func (s *Store) GetTenantLeaderboard(ctx context.Context, uq storage.UsageQuery,
 }
 
 func (s *Store) GetJobLeaderboard(ctx context.Context, uq storage.UsageQuery, limit int) ([]storage.JobUsageSummary, error) {
-	query := fmt.Sprintf(`SELECT job_id, COUNT(*) AS call_count, COALESCE(SUM(gen_ai_total_tokens),0) AS total_tokens, COALESCE(SUM(gen_ai_cost_usd),0) AS total_cost_usd, COALESCE(AVG(duration_ns),0) AS avg_duration_ns FROM %s WHERE project_id = @projectID AND start_time >= @startTime AND start_time <= @endTime AND job_id IS NOT NULL AND job_id != '' GROUP BY job_id ORDER BY total_cost_usd DESC LIMIT @limit`, quoteTable(s.tableID))
+	query := fmt.Sprintf(`SELECT job_id, COUNT(*) AS call_count,
+		COALESCE(SUM(gen_ai_total_tokens),0) AS total_tokens,
+		COALESCE(SUM(gen_ai_cost_usd),0) AS total_cost_usd,
+		COALESCE(AVG(duration_ns),0) AS avg_duration_ns,
+		COALESCE((
+			SELECT s2.gen_ai_model FROM %s s2
+			WHERE s2.job_id = spans.job_id
+				AND s2.project_id = @projectID AND s2.start_time >= @startTime AND s2.start_time <= @endTime
+				AND s2.gen_ai_model IS NOT NULL AND s2.gen_ai_model != ''
+			GROUP BY s2.gen_ai_model
+			ORDER BY SUM(s2.gen_ai_cost_usd) DESC
+			LIMIT 1
+		), '') AS top_model
+	FROM %s spans
+	WHERE project_id = @projectID AND start_time >= @startTime AND start_time <= @endTime
+		AND job_id IS NOT NULL AND job_id != ''
+	GROUP BY job_id
+	ORDER BY total_cost_usd DESC
+	LIMIT @limit`, quoteTable(s.tableID), quoteTable(s.tableID))
 	q := s.client.Query(query)
 	q.Parameters = []bigquery.QueryParameter{{Name: "projectID", Value: uq.ProjectID}, {Name: "startTime", Value: uq.StartTime}, {Name: "endTime", Value: uq.EndTime}, {Name: "limit", Value: limit}}
 	it, err := q.Read(ctx)
@@ -816,6 +834,7 @@ func (s *Store) GetJobLeaderboard(ctx context.Context, uq storage.UsageQuery, li
 			TotalTokens   int64   `bigquery:"total_tokens"`
 			TotalCostUSD  float64 `bigquery:"total_cost_usd"`
 			AvgDurationNs float64 `bigquery:"avg_duration_ns"`
+			TopModel      string  `bigquery:"top_model"`
 		}
 		err := it.Next(&row)
 		if err == iterator.Done {
@@ -824,7 +843,7 @@ func (s *Store) GetJobLeaderboard(ctx context.Context, uq storage.UsageQuery, li
 		if err != nil {
 			return nil, fmt.Errorf("iterating job leaderboard: %w", err)
 		}
-		jobs = append(jobs, storage.JobUsageSummary{JobID: row.JobID, CallCount: row.CallCount, TotalTokens: row.TotalTokens, CostUSD: row.TotalCostUSD, AvgLatencyMs: float64(row.AvgDurationNs) / 1e6})
+		jobs = append(jobs, storage.JobUsageSummary{JobID: row.JobID, CallCount: row.CallCount, TotalTokens: row.TotalTokens, CostUSD: row.TotalCostUSD, AvgLatencyMs: float64(row.AvgDurationNs) / 1e6, TopModel: row.TopModel})
 	}
 	return jobs, nil
 }

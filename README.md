@@ -41,6 +41,52 @@ For deep observability into agent frameworks (**ADK**, **LangChain**, **CrewAI**
 - **🔀 Fan-out Architecture**: CQRS-based design allows writing to multiple sinks simultaneously (e.g., DuckDB + Pub/Sub + OTLP export to Datadog/Tempo/Jaeger).
 - **🐳 Production Sidecar**: Minimal `candela-sidecar` binary (<5MB) for container environments — Pub/Sub + OTLP span export with ADC auth.
 - **🔗 W3C Trace Context**: Full `Traceparent` / `Tracestate` propagation for unified trace trees across ADK agents and LLM calls.
+- **📦 Enrichment SDKs**: Lightweight wrappers for **Python**, **TypeScript**, **Go**, **Kotlin**, and **Rust** — propagate tenant and job metadata via W3C Baggage for multitenant cost attribution.
+
+---
+
+## 📦 Enrichment SDKs
+
+Candela provides zero-dependency SDKs for 5 languages to propagate tenant and job metadata through your LLM requests. Every SDK injects `X-Candela-*` headers and W3C Baggage — giving you per-tenant, per-job cost attribution automatically.
+
+| Language | Package | Install |
+|----------|---------|--------|
+| Python | `candela-sdk` | `pip install candela-sdk` |
+| TypeScript | `@candelahq/sdk` | `npm install @candelahq/sdk` |
+| Go | `github.com/candelahq/candela/sdks/go` | `go get` |
+| Kotlin | `com.candelahq:candela-sdk` | Gradle/Maven |
+| Rust | `candela-sdk` | `cargo add` |
+
+```python
+# Python — works with OpenAI, httpx, requests, or any HTTP client
+from candela import CandelaSession
+
+session = CandelaSession(tenant_id="acme-corp", job_id="eval-42")
+client = OpenAI(
+    base_url="http://localhost:1234/v1",
+    http_client=session.httpx_client(),
+)
+```
+
+```go
+// Go — wraps any http.RoundTripper
+client := &http.Client{
+    Transport: candela.NewTransport(nil,
+        candela.WithTenantID("acme-corp"),
+        candela.WithJobID("eval-42"),
+    ),
+}
+```
+
+```typescript
+// TypeScript — works with fetch, OpenAI SDK, or any HTTP client
+const session = new CandelaSession({ tenantId: "acme-corp", jobId: "eval-42" });
+const client = new OpenAI({ defaultHeaders: session.headers() });
+```
+
+The proxy strips all `X-Candela-*` headers before forwarding upstream — your metadata never leaks to LLM providers.
+
+> 📖 Full SDK docs: [candelahq.com/guides/enrichment-sdks](https://candelahq.com/guides/enrichment-sdks/)
 
 ---
 
@@ -523,6 +569,12 @@ candela/
 │   ├── crates/candela-processor/  # Batched span processor + cost calc
 │   ├── crates/candela-storage/    # Pub/Sub + OTLP sinks (WIP)
 │   └── bins/candela-sidecar/      # Production sidecar binary
+├── sdks/                            # Language-specific enrichment SDKs
+│   ├── python/                      # candela-sdk (PyPI)
+│   ├── typescript/                  # @candelahq/sdk (npm)
+│   ├── go/                          # Go module
+│   ├── kotlin/                      # Kotlin/JVM
+│   └── rust/                        # Rust crate
 ├── test/functional/               # Hurl HTTP test suite (Go/Rust parity)
 │   ├── mock/upstream.go           # Mock LLM server (OpenAI/Anthropic/Vertex AI)
 │   ├── proxy/                     # Proxy round-trip + error tests

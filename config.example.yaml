@@ -111,6 +111,19 @@ worker:
   batch_size: 100
   flush_interval: "2s"
 
+auth:
+  dev_mode: false
+  # Service accounts allowed to authenticate via Google ID token.
+  # Deny-by-default: if this list is empty (or omitted), ALL service accounts
+  # are rejected with 403. Users must authenticate with personal ADC
+  # (gcloud auth application-default login) instead.
+  #
+  # Only add SAs that genuinely need proxy access (e.g. CI runners, shared
+  # build agents). SA traffic bypasses per-user budget deduction, so each
+  # entry here is an unmetered cost vector.
+  # allowed_service_accounts:
+  #   - "candela-ci@my-project.iam.gserviceaccount.com"
+
 # Optional export sinks — fan-out to external systems alongside primary storage.
 # These are write-only; the primary storage backend handles reads.
 sinks:

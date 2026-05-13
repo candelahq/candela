@@ -341,18 +341,28 @@ func TestSpanCapture_TenantID_Explicit(t *testing.T) {
 	resp, _ := http.DefaultClient.Do(req)
 	_ = resp.Body.Close()
 
-	// Poll for capture.
+	// Poll for capture — use specific value match because :memory: SQLite
+	// uses cache=shared, so all test stores share the same in-memory DB.
 	var spans *storage.SpanResult
 	var err error
-	for i := 0; i < 40; i++ {
+	var found bool
+	for i := 0; i < 50; i++ {
 		spans, err = store.SearchSpans(context.Background(), storage.SpanQuery{
 			ProjectID: "local",
 			StartTime: time.Now().Add(-1 * time.Hour),
 			EndTime:   time.Now().Add(1 * time.Hour),
-			PageSize:  1,
+			PageSize:  10,
 		})
-		if err == nil && len(spans.Spans) > 0 {
-			break
+		if err == nil && spans != nil {
+			for _, s := range spans.Spans {
+				if s.TenantID == "acme-corp" {
+					found = true
+					break
+				}
+			}
+			if found {
+				break
+			}
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
@@ -360,11 +370,8 @@ func TestSpanCapture_TenantID_Explicit(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SearchSpans failed: %v", err)
 	}
-	if len(spans.Spans) == 0 {
-		t.Fatal("no spans captured")
-	}
-	if spans.Spans[0].TenantID != "acme-corp" {
-		t.Errorf("got tenant %q, want acme-corp", spans.Spans[0].TenantID)
+	if !found {
+		t.Fatalf("span with tenant=acme-corp not found within 5s; spans=%+v", spans)
 	}
 }
 
@@ -390,18 +397,28 @@ func TestSpanCapture_TenantID_Baggage(t *testing.T) {
 	resp, _ := http.DefaultClient.Do(req)
 	_ = resp.Body.Close()
 
-	// Poll for capture.
+	// Poll for capture — use specific value match because :memory: SQLite
+	// uses cache=shared, so all test stores share the same in-memory DB.
 	var spans *storage.SpanResult
 	var err error
-	for i := 0; i < 40; i++ {
+	var found bool
+	for i := 0; i < 50; i++ {
 		spans, err = store.SearchSpans(context.Background(), storage.SpanQuery{
 			ProjectID: "local",
 			StartTime: time.Now().Add(-1 * time.Hour),
 			EndTime:   time.Now().Add(1 * time.Hour),
-			PageSize:  1,
+			PageSize:  10,
 		})
-		if err == nil && len(spans.Spans) > 0 {
-			break
+		if err == nil && spans != nil {
+			for _, s := range spans.Spans {
+				if s.TenantID == "baggage-tenant" {
+					found = true
+					break
+				}
+			}
+			if found {
+				break
+			}
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
@@ -409,11 +426,8 @@ func TestSpanCapture_TenantID_Baggage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SearchSpans failed: %v", err)
 	}
-	if len(spans.Spans) == 0 {
-		t.Fatal("no spans captured")
-	}
-	if spans.Spans[0].TenantID != "baggage-tenant" {
-		t.Errorf("got tenant %q, want baggage-tenant", spans.Spans[0].TenantID)
+	if !found {
+		t.Fatalf("span with tenant=baggage-tenant not found within 5s; spans=%+v", spans)
 	}
 }
 
@@ -471,18 +485,29 @@ func TestSpanCapture_JobID(t *testing.T) {
 	resp, _ := http.DefaultClient.Do(req)
 	_ = resp.Body.Close()
 
-	// Poll for capture.
+	// Poll for capture. Use a generous timeout and poll for the specific
+	// field values rather than just any span — the async goroutine that
+	// calls buildSpan may not have scheduled yet under CI load.
 	var spans *storage.SpanResult
 	var searchErr error
-	for i := 0; i < 20; i++ {
+	var found bool
+	for i := 0; i < 50; i++ {
 		spans, searchErr = store.SearchSpans(context.Background(), storage.SpanQuery{
 			ProjectID: "local",
 			StartTime: time.Now().Add(-1 * time.Hour),
 			EndTime:   time.Now().Add(1 * time.Hour),
-			PageSize:  1,
+			PageSize:  10,
 		})
-		if searchErr == nil && spans != nil && len(spans.Spans) > 0 {
-			break
+		if searchErr == nil && spans != nil {
+			for _, s := range spans.Spans {
+				if s.TenantID == "t1" && s.JobID == "j1" {
+					found = true
+					break
+				}
+			}
+			if found {
+				break
+			}
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
@@ -490,15 +515,8 @@ func TestSpanCapture_JobID(t *testing.T) {
 	if searchErr != nil {
 		t.Fatalf("SearchSpans failed: %v", searchErr)
 	}
-	if spans == nil || len(spans.Spans) == 0 {
-		t.Fatal("no spans captured")
-	}
-	s := spans.Spans[0]
-	if s.TenantID != "t1" {
-		t.Errorf("got tenant %q, want t1", s.TenantID)
-	}
-	if s.JobID != "j1" {
-		t.Errorf("got job %q, want j1", s.JobID)
+	if !found {
+		t.Fatalf("span with tenant=t1, job=j1 not found within 5s; spans=%+v", spans)
 	}
 
 	// Test extraction from explicit header.
@@ -507,27 +525,28 @@ func TestSpanCapture_JobID(t *testing.T) {
 	resp, _ = http.DefaultClient.Do(req)
 	_ = resp.Body.Close()
 
-	for i := 0; i < 20; i++ {
+	found = false
+	for i := 0; i < 50; i++ {
 		spans, searchErr = store.SearchSpans(context.Background(), storage.SpanQuery{
 			ProjectID: "local",
 			StartTime: time.Now().Add(-1 * time.Hour),
 			EndTime:   time.Now().Add(1 * time.Hour),
 			PageSize:  10,
 		})
-		if searchErr == nil && spans != nil && len(spans.Spans) >= 2 {
-			break
+		if searchErr == nil && spans != nil {
+			for _, s := range spans.Spans {
+				if s.JobID == "j2" {
+					found = true
+					break
+				}
+			}
+			if found {
+				break
+			}
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
-
-	found := false
-	for _, s := range spans.Spans {
-		if s.JobID == "j2" {
-			found = true
-			break
-		}
-	}
 	if !found {
-		t.Error("job_id j2 not found in captured spans")
+		t.Errorf("job_id j2 not found in captured spans within 5s; spans=%+v", spans)
 	}
 }

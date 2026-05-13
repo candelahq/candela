@@ -82,7 +82,8 @@ type Config struct {
 		FlushInterval string `yaml:"flush_interval"`
 	} `yaml:"worker"`
 	Auth struct {
-		DevMode bool `yaml:"dev_mode"` // If true, skip auth validation
+		DevMode                bool     `yaml:"dev_mode"`                 // If true, skip auth validation
+		AllowedServiceAccounts []string `yaml:"allowed_service_accounts"` // SAs allowed to proxy — deny all if empty
 	} `yaml:"auth"`
 	Firestore struct {
 		Enabled    bool   `yaml:"enabled"`
@@ -367,6 +368,7 @@ func main() {
 		cloudRunURL,
 		userAuth,
 		devMode,
+		cfg.Auth.AllowedServiceAccounts,
 	)
 	if devMode {
 		slog.Info("🔓 Running in dev mode — auth disabled")
@@ -422,6 +424,7 @@ func main() {
 			cloudRunURL,
 			userAuth,
 			devMode,
+			cfg.Auth.AllowedServiceAccounts,
 		)
 
 		lmAddr := fmt.Sprintf("%s:%d", cfg.Server.Host, lmPort)

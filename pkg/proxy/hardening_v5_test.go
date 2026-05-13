@@ -64,7 +64,7 @@ func TestUpstreamError_DoesNotLeakURL(t *testing.T) {
 	}, nil, calc)
 
 	req := httptest.NewRequest("POST", "/proxy/openai/v1/chat/completions",
-		strings.NewReader(`{"model":"gpt-4","messages":[{"role":"user","content":"hi"}]}`))
+		strings.NewReader(`{"model":"gpt-4o","messages":[{"role":"user","content":"hi"}]}`))
 	req.Header.Set("Content-Type", "application/json")
 	rr := httptest.NewRecorder()
 

@@ -166,7 +166,7 @@ go run ./cmd/candela
 ```bash
 candela start                          # reads ~/.config/candela/config.yaml
 candela start --config ./my-config.yaml
-candela run --remote https://... --audience 12345 --port 8181
+candela run --remote https://candela-xxx.a.run.app --audience 12345678.apps.googleusercontent.com --port 8181
 ```
 
 ### Full Config Reference
@@ -351,8 +351,8 @@ curl http://localhost:1234/v1/chat/completions \
 | Symptom | Cause | Fix |
 |---------|-------|-----|
 | "model not found locally and no remote server configured" | Solo Mode + unknown model | Add `providers` for cloud models, or use a local model |
-| "vertex_ai.project is required" | `providers` set but no project | Add `vertex_ai.project` to config |
+| "vertex_ai.project is required" | `providers` set but no project | Add `vertex_ai.project` to `config.yaml` |
 | "failed to get Google ADC" | ADC not configured | Run `gcloud auth application-default login` |
-| "audience is required when remote is set" | Missing `audience` | Add IAP `audience` to config |
+| "audience is required when remote is set" | Missing `audience` | Add IAP `audience` to `config.yaml` |
 | Traces card shows "Traces not available" | Team Mode (traces go to cloud) | Expected — check the cloud dashboard |
 | No models in `/v1/models` | Runtime not started | Start Ollama: `ollama serve` |

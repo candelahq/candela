@@ -30,11 +30,11 @@ The middleware (`pkg/auth/firebase.go`) tries three strategies in sequence. The 
 | # | Strategy | Client | Token Source | Validation Method |
 |---|----------|--------|-------------|-------------------|
 | 1 | **Firebase ID Token** | Browser UI | Firebase JS SDK (`onAuthStateChanged`) | `fbAuth.VerifyIDToken()` |
-| 2 | **Google ID Token** | Service accounts, `candela-local` with `idtoken` | `idtoken.NewTokenSource(audience)` | `idtoken.Validate(token, audience)` |
-| 3 | **OAuth2 Access Token** | `candela-local` with user ADC | `gcloud auth application-default login` | `googleapis.com/oauth2/v3/userinfo` |
+| 2 | **Google ID Token** | Service accounts, `candela` with `idtoken` | `idtoken.NewTokenSource(audience)` | `idtoken.Validate(token, audience)` |
+| 3 | **OAuth2 Access Token** | `candela` with user ADC | `gcloud auth application-default login` | `googleapis.com/oauth2/v3/userinfo` |
 
 > [!NOTE]
-> Strategy 3 makes an HTTP call to Google's userinfo endpoint on every request. This adds ~50ms latency but is the only way to validate user-scoped Application Default Credentials (ADC) that `candela-local` uses when `gcloud auth application-default login` provides an access token rather than an ID token.
+> Strategy 3 makes an HTTP call to Google's userinfo endpoint on every request. This adds ~50ms latency but is the only way to validate user-scoped Application Default Credentials (ADC) that `candela` uses when `gcloud auth application-default login` provides an access token rather than an ID token.
 
 ### Auth Bypass
 
@@ -167,7 +167,7 @@ When `CANDELA_DEV_MODE=true` or `auth.dev_mode: true` in config:
 
 ---
 
-## `candela-local` Authentication
+## `candela` Authentication
 
 ### Solo Mode
 No authentication needed. All requests to `:1234` and `:8181` are unauthenticated.
@@ -180,10 +180,10 @@ gcloud auth application-default login
 No server-side auth needed — ADC tokens are used for upstream cloud calls only.
 
 ### Team Mode
-`candela-local` injects OIDC tokens into requests to the Candela Cloud Run server:
+`candela` injects OIDC tokens into requests to the Candela Cloud Run server:
 
 ```
-IDE → candela-local (:1234)
+IDE → candela (:1234)
          │
          ├── Local model → Ollama (no auth)
          │
@@ -196,7 +196,7 @@ IDE → candela-local (:1234)
 ```
 
 Token acquisition flow:
-1. `candela-local` reads `~/.candela.yaml` for `remote` and `audience`
+1. `candela` reads `~/.config/candela/config.yaml` for `remote` and `audience`
 2. Uses `google.DefaultTokenSource()` to get an ADC token
 3. Injects `Authorization: Bearer <token>` on every proxied request
 
@@ -255,4 +255,4 @@ See [docs/user-management.md](user-management.md) for the full validation rule r
 | `pkg/connecthandlers/scope.go` | `scopeUserID()` — per-user data scoping helper |
 | `pkg/connecthandlers/errors.go` | `internalError()` — sanitized error responses |
 | `cmd/candela-server/main.go` | Middleware wiring, Firebase init, dev mode |
-| `cmd/candela-local/main.go` | ADC token injection for Team Mode |
+| `cmd/candela/main.go` | ADC token injection for Team Mode |

@@ -11,7 +11,7 @@ Candela defines all service boundaries in Protobuf. The backend serves these via
 | `IngestionService` | `v1/ingestion_service.proto` | 1 | OTLP span ingestion |
 | `UserService` | `v1/user_service.proto` | 15 | User CRUD, budgets, grants, audit |
 | `ProjectService` | `v1/project_service.proto` | 5 | Project + API key management |
-| `RuntimeService` | `v1/runtime_service.proto` | 10 | Local LLM runtime control (candela-local) |
+| `RuntimeService` | `v1/runtime_service.proto` | 10 | Local LLM runtime control (candela) |
 
 ## Type Packages
 
@@ -226,7 +226,7 @@ API key management:
 
 ## RuntimeService
 
-Controls local LLM runtimes from `candela-local`. Served via ConnectRPC on the management port (`:8181`).
+Controls local LLM runtimes from `candela`. Served via ConnectRPC on the management port (`:8181`).
 
 | RPC | Description |
 |-----|-------------|

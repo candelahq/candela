@@ -25,14 +25,12 @@ jobs:
       - name: Fix git ownership for Nix flake
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
-      - name: Install GoReleaser
+      - name: Run GoReleaser
         run: |
           nix develop . --command bash -c "
             go install github.com/goreleaser/goreleaser/v2@latest
+            goreleaser release --clean
           "
-
-      - name: Run GoReleaser
-        run: nix develop . --command goreleaser release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}

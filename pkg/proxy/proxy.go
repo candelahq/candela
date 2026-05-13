@@ -791,34 +791,21 @@ func (p *Proxy) handleStreamingResponse(
 	}
 
 	// Tee the stream: forward to client AND buffer for observability.
-	// Two separate buffers:
-	//   streamBuffer — first 32KB of content (for BigQuery input/output text)
-	//   tailBuf      — last 8KB always (ring-overwrites); captures the SSE
-	//                  usage chunk which appears at stream END. Without this,
-	//                  the old 1MB cap stopped before the usage line arrived,
-	//                  billing $0 for every long streaming response (#8).
+	// The buffer captures the full SSE payload so trace content in BigQuery
+	// is never truncated and the usage chunk (at stream-end) is always
+	// present for accurate token/cost attribution.
+	//
+	// Cap at 10MB (matching the standard response respLimit) to prevent
+	// unbounded memory growth under concurrent load. 10MB comfortably fits
+	// any realistic LLM streaming response; if exceeded, content is
+	// truncated but the stream still forwards to the client uninterrupted.
 	var streamBuffer bytes.Buffer
-	const maxStreamCapture = 32 << 10 // 32KB for content logging
-	const tailBufSize = 8 << 10       // 8KB tail — enough for any usage chunk
-	tailBuf := make([]byte, tailBufSize)
-	tailHead := 0     // write position in ring
-	tailFull := false // whether ring has wrapped
+	const maxStreamCapture = 10 << 20 // 10MB — matches respLimit
 	streamCapped := false
 	buf := make([]byte, 4096)
 	var ttft time.Duration
 	isFirstChunk := true
 	streamCompleted := false // tracks whether stream ended normally
-
-	appendTail := func(data []byte) {
-		for len(data) > 0 {
-			n := copy(tailBuf[tailHead:], data)
-			tailHead = (tailHead + n) % tailBufSize
-			if tailHead == 0 {
-				tailFull = true
-			}
-			data = data[n:]
-		}
-	}
 
 	for {
 		n, err := resp.Body.Read(buf)
@@ -831,17 +818,14 @@ func (p *Proxy) handleStreamingResponse(
 			chunk := buf[:n]
 
 			// Buffer raw upstream data for observability (before translation).
-			if cbAllow {
-				if !streamCapped {
-					if streamBuffer.Len()+n > maxStreamCapture {
-						streamCapped = true
-					} else {
-						streamBuffer.Write(chunk)
-					}
+			if cbAllow && !streamCapped {
+				if streamBuffer.Len()+n > maxStreamCapture {
+					streamCapped = true
+					slog.Warn("stream capture truncated at 10MB",
+						"provider", provider.Name, "request_id", requestID)
+				} else {
+					streamBuffer.Write(chunk)
 				}
-				// Always update tail buffer — overwrites oldest bytes.
-				// Usage chunks are last; this ensures they're always captured.
-				appendTail(chunk)
 			}
 
 			// Translate chunk if provider has a FormatTranslator.
@@ -869,21 +853,7 @@ func (p *Proxy) handleStreamingResponse(
 
 	endTime := time.Now()
 
-	// Reconstruct parse data: content buffer (first 32KB) + tail buffer (last 8KB).
-	// When streamCapped, the usage SSE chunk at stream-end is in tailBuf, not
-	// streamBuffer — merge them so extractStreamingUsage always finds the token counts.
-	var parseData []byte
-	if streamCapped {
-		var tail []byte
-		if tailFull {
-			tail = append(tailBuf[tailHead:], tailBuf[:tailHead]...)
-		} else {
-			tail = tailBuf[:tailHead]
-		}
-		parseData = append(streamBuffer.Bytes(), tail...)
-	} else {
-		parseData = streamBuffer.Bytes()
-	}
+	parseData := streamBuffer.Bytes()
 
 	// Parse the accumulated stream to extract usage data.
 	// Use bounded timeout to prevent goroutine leaks.

@@ -30,7 +30,7 @@ These are used by the container entrypoint (`deploy/entrypoint.sh`) to generate 
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `CANDELA_DEV_MODE` | `false` | Skip auth, inject synthetic admin user. **Never use in production.** |
-| `CLOUD_RUN_URL` | _(empty)_ | Cloud Run service URL. Used as the audience for Google ID token validation (Strategy 2). Set this to enable `candela-local` Team Mode auth. |
+| `CLOUD_RUN_URL` | _(empty)_ | Cloud Run service URL. Used as the audience for Google ID token validation (Strategy 2). Set this to enable `candela` Team Mode auth. |
 
 ### Firestore
 
@@ -95,14 +95,14 @@ The Next.js UI reads these at **build time** (prefixed with `NEXT_PUBLIC_`) and 
 
 ---
 
-## candela-local Environment
+## candela Environment
 
-`candela-local` primarily reads from `~/.candela.yaml` (see [docs/candela-local.md](candela-local.md)). It also respects:
+`candela` primarily reads from `~/.config/candela/config.yaml` (see [docs/candela.md](candela.md)). It also respects:
 
 | Variable | Description |
 |----------|-------------|
 | `GOOGLE_APPLICATION_CREDENTIALS` | Path to GCP service account key (alternative to `gcloud auth application-default login`) |
-| `GOOGLE_CLOUD_PROJECT` | Fallback GCP project if not set in `~/.candela.yaml` |
+| `GOOGLE_CLOUD_PROJECT` | Fallback GCP project if not set in `~/.config/candela/config.yaml` |
 
 ---
 

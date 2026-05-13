@@ -138,14 +138,14 @@ You can get Candela running in less than 60 seconds.
 Ideal for quick local setup. Uses **SQLite** by default.
 
 ```bash
-# Install the local dev proxy (macOS / Linux)
-brew install candelahq/tap/candela-local
+# Install the CLI proxy (macOS / Linux)
+brew install candelahq/tap/candela
 
 # Or install the Desktop app (macOS)
-brew install --cask candelahq/tap/candela
+brew install --cask candelahq/tap/candela-desktop
 ```
 
-> **💡 Tip**: `candela-local` starts on `:8181` (proxy + UI at `/_local/`) + `:1234` (LM-compatible endpoint). Point your IDE or app at it immediately.
+> **💡 Tip**: `candela start` launches the proxy on `:8181` (proxy + UI at `/_local/`) + `:1234` (LM-compatible endpoint). Point your IDE or app at it immediately.
 
 ### Option B: From Source
 
@@ -217,7 +217,7 @@ graph TD
         SDK[OTel SDK]
     end
 
-    subgraph "candela-local"
+    subgraph "candela"
         LM["LM Compat Listener (:1234)<br/>Unified /v1/models"]
         SC[Span Capture]
         LP[Local Proxy]
@@ -400,9 +400,9 @@ The UI communicates with the backend via **ConnectRPC v2** on port `8181`. Pages
 
 ---
 
-## 🕹️ candela-local — Local Development Proxy
+## 🕹️ candela — Local Development Proxy
 
-`candela-local` is an auth-injecting proxy + runtime manager for developer machines.
+`candela` is an auth-injecting proxy + runtime manager for developer machines.
 It operates in three modes:
 
 ### 🏠 Solo Mode (Zero-Config)
@@ -410,12 +410,12 @@ It operates in three modes:
 Run local models with full observability — **no cloud account needed**.
 
 ```yaml
-# ~/.candela.yaml
+# ~/.config/candela/config.yaml
 runtime_backend: ollama
 ```
 
 ```bash
-candela-local   # starts on :8181 (proxy) + :1234 (LM compat)
+candela start   # background daemon on :8181 (proxy) + :1234 (LM compat)
 ```
 
 - Local models via Ollama/vLLM on `:1234`
@@ -427,7 +427,7 @@ candela-local   # starts on :8181 (proxy) + :1234 (LM compat)
 Call Gemini and Claude directly using your **Google identity** — no server deployment needed.
 
 ```yaml
-# ~/.candela.yaml
+# ~/.config/candela/config.yaml
 runtime_backend: ollama
 
 providers:
@@ -450,7 +450,7 @@ vertex_ai:
 Connect to a shared Candela server for **budget enforcement, RBAC, and team-wide cost tracking**.
 
 ```yaml
-# ~/.candela.yaml
+# ~/.config/candela/config.yaml
 runtime_backend: ollama
 remote: https://candela-xxx.a.run.app
 audience: "12345678.apps.googleusercontent.com"
@@ -462,7 +462,7 @@ audience: "12345678.apps.googleusercontent.com"
 - Team-wide cost tracking, budget enforcement, and centralized governance
 
 > [!TIP]
-> See [docs/candela-local.md](docs/candela-local.md) for the full setup guide.
+> See [docs/candela.md](docs/candela.md) for the full setup guide.
 
 ### Unified Model Discovery
 
@@ -508,8 +508,8 @@ All features are accessible via **ConnectRPC** (`RuntimeService`) and the embedd
   - Admin UI: user management, budget explainer, audit logs
   - Client-side form validation (`@bufbuild/protovalidate`)
   - Budget enforcement with grant-first waterfall
-  - `candela-local` auth-injecting proxy for developer machines
-  - `candela-local` embedded runtime management UI (`/_local/`)
+  - `candela` auth-injecting proxy for developer machines
+  - `candela` embedded runtime management UI (`/_local/`)
 - **Phase 5: Hardening** ✅ (Security audit, input validation, CORS hardening, race condition fixes)
   - 16 critical/high issues remediated across Go and Rust (XSS, DoS, billing bypass, info leak)
   - 47 new tests (25 unit + 9 integration + 13 Rust) with race detector
@@ -527,7 +527,7 @@ candela/
 ├── buf.gen.yaml                 # Buf code gen config (pulls from BSR)
 ├── gen/                         # Generated code (Go, TypeScript, BQ schema)
 ├── cmd/candela-server/          # Server entry point
-├── cmd/candela-local/           # Local dev proxy + runtime manager
+├── cmd/candela/                 # Local dev proxy + runtime manager
 │   ├── lm_handler.go            # Smart model routing (local ↔ cloud)
 │   ├── span_capture.go          # Request/response capture middleware
 │   ├── traces_handler.go        # /_local/api/traces REST endpoint

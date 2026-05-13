@@ -6,7 +6,7 @@
 graph TB
     subgraph "Developer Machine"
         OC[OpenCode / Zed / Cursor]
-        CL["candela-local<br/>(auth proxy)"]
+        CL["candela<br/>(auth proxy)"]
         OC -->|"localhost:8181"| CL
     end
 
@@ -36,7 +36,7 @@ graph TB
 |---|---|---|
 | **Go Backend** | `cmd/candela-server` | API, LLM proxy, span ingestion, auth middleware, storage |
 | **Next.js UI** | `ui/` | Dashboard, trace waterfall, costs, admin panel |
-| **candela-local** | `cmd/candela-local` | CLI proxy injecting Google credentials for dev tools |
+| **candela** | `cmd/candela` | CLI proxy injecting Google credentials for dev tools |
 | **Terraform** | `terraform/` | Cloud Run, BigQuery, Firestore, Firebase, IAM |
 
 ## Authentication (3 Strategies)
@@ -58,7 +58,7 @@ flowchart TD
 |---|---|---|
 | Firebase ID Token | Browser UI | Firebase JS SDK |
 | Google ID Token | Service accounts | `idtoken.NewTokenSource()` |
-| OAuth2 Access Token | candela-local (user ADC) | `gcloud auth application-default login` |
+| OAuth2 Access Token | candela (user ADC) | `gcloud auth application-default login` |
 
 ## Container Layout
 
@@ -73,17 +73,17 @@ Next.js rewrites:
   /healthz         → localhost:8181
 ```
 
-## candela-local Setup
+## candela Setup
 
 ```yaml
-# ~/.candela.yaml
+# ~/.config/candela/config.yaml
 remote: https://candela-xxx.run.app
 audience: https://candela-xxx.run.app
 port: 8181
 ```
 
 ```bash
-go run ./cmd/candela-local   # or: go install && candela-local
+go run ./cmd/candela   # or: go install && candela
 ```
 
 Point tools at `http://localhost:8181/proxy/openai/v1`.

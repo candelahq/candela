@@ -1,6 +1,6 @@
-# candela-local — Developer Proxy & Runtime Manager
+# candela — Developer Proxy & Runtime Manager
 
-`candela-local` is a lightweight binary that runs on a developer's machine. It provides:
+`candela` is a lightweight binary that runs on a developer's machine. It provides:
 
 - **Unified model discovery** — one endpoint for local _and_ cloud models
 - **Smart routing** — automatically sends requests to the right backend
@@ -9,8 +9,8 @@
 
 ## Operating Modes
 
-`candela-local` operates in one of two modes, determined entirely by your
-`~/.candela.yaml` configuration:
+`candela` operates in one of two modes, determined entirely by your
+`~/.config/candela/config.yaml` configuration:
 
 ### 🏠 Solo Mode
 
@@ -20,7 +20,7 @@ observability and zero cloud dependencies.
 **Config**: Simply omit the `remote` and `providers` fields.
 
 ```yaml
-# ~/.candela.yaml — Solo Mode
+# ~/.config/candela/config.yaml — Solo Mode
 port: 8181
 lm_studio_port: 1234
 runtime_backend: ollama
@@ -44,7 +44,7 @@ identity you already have.
 **Config**: Add `providers` and `vertex_ai` to your solo config.
 
 ```yaml
-# ~/.candela.yaml — Solo + Cloud
+# ~/.config/candela/config.yaml — Solo + Cloud
 runtime_backend: ollama
 
 providers:
@@ -91,7 +91,7 @@ JetBrains / Cline / curl
 ```
 
 > [!NOTE]
-> If `vertex_ai.project` is not set in config, candela-local will try
+> If `vertex_ai.project` is not set in config, candela will try
 > `gcloud config get project` as a fallback and log a warning.
 
 ---
@@ -104,7 +104,7 @@ Candela cloud backend.
 **Config**: Set `remote` to your team's Candela server URL.
 
 ```yaml
-# ~/.candela.yaml — Team Mode
+# ~/.config/candela/config.yaml — Team Mode
 port: 8181
 lm_studio_port: 1234
 runtime_backend: ollama
@@ -143,24 +143,30 @@ JetBrains / Cline / curl
 ## Installation
 
 ```bash
-go install github.com/candelahq/candela/cmd/candela-local@latest
+brew install candelahq/tap/candela
+```
+
+Or via `go install`:
+
+```bash
+go install github.com/candelahq/candela/cmd/candela@latest
 ```
 
 Or from the repo:
 
 ```bash
 nix develop           # or ensure Go 1.26+ is installed
-go run ./cmd/candela-local
+go run ./cmd/candela
 ```
 
 ## Configuration
 
-`candela-local` reads `~/.candela.yaml` by default. Override with `--config`:
+`candela` reads `~/.config/candela/config.yaml` by default. Override with `--config`:
 
 ```bash
-candela-local                          # reads ~/.candela.yaml
-candela-local --config ./my-config.yaml
-candela-local --remote https://... --audience 12345 --port 8181
+candela start                          # reads ~/.config/candela/config.yaml
+candela start --config ./my-config.yaml
+candela run --remote https://candela-xxx.a.run.app --audience 12345678.apps.googleusercontent.com --port 8181
 ```
 
 ### Full Config Reference
@@ -345,8 +351,8 @@ curl http://localhost:1234/v1/chat/completions \
 | Symptom | Cause | Fix |
 |---------|-------|-----|
 | "model not found locally and no remote server configured" | Solo Mode + unknown model | Add `providers` for cloud models, or use a local model |
-| "vertex_ai.project is required" | `providers` set but no project | Add `vertex_ai.project` to `~/.candela.yaml` |
+| "vertex_ai.project is required" | `providers` set but no project | Add `vertex_ai.project` to `config.yaml` |
 | "failed to get Google ADC" | ADC not configured | Run `gcloud auth application-default login` |
-| "audience is required when remote is set" | Missing `audience` | Add IAP `audience` to `~/.candela.yaml` |
+| "audience is required when remote is set" | Missing `audience` | Add IAP `audience` to `config.yaml` |
 | Traces card shows "Traces not available" | Team Mode (traces go to cloud) | Expected — check the cloud dashboard |
 | No models in `/v1/models` | Runtime not started | Start Ollama: `ollama serve` |

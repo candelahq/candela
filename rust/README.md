@@ -47,7 +47,7 @@ This is an **incremental rewrite** from Go. Each phase produces an independently
 
 1. **Phase 1**: `candela-sidecar` — drop-in replacement for the Go sidecar
 2. **Phase 2**: Harden proxy with full test suite + benchmarks
-3. **Phase 3**: `candela-local` — developer desktop binary
+3. **Phase 3**: `candela` — developer desktop binary
 4. **Phase 4**: `candela-server` — full team backend with ConnectRPC
 
 The Go code (`cmd/`, `pkg/`) continues running alongside — zero downtime, zero client breakage.

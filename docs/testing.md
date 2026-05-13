@@ -14,13 +14,13 @@ tests/
 │   ├── pkg/runtime/*_test.go       — runtime interface, discovery, manager
 │   ├── pkg/notify/*_test.go        — budget notifications
 │   ├── pkg/storage/*_test.go       — storage interfaces
-│   └── cmd/candela-local/*_test.go — LM handler, span capture, state, API
+│   └── cmd/candela/*_test.go — LM handler, span capture, state, API
 │
 ├── Go Integration Tests
 │   ├── pkg/connecthandlers/integration_test.go — full service stack
 │   ├── pkg/connecthandlers/project_handler_test.go
 │   ├── pkg/connecthandlers/user_handler_test.go
-│   └── cmd/candela-local/ui_integration_test.go
+│   └── cmd/candela/ui_integration_test.go
 │
 └── Playwright E2E Tests (3 suites)
     ├── e2e/app.spec.ts             — dashboard, traces, costs, usage
@@ -58,8 +58,8 @@ nix develop -c go test ./pkg/auth -v
 # Runtime tests
 nix develop -c go test ./pkg/runtime/... -v
 
-# candela-local tests
-nix develop -c go test ./cmd/candela-local -v
+# candela tests
+nix develop -c go test ./cmd/candela -v
 
 # Integration tests (ConnectRPC handlers)
 nix develop -c go test ./pkg/connecthandlers -v -run TestIntegration

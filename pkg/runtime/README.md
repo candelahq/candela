@@ -45,7 +45,7 @@ type Runtime interface {
 ```
 
 Every backend exposes an **OpenAI-compatible `/v1` endpoint** via `Endpoint()`.
-This means `candela-local` can route `/v1/chat/completions` to any backend
+This means `candela` can route `/v1/chat/completions` to any backend
 without caring which server is running underneath.
 
 ## Registry Pattern
@@ -153,7 +153,7 @@ backends := runtime.Discover()
 // → [{Name:"ollama", Installed:true, BinaryPath:"/opt/homebrew/bin/ollama", InstallHint:"brew install ollama"}, ...]
 ```
 
-This powers the **backend discovery** card in the `candela-local` management
+This powers the **backend discovery** card in the `candela` management
 UI (`/_local/`), showing install status and platform-specific install hints.
 
 ## Shared Helpers
@@ -220,7 +220,7 @@ var knownBackends = map[string]backendMeta{
 }
 ```
 
-4. Import the package in `cmd/candela-local` (blank import for `init()`
+4. Import the package in `cmd/candela` (blank import for `init()`
    registration):
 
 ```go

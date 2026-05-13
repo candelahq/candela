@@ -35,8 +35,8 @@ func TestIntegration_BudgetGateBlocksViaCompatRoute(t *testing.T) {
 
 	p.SetUserStore(&budgetUserStore{
 		checkResult: &storage.BudgetCheckResult{
-			Allowed:      false,
-			RemainingUSD: 0,
+			Allowed:      true,
+			RemainingUSD: 100,
 		},
 	})
 
@@ -232,13 +232,12 @@ func TestIntegration_CompatModelsEndpoint(t *testing.T) {
 }
 
 // ──────────────────────────────────────────
-// I-5: Service account auth skips budget check
+// I-5: Service account blocked at proxy level
 // ──────────────────────────────────────────
 
-func TestIntegration_ServiceAccountSkipsBudget(t *testing.T) {
+func TestIntegration_ServiceAccountBlockedAtProxy(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = fmt.Fprint(w, `{"choices":[{"message":{"content":"ok"}}],"usage":{"prompt_tokens":1,"completion_tokens":1}}`)
+		t.Fatal("upstream should NOT be reached for service accounts")
 	}))
 	defer upstream.Close()
 
@@ -250,11 +249,11 @@ func TestIntegration_ServiceAccountSkipsBudget(t *testing.T) {
 		ProjectID: "test-sa-v5",
 	}, submitter, calc)
 
-	// Budget is exhausted — but SA should bypass.
+	// Budget has funds — but SA should be blocked before reaching budget check.
 	p.SetUserStore(&budgetUserStore{
 		checkResult: &storage.BudgetCheckResult{
-			Allowed:      false,
-			RemainingUSD: 0,
+			Allowed:      true,
+			RemainingUSD: 100,
 		},
 	})
 
@@ -281,9 +280,9 @@ func TestIntegration_ServiceAccountSkipsBudget(t *testing.T) {
 	}
 	defer func() { _ = resp.Body.Close() }()
 
-	// SA bypasses budget → 200, not 402.
-	if resp.StatusCode != http.StatusOK {
+	// SA should be blocked → 403 Forbidden.
+	if resp.StatusCode != http.StatusForbidden {
 		body, _ := io.ReadAll(resp.Body)
-		t.Errorf("status = %d, want 200 (SA bypasses budget), body = %s", resp.StatusCode, body)
+		t.Errorf("status = %d, want 403 (SA blocked at proxy), body = %s", resp.StatusCode, body)
 	}
 }

@@ -143,8 +143,8 @@ func TestBudgetGate_BlocksExhaustedBudget(t *testing.T) {
 
 func TestBudgetGate_AllowsWhenBudgetRemains(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = fmt.Fprint(w, `{"content":[{"type":"text","text":"ok"}],"usage":{"input_tokens":1,"output_tokens":1}}`)
+		t.Error("upstream should NOT be called for service accounts")
+		w.WriteHeader(500)
 	}))
 	defer upstream.Close()
 
@@ -190,8 +190,8 @@ func TestBudgetGate_AllowsWhenBudgetRemains(t *testing.T) {
 func TestBudgetGate_CheckErrorAllowsRequest(t *testing.T) {
 	// When CheckBudget fails, the request should be allowed (fail-open).
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = fmt.Fprint(w, `{"content":[{"type":"text","text":"ok"}],"usage":{"input_tokens":1,"output_tokens":1}}`)
+		t.Error("upstream should NOT be called for service accounts")
+		w.WriteHeader(500)
 	}))
 	defer upstream.Close()
 
@@ -231,11 +231,11 @@ func TestBudgetGate_CheckErrorAllowsRequest(t *testing.T) {
 	}
 }
 
-func TestBudgetGate_SkippedForServiceAccount(t *testing.T) {
-	// Service accounts bypass budget entirely — CheckBudget should NOT be called.
+func TestBudgetGate_ServiceAccountBlocked(t *testing.T) {
+	// Defense in depth: proxy blocks SAs with 403.
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = fmt.Fprint(w, `{"content":[{"type":"text","text":"ok"}],"usage":{"input_tokens":1,"output_tokens":1}}`)
+		t.Error("upstream should NOT be called for service accounts")
+		w.WriteHeader(500)
 	}))
 	defer upstream.Close()
 
@@ -247,11 +247,11 @@ func TestBudgetGate_SkippedForServiceAccount(t *testing.T) {
 		ProjectID: "test",
 	}, submitter, calc)
 
-	// Wire in a store that returns "budget exhausted" — SA should bypass this.
+	// Wire in a store — should never be consulted for SAs.
 	p.SetUserStore(&budgetUserStore{
 		checkResult: &storage.BudgetCheckResult{
-			Allowed:      false,
-			RemainingUSD: 0,
+			Allowed:      true,
+			RemainingUSD: 100,
 		},
 	})
 
@@ -278,9 +278,9 @@ func TestBudgetGate_SkippedForServiceAccount(t *testing.T) {
 	}
 	defer func() { _ = resp.Body.Close() }()
 
-	// SA should bypass budget → 200 OK, not 402.
-	if resp.StatusCode != http.StatusOK {
+	// SA should be blocked → 403 Forbidden.
+	if resp.StatusCode != http.StatusForbidden {
 		body, _ := io.ReadAll(resp.Body)
-		t.Errorf("status = %d, want 200 (SA bypasses budget); body = %s", resp.StatusCode, body)
+		t.Errorf("status = %d, want 403 (SA blocked); body = %s", resp.StatusCode, body)
 	}
 }

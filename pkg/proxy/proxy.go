@@ -433,8 +433,18 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// SECURITY: Block service accounts from using the proxy entirely.
+	if isServiceAccount {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = w.Write([]byte(`{"error":{"message":"service accounts cannot use the LLM proxy — authenticate with personal credentials","type":"forbidden","code":403}}`))
+		slog.Warn("blocked service account from proxy",
+			"user_id", effectiveUserID, "provider", providerName)
+		return
+	}
+
 	// ── Pre-flight budget check ──
-	if p.users != nil && effectiveUserID != "" && !isServiceAccount {
+	if p.users != nil && effectiveUserID != "" {
 		// ── Rate limiting ──
 		allowed, count, limit, rlErr := p.users.CheckRateLimit(r.Context(), effectiveUserID)
 		if rlErr != nil {
@@ -487,7 +497,7 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 
 	// ── Pricing gate (#6) + budget pre-flight with model-aware floor (#7) ──
 	// These checks run after body read so we can extract the model name.
-	if p.users != nil && effectiveUserID != "" && !isServiceAccount {
+	if p.users != nil && effectiveUserID != "" {
 		model, _ := extractRequestInfo(providerName, reqBody)
 
 		// #6: Block calls to cloud models with no pricing configured.

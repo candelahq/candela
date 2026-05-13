@@ -50,10 +50,8 @@ export default function DashboardPage() {
 
       <div className="main-body">
         {error && (
-          <ErrorBanner title="Backend Unavailable">
-            Could not connect to Candela backend at{" "}
-            <code className="mono">localhost:8181</code>. Start the server
-            with <code className="mono">go run ./cmd/candela-server</code>.
+          <ErrorBanner title="Dashboard Error">
+            {error}
           </ErrorBanner>
         )}
 

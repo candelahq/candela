@@ -413,9 +413,17 @@ func runForeground() {
 			os.Exit(1)
 		}
 
-		// ── Get OIDC ID token source via ADC ──
+		// ── Get auth token source via ADC ──
 		// Strategy 1: idtoken.NewTokenSource (works for service accounts).
-		// Strategy 2: google.DefaultTokenSource with openid scope (works for user credentials).
+		//   → AccessToken IS the audience-scoped OIDC ID token.
+		// Strategy 2: google.DefaultTokenSource (works for user credentials).
+		//   → AccessToken is an OAuth2 access token. The server validates it
+		//     via the userinfo endpoint (Strategy 3 in FirebaseAuthMiddleware).
+		//
+		// In both cases, token.AccessToken contains the correct bearer token.
+		// Do NOT use token.Extra("id_token") — for user credentials it returns
+		// a generic OIDC token without the required audience claim, which the
+		// server rejects.
 		var tokenSource oauth2.TokenSource
 
 		ts, err := idtoken.NewTokenSource(ctx, cfg.Audience)
@@ -430,6 +438,7 @@ func runForeground() {
 					"error", err2)
 				os.Exit(1)
 			}
+			slog.Info("using user ADC credentials (OAuth2 access token)")
 			tokenSource = ts2
 		}
 
@@ -441,23 +450,16 @@ func runForeground() {
 				req.URL.Host = remoteURL.Host
 				req.Host = remoteURL.Host
 
-				// Inject OIDC identity token for IAP.
-				// For user credentials (OAuth2), the ID token is in token.Extra("id_token").
-				// For service account credentials (idtoken pkg), AccessToken IS the ID token.
+				// Inject auth token for the remote server.
+				// For service accounts, AccessToken is the audience-scoped OIDC ID token.
+				// For user credentials, AccessToken is the OAuth2 access token which
+				// the server validates via Google's userinfo endpoint.
 				token, err := tokenSource.Token()
 				if err != nil {
-					slog.Error("failed to get identity token", "error", err)
+					slog.Error("failed to get auth token", "error", err)
 					return
 				}
-				bearerToken := token.AccessToken
-				// For service accounts (idtoken pkg), AccessToken IS the
-				// audience-scoped ID token — use it directly.
-				// For user credentials (OAuth2 ADC), AccessToken is an OAuth2
-				// access token. The remote server validates it via Google's
-				// userinfo endpoint (auth Strategy 3). Do NOT use the OIDC
-				// id_token here — its audience is Google's default OAuth client
-				// ID, not the Cloud Run URL, so the remote server rejects it.
-				req.Header.Set("Authorization", "Bearer "+bearerToken)
+				req.Header.Set("Authorization", "Bearer "+token.AccessToken)
 
 				// Preserve the original path.
 				if _, ok := req.Header["User-Agent"]; !ok {

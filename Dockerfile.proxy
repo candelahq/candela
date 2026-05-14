@@ -1,0 +1,48 @@
+# ── candela-proxy ──
+# Standalone LLM observability proxy — single static binary on distroless.
+#
+# Build:  docker build -f Dockerfile.proxy -t candela-proxy ./rust
+# Run:    docker run -p 8080:8080 -e PROVIDERS=openai,anthropic candela-proxy
+
+FROM rust:1.87-alpine AS builder
+
+RUN apk add --no-cache musl-dev
+
+WORKDIR /app
+
+# Cache dependencies — copy only manifests first.
+COPY rust/Cargo.toml rust/Cargo.lock ./
+COPY rust/crates/candela-core/Cargo.toml crates/candela-core/Cargo.toml
+COPY rust/crates/candela-proxy/Cargo.toml crates/candela-proxy/Cargo.toml
+COPY rust/crates/candela-processor/Cargo.toml crates/candela-processor/Cargo.toml
+COPY rust/crates/candela-storage/Cargo.toml crates/candela-storage/Cargo.toml
+COPY rust/bins/candela-proxy/Cargo.toml bins/candela-proxy/Cargo.toml
+COPY rust/bins/candela-sidecar/Cargo.toml bins/candela-sidecar/Cargo.toml
+
+# Create stub lib.rs files for dependency caching.
+RUN mkdir -p crates/candela-core/src && echo "" > crates/candela-core/src/lib.rs && \
+    mkdir -p crates/candela-proxy/src && echo "" > crates/candela-proxy/src/lib.rs && \
+    mkdir -p crates/candela-processor/src && echo "" > crates/candela-processor/src/lib.rs && \
+    mkdir -p crates/candela-storage/src && echo "" > crates/candela-storage/src/lib.rs && \
+    mkdir -p bins/candela-proxy/src && echo "fn main() {}" > bins/candela-proxy/src/main.rs && \
+    mkdir -p bins/candela-sidecar/src && echo "fn main() {}" > bins/candela-sidecar/src/main.rs
+
+RUN cargo build --release --bin candela-proxy 2>/dev/null || true
+
+# Copy full source and rebuild.
+COPY rust/ .
+
+# Touch source files to invalidate the stub cache.
+RUN find . -name "*.rs" -exec touch {} +
+
+RUN cargo build --release --bin candela-proxy
+
+# ── Runtime ──
+FROM gcr.io/distroless/static-debian12:nonroot
+
+COPY --from=builder /app/target/release/candela-proxy /candela-proxy
+
+# Default port (overridable via PORT env var).
+EXPOSE 8080
+
+ENTRYPOINT ["/candela-proxy"]

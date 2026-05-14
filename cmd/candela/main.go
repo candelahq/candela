@@ -450,12 +450,13 @@ func runForeground() {
 					return
 				}
 				bearerToken := token.AccessToken
-				// For IAP, we MUST use the OIDC ID token. Both idtoken.NewTokenSource
-				// and the OAuth2 fallback (with openid scope) provide this in the
-				// "id_token" extra field.
-				if idToken, ok := token.Extra("id_token").(string); ok && idToken != "" {
-					bearerToken = idToken
-				}
+				// For service accounts (idtoken pkg), AccessToken IS the
+				// audience-scoped ID token — use it directly.
+				// For user credentials (OAuth2 ADC), AccessToken is an OAuth2
+				// access token. The remote server validates it via Google's
+				// userinfo endpoint (auth Strategy 3). Do NOT use the OIDC
+				// id_token here — its audience is Google's default OAuth client
+				// ID, not the Cloud Run URL, so the remote server rejects it.
 				req.Header.Set("Authorization", "Bearer "+bearerToken)
 
 				// Preserve the original path.
@@ -879,6 +880,21 @@ func buildCloudProxy(cfg Config, submitter *processor.SpanProcessor) (*proxy.Pro
 		case "anthropic":
 			p.UpstreamURL = fmt.Sprintf("https://%s-aiplatform.googleapis.com", region)
 			p.FormatTranslator = &proxy.AnthropicFormatTranslator{}
+			p.PathRewriter = &proxy.VertexAIPathRewriter{
+				ProjectID: project,
+				Region:    region,
+			}
+		case "anthropic-direct":
+			// Native Anthropic Messages API passthrough — client provides its own
+			// API key via x-api-key or Authorization header. No ADC, no Vertex AI.
+			// This is the Claude Code LLM gateway mode.
+			p.UpstreamURL = "https://api.anthropic.com"
+			p.TokenSource = nil // Client manages auth, not ADC.
+		case "anthropic-vertex":
+			// Native Anthropic Messages API routed via Vertex AI rawPredict.
+			// Candela injects GCP ADC auth — no client API key needed.
+			// For Claude Code: ANTHROPIC_BASE_URL=http://localhost:8181/proxy/anthropic-vertex
+			p.UpstreamURL = fmt.Sprintf("https://%s-aiplatform.googleapis.com", region)
 			p.PathRewriter = &proxy.VertexAIPathRewriter{
 				ProjectID: project,
 				Region:    region,

@@ -817,4 +817,128 @@ mod tests {
         let body = br#"{"model": "gpt-4", "stream": null}"#;
         assert!(!detect_streaming(body));
     }
+
+    // ── Additional edge-case tests ──
+
+    #[test]
+    fn detect_streaming_numeric_one() {
+        // Some clients send 1 instead of true.
+        let body = br#"{"model": "gpt-4", "stream": 1}"#;
+        assert!(
+            !detect_streaming(body),
+            "numeric 1 should not be detected as boolean true"
+        );
+    }
+
+    /// Token usage with very large values should not overflow.
+    #[test]
+    fn extract_token_usage_large_values() {
+        let body = br#"{"usage": {"prompt_tokens": 9999999999, "completion_tokens": 9999999999, "total_tokens": 19999999998}}"#;
+        let (_, usage) = parsers::extract_response_usage("openai", body);
+        assert!(usage.input_tokens > 0);
+        assert!(usage.output_tokens > 0);
+    }
+
+    /// Token usage with fractional values should not panic.
+    #[test]
+    fn extract_token_usage_fractional_truncated() {
+        let body = br#"{"usage": {"prompt_tokens": 100.7, "completion_tokens": 50.3}}"#;
+        let (_, usage) = parsers::extract_response_usage("openai", body);
+        // Fractional tokens — parser behavior is implementation-defined.
+        assert!(usage.input_tokens >= 0);
+    }
+
+    /// Token usage with negative values.
+    #[test]
+    fn extract_token_usage_negative_values() {
+        let body = br#"{"usage": {"prompt_tokens": -100, "completion_tokens": -50}}"#;
+        let (_, usage) = parsers::extract_response_usage("openai", body);
+        assert!(usage.input_tokens <= 0);
+    }
+
+    /// Usage nested inside a "data" wrapper should not be found at top level.
+    #[test]
+    fn extract_token_usage_nested_data_not_found() {
+        let body = br#"{"data": {"usage": {"prompt_tokens": 100}}}"#;
+        let (_, usage) = parsers::extract_response_usage("openai", body);
+        assert_eq!(
+            usage.input_tokens, 0,
+            "usage nested inside 'data' should not be extracted"
+        );
+    }
+
+    /// Path sanitization should handle consecutive slashes.
+    #[test]
+    fn sanitize_path_consecutive_slashes() {
+        assert_eq!(
+            sanitize_path("v1///chat///completions"),
+            "v1/chat/completions"
+        );
+    }
+
+    /// Path sanitization should handle URL-encoded traversal (already decoded).
+    #[test]
+    fn sanitize_path_mixed_dots_and_segments() {
+        assert_eq!(
+            sanitize_path("../v1/../../chat/../completions"),
+            "v1/chat/completions"
+        );
+    }
+
+    /// Path sanitization with only dots/slashes should return empty.
+    #[test]
+    fn sanitize_path_only_traversal() {
+        assert_eq!(sanitize_path("../../.."), "");
+        assert_eq!(sanitize_path("///"), "");
+        assert_eq!(sanitize_path(""), "");
+    }
+
+    /// Empty baggage header should return None, not panic.
+    #[test]
+    fn extract_baggage_empty_header() {
+        let mut headers = HeaderMap::new();
+        headers.insert("baggage", "".parse().unwrap());
+        assert_eq!(extract_baggage_value(&headers, "candela.tenant_id"), None);
+    }
+
+    /// Baggage with properties (semicolons) — handler's simpler parser
+    /// does not strip properties (unlike attribution.rs's parse_baggage).
+    #[test]
+    fn extract_baggage_with_properties() {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            "baggage",
+            "candela.tenant_id=acme;expires=2026-01-01,other=val"
+                .parse()
+                .unwrap(),
+        );
+        assert_eq!(
+            extract_baggage_value(&headers, "candela.tenant_id"),
+            Some("acme;expires=2026-01-01".into()),
+        );
+    }
+
+    /// Model extraction should handle nested content arrays.
+    #[test]
+    fn extract_model_from_anthropic_body() {
+        let body = br#"{"model": "claude-sonnet-4-20250514", "messages": [{"role": "user", "content": [{"type": "text", "text": "hi"}]}], "max_tokens": 1024}"#;
+        assert_eq!(extract_model(body), Some("claude-sonnet-4-20250514".into()));
+    }
+
+    /// Model extraction should handle empty string model.
+    #[test]
+    fn extract_model_empty_string() {
+        let body = br#"{"model": "", "messages": []}"#;
+        assert_eq!(extract_model(body), Some("".into()));
+    }
+
+    /// Token usage with only total_tokens (no breakdown).
+    #[test]
+    fn extract_token_usage_only_total() {
+        let body =
+            br#"{"usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 500}}"#;
+        let (_, usage) = parsers::extract_response_usage("openai", body);
+        assert_eq!(usage.input_tokens, 0);
+        assert_eq!(usage.output_tokens, 0);
+    }
 }

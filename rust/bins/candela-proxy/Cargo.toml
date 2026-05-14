@@ -1,0 +1,25 @@
+[package]
+name = "candela-proxy-bin"
+description = "Standalone LLM observability proxy — traces, costs, and circuit breaking in a single binary"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "candela-proxy"
+path = "src/main.rs"
+
+[dependencies]
+candela-core = { workspace = true }
+candela-proxy = { workspace = true }
+candela-processor = { workspace = true }
+candela-storage = { workspace = true }
+anyhow = { workspace = true }
+axum = { workspace = true }
+reqwest = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true }
+tower-http = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }

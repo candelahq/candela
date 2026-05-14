@@ -236,4 +236,89 @@ mod tests {
         assert_eq!(attr.tenant_id, Some("acme".to_string()));
         assert_eq!(attr.job_id, Some("job-456".to_string()));
     }
+
+    // ── New comprehensive tests ──
+
+    /// Empty tenant ID value should be rejected.
+    #[test]
+    fn rejects_empty_tenant_id() {
+        let mut headers = HeaderMap::new();
+        headers.insert("X-Candela-Tenant-Id", HeaderValue::from_static(""));
+        let attr = Attribution::from_headers(&headers);
+        assert_eq!(attr.tenant_id, None, "empty string must be rejected");
+    }
+
+    /// Maximum length ID (128 chars) should be accepted.
+    #[test]
+    fn accepts_max_length_id() {
+        let id = "a".repeat(128);
+        let mut headers = HeaderMap::new();
+        headers.insert("X-Candela-Tenant-Id", HeaderValue::from_str(&id).unwrap());
+        let attr = Attribution::from_headers(&headers);
+        assert_eq!(attr.tenant_id, Some(id));
+    }
+
+    /// Over-length ID (129 chars) should be rejected.
+    #[test]
+    fn rejects_over_length_id() {
+        let id = "a".repeat(129);
+        let mut headers = HeaderMap::new();
+        headers.insert("X-Candela-Tenant-Id", HeaderValue::from_str(&id).unwrap());
+        let attr = Attribution::from_headers(&headers);
+        assert_eq!(attr.tenant_id, None, "129-char ID must be rejected");
+    }
+
+    /// Baggage with unrelated keys should return empty attribution.
+    #[test]
+    fn baggage_without_candela_keys() {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            "Baggage",
+            HeaderValue::from_static("svc.name=my-service,request.id=abc"),
+        );
+        let attr = Attribution::from_headers(&headers);
+        assert_eq!(attr.tenant_id, None);
+        assert_eq!(attr.job_id, None);
+    }
+
+    /// Only job_id from explicit header, no tenant_id.
+    #[test]
+    fn explicit_job_id_only() {
+        let mut headers = HeaderMap::new();
+        headers.insert("X-Candela-Job-Id", HeaderValue::from_static("eval-run-42"));
+        let attr = Attribution::from_headers(&headers);
+        assert_eq!(attr.tenant_id, None);
+        assert_eq!(attr.job_id, Some("eval-run-42".to_string()));
+    }
+
+    /// No headers at all should return default (all None).
+    #[test]
+    fn no_headers_returns_default() {
+        let headers = HeaderMap::new();
+        let attr = Attribution::from_headers(&headers);
+        assert_eq!(attr.tenant_id, None);
+        assert_eq!(attr.job_id, None);
+    }
+
+    /// Special characters that are valid: hyphens, dots, underscores.
+    #[test]
+    fn accepts_special_valid_characters() {
+        for id in &["a-b", "a.b", "a_b", "A-B.C_D", "123-456.789_0"] {
+            let mut headers = HeaderMap::new();
+            headers.insert("X-Candela-Tenant-Id", HeaderValue::from_str(id).unwrap());
+            let attr = Attribution::from_headers(&headers);
+            assert_eq!(attr.tenant_id, Some(id.to_string()), "should accept {id}");
+        }
+    }
+
+    /// Special characters that are invalid: @, #, $, etc.
+    #[test]
+    fn rejects_special_invalid_characters() {
+        for id in &["acme@corp", "tenant#1", "$admin", "tenant;drop", "a b"] {
+            let mut headers = HeaderMap::new();
+            headers.insert("X-Candela-Tenant-Id", HeaderValue::from_str(id).unwrap());
+            let attr = Attribution::from_headers(&headers);
+            assert_eq!(attr.tenant_id, None, "should reject {id}");
+        }
+    }
 }

@@ -146,4 +146,154 @@ mod tests {
         assert_eq!(json["role"], "user");
         assert_eq!(json["content"], "What is Rust?");
     }
+
+    // ── New comprehensive tests ──
+
+    /// OpenAI request without optional fields should serialize cleanly.
+    #[test]
+    fn openai_request_minimal() {
+        let req = OpenAIRequest {
+            model: "gpt-4o-mini".into(),
+            messages: vec![OpenAIMessage {
+                role: "user".into(),
+                content: serde_json::Value::String("hi".into()),
+            }],
+            max_tokens: None,
+            temperature: None,
+            stream: false,
+            tools: vec![],
+        };
+        let json = serde_json::to_string(&req).unwrap();
+        // Optional fields should be absent.
+        assert!(!json.contains("max_tokens"));
+        assert!(!json.contains("temperature"));
+        assert!(!json.contains("tools"));
+    }
+
+    /// Anthropic request requires max_tokens — verify it's mandatory.
+    #[test]
+    fn anthropic_request_round_trip() {
+        let req = AnthropicRequest {
+            model: "claude-sonnet-4-20250514".into(),
+            messages: vec![AnthropicMessage {
+                role: "user".into(),
+                content: serde_json::Value::String("Hello Claude".into()),
+            }],
+            max_tokens: 4096,
+            temperature: Some(0.0),
+            system: Some("You are a helpful assistant.".into()),
+            stream: true,
+            tools: vec![],
+        };
+        let json = serde_json::to_string(&req).unwrap();
+        let restored: AnthropicRequest = serde_json::from_str(&json).unwrap();
+        assert_eq!(restored.model, "claude-sonnet-4-20250514");
+        assert_eq!(restored.max_tokens, 4096);
+        assert_eq!(restored.system, Some("You are a helpful assistant.".into()));
+        assert!(restored.stream);
+    }
+
+    /// Anthropic request without system prompt should omit it.
+    #[test]
+    fn anthropic_request_no_system() {
+        let req = AnthropicRequest {
+            model: "claude-haiku-4.5".into(),
+            messages: vec![],
+            max_tokens: 1024,
+            temperature: None,
+            system: None,
+            stream: false,
+            tools: vec![],
+        };
+        let json = serde_json::to_string(&req).unwrap();
+        assert!(!json.contains("system"), "None system should be omitted");
+    }
+
+    /// message_delta stream event with usage should parse correctly.
+    #[test]
+    fn anthropic_stream_message_delta_with_usage() {
+        let json = r#"{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":42}}"#;
+        let event: AnthropicStreamEvent = serde_json::from_str(json).unwrap();
+        match event {
+            AnthropicStreamEvent::MessageDelta { usage, .. } => {
+                let usage = usage.expect("usage should be present");
+                assert_eq!(usage["output_tokens"], 42);
+            }
+            _ => panic!("expected MessageDelta"),
+        }
+    }
+
+    /// message_delta without usage should also parse.
+    #[test]
+    fn anthropic_stream_message_delta_without_usage() {
+        let json = r#"{"type":"message_delta","delta":{"stop_reason":"end_turn"}}"#;
+        let event: AnthropicStreamEvent = serde_json::from_str(json).unwrap();
+        match event {
+            AnthropicStreamEvent::MessageDelta { usage, .. } => {
+                assert!(usage.is_none());
+            }
+            _ => panic!("expected MessageDelta"),
+        }
+    }
+
+    /// Multi-turn conversation should preserve message order.
+    #[test]
+    fn openai_multi_turn_preserves_order() {
+        let req = OpenAIRequest {
+            model: "gpt-4o".into(),
+            messages: vec![
+                OpenAIMessage {
+                    role: "system".into(),
+                    content: serde_json::json!("You are a bot."),
+                },
+                OpenAIMessage {
+                    role: "user".into(),
+                    content: serde_json::json!("Hi"),
+                },
+                OpenAIMessage {
+                    role: "assistant".into(),
+                    content: serde_json::json!("Hello!"),
+                },
+                OpenAIMessage {
+                    role: "user".into(),
+                    content: serde_json::json!("How are you?"),
+                },
+            ],
+            max_tokens: None,
+            temperature: None,
+            stream: false,
+            tools: vec![],
+        };
+        let json = serde_json::to_string(&req).unwrap();
+        let restored: OpenAIRequest = serde_json::from_str(&json).unwrap();
+        assert_eq!(restored.messages.len(), 4);
+        assert_eq!(restored.messages[0].role, "system");
+        assert_eq!(restored.messages[3].role, "user");
+    }
+
+    /// Temperature of 0.0 and 2.0 (boundary values) should round-trip.
+    #[test]
+    fn temperature_boundary_values() {
+        for temp in [0.0, 0.5, 1.0, 2.0] {
+            let req = OpenAIRequest {
+                model: "gpt-4o".into(),
+                messages: vec![],
+                max_tokens: None,
+                temperature: Some(temp),
+                stream: false,
+                tools: vec![],
+            };
+            let json = serde_json::to_string(&req).unwrap();
+            let restored: OpenAIRequest = serde_json::from_str(&json).unwrap();
+            assert!((restored.temperature.unwrap() - temp).abs() < f64::EPSILON);
+        }
+    }
+
+    /// Unknown stream event type should fail deserialization (exhaustive matching).
+    #[test]
+    fn anthropic_stream_unknown_event_rejected() {
+        let json = r#"{"type":"unknown_event","data":{}}"#;
+        let result = serde_json::from_str::<AnthropicStreamEvent>(json);
+        assert!(result.is_err(), "unknown event types must be rejected");
+    }
 }

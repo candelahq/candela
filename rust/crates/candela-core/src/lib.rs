@@ -389,4 +389,180 @@ mod tests {
         let restored: GenAIAttributes = serde_json::from_str(&json).unwrap();
         assert_eq!(restored.input_tokens, i64::MAX);
     }
+
+    // ── New comprehensive tests ──
+
+    /// GenAI zero fields should be omitted via skip_serializing_if.
+    #[test]
+    fn gen_ai_zero_fields_omitted() {
+        let attrs = GenAIAttributes::default();
+        let json = serde_json::to_string(&attrs).unwrap();
+        assert!(
+            !json.contains("input_tokens"),
+            "zero input_tokens should be omitted"
+        );
+        assert!(
+            !json.contains("output_tokens"),
+            "zero output_tokens should be omitted"
+        );
+        assert!(
+            !json.contains("cost_usd"),
+            "zero cost_usd should be omitted"
+        );
+        assert!(
+            !json.contains("temperature"),
+            "zero temperature should be omitted"
+        );
+        assert!(!json.contains("model"), "empty model should be omitted");
+    }
+
+    /// GenAI non-zero fields should be present.
+    #[test]
+    fn gen_ai_nonzero_fields_present() {
+        let attrs = GenAIAttributes {
+            model: "gpt-4o".into(),
+            input_tokens: 100,
+            cost_usd: 0.003,
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&attrs).unwrap();
+        assert!(json.contains("model"));
+        assert!(json.contains("input_tokens"));
+        assert!(json.contains("cost_usd"));
+    }
+
+    /// Span with all None optional fields should exclude them from JSON.
+    #[test]
+    fn span_none_fields_excluded() {
+        let span = Span {
+            span_id: "s1".into(),
+            trace_id: "t1".into(),
+            parent_span_id: None,
+            name: "test".into(),
+            kind: SpanKind::default(),
+            status: SpanStatus::default(),
+            status_message: None,
+            start_time: Utc::now(),
+            end_time: Utc::now(),
+            duration: Duration::from_millis(1),
+            gen_ai: None,
+            attributes: BTreeMap::new(),
+            project_id: "p1".into(),
+            environment: None,
+            service_name: None,
+            user_id: None,
+            session_id: None,
+            tenant_id: None,
+            job_id: None,
+        };
+        let json = serde_json::to_string(&span).unwrap();
+        assert!(!json.contains("parent_span_id"));
+        assert!(!json.contains("status_message"));
+        assert!(!json.contains("gen_ai"));
+        assert!(!json.contains("environment"));
+        assert!(!json.contains("tenant_id"));
+        assert!(!json.contains("job_id"));
+    }
+
+    /// Duration of exactly 0 should round-trip correctly.
+    #[test]
+    fn duration_zero_round_trip() {
+        let json = r#"{
+            "span_id": "s1", "trace_id": "t1", "name": "test",
+            "start_time": "2025-01-01T00:00:00Z", "end_time": "2025-01-01T00:00:01Z",
+            "duration": 0.0, "project_id": "p1"
+        }"#;
+        let span: Span = serde_json::from_str(json).unwrap();
+        assert_eq!(span.duration, Duration::ZERO);
+    }
+
+    /// Very large (but valid) duration should be clamped, not panic.
+    #[test]
+    fn duration_very_large_clamped() {
+        let json = r#"{
+            "span_id": "s1", "trace_id": "t1", "name": "test",
+            "start_time": "2025-01-01T00:00:00Z", "end_time": "2025-01-01T00:00:01Z",
+            "duration": 1e19, "project_id": "p1"
+        }"#;
+        // Should clamp to MAX_SAFE_SECS, not panic.
+        let span: Span = serde_json::from_str(json).unwrap();
+        assert!(span.duration.as_secs() > 0);
+    }
+
+    /// Error::NotFound should display correctly.
+    #[test]
+    fn error_display() {
+        let err = Error::NotFound;
+        assert_eq!(format!("{err}"), "not found");
+    }
+
+    /// Error::Internal should wrap anyhow errors.
+    #[test]
+    fn error_internal_from_anyhow() {
+        let inner = anyhow::anyhow!("something went wrong");
+        let err = Error::Internal(inner);
+        assert!(format!("{err}").contains("something went wrong"));
+    }
+
+    /// Span with empty attributes BTreeMap should omit it from JSON.
+    #[test]
+    fn span_empty_attributes_omitted() {
+        let span = Span {
+            span_id: "s1".into(),
+            trace_id: "t1".into(),
+            parent_span_id: None,
+            name: "test".into(),
+            kind: SpanKind::default(),
+            status: SpanStatus::default(),
+            status_message: None,
+            start_time: Utc::now(),
+            end_time: Utc::now(),
+            duration: Duration::from_millis(1),
+            gen_ai: None,
+            attributes: BTreeMap::new(),
+            project_id: "p1".into(),
+            environment: None,
+            service_name: None,
+            user_id: None,
+            session_id: None,
+            tenant_id: None,
+            job_id: None,
+        };
+        let json = serde_json::to_string(&span).unwrap();
+        assert!(
+            !json.contains("attributes"),
+            "empty attributes should be omitted"
+        );
+    }
+
+    /// Span with populated attributes should include them.
+    #[test]
+    fn span_populated_attributes_included() {
+        let mut attrs = BTreeMap::new();
+        attrs.insert("http.method".into(), "POST".into());
+        let span = Span {
+            span_id: "s1".into(),
+            trace_id: "t1".into(),
+            parent_span_id: None,
+            name: "test".into(),
+            kind: SpanKind::default(),
+            status: SpanStatus::default(),
+            status_message: None,
+            start_time: Utc::now(),
+            end_time: Utc::now(),
+            duration: Duration::from_millis(1),
+            gen_ai: None,
+            attributes: attrs,
+            project_id: "p1".into(),
+            environment: None,
+            service_name: None,
+            user_id: None,
+            session_id: None,
+            tenant_id: None,
+            job_id: None,
+        };
+        let json = serde_json::to_string(&span).unwrap();
+        assert!(json.contains("http.method"));
+        assert!(json.contains("POST"));
+    }
 }

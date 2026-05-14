@@ -1,11 +1,13 @@
 package prototest
 
 import (
+	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // repoRoot returns the candela repo root by walking up from the test file.
@@ -127,10 +129,30 @@ func TestIntegration_GoImports_Compile(t *testing.T) {
 	}
 
 	root := repoRoot(t)
-	cmd := exec.Command("go", "build", "./...")
+
+	// Build only the generated proto packages — not the entire workspace.
+	// `go build ./...` takes 5+ minutes in this repo and exceeds typical
+	// test timeouts, causing goroutine leaks from orphaned subprocess pipes.
+	// Scoping to gen/go/... validates that generated stubs compile without
+	// paying for the full workspace build.
+	timeout := 2 * time.Minute
+	if dl, ok := t.Deadline(); ok {
+		timeout = time.Until(dl) - time.Second
+		if timeout <= 0 {
+			t.Skip("insufficient time remaining for compilation test")
+		}
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "go", "build", "./gen/go/...")
 	cmd.Dir = root
 	output, err := cmd.CombinedOutput()
+	if ctx.Err() == context.DeadlineExceeded {
+		t.Fatalf("go build timed out after %s:\n%s", timeout, string(output))
+	}
 	if err != nil {
-		t.Fatalf("go build ./... failed:\n%s", string(output))
+		t.Fatalf("go build ./gen/go/... failed:\n%s", string(output))
 	}
 }

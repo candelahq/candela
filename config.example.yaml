@@ -26,6 +26,7 @@ proxy:
   vertex_ai:
     project_id: "your-gcp-project-id"
     region: "us-east5"      # Vertex AI region (Claude available here)
+    prompt_caching: true    # Inject cache_control for Anthropic prompt caching (~10x cost reduction)
 
   # Specify which providers to enable. If omitted, all providers are enabled.
   # Valid values: openai, google, anthropic, gemini-oai

@@ -553,6 +553,27 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 			"streaming", isStreaming)
 	}
 
+	// --- Vertex AI body enrichment for native passthrough ---
+	// When there's no FormatTranslator (e.g. anthropic-vertex), the body is
+	// forwarded as-is. But Vertex AI rawPredict requires `anthropic_version`
+	// in the request body, while Claude Code sends it as a header. Inject it
+	// if missing.
+	if provider.FormatTranslator == nil && provider.PathRewriter != nil {
+		var bodyMap map[string]interface{}
+		if json.Unmarshal(upstreamBody, &bodyMap) == nil {
+			if _, hasVersion := bodyMap["anthropic_version"]; !hasVersion {
+				version := r.Header.Get("anthropic-version")
+				if version == "" {
+					version = "vertex-2023-10-16"
+				}
+				bodyMap["anthropic_version"] = version
+				if enriched, err := json.Marshal(bodyMap); err == nil {
+					upstreamBody = enriched
+				}
+			}
+		}
+	}
+
 	// --- Path rewriting ---
 	// If the provider has a PathRewriter, rewrite the upstream URL path
 	// (e.g. Vertex AI project-scoped model endpoints).

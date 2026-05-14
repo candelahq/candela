@@ -450,12 +450,13 @@ func runForeground() {
 					return
 				}
 				bearerToken := token.AccessToken
-				// For IAP, we MUST use the OIDC ID token. Both idtoken.NewTokenSource
-				// and the OAuth2 fallback (with openid scope) provide this in the
-				// "id_token" extra field.
-				if idToken, ok := token.Extra("id_token").(string); ok && idToken != "" {
-					bearerToken = idToken
-				}
+				// For service accounts (idtoken pkg), AccessToken IS the
+				// audience-scoped ID token — use it directly.
+				// For user credentials (OAuth2 ADC), AccessToken is an OAuth2
+				// access token. The remote server validates it via Google's
+				// userinfo endpoint (auth Strategy 3). Do NOT use the OIDC
+				// id_token here — its audience is Google's default OAuth client
+				// ID, not the Cloud Run URL, so the remote server rejects it.
 				req.Header.Set("Authorization", "Bearer "+bearerToken)
 
 				// Preserve the original path.

@@ -167,14 +167,6 @@ cd ui && pnpm install && pnpm run dev
 
 > **💡 Quick Start Tip**: Copy `config.example.yaml` to `config.yaml` to use port 8181 and enable all features.
 
-### Option C: Docker Compose (Full Stack)
-Ideal for testing the full multi-service experience.
-
-```bash
-# Start all services (server + collector)
-docker compose -f deploy/docker-compose.yml up
-```
-
 ---
 
 ## 🛠️ Route an LLM Call
@@ -308,7 +300,7 @@ Candela uses port `8181` by default.
 | Setup | Port | When Used |
 |-------|------|-----------|
 | **Default** | `8181` | Running `go run ./cmd/candela-server` |
-| **Docker Compose** | `8181` | As specified in `docker-compose.yml` |
+
 
 ### Quick Setup
 ```bash

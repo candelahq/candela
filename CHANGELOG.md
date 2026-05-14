@@ -2,7 +2,41 @@
 
 All notable changes to Candela are documented here, organized by development phase. PRs are merged to `main`.
 
-## Latest
+## v0.3.0 — 2026-05-14
+
+### Auth Fix — User ADC Token Forwarding (#195)
+- Fix "invalid authentication token" error in team mode by using `token.AccessToken` for user ADC credentials
+- Ensures proper token forwarding when authenticating via Application Default Credentials
+
+### Claude Code LLM Gateway (#194)
+- Override `anthropic_version` to `vertex-2023-10-16` for Vertex AI passthrough
+- Strip `model` field from request body to avoid Vertex AI validation errors
+- Enables seamless Claude Code → Candela → Vertex AI routing
+
+### Anthropic Prompt Caching (#192)
+- Configurable `cache_control` breakpoint injection for Anthropic requests
+- System prompt + last user message cached for ~10× cost reduction on multi-turn conversations
+- Toggle via `vertex_ai.prompt_caching` in config
+- Array-based system message support in Go translator
+
+### Rust Proxy — P0 Sidecar Parity (#190)
+- Line-by-line SSE token parser for streaming cache extraction
+- W3C trace context propagation
+- 120+ unit tests for parsers, attribution, and cost calculation
+- Standalone `candela-proxy` binary release target
+
+### Cost Accuracy Fixes (#188, #189)
+- Fix 10× cost overcharge — cached tokens were double-counted as full-price input
+- Fix trace duration reporting (was 0ms)
+- Cache token visibility for all providers (OpenAI, Google, Anthropic)
+
+### Documentation (#193)
+- Remove all Docker/docker-compose references from docs
+- Updated installation guides for native binary deployment
+
+---
+
+## Previous
 
 ### Documentation Audit & Site Expansion
 - Added 3 missing proxy routes to README and docs site (`anthropic-vertex`, `anthropic-direct`, `gemini-oai`)
@@ -40,10 +74,6 @@ All notable changes to Candela are documented here, organized by development pha
 - Inject `X-Candela-Tenant-Id`, `X-Candela-Job-Id`, and W3C Baggage headers
 - Proxy strips enrichment headers before forwarding to upstream LLMs
 - Per-tenant and per-job cost attribution in dashboard
-
----
-
-## Previous
 
 ### API Hardening & Proto Centralization (#113)
 

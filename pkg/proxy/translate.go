@@ -102,24 +102,32 @@ func (t *AnthropicFormatTranslator) TranslateRequest(body []byte) ([]byte, strin
 	for _, msg := range oaiReq.Messages {
 		switch msg.Role {
 		case "system":
-			content, _ := msg.Content.(string)
-			if content == "" {
-				break
-			}
-			if t.PromptCaching {
-				// Wrap system prompt as a content block array with cache_control
-				// to enable Anthropic prompt caching on Vertex AI. This caches
-				// the system prompt across turns, reducing cost ~10x for
-				// multi-turn conversations with large system prompts.
-				anthReq.System = []interface{}{
-					map[string]interface{}{
-						"type":          "text",
-						"text":          content,
-						"cache_control": map[string]string{"type": "ephemeral"},
-					},
+			// OpenAI allows system content as a string or an array of content blocks.
+			switch c := msg.Content.(type) {
+			case string:
+				if c == "" {
+					break
 				}
-			} else {
-				anthReq.System = content
+				if t.PromptCaching {
+					anthReq.System = []interface{}{
+						map[string]interface{}{
+							"type":          "text",
+							"text":          c,
+							"cache_control": map[string]string{"type": "ephemeral"},
+						},
+					}
+				} else {
+					anthReq.System = c
+				}
+			case []interface{}:
+				// Array of content blocks — pass through as-is.
+				if t.PromptCaching && len(c) > 0 {
+					// Add cache_control to the last block.
+					if block, ok := c[len(c)-1].(map[string]interface{}); ok {
+						block["cache_control"] = map[string]string{"type": "ephemeral"}
+					}
+				}
+				anthReq.System = c
 			}
 
 		case "assistant":

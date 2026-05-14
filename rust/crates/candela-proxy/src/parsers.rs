@@ -160,8 +160,65 @@ pub fn extract_streaming_cache_tokens(provider: &str, data: &[u8]) -> CacheToken
             }
             CacheTokens::default()
         }
-        // OpenAI/Google streaming usage chunks use standard format.
-        _ => extract_cache_tokens(provider, data),
+        // OpenAI streaming: usage in the final SSE chunk.
+        "openai" | "gemini-oai" => {
+            for line in text.lines() {
+                let line = line.trim();
+                if !line.starts_with("data: ") {
+                    continue;
+                }
+                let payload = &line["data: ".len()..];
+                if payload == "[DONE]" {
+                    continue;
+                }
+                let chunk: Value = match serde_json::from_str(payload) {
+                    Ok(v) => v,
+                    Err(_) => continue,
+                };
+                if let Some(details) = chunk
+                    .get("usage")
+                    .and_then(|u| u.get("prompt_tokens_details"))
+                    .and_then(|d| d.as_object())
+                {
+                    let read = details
+                        .get("cached_tokens")
+                        .and_then(|v| v.as_i64())
+                        .unwrap_or(0);
+                    if read > 0 {
+                        return CacheTokens {
+                            cache_read_tokens: read,
+                            cache_creation_tokens: 0,
+                        };
+                    }
+                }
+            }
+            CacheTokens::default()
+        }
+        // Google streaming: JSON array or newline-delimited chunks.
+        "google" => {
+            for line in text.lines() {
+                let line = line.trim();
+                // Google streams can be JSON arrays or newline-delimited objects.
+                let chunk: Value = match serde_json::from_str(line) {
+                    Ok(v) => v,
+                    Err(_) => continue,
+                };
+                if let Some(meta) = chunk.get("usageMetadata").and_then(|m| m.as_object()) {
+                    let read = meta
+                        .get("cachedContentTokenCount")
+                        .and_then(|v| v.as_i64())
+                        .unwrap_or(0);
+                    if read > 0 {
+                        return CacheTokens {
+                            cache_read_tokens: read,
+                            cache_creation_tokens: 0,
+                        };
+                    }
+                }
+            }
+            CacheTokens::default()
+        }
+        _ => CacheTokens::default(),
     }
 }
 

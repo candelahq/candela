@@ -4,5 +4,14 @@ ui/.next
 ui/out
 *.duckdb
 *.db
+*.db-wal
+*.db-shm
 .env*
-terraform/.terraform
+terraform/
+rust/
+scratch/
+docs/
+sdks/
+.github/
+*.tar.gz
+*.tgz

@@ -19,14 +19,69 @@ use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use bytes::Bytes;
 use chrono::Utc;
-use http_body_util::BodyExt;
+use regex::Regex;
 use tracing::{error, info, warn};
 
 use candela_core::{GenAIAttributes, Span, SpanKind, SpanStatus};
 
 use crate::ids::{new_span_id, new_trace_id};
-use crate::parsers::TokenUsage;
+use crate::parsers::{self, CacheTokens};
 use crate::{Proxy, SpanSubmitter};
+
+/// Maximum request body size (10 MB) — matches Go's MaxBytesReader.
+const MAX_REQUEST_BODY: usize = 10 << 20;
+
+/// Validates request/session IDs: alphanumeric + hyphens/dots/underscores, 1-128 chars.
+/// Prevents log injection and trace poisoning.
+fn validate_request_id(id: &str) -> bool {
+    static RE: std::sync::LazyLock<Regex> =
+        std::sync::LazyLock::new(|| Regex::new(r"^[a-zA-Z0-9\-._]{1,128}$").unwrap());
+    RE.is_match(id)
+}
+
+/// Parsed W3C Trace Context from a `Traceparent` header.
+struct TraceContext {
+    trace_id: String,
+    parent_span_id: String,
+}
+
+/// Parse a W3C `Traceparent` header: `{version}-{trace-id}-{parent-id}-{flags}`.
+fn parse_traceparent(header: &str) -> Option<TraceContext> {
+    let parts: Vec<&str> = header.split('-').collect();
+    if parts.len() != 4 {
+        return None;
+    }
+    let trace_id = parts[1];
+    let parent_id = parts[2];
+    if trace_id.len() != 32 || parent_id.len() != 16 {
+        return None;
+    }
+    if !trace_id.chars().all(|c| c.is_ascii_hexdigit())
+        || !parent_id.chars().all(|c| c.is_ascii_hexdigit())
+    {
+        return None;
+    }
+    Some(TraceContext {
+        trace_id: trace_id.to_string(),
+        parent_span_id: parent_id.to_string(),
+    })
+}
+
+/// Emit cache token counts as span attributes when non-zero.
+fn add_cache_attrs(attrs: &mut BTreeMap<String, String>, cache: &CacheTokens) {
+    if cache.cache_read_tokens > 0 {
+        attrs.insert(
+            "gen_ai.usage.cache_read_tokens".into(),
+            cache.cache_read_tokens.to_string(),
+        );
+    }
+    if cache.cache_creation_tokens > 0 {
+        attrs.insert(
+            "gen_ai.usage.cache_creation_tokens".into(),
+            cache.cache_creation_tokens.to_string(),
+        );
+    }
+}
 
 /// Shared application state passed to axum handlers via `State`.
 pub struct AppState {
@@ -74,9 +129,9 @@ pub async fn proxy_handler(
             .into_response();
     }
 
-    // ── 3. Buffer request body ──
-    let request_bytes = match body.collect().await {
-        Ok(collected) => collected.to_bytes(),
+    // ── 3. Buffer request body (with size limit) ──
+    let request_bytes = match axum::body::to_bytes(body, MAX_REQUEST_BODY).await {
+        Ok(bytes) => bytes,
         Err(e) => {
             error!(error = %e, "failed to read request body");
             return (StatusCode::BAD_REQUEST, "failed to read request body").into_response();
@@ -184,21 +239,28 @@ pub async fn proxy_handler(
         response_bytes.clone()
     };
 
-    // ── 9. Extract token usage ──
-    let usage = extract_token_usage(&response_bytes);
+    // ── 9. Extract token usage (provider-aware) ──
+    let (output_content_parsed, usage) =
+        parsers::extract_response_usage(&provider_name, &response_bytes);
+    let cache_tokens = parsers::extract_cache_tokens(&provider_name, &response_bytes);
 
     // ── 10. Build span ──
     let elapsed = start.elapsed();
     let end_time = Utc::now();
 
-    let input_content = String::from_utf8_lossy(&request_bytes)
+    // Truncate at byte boundary first to avoid decoding multi-MB bodies.
+    let input_content = String::from_utf8_lossy(&request_bytes[..request_bytes.len().min(16384)])
         .chars()
         .take(4096)
         .collect::<String>();
-    let output_content = String::from_utf8_lossy(&response_bytes)
-        .chars()
-        .take(4096)
-        .collect::<String>();
+    let output_content = if output_content_parsed.is_empty() {
+        String::from_utf8_lossy(&response_bytes[..response_bytes.len().min(16384)])
+            .chars()
+            .take(4096)
+            .collect::<String>()
+    } else {
+        output_content_parsed.chars().take(4096).collect::<String>()
+    };
 
     let span_status = if response_status.is_success() {
         SpanStatus::Ok
@@ -212,9 +274,19 @@ pub async fn proxy_handler(
         None
     };
 
+    // ── W3C Trace Context ──
+    let trace_ctx =
+        extract_header_str(&headers, "traceparent").and_then(|tp| parse_traceparent(&tp));
+
+    // Generate or validate request ID.
+    let request_id = extract_header_str(&headers, "x-request-id")
+        .filter(|id| validate_request_id(id))
+        .unwrap_or_else(new_trace_id);
+
     // Extract user/tenant/session from headers or baggage.
     let user_id = extract_header_str(&headers, "x-user-id");
-    let session_id = extract_header_str(&headers, "x-session-id");
+    let session_id =
+        extract_header_str(&headers, "x-session-id").filter(|id| validate_request_id(id));
     let tenant_id = extract_baggage_value(&headers, "candela.tenant_id");
     let job_id = extract_baggage_value(&headers, "candela.job_id");
 
@@ -225,6 +297,8 @@ pub async fn proxy_handler(
         "http.status_code".into(),
         response_status.as_u16().to_string(),
     );
+    attributes.insert("http.ttfb_ms".into(), elapsed.as_millis().to_string());
+    attributes.insert("http.request_id".into(), request_id.clone());
     attributes.insert("llm.provider".into(), provider_name.clone());
     if is_streaming {
         attributes.insert("llm.streaming".into(), "true".into());
@@ -232,11 +306,22 @@ pub async fn proxy_handler(
     if let Some(ref tid) = tenant_id {
         attributes.insert("candela.tenant_id".into(), tid.clone());
     }
+    add_cache_attrs(&mut attributes, &cache_tokens);
+
+    // Determine trace/span IDs from W3C context or generate new ones.
+    let (trace_id, parent_span_id) = if let Some(ref ctx) = trace_ctx {
+        (ctx.trace_id.clone(), Some(ctx.parent_span_id.clone()))
+    } else {
+        (
+            extract_header_str(&headers, "x-trace-id").unwrap_or_else(new_trace_id),
+            extract_header_str(&headers, "x-parent-span-id"),
+        )
+    };
 
     let span = Span {
         span_id: new_span_id(),
-        trace_id: extract_header_str(&headers, "x-trace-id").unwrap_or_else(new_trace_id),
-        parent_span_id: extract_header_str(&headers, "x-parent-span-id"),
+        trace_id,
+        parent_span_id,
         name: format!("llm.{provider_name}.chat"),
         kind: SpanKind::Llm,
         status: span_status,
@@ -244,16 +329,22 @@ pub async fn proxy_handler(
         start_time,
         end_time,
         duration: elapsed,
-        gen_ai: Some(GenAIAttributes {
-            model: model.clone(),
-            provider: provider_name.clone(),
-            input_tokens: usage.input_tokens,
-            output_tokens: usage.output_tokens,
-            total_tokens: usage.total_tokens,
-            input_content,
-            output_content,
-            ..Default::default()
-        }),
+        gen_ai: if model.is_empty() {
+            None
+        } else {
+            Some(GenAIAttributes {
+                model: model.clone(),
+                provider: provider_name.clone(),
+                input_tokens: usage.input_tokens,
+                output_tokens: usage.output_tokens,
+                total_tokens: usage.total_tokens,
+                input_content,
+                output_content,
+                cache_read_tokens: cache_tokens.cache_read_tokens,
+                cache_creation_tokens: cache_tokens.cache_creation_tokens,
+                ..Default::default()
+            })
+        },
         attributes,
         project_id: state.proxy.project_id().to_string(),
         environment: extract_header_str(&headers, "x-environment"),
@@ -286,6 +377,7 @@ pub async fn proxy_handler(
         .status(StatusCode::from_u16(response_status.as_u16()).unwrap_or(StatusCode::OK));
 
     response = response.header("content-type", upstream_content_type);
+    response = response.header("x-request-id", &request_id);
 
     response
         .body(Body::from(client_body))
@@ -311,43 +403,6 @@ fn detect_streaming(body: &[u8]) -> bool {
         .unwrap_or(false)
 }
 
-/// Extract token usage from upstream JSON response.
-///
-/// Supports both OpenAI (`prompt_tokens`/`completion_tokens`) and
-/// Anthropic (`input_tokens`/`output_tokens`) field names.
-/// Auto-computes `total_tokens` when not explicitly provided.
-fn extract_token_usage(body: &[u8]) -> TokenUsage {
-    let val: serde_json::Value = match serde_json::from_slice(body) {
-        Ok(v) => v,
-        Err(_) => return TokenUsage::default(),
-    };
-
-    if let Some(usage) = val.get("usage") {
-        let input = usage
-            .get("prompt_tokens")
-            .or_else(|| usage.get("input_tokens"))
-            .and_then(|v| v.as_i64())
-            .unwrap_or(0);
-        let output = usage
-            .get("completion_tokens")
-            .or_else(|| usage.get("output_tokens"))
-            .and_then(|v| v.as_i64())
-            .unwrap_or(0);
-        let total = usage
-            .get("total_tokens")
-            .and_then(|v| v.as_i64())
-            .unwrap_or_else(|| input.saturating_add(output));
-
-        return TokenUsage {
-            input_tokens: input,
-            output_tokens: output,
-            total_tokens: total,
-        };
-    }
-
-    TokenUsage::default()
-}
-
 /// Extract a string header value.
 fn extract_header_str(headers: &HeaderMap, key: &str) -> Option<String> {
     headers
@@ -360,7 +415,7 @@ fn extract_header_str(headers: &HeaderMap, key: &str) -> Option<String> {
 ///
 /// Handles multiple Baggage headers (per W3C spec) and case-insensitive
 /// key matching for `candela.tenant_id`.
-#[allow(clippy::collapsible_if)] // Intentional: avoid unstable let_chains for stable Rust.
+#[allow(clippy::collapsible_if)]
 fn extract_baggage_value(headers: &HeaderMap, key: &str) -> Option<String> {
     let key_lower = key.to_lowercase();
     for val in headers.get_all("baggage") {
@@ -379,14 +434,40 @@ fn extract_baggage_value(headers: &HeaderMap, key: &str) -> Option<String> {
 }
 
 /// Sanitize a URL path segment to prevent directory traversal attacks.
-///
-/// Removes `..` segments and normalizes the path to prevent requests like
-/// `/proxy/openai/../../admin/secret` from escaping the upstream API scope.
+/// URL-decodes first to catch %2e%2e encoded traversal.
 fn sanitize_path(path: &str) -> String {
-    path.split('/')
+    let decoded = urldecode(path);
+    decoded
+        .split('/')
         .filter(|seg| !seg.is_empty() && *seg != ".." && *seg != ".")
         .collect::<Vec<_>>()
         .join("/")
+}
+
+/// Minimal URL percent-decoding for path sanitization.
+fn urldecode(s: &str) -> String {
+    let mut result = Vec::with_capacity(s.len());
+    let mut bytes = s.as_bytes().iter();
+    while let Some(&b) = bytes.next() {
+        if b == b'%' {
+            let hi = bytes.next().copied().unwrap_or(b'0');
+            let lo = bytes.next().copied().unwrap_or(b'0');
+            let decoded = (hex_val(hi) << 4) | hex_val(lo);
+            result.push(decoded);
+        } else {
+            result.push(b);
+        }
+    }
+    String::from_utf8_lossy(&result).into_owned()
+}
+
+fn hex_val(b: u8) -> u8 {
+    match b {
+        b'0'..=b'9' => b - b'0',
+        b'a'..=b'f' => b - b'a' + 10,
+        b'A'..=b'F' => b - b'A' + 10,
+        _ => 0,
+    }
 }
 
 #[cfg(test)]
@@ -433,7 +514,7 @@ mod tests {
     fn extract_openai_token_usage() {
         let body =
             br#"{"usage": {"prompt_tokens": 100, "completion_tokens": 50, "total_tokens": 150}}"#;
-        let usage = extract_token_usage(body);
+        let (_, usage) = parsers::extract_response_usage("openai", body);
         assert_eq!(usage.input_tokens, 100);
         assert_eq!(usage.output_tokens, 50);
         assert_eq!(usage.total_tokens, 150);
@@ -442,7 +523,7 @@ mod tests {
     #[test]
     fn extract_anthropic_token_usage() {
         let body = br#"{"usage": {"input_tokens": 200, "output_tokens": 80}}"#;
-        let usage = extract_token_usage(body);
+        let (_, usage) = parsers::extract_response_usage("anthropic", body);
         assert_eq!(usage.input_tokens, 200);
         assert_eq!(usage.output_tokens, 80);
     }
@@ -450,7 +531,7 @@ mod tests {
     #[test]
     fn extract_token_usage_missing() {
         let body = br#"{"choices": []}"#;
-        let usage = extract_token_usage(body);
+        let (_, usage) = parsers::extract_response_usage("openai", body);
         assert_eq!(usage.input_tokens, 0);
     }
 
@@ -495,6 +576,21 @@ mod tests {
     }
 
     #[test]
+    fn extract_baggage_job_id() {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            "baggage",
+            "candela.tenant_id=acme,candela.job_id=exp-42"
+                .parse()
+                .unwrap(),
+        );
+        assert_eq!(
+            extract_baggage_value(&headers, "candela.job_id"),
+            Some("exp-42".into())
+        );
+    }
+
+    #[test]
     fn extract_header_str_present() {
         let mut headers = HeaderMap::new();
         headers.insert("x-user-id", "alice@example.com".parse().unwrap());
@@ -510,22 +606,102 @@ mod tests {
         assert_eq!(extract_header_str(&headers, "x-user-id"), None);
     }
 
-    // ── New unit tests ──
+    // ── W3C Trace Context tests ──
 
-    /// CRITICAL: Anthropic responses omit `total_tokens`. Ensure it's auto-computed.
     #[test]
-    fn extract_token_usage_auto_computes_total() {
-        let body = br#"{"usage": {"input_tokens": 300, "output_tokens": 120}}"#;
-        let usage = extract_token_usage(body);
-        assert_eq!(usage.input_tokens, 300);
-        assert_eq!(usage.output_tokens, 120);
-        assert_eq!(
-            usage.total_tokens, 420,
-            "total_tokens must be auto-computed as input + output when absent"
+    fn parse_traceparent_valid() {
+        let ctx = parse_traceparent("00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01");
+        assert!(ctx.is_some());
+        let ctx = ctx.unwrap();
+        assert_eq!(ctx.trace_id, "4bf92f3577b34da6a3ce929d0e0e4736");
+        assert_eq!(ctx.parent_span_id, "00f067aa0ba902b7");
+    }
+
+    #[test]
+    fn parse_traceparent_invalid_format() {
+        assert!(parse_traceparent("not-a-traceparent").is_none());
+        assert!(parse_traceparent("").is_none());
+        assert!(parse_traceparent("00-short-id-01").is_none());
+    }
+
+    #[test]
+    fn parse_traceparent_non_hex() {
+        assert!(
+            parse_traceparent("00-zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz-00f067aa0ba902b7-01").is_none()
         );
     }
 
-    /// CRITICAL: Path traversal must be sanitized to prevent upstream URL escape.
+    #[test]
+    fn parse_traceparent_extra_dashes() {
+        assert!(parse_traceparent("00-aa-bb-cc-dd").is_none());
+    }
+
+    #[test]
+    fn parse_traceparent_all_zeros() {
+        let tp = "00-00000000000000000000000000000000-0000000000000000-00";
+        let ctx = parse_traceparent(tp);
+        assert!(ctx.is_some());
+        assert_eq!(ctx.unwrap().trace_id, "00000000000000000000000000000000");
+    }
+
+    // ── Request ID validation tests ──
+
+    #[test]
+    fn validate_request_id_accepts_valid() {
+        assert!(validate_request_id("abc-123"));
+        assert!(validate_request_id("a1b2c3d4e5f6"));
+    }
+
+    #[test]
+    fn validate_request_id_with_dots_and_underscores() {
+        assert!(validate_request_id("req.id_123"));
+        assert!(validate_request_id("opencode_trace.v2"));
+    }
+
+    #[test]
+    fn validate_request_id_at_boundary() {
+        let max = "a".repeat(128);
+        assert!(validate_request_id(&max));
+        let over = "a".repeat(129);
+        assert!(!validate_request_id(&over));
+    }
+
+    #[test]
+    fn validate_request_id_rejects_injection() {
+        assert!(!validate_request_id("../../etc/passwd"));
+        assert!(!validate_request_id("id with spaces"));
+        assert!(!validate_request_id(""));
+        assert!(!validate_request_id("id;injection"));
+        assert!(!validate_request_id("id=value"));
+    }
+
+    // ── Cache attrs tests ──
+
+    #[test]
+    fn add_cache_attrs_adds_when_nonzero() {
+        let mut attrs = BTreeMap::new();
+        let cache = CacheTokens {
+            cache_read_tokens: 100,
+            cache_creation_tokens: 20,
+        };
+        add_cache_attrs(&mut attrs, &cache);
+        assert_eq!(attrs.get("gen_ai.usage.cache_read_tokens").unwrap(), "100");
+        assert_eq!(
+            attrs.get("gen_ai.usage.cache_creation_tokens").unwrap(),
+            "20"
+        );
+    }
+
+    #[test]
+    fn add_cache_attrs_skips_zero() {
+        let mut attrs = BTreeMap::new();
+        let cache = CacheTokens::default();
+        add_cache_attrs(&mut attrs, &cache);
+        assert!(!attrs.contains_key("gen_ai.usage.cache_read_tokens"));
+    }
+
+    // ── Path sanitization + URL-encoded traversal ──
+
     #[test]
     fn sanitize_path_removes_traversal() {
         assert_eq!(sanitize_path("../../admin/secret"), "admin/secret");
@@ -536,19 +712,109 @@ mod tests {
         );
     }
 
-    /// Normal paths should pass through sanitization unmodified.
     #[test]
     fn sanitize_path_preserves_normal() {
         assert_eq!(sanitize_path("v1/chat/completions"), "v1/chat/completions");
         assert_eq!(sanitize_path("v1/models"), "v1/models");
     }
 
-    /// Empty request body should produce zero token usage, not panic.
     #[test]
-    fn extract_token_usage_empty_body() {
-        let usage = extract_token_usage(b"");
-        assert_eq!(usage.input_tokens, 0);
-        assert_eq!(usage.output_tokens, 0);
-        assert_eq!(usage.total_tokens, 0);
+    fn sanitize_path_url_encoded_traversal() {
+        assert_eq!(sanitize_path("%2e%2e/admin/secret"), "admin/secret");
+        assert_eq!(sanitize_path("v1/%2E%2E/%2E%2E/etc"), "v1/etc");
+    }
+
+    #[test]
+    fn sanitize_path_mixed_encoding() {
+        assert_eq!(sanitize_path("../%2e%2e/secret"), "secret");
+    }
+
+    // ── urldecode tests ──
+
+    #[test]
+    fn urldecode_basic() {
+        assert_eq!(urldecode("hello%20world"), "hello world");
+        assert_eq!(urldecode("%2e%2e"), "..");
+    }
+
+    #[test]
+    fn urldecode_empty() {
+        assert_eq!(urldecode(""), "");
+    }
+
+    #[test]
+    fn urldecode_no_encoding() {
+        assert_eq!(urldecode("v1/chat/completions"), "v1/chat/completions");
+    }
+
+    #[test]
+    fn urldecode_uppercase_hex() {
+        assert_eq!(urldecode("%2E%2E"), "..");
+    }
+
+    #[test]
+    fn hex_val_digits() {
+        assert_eq!(hex_val(b'0'), 0);
+        assert_eq!(hex_val(b'9'), 9);
+        assert_eq!(hex_val(b'a'), 10);
+        assert_eq!(hex_val(b'f'), 15);
+        assert_eq!(hex_val(b'A'), 10);
+        assert_eq!(hex_val(b'F'), 15);
+        assert_eq!(hex_val(b'z'), 0);
+    }
+
+    // ── Baggage edge cases ──
+
+    #[test]
+    fn extract_baggage_whitespace_handling() {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            "baggage",
+            " candela.tenant_id = spaced-value , other=x "
+                .parse()
+                .unwrap(),
+        );
+        assert_eq!(
+            extract_baggage_value(&headers, "candela.tenant_id"),
+            Some("spaced-value".into())
+        );
+    }
+
+    #[test]
+    fn extract_baggage_empty_value() {
+        let mut headers = HeaderMap::new();
+        headers.insert("baggage", "candela.tenant_id=".parse().unwrap());
+        assert_eq!(
+            extract_baggage_value(&headers, "candela.tenant_id"),
+            Some("".into())
+        );
+    }
+
+    // ── Model extraction edge cases ──
+
+    #[test]
+    fn extract_model_nested_body() {
+        let body = br#"{"model":"claude-sonnet-4-20250514","max_tokens":1024}"#;
+        assert_eq!(extract_model(body), Some("claude-sonnet-4-20250514".into()));
+    }
+
+    #[test]
+    fn extract_model_numeric_model() {
+        let body = br#"{"model": 42}"#;
+        assert_eq!(extract_model(body), None);
+    }
+
+    // ── Streaming detection edge cases ──
+
+    #[test]
+    fn detect_streaming_with_string_true() {
+        let body = br#"{"model": "gpt-4", "stream": "true"}"#;
+        assert!(!detect_streaming(body));
+    }
+
+    #[test]
+    fn detect_streaming_null() {
+        let body = br#"{"model": "gpt-4", "stream": null}"#;
+        assert!(!detect_streaming(body));
     }
 }

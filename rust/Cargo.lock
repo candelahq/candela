@@ -183,6 +183,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "candela-proxy-bin"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "axum",
+ "candela-core",
+ "candela-processor",
+ "candela-proxy",
+ "candela-storage",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tower-http",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "candela-sidecar"
 version = "0.1.0"
 dependencies = [

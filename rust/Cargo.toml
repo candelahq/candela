@@ -5,6 +5,7 @@ members = [
     "crates/candela-proxy",
     "crates/candela-processor",
     "crates/candela-storage",
+    "bins/candela-proxy",
     "bins/candela-sidecar",
 ]
 

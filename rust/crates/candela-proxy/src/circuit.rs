@@ -155,4 +155,93 @@ mod tests {
         assert_eq!(cb.state(), State::Closed);
         assert!(cb.is_allowed());
     }
+
+    // ── New comprehensive tests ──
+
+    /// Threshold of 1 should trip immediately on first failure.
+    #[test]
+    fn threshold_one_trips_immediately() {
+        let mut cb = CircuitBreaker::new(1, Duration::from_secs(30));
+        assert!(cb.is_allowed());
+        cb.record_failure();
+        assert_eq!(cb.state(), State::Open);
+        assert!(!cb.is_allowed());
+    }
+
+    /// Success in half-open state should reset failure count to 0.
+    #[test]
+    fn success_in_half_open_resets_failure_count() {
+        let mut cb = CircuitBreaker::new(3, Duration::from_secs(30));
+        // Trip the breaker.
+        for _ in 0..3 {
+            cb.record_failure();
+        }
+        assert_eq!(cb.failure_count, 3);
+
+        // Simulate entering half-open and succeeding.
+        cb.state = State::HalfOpen;
+        cb.record_success();
+        assert_eq!(cb.failure_count, 0);
+        assert_eq!(cb.state(), State::Closed);
+
+        // Should now tolerate 2 more failures before tripping again.
+        cb.record_failure();
+        cb.record_failure();
+        assert!(cb.is_allowed());
+    }
+
+    /// Rapid alternation between success and failure should not trip if
+    /// failures never accumulate to threshold.
+    #[test]
+    fn interleaved_success_failure_stays_closed() {
+        let mut cb = CircuitBreaker::new(3, Duration::from_secs(30));
+        for _ in 0..100 {
+            cb.record_failure();
+            cb.record_success(); // resets count
+        }
+        assert_eq!(cb.state(), State::Closed);
+        assert!(cb.is_allowed());
+    }
+
+    /// New breaker with very short timeout should transition quickly.
+    #[test]
+    fn very_short_timeout_transitions() {
+        let mut cb = CircuitBreaker::new(1, Duration::from_millis(1));
+        cb.record_failure();
+        assert_eq!(cb.state(), State::Open);
+
+        // Sleep past the timeout.
+        std::thread::sleep(Duration::from_millis(5));
+
+        // Should transition to HalfOpen on next check.
+        assert!(cb.is_allowed());
+        assert_eq!(cb.state(), State::HalfOpen);
+    }
+
+    /// Multiple successes after reset should keep state closed.
+    #[test]
+    fn multiple_successes_keep_closed() {
+        let mut cb = CircuitBreaker::new(3, Duration::from_secs(30));
+        for _ in 0..100 {
+            cb.record_success();
+        }
+        assert_eq!(cb.state(), State::Closed);
+        assert_eq!(cb.failure_count, 0);
+    }
+
+    /// Breaker should stay open until timeout elapses, even with more failures.
+    #[test]
+    fn stays_open_with_continued_failures() {
+        let mut cb = CircuitBreaker::new(2, Duration::from_secs(300));
+        cb.record_failure();
+        cb.record_failure();
+        assert_eq!(cb.state(), State::Open);
+
+        // More failures shouldn't change state (already open).
+        for _ in 0..10 {
+            cb.record_failure();
+        }
+        assert_eq!(cb.state(), State::Open);
+        assert!(!cb.is_allowed());
+    }
 }

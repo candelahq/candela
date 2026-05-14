@@ -883,6 +883,21 @@ func buildCloudProxy(cfg Config, submitter *processor.SpanProcessor) (*proxy.Pro
 				ProjectID: project,
 				Region:    region,
 			}
+		case "anthropic-direct":
+			// Native Anthropic Messages API passthrough — client provides its own
+			// API key via x-api-key or Authorization header. No ADC, no Vertex AI.
+			// This is the Claude Code LLM gateway mode.
+			p.UpstreamURL = "https://api.anthropic.com"
+			p.TokenSource = nil // Client manages auth, not ADC.
+		case "anthropic-vertex":
+			// Native Anthropic Messages API routed via Vertex AI rawPredict.
+			// Candela injects GCP ADC auth — no client API key needed.
+			// For Claude Code: ANTHROPIC_BASE_URL=http://localhost:8181/proxy/anthropic-vertex
+			p.UpstreamURL = fmt.Sprintf("https://%s-aiplatform.googleapis.com", region)
+			p.PathRewriter = &proxy.VertexAIPathRewriter{
+				ProjectID: project,
+				Region:    region,
+			}
 		default:
 			slog.Warn("unknown provider — skipping", "name", lp.Name)
 			continue

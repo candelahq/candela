@@ -551,4 +551,178 @@ mod tests {
         assert_eq!(usage.output_tokens, 0);
         assert_eq!(usage.total_tokens, 0);
     }
+
+    // ── New comprehensive tests ──
+
+    /// Streaming detection should handle non-boolean `stream` field gracefully.
+    #[test]
+    fn detect_streaming_string_true() {
+        // Some clients send "true" as a string — should not detect as streaming.
+        let body = br#"{"model": "gpt-4", "stream": "true"}"#;
+        assert!(
+            !detect_streaming(body),
+            "string 'true' should not be detected as boolean true"
+        );
+    }
+
+    #[test]
+    fn detect_streaming_null_value() {
+        let body = br#"{"model": "gpt-4", "stream": null}"#;
+        assert!(!detect_streaming(body));
+    }
+
+    #[test]
+    fn detect_streaming_numeric_one() {
+        // Some clients send 1 instead of true.
+        let body = br#"{"model": "gpt-4", "stream": 1}"#;
+        assert!(
+            !detect_streaming(body),
+            "numeric 1 should not be detected as boolean true"
+        );
+    }
+
+    /// Token usage with very large values should not overflow.
+    #[test]
+    fn extract_token_usage_large_values() {
+        let body = br#"{"usage": {"prompt_tokens": 9999999999, "completion_tokens": 9999999999, "total_tokens": 19999999998}}"#;
+        let usage = extract_token_usage(body);
+        assert_eq!(usage.input_tokens, 9999999999);
+        assert_eq!(usage.output_tokens, 9999999999);
+        assert_eq!(usage.total_tokens, 19999999998);
+    }
+
+    /// Token usage with fractional values should truncate, not panic.
+    #[test]
+    fn extract_token_usage_fractional_truncated() {
+        let body = br#"{"usage": {"prompt_tokens": 100.7, "completion_tokens": 50.3}}"#;
+        let usage = extract_token_usage(body);
+        // as_i64() returns None for floats, so should fall back to 0.
+        assert_eq!(usage.input_tokens, 0);
+        assert_eq!(usage.output_tokens, 0);
+    }
+
+    /// Token usage with negative values should be passed through (clamped at cost calc).
+    #[test]
+    fn extract_token_usage_negative_values() {
+        let body = br#"{"usage": {"prompt_tokens": -100, "completion_tokens": -50}}"#;
+        let usage = extract_token_usage(body);
+        assert_eq!(usage.input_tokens, -100);
+        assert_eq!(usage.output_tokens, -50);
+    }
+
+    /// Usage nested inside a "data" wrapper (streaming final chunk) should not be found.
+    #[test]
+    fn extract_token_usage_nested_data_not_found() {
+        let body = br#"{"data": {"usage": {"prompt_tokens": 100}}}"#;
+        let usage = extract_token_usage(body);
+        assert_eq!(
+            usage.input_tokens, 0,
+            "usage nested inside 'data' should not be extracted"
+        );
+    }
+
+    /// Path sanitization should handle consecutive slashes.
+    #[test]
+    fn sanitize_path_consecutive_slashes() {
+        assert_eq!(
+            sanitize_path("v1///chat///completions"),
+            "v1/chat/completions"
+        );
+    }
+
+    /// Path sanitization should handle URL-encoded traversal (already decoded).
+    #[test]
+    fn sanitize_path_mixed_dots_and_segments() {
+        assert_eq!(
+            sanitize_path("../v1/../../chat/../completions"),
+            "v1/chat/completions"
+        );
+    }
+
+    /// Path sanitization with only dots/slashes should return empty.
+    #[test]
+    fn sanitize_path_only_traversal() {
+        assert_eq!(sanitize_path("../../.."), "");
+        assert_eq!(sanitize_path("///"), "");
+        assert_eq!(sanitize_path(""), "");
+    }
+
+    /// Baggage with trailing/leading whitespace should be handled.
+    #[test]
+    fn extract_baggage_whitespace_handling() {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            "baggage",
+            "  candela.tenant_id = spaced-tenant , other = val "
+                .parse()
+                .unwrap(),
+        );
+        assert_eq!(
+            extract_baggage_value(&headers, "candela.tenant_id"),
+            Some("spaced-tenant".into()),
+        );
+    }
+
+    /// Empty baggage header should return None, not panic.
+    #[test]
+    fn extract_baggage_empty_header() {
+        let mut headers = HeaderMap::new();
+        headers.insert("baggage", "".parse().unwrap());
+        assert_eq!(extract_baggage_value(&headers, "candela.tenant_id"), None);
+    }
+
+    /// Baggage with properties (semicolons) — handler's simpler parser
+    /// does not strip properties (unlike attribution.rs's parse_baggage).
+    /// This documents the current behavior.
+    #[test]
+    fn extract_baggage_with_properties() {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            "baggage",
+            "candela.tenant_id=acme;expires=2026-01-01,other=val"
+                .parse()
+                .unwrap(),
+        );
+        // The handler's extract_baggage_value splits on ',' then '=' but does
+        // NOT strip semicolon properties — the value includes everything after '='.
+        assert_eq!(
+            extract_baggage_value(&headers, "candela.tenant_id"),
+            Some("acme;expires=2026-01-01".into()),
+        );
+    }
+
+    /// Model extraction should handle nested content arrays.
+    #[test]
+    fn extract_model_from_anthropic_body() {
+        let body = br#"{"model": "claude-sonnet-4-20250514", "messages": [{"role": "user", "content": [{"type": "text", "text": "hi"}]}], "max_tokens": 1024}"#;
+        assert_eq!(extract_model(body), Some("claude-sonnet-4-20250514".into()));
+    }
+
+    /// Model extraction should handle empty string model.
+    #[test]
+    fn extract_model_empty_string() {
+        let body = br#"{"model": "", "messages": []}"#;
+        assert_eq!(extract_model(body), Some("".into()));
+    }
+
+    /// Model extraction with numeric model field should return None.
+    #[test]
+    fn extract_model_numeric_value() {
+        let body = br#"{"model": 42, "messages": []}"#;
+        assert_eq!(
+            extract_model(body),
+            None,
+            "numeric model should return None"
+        );
+    }
+
+    /// Token usage with only total_tokens (no breakdown) should preserve total.
+    #[test]
+    fn extract_token_usage_only_total() {
+        let body = br#"{"usage": {"total_tokens": 500}}"#;
+        let usage = extract_token_usage(body);
+        assert_eq!(usage.input_tokens, 0);
+        assert_eq!(usage.output_tokens, 0);
+        assert_eq!(usage.total_tokens, 500);
+    }
 }

@@ -206,4 +206,103 @@ mod tests {
         assert!(!calc.has_pricing("unknown-model-xyz"));
         assert!(!calc.has_pricing(""));
     }
+
+    // ── New comprehensive tests ──
+
+    /// All Gemini model variants should have pricing.
+    #[test]
+    fn all_gemini_models_have_pricing() {
+        let calc = CostCalculator::new();
+        for model in &[
+            "gemini-3.1-pro",
+            "gemini-2.5-pro",
+            "gemini-2.5-flash",
+            "gemini-2.5-flash-lite",
+            "gemini-2.0-flash",
+            "gemini-2.0-pro",
+            "gemini-1.5-flash",
+            "gemini-1.5-pro",
+        ] {
+            assert!(calc.has_pricing(model), "missing pricing for {model}");
+        }
+    }
+
+    /// All OpenAI reasoning models should have pricing.
+    #[test]
+    fn all_reasoning_models_have_pricing() {
+        let calc = CostCalculator::new();
+        for model in &["o3", "o3-mini", "o1", "o1-mini"] {
+            assert!(calc.has_pricing(model), "missing pricing for {model}");
+        }
+    }
+
+    /// Claude pricing hierarchy: Opus > Sonnet > Haiku.
+    #[test]
+    fn claude_pricing_hierarchy() {
+        let calc = CostCalculator::new();
+        let opus = calc.calculate("anthropic", "claude-opus-4.6", 1_000_000, 1_000_000);
+        let sonnet = calc.calculate("anthropic", "claude-sonnet-4.6", 1_000_000, 1_000_000);
+        let haiku = calc.calculate("anthropic", "claude-haiku-4.5", 1_000_000, 1_000_000);
+        assert!(
+            opus > sonnet,
+            "Opus ({opus}) should be more expensive than Sonnet ({sonnet})"
+        );
+        assert!(
+            sonnet > haiku,
+            "Sonnet ({sonnet}) should be more expensive than Haiku ({haiku})"
+        );
+    }
+
+    /// GPT pricing hierarchy: Pro > Standard > Mini > Nano.
+    #[test]
+    fn gpt54_pricing_hierarchy() {
+        let calc = CostCalculator::new();
+        let pro = calc.calculate("openai", "gpt-5.4-pro", 1_000_000, 1_000_000);
+        let standard = calc.calculate("openai", "gpt-5.4", 1_000_000, 1_000_000);
+        let mini = calc.calculate("openai", "gpt-5.4-mini", 1_000_000, 1_000_000);
+        let nano = calc.calculate("openai", "gpt-5.4-nano", 1_000_000, 1_000_000);
+        assert!(pro > standard, "Pro ({pro}) > Standard ({standard})");
+        assert!(standard > mini, "Standard ({standard}) > Mini ({mini})");
+        assert!(mini > nano, "Mini ({mini}) > Nano ({nano})");
+    }
+
+    /// Very large token count should not panic or produce NaN.
+    #[test]
+    fn large_token_count_no_panic() {
+        let calc = CostCalculator::new();
+        let cost = calc.calculate("openai", "gpt-4o", i64::MAX, i64::MAX);
+        assert!(cost.is_finite(), "cost must be finite, got {cost}");
+        assert!(cost > 0.0);
+    }
+
+    /// Single-token precision: cost should be calculable for 1 token.
+    #[test]
+    fn single_token_cost_precision() {
+        let calc = CostCalculator::new();
+        let cost = calc.calculate("openai", "gpt-4o", 1, 0);
+        // 1 token @ $2.50/M = $0.0000025
+        assert!(cost > 0.0, "single token should produce non-zero cost");
+        assert!((cost - 2.5e-6).abs() < 1e-9);
+    }
+
+    /// Provider field is ignored — only model matters for pricing.
+    #[test]
+    fn provider_field_ignored() {
+        let calc = CostCalculator::new();
+        let cost_a = calc.calculate("openai", "gpt-4o", 1000, 1000);
+        let cost_b = calc.calculate("anything", "gpt-4o", 1000, 1000);
+        assert_eq!(cost_a, cost_b, "provider field should not affect cost");
+    }
+
+    /// Output tokens are typically more expensive than input tokens.
+    #[test]
+    fn output_more_expensive_than_input() {
+        let calc = CostCalculator::new();
+        let input_only = calc.calculate("openai", "gpt-4o", 1_000_000, 0);
+        let output_only = calc.calculate("openai", "gpt-4o", 0, 1_000_000);
+        assert!(
+            output_only > input_only,
+            "output ({output_only}) should cost more than input ({input_only}) for gpt-4o"
+        );
+    }
 }

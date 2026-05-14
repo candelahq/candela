@@ -237,3 +237,103 @@ func TestGetParser_UnknownProvider_ReturnsFallback(t *testing.T) {
 		t.Error("expected fallback parser for unknown provider")
 	}
 }
+
+// ── Cache token extraction tests ────────────────────────────────────────────
+
+func TestExtractCacheTokens_Anthropic(t *testing.T) {
+	body := []byte(`{
+		"usage": {
+			"input_tokens": 21,
+			"cache_read_input_tokens": 188086,
+			"cache_creation_input_tokens": 500,
+			"output_tokens": 393
+		}
+	}`)
+
+	ct := extractCacheTokens("anthropic", body)
+	if ct.CacheReadTokens != 188086 {
+		t.Errorf("CacheReadTokens = %d, want 188086", ct.CacheReadTokens)
+	}
+	if ct.CacheCreationTokens != 500 {
+		t.Errorf("CacheCreationTokens = %d, want 500", ct.CacheCreationTokens)
+	}
+
+	// Also works for anthropic-direct and anthropic-vertex.
+	for _, provider := range []string{"anthropic-direct", "anthropic-vertex"} {
+		ct2 := extractCacheTokens(provider, body)
+		if ct2.CacheReadTokens != 188086 {
+			t.Errorf("%s: CacheReadTokens = %d, want 188086", provider, ct2.CacheReadTokens)
+		}
+	}
+}
+
+func TestExtractCacheTokens_OpenAI(t *testing.T) {
+	body := []byte(`{
+		"usage": {
+			"prompt_tokens": 5000,
+			"completion_tokens": 200,
+			"prompt_tokens_details": {
+				"cached_tokens": 4096
+			}
+		}
+	}`)
+
+	ct := extractCacheTokens("openai", body)
+	if ct.CacheReadTokens != 4096 {
+		t.Errorf("CacheReadTokens = %d, want 4096", ct.CacheReadTokens)
+	}
+	if ct.CacheCreationTokens != 0 {
+		t.Errorf("CacheCreationTokens = %d, want 0 (OpenAI has no creation concept)", ct.CacheCreationTokens)
+	}
+
+	// gemini-oai uses the same OpenAI format.
+	ct2 := extractCacheTokens("gemini-oai", body)
+	if ct2.CacheReadTokens != 4096 {
+		t.Errorf("gemini-oai: CacheReadTokens = %d, want 4096", ct2.CacheReadTokens)
+	}
+}
+
+func TestExtractCacheTokens_Google(t *testing.T) {
+	body := []byte(`{
+		"candidates": [{"content": {"parts": [{"text": "hi"}]}}],
+		"usageMetadata": {
+			"promptTokenCount": 100,
+			"candidatesTokenCount": 50,
+			"cachedContentTokenCount": 80,
+			"totalTokenCount": 150
+		}
+	}`)
+
+	ct := extractCacheTokens("google", body)
+	if ct.CacheReadTokens != 80 {
+		t.Errorf("CacheReadTokens = %d, want 80", ct.CacheReadTokens)
+	}
+	if ct.CacheCreationTokens != 0 {
+		t.Errorf("CacheCreationTokens = %d, want 0 (Google has no creation concept)", ct.CacheCreationTokens)
+	}
+}
+
+func TestExtractCacheTokens_UnknownProvider(t *testing.T) {
+	body := []byte(`{"usage": {"cached_tokens": 999}}`)
+	ct := extractCacheTokens("unknown-provider", body)
+	if ct.CacheReadTokens != 0 || ct.CacheCreationTokens != 0 {
+		t.Errorf("unknown provider should return zeros, got read=%d creation=%d",
+			ct.CacheReadTokens, ct.CacheCreationTokens)
+	}
+}
+
+func TestExtractStreamingCacheTokens_Anthropic(t *testing.T) {
+	stream := []byte(`data: {"type":"message_start","message":{"usage":{"input_tokens":10,"cache_read_input_tokens":50000,"cache_creation_input_tokens":200}}}
+data: {"type":"content_block_delta","delta":{"type":"text_delta","text":"hello"}}
+data: {"type":"message_delta","usage":{"output_tokens":42}}
+data: [DONE]
+`)
+
+	ct := extractStreamingCacheTokens("anthropic", stream)
+	if ct.CacheReadTokens != 50000 {
+		t.Errorf("CacheReadTokens = %d, want 50000", ct.CacheReadTokens)
+	}
+	if ct.CacheCreationTokens != 200 {
+		t.Errorf("CacheCreationTokens = %d, want 200", ct.CacheCreationTokens)
+	}
+}

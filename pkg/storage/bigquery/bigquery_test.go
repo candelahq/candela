@@ -246,3 +246,128 @@ func TestBuildTrace_TenantIDPreserved(t *testing.T) {
 		t.Errorf("TenantID = %q, want acme-corp", trace.Spans[0].TenantID)
 	}
 }
+
+// ── Duration fix integration tests ──────────────────────────────────────────
+
+func TestBuildTrace_DurationWithParentSpan(t *testing.T) {
+	// Regression test for the 0ms duration bug:
+	// When ALL spans have a ParentSpanID (W3C trace context propagation),
+	// buildTrace must still compute a non-zero duration from the time range.
+	now := time.Now().UTC()
+	spans := []storage.Span{
+		{
+			SpanID:       "proxy-span-1",
+			TraceID:      "external-trace-id",
+			ParentSpanID: "external-parent-id", // ← has parent, NOT a root span
+			Name:         "anthropic.chat.stream",
+			StartTime:    now,
+			EndTime:      now.Add(5 * time.Second),
+			GenAI: &storage.GenAIAttributes{
+				TotalTokens: 1000,
+				CostUSD:     0.10,
+			},
+		},
+		{
+			SpanID:       "proxy-span-2",
+			TraceID:      "external-trace-id",
+			ParentSpanID: "external-parent-id", // also has parent
+			Name:         "anthropic.chat.stream",
+			StartTime:    now.Add(6 * time.Second),
+			EndTime:      now.Add(10 * time.Second),
+			GenAI: &storage.GenAIAttributes{
+				TotalTokens: 2000,
+				CostUSD:     0.20,
+			},
+		},
+	}
+
+	trace := buildTrace("external-trace-id", spans)
+
+	if trace.Duration == 0 {
+		t.Fatal("Duration is 0 — the fallback for traces without root spans is broken")
+	}
+	if trace.Duration != 10*time.Second {
+		t.Errorf("Duration = %v, want 10s (from earliest start to latest end)", trace.Duration)
+	}
+	// RootSpanName should be empty since no span has ParentSpanID=="".
+	if trace.RootSpanName != "" {
+		t.Errorf("RootSpanName = %q, want empty (no root span exists)", trace.RootSpanName)
+	}
+	// Tokens and cost should still be aggregated.
+	if trace.TotalTokens != 3000 {
+		t.Errorf("TotalTokens = %d, want 3000", trace.TotalTokens)
+	}
+}
+
+func TestBuildTrace_DurationWithRootSpan(t *testing.T) {
+	// Regression guard: when a root span EXISTS, its duration should be used
+	// (not the fallback). This ensures the fix didn't break the normal path.
+	now := time.Now().UTC()
+	spans := []storage.Span{
+		{
+			SpanID:       "root-span",
+			TraceID:      "trace-normal",
+			ParentSpanID: "", // root span
+			Name:         "openai.chat",
+			StartTime:    now,
+			EndTime:      now.Add(3 * time.Second),
+		},
+		{
+			SpanID:       "child-span",
+			TraceID:      "trace-normal",
+			ParentSpanID: "root-span",
+			Name:         "tool.call",
+			StartTime:    now.Add(500 * time.Millisecond),
+			EndTime:      now.Add(2 * time.Second),
+		},
+	}
+
+	trace := buildTrace("trace-normal", spans)
+
+	if trace.Duration != 3*time.Second {
+		t.Errorf("Duration = %v, want 3s (from root span)", trace.Duration)
+	}
+	if trace.RootSpanName != "openai.chat" {
+		t.Errorf("RootSpanName = %q, want openai.chat", trace.RootSpanName)
+	}
+}
+
+func TestSpanRowRoundtrip_CacheTokens(t *testing.T) {
+	// Verify that cache token fields survive the spanToRow → rowToSpan roundtrip.
+	now := time.Now().UTC().Truncate(time.Millisecond)
+	original := storage.Span{
+		SpanID:    "span-cache",
+		TraceID:   "trace-cache",
+		Name:      "anthropic.chat.stream",
+		StartTime: now,
+		EndTime:   now.Add(2 * time.Second),
+		Duration:  2 * time.Second,
+		GenAI: &storage.GenAIAttributes{
+			Model:               "claude-sonnet-4-20250514",
+			Provider:            "anthropic",
+			InputTokens:         19455, // cost-normalized
+			OutputTokens:        393,
+			TotalTokens:         19848,
+			CostUSD:             0.64,
+			CacheReadTokens:     188086, // raw from API
+			CacheCreationTokens: 500,    // raw from API
+		},
+	}
+
+	row := spanToRow(original)
+	roundtripped := rowToSpan(row)
+
+	if roundtripped.GenAI == nil {
+		t.Fatal("GenAI is nil after roundtrip")
+	}
+	if roundtripped.GenAI.CacheReadTokens != 188086 {
+		t.Errorf("CacheReadTokens = %d, want 188086", roundtripped.GenAI.CacheReadTokens)
+	}
+	if roundtripped.GenAI.CacheCreationTokens != 500 {
+		t.Errorf("CacheCreationTokens = %d, want 500", roundtripped.GenAI.CacheCreationTokens)
+	}
+	// Also verify the cost-normalized tokens survived.
+	if roundtripped.GenAI.InputTokens != 19455 {
+		t.Errorf("InputTokens = %d, want 19455", roundtripped.GenAI.InputTokens)
+	}
+}

@@ -905,6 +905,7 @@ type spanParams struct {
 	outputContent   string
 	inputTokens     int64
 	outputTokens    int64
+	cacheTokens     CacheTokens // raw prompt cache breakdown
 	startTime       time.Time
 	endTime         time.Time
 	status          storage.SpanStatus
@@ -1008,6 +1009,14 @@ func (p *Proxy) buildSpan(ctx context.Context, params spanParams) {
 	for k, v := range params.extraAttrs {
 		attrs[k] = v
 	}
+	// Expose raw cache token counts as attributes so the UI can show
+	// cache utilization regardless of provider (Anthropic, OpenAI, Google).
+	if params.cacheTokens.CacheReadTokens > 0 {
+		attrs["gen_ai.usage.cache_read_tokens"] = fmt.Sprintf("%d", params.cacheTokens.CacheReadTokens)
+	}
+	if params.cacheTokens.CacheCreationTokens > 0 {
+		attrs["gen_ai.usage.cache_creation_tokens"] = fmt.Sprintf("%d", params.cacheTokens.CacheCreationTokens)
+	}
 
 	// Use caller's trace context if present (W3C Trace Context propagation).
 	// This nests the proxy span under the caller's OTel span.
@@ -1030,14 +1039,16 @@ func (p *Proxy) buildSpan(ctx context.Context, params spanParams) {
 		Duration:     params.endTime.Sub(params.startTime),
 		ProjectID:    p.projectID,
 		GenAI: &storage.GenAIAttributes{
-			Model:         params.model,
-			Provider:      params.provider.Name,
-			InputTokens:   params.inputTokens,
-			OutputTokens:  params.outputTokens,
-			TotalTokens:   totalTokens,
-			CostUSD:       cost,
-			InputContent:  params.inputContent,
-			OutputContent: params.outputContent,
+			Model:               params.model,
+			Provider:            params.provider.Name,
+			InputTokens:         params.inputTokens,
+			OutputTokens:        params.outputTokens,
+			TotalTokens:         totalTokens,
+			CostUSD:             cost,
+			InputContent:        params.inputContent,
+			OutputContent:       params.outputContent,
+			CacheReadTokens:     params.cacheTokens.CacheReadTokens,
+			CacheCreationTokens: params.cacheTokens.CacheCreationTokens,
 		},
 		Attributes: attrs,
 	}
@@ -1085,6 +1096,7 @@ func (p *Proxy) createSpan(
 ) {
 	model, inputContent := extractRequestInfo(provider.Name, reqBody)
 	outputContent, inputTokens, outputTokens := extractResponseInfo(provider.Name, respBody)
+	ct := extractCacheTokens(provider.Name, respBody)
 
 	status := storage.SpanStatusOK
 	if statusCode >= 400 {
@@ -1101,6 +1113,7 @@ func (p *Proxy) createSpan(
 		outputContent:   outputContent,
 		inputTokens:     inputTokens,
 		outputTokens:    outputTokens,
+		cacheTokens:     ct,
 		startTime:       startTime,
 		endTime:         endTime,
 		status:          status,
@@ -1133,6 +1146,7 @@ func (p *Proxy) createStreamingSpan(
 ) {
 	model, inputContent := extractRequestInfo(provider.Name, reqBody)
 	outputContent, inputTokens, outputTokens := extractStreamingUsage(provider.Name, streamData)
+	ct := extractStreamingCacheTokens(provider.Name, streamData)
 
 	p.buildSpan(ctx, spanParams{
 		provider:        provider,
@@ -1144,6 +1158,7 @@ func (p *Proxy) createStreamingSpan(
 		outputContent:   outputContent,
 		inputTokens:     inputTokens,
 		outputTokens:    outputTokens,
+		cacheTokens:     ct,
 		startTime:       startTime,
 		endTime:         endTime,
 		status:          streamStatus,

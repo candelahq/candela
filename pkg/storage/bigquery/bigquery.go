@@ -80,32 +80,34 @@ type AttributeKV struct {
 
 // spanRow is the BigQuery row schema for a span.
 type spanRow struct {
-	SpanID        string        `bigquery:"span_id"`
-	TraceID       string        `bigquery:"trace_id"`
-	ParentSpanID  string        `bigquery:"parent_span_id"`
-	Name          string        `bigquery:"name"`
-	Kind          int           `bigquery:"kind"`
-	Status        int           `bigquery:"status"`
-	StatusMessage string        `bigquery:"status_message"`
-	StartTime     time.Time     `bigquery:"start_time"`
-	EndTime       time.Time     `bigquery:"end_time"`
-	DurationNs    int64         `bigquery:"duration_ns"`
-	ProjectID     string        `bigquery:"project_id"`
-	Environment   string        `bigquery:"environment"`
-	ServiceName   string        `bigquery:"service_name"`
-	GenAIModel    string        `bigquery:"gen_ai_model"`
-	GenAIProvider string        `bigquery:"gen_ai_provider"`
-	InputTokens   int64         `bigquery:"gen_ai_input_tokens"`
-	OutputTokens  int64         `bigquery:"gen_ai_output_tokens"`
-	TotalTokens   int64         `bigquery:"gen_ai_total_tokens"`
-	CostUSD       float64       `bigquery:"gen_ai_cost_usd"`
-	Temperature   float64       `bigquery:"gen_ai_temperature"`
-	MaxTokens     int64         `bigquery:"gen_ai_max_tokens"`
-	InputContent  string        `bigquery:"gen_ai_input_content"`
-	OutputContent string        `bigquery:"gen_ai_output_content"`
-	Attributes    []AttributeKV `bigquery:"attributes"`
-	UserID        string        `bigquery:"user_id"`
-	SessionID     string        `bigquery:"session_id"`
+	SpanID              string        `bigquery:"span_id"`
+	TraceID             string        `bigquery:"trace_id"`
+	ParentSpanID        string        `bigquery:"parent_span_id"`
+	Name                string        `bigquery:"name"`
+	Kind                int           `bigquery:"kind"`
+	Status              int           `bigquery:"status"`
+	StatusMessage       string        `bigquery:"status_message"`
+	StartTime           time.Time     `bigquery:"start_time"`
+	EndTime             time.Time     `bigquery:"end_time"`
+	DurationNs          int64         `bigquery:"duration_ns"`
+	ProjectID           string        `bigquery:"project_id"`
+	Environment         string        `bigquery:"environment"`
+	ServiceName         string        `bigquery:"service_name"`
+	GenAIModel          string        `bigquery:"gen_ai_model"`
+	GenAIProvider       string        `bigquery:"gen_ai_provider"`
+	InputTokens         int64         `bigquery:"gen_ai_input_tokens"`
+	OutputTokens        int64         `bigquery:"gen_ai_output_tokens"`
+	TotalTokens         int64         `bigquery:"gen_ai_total_tokens"`
+	CostUSD             float64       `bigquery:"gen_ai_cost_usd"`
+	Temperature         float64       `bigquery:"gen_ai_temperature"`
+	MaxTokens           int64         `bigquery:"gen_ai_max_tokens"`
+	InputContent        string        `bigquery:"gen_ai_input_content"`
+	OutputContent       string        `bigquery:"gen_ai_output_content"`
+	CacheReadTokens     int64         `bigquery:"gen_ai_cache_read_tokens"`
+	CacheCreationTokens int64         `bigquery:"gen_ai_cache_creation_tokens"`
+	Attributes          []AttributeKV `bigquery:"attributes"`
+	UserID              string        `bigquery:"user_id"`
+	SessionID           string        `bigquery:"session_id"`
 	// TenantID identifies the downstream customer on whose behalf this LLM call
 	// was made. Populated from X-Candela-Tenant-Id header or W3C Baggage.
 	TenantID string `bigquery:"tenant_id"`
@@ -142,6 +144,8 @@ func spanToRow(span storage.Span) spanRow {
 		row.MaxTokens = span.GenAI.MaxTokens
 		row.InputContent = span.GenAI.InputContent
 		row.OutputContent = span.GenAI.OutputContent
+		row.CacheReadTokens = span.GenAI.CacheReadTokens
+		row.CacheCreationTokens = span.GenAI.CacheCreationTokens
 	}
 
 	for k, v := range span.Attributes {
@@ -173,16 +177,18 @@ func rowToSpan(row spanRow) storage.Span {
 
 	if row.GenAIModel != "" {
 		span.GenAI = &storage.GenAIAttributes{
-			Model:         row.GenAIModel,
-			Provider:      row.GenAIProvider,
-			InputTokens:   row.InputTokens,
-			OutputTokens:  row.OutputTokens,
-			TotalTokens:   row.TotalTokens,
-			CostUSD:       row.CostUSD,
-			Temperature:   row.Temperature,
-			MaxTokens:     row.MaxTokens,
-			InputContent:  row.InputContent,
-			OutputContent: row.OutputContent,
+			Model:               row.GenAIModel,
+			Provider:            row.GenAIProvider,
+			InputTokens:         row.InputTokens,
+			OutputTokens:        row.OutputTokens,
+			TotalTokens:         row.TotalTokens,
+			CostUSD:             row.CostUSD,
+			Temperature:         row.Temperature,
+			MaxTokens:           row.MaxTokens,
+			InputContent:        row.InputContent,
+			OutputContent:       row.OutputContent,
+			CacheReadTokens:     row.CacheReadTokens,
+			CacheCreationTokens: row.CacheCreationTokens,
 		}
 	}
 
@@ -884,15 +890,31 @@ func buildTrace(traceID string, spans []storage.Span) *storage.Trace {
 		trace.Environment = spans[0].Environment
 	}
 
+	// Track the latest EndTime across all spans so we can compute trace
+	// duration even when no root span exists (W3C trace context propagation
+	// gives every proxy span a parentSpanID, so ParentSpanID=="" never matches).
+	var latestEnd time.Time
+
 	for _, span := range spans {
 		if span.ParentSpanID == "" {
 			trace.RootSpanName = span.Name
 			trace.Duration = span.EndTime.Sub(span.StartTime)
 		}
+		if span.EndTime.After(latestEnd) {
+			latestEnd = span.EndTime
+		}
 		if span.GenAI != nil {
 			trace.TotalTokens += span.GenAI.TotalTokens
 			trace.TotalCostUSD += span.GenAI.CostUSD
 		}
+	}
+
+	trace.EndTime = latestEnd
+
+	// Fallback: if no root span was found (all spans have a parent from an
+	// external trace), compute duration from the full time range of all spans.
+	if trace.Duration == 0 && !trace.StartTime.IsZero() && !trace.EndTime.IsZero() {
+		trace.Duration = trace.EndTime.Sub(trace.StartTime)
 	}
 
 	return trace

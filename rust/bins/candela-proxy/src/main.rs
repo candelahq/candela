@@ -97,7 +97,6 @@ async fn main() -> anyhow::Result<()> {
     // ── Configuration ──
     let port = env_or("PORT", "8080");
     let gcp_project = env::var("GCP_PROJECT").unwrap_or_default();
-    let _vertex_region = env_or("VERTEX_REGION", "us-central1");
     let project_id = env_or("CANDELA_PROJECT_ID", &gcp_project);
 
     if project_id.is_empty() {
@@ -108,6 +107,7 @@ async fn main() -> anyhow::Result<()> {
 
     // ── Build providers from env ──
     let providers_csv = env_or("PROVIDERS", "openai,anthropic");
+    let vertex_region = env_or("VERTEX_REGION", "us-central1");
     let providers: Vec<Provider> = providers_csv
         .split(',')
         .filter_map(|name| {
@@ -120,9 +120,14 @@ async fn main() -> anyhow::Result<()> {
                 "anthropic" => "https://api.anthropic.com".to_string(),
                 "anthropic-direct" => "https://api.anthropic.com".to_string(),
                 "google" => {
-                    let region = env_or("VERTEX_REGION", "us-central1");
-                    let project = env::var("GCP_PROJECT").unwrap_or_default();
-                    format!("https://{region}-aiplatform.googleapis.com/v1/projects/{project}")
+                    if gcp_project.is_empty() {
+                        tracing::warn!(provider = name, "GCP_PROJECT is required for google provider — skipping");
+                        return None;
+                    }
+                    format!(
+                        "https://{}-aiplatform.googleapis.com/v1/projects/{}/locations/{}/publishers/google/models",
+                        vertex_region, gcp_project, vertex_region
+                    )
                 }
                 _ => {
                     // Check for env-provided upstream: {NAME}_UPSTREAM_URL
@@ -163,7 +168,10 @@ async fn main() -> anyhow::Result<()> {
     let app_state = Arc::new(AppState {
         proxy,
         submitter: Arc::new(LogSubmitter),
-        http_client: reqwest::Client::new(),
+        http_client: reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(300)) // 5min — matches Go proxy
+            .build()
+            .expect("failed to build HTTP client"),
     });
 
     info!(

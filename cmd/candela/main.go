@@ -451,6 +451,9 @@ func runForeground() {
 				req.Host = remoteURL.Host
 
 				// Inject auth token for the remote server.
+				// For service accounts, AccessToken is the audience-scoped OIDC ID token.
+				// For user credentials, AccessToken is the OAuth2 access token which
+				// the server validates via Google's userinfo endpoint.
 				token, err := tokenSource.Token()
 				if err != nil {
 					slog.Error("failed to get auth token", "error", err)

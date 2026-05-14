@@ -101,6 +101,9 @@ func serveOpenAI(w http.ResponseWriter, r *http.Request) {
 			"prompt_tokens":     15,
 			"completion_tokens": 8,
 			"total_tokens":      23,
+			"prompt_tokens_details": map[string]any{
+				"cached_tokens": 10,
+			},
 		},
 	})
 }
@@ -116,8 +119,10 @@ func serveAnthropic(w http.ResponseWriter, r *http.Request) {
 		},
 		"stop_reason": "end_turn",
 		"usage": map[string]any{
-			"input_tokens":  15,
-			"output_tokens": 8,
+			"input_tokens":                15,
+			"output_tokens":               8,
+			"cache_read_input_tokens":     12,
+			"cache_creation_input_tokens": 3,
 		},
 	})
 }
@@ -134,7 +139,7 @@ func serveAnthropicStream(w http.ResponseWriter, r *http.Request) {
 	}
 
 	events := []string{
-		`data: {"type":"message_start","message":{"id":"msg_mock123","type":"message","role":"assistant","content":[],"usage":{"input_tokens":15,"output_tokens":0}}}`,
+		`data: {"type":"message_start","message":{"id":"msg_mock123","type":"message","role":"assistant","content":[],"usage":{"input_tokens":15,"output_tokens":0,"cache_read_input_tokens":12,"cache_creation_input_tokens":3}}}`,
 		`data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}`,
 		`data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Hello from "}}`,
 		`data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"the mock upstream!"}}`,

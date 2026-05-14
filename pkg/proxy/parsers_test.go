@@ -7,15 +7,15 @@ import (
 // ── Anthropic cache token tests ──────────────────────────────────────────────
 
 func TestAnthropicParser_ParseResponse_CacheTokens(t *testing.T) {
-	// Anthropic returns cache_read_input_tokens and cache_creation_input_tokens
-	// alongside input_tokens. The real total input is the sum of all three.
+	// Anthropic's input_tokens INCLUDES cache_read + cache_creation in the total.
+	// input_tokens = 21 (new) + 188086 (cache_read) + 500 (cache_creation) = 188607
 	body := []byte(`{
 		"id": "msg_01",
 		"type": "message",
 		"role": "assistant",
 		"content": [{"type": "text", "text": "hello"}],
 		"usage": {
-			"input_tokens": 21,
+			"input_tokens": 188607,
 			"cache_read_input_tokens": 188086,
 			"cache_creation_input_tokens": 500,
 			"output_tokens": 393
@@ -28,10 +28,11 @@ func TestAnthropicParser_ParseResponse_CacheTokens(t *testing.T) {
 	if content != "hello" {
 		t.Errorf("content = %q, want %q", content, "hello")
 	}
-	// Cost-equivalent input = 21 + round(188086 * 0.1) + round(500 * 1.25)
-	//                       = 21 + 18809 + 625 = 19455
+	// nonCached = 188607 - 188086 - 500 = 21
+	// Cost-equivalent = 21 + round(188086 * 0.1) + round(500 * 1.25)
+	//                = 21 + 18809 + 625 = 19455
 	if inputTokens != 19455 {
-		t.Errorf("inputTokens = %d, want 19455 (21 + 18809 cache_read@0.1x + 625 cache_creation@1.25x)", inputTokens)
+		t.Errorf("inputTokens = %d, want 19455 (21 non-cached + 18809 cache_read@0.1x + 625 cache_creation@1.25x)", inputTokens)
 	}
 	if outputTokens != 393 {
 		t.Errorf("outputTokens = %d, want 393", outputTokens)
@@ -57,9 +58,9 @@ func TestAnthropicParser_ParseResponse_NoCacheTokens(t *testing.T) {
 }
 
 func TestAnthropicParser_ParseStreamingResponse_CacheTokens(t *testing.T) {
-	// In streaming, input tokens (including cache) come in message_start.message.usage,
-	// and output tokens come in message_delta.usage.
-	stream := `data: {"type":"message_start","message":{"usage":{"input_tokens":10,"cache_read_input_tokens":50000,"cache_creation_input_tokens":200}}}
+	// In streaming, input tokens (including cache) come in message_start.message.usage.
+	// Anthropic's input_tokens = 50210 (total: 10 new + 50000 cache_read + 200 cache_creation).
+	stream := `data: {"type":"message_start","message":{"usage":{"input_tokens":50210,"cache_read_input_tokens":50000,"cache_creation_input_tokens":200}}}
 data: {"type":"content_block_delta","delta":{"type":"text_delta","text":"hello"}}
 data: {"type":"message_delta","usage":{"output_tokens":42}}
 data: [DONE]
@@ -71,10 +72,11 @@ data: [DONE]
 	if content != "hello" {
 		t.Errorf("content = %q, want %q", content, "hello")
 	}
-	// Cost-equivalent input = 10 + round(50000 * 0.1) + round(200 * 1.25)
-	//                       = 10 + 5000 + 250 = 5260
+	// nonCached = 50210 - 50000 - 200 = 10
+	// Cost-equivalent = 10 + round(50000 * 0.1) + round(200 * 1.25)
+	//                = 10 + 5000 + 250 = 5260
 	if inputTokens != 5260 {
-		t.Errorf("inputTokens = %d, want 5260 (10 + 5000 cache_read@0.1x + 250 cache_creation@1.25x)", inputTokens)
+		t.Errorf("inputTokens = %d, want 5260 (10 non-cached + 5000 cache_read@0.1x + 250 cache_creation@1.25x)", inputTokens)
 	}
 	if outputTokens != 42 {
 		t.Errorf("outputTokens = %d, want 42", outputTokens)

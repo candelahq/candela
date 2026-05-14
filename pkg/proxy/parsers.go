@@ -76,8 +76,25 @@ func (p *openaiParser) ParseResponse(body []byte) (content string, inputTokens, 
 	}
 
 	if usage, ok := resp["usage"].(map[string]interface{}); ok {
-		inputTokens = toInt64(usage["prompt_tokens"])
+		rawInput := toInt64(usage["prompt_tokens"])
 		outputTokens = toInt64(usage["completion_tokens"])
+
+		// OpenAI's prompt_tokens INCLUDES cached tokens in the total.
+		// Cached tokens are discounted at 0.5× (50% off) for supported models.
+		// Subtract cached from total, then add back at the discounted rate.
+		var cachedTokens int64
+		if details, ok := usage["prompt_tokens_details"].(map[string]interface{}); ok {
+			cachedTokens = toInt64(details["cached_tokens"])
+		}
+		if cachedTokens > 0 {
+			nonCached := rawInput - cachedTokens
+			if nonCached < 0 {
+				nonCached = 0
+			}
+			inputTokens = nonCached + int64(math.Round(float64(cachedTokens)*0.5))
+		} else {
+			inputTokens = rawInput
+		}
 	}
 	if choices, ok := resp["choices"].([]interface{}); ok && len(choices) > 0 {
 		if choice, ok := choices[0].(map[string]interface{}); ok {
@@ -117,8 +134,23 @@ func (p *openaiParser) ParseStreamingResponse(data []byte) (content string, inpu
 			}
 		}
 		if usage, ok := chunk["usage"].(map[string]interface{}); ok {
-			inputTokens = toInt64(usage["prompt_tokens"])
+			rawInput := toInt64(usage["prompt_tokens"])
 			outputTokens = toInt64(usage["completion_tokens"])
+
+			// Same cache normalization as ParseResponse.
+			var cachedTokens int64
+			if details, ok := usage["prompt_tokens_details"].(map[string]interface{}); ok {
+				cachedTokens = toInt64(details["cached_tokens"])
+			}
+			if cachedTokens > 0 {
+				nonCached := rawInput - cachedTokens
+				if nonCached < 0 {
+					nonCached = 0
+				}
+				inputTokens = nonCached + int64(math.Round(float64(cachedTokens)*0.5))
+			} else {
+				inputTokens = rawInput
+			}
 		}
 	}
 
@@ -162,14 +194,22 @@ func (p *anthropicParser) ParseResponse(body []byte) (content string, inputToken
 
 	if usage, ok := resp["usage"].(map[string]interface{}); ok {
 		// Anthropic reports cache tokens separately with different billing rates:
-		//   input_tokens:          1.0× base rate
-		//   cache_read_input_tokens:  0.1× base rate (90% savings)
+		//   input_tokens:                1.0× base rate
+		//   cache_read_input_tokens:     0.1× base rate (90% savings)
 		//   cache_creation_input_tokens: 1.25× base rate
-		// We normalize to cost-equivalent token counts at the base rate so the
-		// Calculator's per-million-token math produces correct costs.
+		//
+		// CRITICAL: Anthropic's input_tokens INCLUDES cached tokens in the total.
+		// We must subtract them to get the non-cached portion, then add back the
+		// cost-weighted amounts. Without this, cache reads are double-counted at
+		// full price (10× overcharge).
+		rawInput := toInt64(usage["input_tokens"])
 		cacheRead := toInt64(usage["cache_read_input_tokens"])
 		cacheCreation := toInt64(usage["cache_creation_input_tokens"])
-		inputTokens = toInt64(usage["input_tokens"]) +
+		nonCached := rawInput - cacheRead - cacheCreation
+		if nonCached < 0 {
+			nonCached = 0
+		}
+		inputTokens = nonCached +
 			int64(math.Round(float64(cacheRead)*0.1)) +
 			int64(math.Round(float64(cacheCreation)*1.25))
 		outputTokens = toInt64(usage["output_tokens"])
@@ -212,10 +252,16 @@ func (p *anthropicParser) ParseStreamingResponse(data []byte) (content string, i
 		}
 		if msg, ok := chunk["message"].(map[string]interface{}); ok {
 			if usage, ok := msg["usage"].(map[string]interface{}); ok {
-				// Normalize cache tokens to cost-equivalent values — see ParseResponse.
+				// Normalize cache tokens — see ParseResponse for explanation.
+				// Anthropic's input_tokens INCLUDES cached tokens.
+				rawInput := toInt64(usage["input_tokens"])
 				cacheRead := toInt64(usage["cache_read_input_tokens"])
 				cacheCreation := toInt64(usage["cache_creation_input_tokens"])
-				inputTokens = toInt64(usage["input_tokens"]) +
+				nonCached := rawInput - cacheRead - cacheCreation
+				if nonCached < 0 {
+					nonCached = 0
+				}
+				inputTokens = nonCached +
 					int64(math.Round(float64(cacheRead)*0.1)) +
 					int64(math.Round(float64(cacheCreation)*1.25))
 			}
@@ -257,7 +303,21 @@ func (p *googleParser) ParseResponse(body []byte) (content string, inputTokens, 
 	}
 
 	if meta, ok := resp["usageMetadata"].(map[string]interface{}); ok {
-		inputTokens = toInt64(meta["promptTokenCount"])
+		rawInput := toInt64(meta["promptTokenCount"])
+
+		// Google's promptTokenCount INCLUDES cachedContentTokenCount.
+		// Cached content is discounted at 0.25× (75% off).
+		cachedTokens := toInt64(meta["cachedContentTokenCount"])
+		if cachedTokens > 0 {
+			nonCached := rawInput - cachedTokens
+			if nonCached < 0 {
+				nonCached = 0
+			}
+			inputTokens = nonCached + int64(math.Round(float64(cachedTokens)*0.25))
+		} else {
+			inputTokens = rawInput
+		}
+
 		// Gemini 2.5 "thinking" models report reasoning tokens separately.
 		// These are billed at the output rate but NOT included in candidatesTokenCount.
 		// Without this, thinking-heavy responses undercount output by 2-10×.

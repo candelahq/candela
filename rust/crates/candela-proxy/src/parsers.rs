@@ -160,8 +160,65 @@ pub fn extract_streaming_cache_tokens(provider: &str, data: &[u8]) -> CacheToken
             }
             CacheTokens::default()
         }
-        // OpenAI/Google streaming usage chunks use standard format.
-        _ => extract_cache_tokens(provider, data),
+        // OpenAI streaming: usage in the final SSE chunk.
+        "openai" | "gemini-oai" => {
+            for line in text.lines() {
+                let line = line.trim();
+                if !line.starts_with("data: ") {
+                    continue;
+                }
+                let payload = &line["data: ".len()..];
+                if payload == "[DONE]" {
+                    continue;
+                }
+                let chunk: Value = match serde_json::from_str(payload) {
+                    Ok(v) => v,
+                    Err(_) => continue,
+                };
+                if let Some(details) = chunk
+                    .get("usage")
+                    .and_then(|u| u.get("prompt_tokens_details"))
+                    .and_then(|d| d.as_object())
+                {
+                    let read = details
+                        .get("cached_tokens")
+                        .and_then(|v| v.as_i64())
+                        .unwrap_or(0);
+                    if read > 0 {
+                        return CacheTokens {
+                            cache_read_tokens: read,
+                            cache_creation_tokens: 0,
+                        };
+                    }
+                }
+            }
+            CacheTokens::default()
+        }
+        // Google streaming: JSON array or newline-delimited chunks.
+        "google" => {
+            for line in text.lines() {
+                let line = line.trim();
+                // Google streams can be JSON arrays or newline-delimited objects.
+                let chunk: Value = match serde_json::from_str(line) {
+                    Ok(v) => v,
+                    Err(_) => continue,
+                };
+                if let Some(meta) = chunk.get("usageMetadata").and_then(|m| m.as_object()) {
+                    let read = meta
+                        .get("cachedContentTokenCount")
+                        .and_then(|v| v.as_i64())
+                        .unwrap_or(0);
+                    if read > 0 {
+                        return CacheTokens {
+                            cache_read_tokens: read,
+                            cache_creation_tokens: 0,
+                        };
+                    }
+                }
+            }
+            CacheTokens::default()
+        }
+        _ => CacheTokens::default(),
     }
 }
 
@@ -636,6 +693,40 @@ mod tests {
         let cache = extract_streaming_cache_tokens("anthropic", data);
         assert_eq!(cache.cache_read_tokens, 70);
         assert_eq!(cache.cache_creation_tokens, 10);
+    }
+
+    #[test]
+    fn streaming_cache_tokens_openai() {
+        let data = b"data: {\"choices\":[{\"delta\":{\"content\":\"Hi\"}}]}\ndata: {\"usage\":{\"prompt_tokens\":100,\"completion_tokens\":20,\"prompt_tokens_details\":{\"cached_tokens\":60}}}\ndata: [DONE]\n";
+        let cache = extract_streaming_cache_tokens("openai", data);
+        assert_eq!(cache.cache_read_tokens, 60);
+        assert_eq!(cache.cache_creation_tokens, 0);
+    }
+
+    #[test]
+    fn streaming_cache_tokens_gemini_oai() {
+        let data = b"data: {\"usage\":{\"prompt_tokens\":200,\"prompt_tokens_details\":{\"cached_tokens\":120}}}\ndata: [DONE]\n";
+        let cache = extract_streaming_cache_tokens("gemini-oai", data);
+        assert_eq!(cache.cache_read_tokens, 120);
+        assert_eq!(cache.cache_creation_tokens, 0);
+    }
+
+    #[test]
+    fn streaming_cache_tokens_google() {
+        let data =
+            b"{\"usageMetadata\":{\"promptTokenCount\":100,\"cachedContentTokenCount\":45}}\n";
+        let cache = extract_streaming_cache_tokens("google", data);
+        assert_eq!(cache.cache_read_tokens, 45);
+        assert_eq!(cache.cache_creation_tokens, 0);
+    }
+
+    #[test]
+    fn streaming_cache_tokens_openai_no_cache() {
+        // Streaming response with no cache data should return defaults.
+        let data = b"data: {\"choices\":[{\"delta\":{\"content\":\"Hello\"}}]}\ndata: {\"usage\":{\"prompt_tokens\":50,\"completion_tokens\":10}}\ndata: [DONE]\n";
+        let cache = extract_streaming_cache_tokens("openai", data);
+        assert_eq!(cache.cache_read_tokens, 0);
+        assert_eq!(cache.cache_creation_tokens, 0);
     }
 
     // ── Fallback / edge cases ──

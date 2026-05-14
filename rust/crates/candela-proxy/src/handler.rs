@@ -297,7 +297,7 @@ pub async fn proxy_handler(
         "http.status_code".into(),
         response_status.as_u16().to_string(),
     );
-    attributes.insert("http.ttfb_ms".into(), elapsed.as_millis().to_string());
+    attributes.insert("http.duration_ms".into(), elapsed.as_millis().to_string());
     attributes.insert("http.request_id".into(), request_id.clone());
     attributes.insert("llm.provider".into(), provider_name.clone());
     if is_streaming {

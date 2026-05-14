@@ -139,12 +139,169 @@ func TestTranslateRequest_SystemMessage(t *testing.T) {
 		t.Fatalf("failed to unmarshal: %v", err)
 	}
 
-	if result.System != "You are a helpful assistant." {
-		t.Errorf("system = %q, want 'You are a helpful assistant.'", result.System)
+	// Without PromptCaching, system should be a plain string.
+	sysStr, ok := result.System.(string)
+	if !ok {
+		t.Fatalf("system should be a string when PromptCaching=false, got %T", result.System)
+	}
+	if sysStr != "You are a helpful assistant." {
+		t.Errorf("system = %q, want 'You are a helpful assistant.'", sysStr)
 	}
 	// System message should NOT appear in messages array.
 	if len(result.Messages) != 1 {
 		t.Errorf("messages len = %d, want 1 (system extracted)", len(result.Messages))
+	}
+}
+
+func TestTranslateRequest_PromptCaching(t *testing.T) {
+	translator := &AnthropicFormatTranslator{PromptCaching: true}
+
+	body := `{
+		"model": "claude-sonnet-4-20250514",
+		"messages": [
+			{"role": "system", "content": "You are a helpful assistant."},
+			{"role": "user", "content": "Hello"},
+			{"role": "assistant", "content": "Hi there!"},
+			{"role": "user", "content": "How are you?"}
+		]
+	}`
+
+	translated, _, err := translator.TranslateRequest([]byte(body))
+	if err != nil {
+		t.Fatalf("TranslateRequest failed: %v", err)
+	}
+
+	// Parse as raw JSON to inspect cache_control injection.
+	var raw map[string]interface{}
+	if err := json.Unmarshal(translated, &raw); err != nil {
+		t.Fatalf("failed to unmarshal: %v", err)
+	}
+
+	// System should be a content block array with cache_control.
+	sysBlocks, ok := raw["system"].([]interface{})
+	if !ok {
+		t.Fatalf("system should be []interface{} with PromptCaching=true, got %T", raw["system"])
+	}
+	if len(sysBlocks) != 1 {
+		t.Fatalf("system blocks = %d, want 1", len(sysBlocks))
+	}
+	sysBlock := sysBlocks[0].(map[string]interface{})
+	if sysBlock["type"] != "text" {
+		t.Errorf("system block type = %v, want text", sysBlock["type"])
+	}
+	if sysBlock["text"] != "You are a helpful assistant." {
+		t.Errorf("system block text = %v", sysBlock["text"])
+	}
+	cc, ok := sysBlock["cache_control"].(map[string]interface{})
+	if !ok {
+		t.Fatal("system block missing cache_control")
+	}
+	if cc["type"] != "ephemeral" {
+		t.Errorf("cache_control type = %v, want ephemeral", cc["type"])
+	}
+
+	// Last user message should have cache_control on its content.
+	messages := raw["messages"].([]interface{})
+	lastMsg := messages[len(messages)-1].(map[string]interface{})
+	lastContent := lastMsg["content"].([]interface{})
+	lastBlock := lastContent[len(lastContent)-1].(map[string]interface{})
+	msgCC, ok := lastBlock["cache_control"].(map[string]interface{})
+	if !ok {
+		t.Fatal("last user message missing cache_control")
+	}
+	if msgCC["type"] != "ephemeral" {
+		t.Errorf("last message cache_control type = %v, want ephemeral", msgCC["type"])
+	}
+}
+
+func TestTranslateRequest_SystemMessageArray(t *testing.T) {
+	// OpenAI allows system content as an array of content blocks.
+	translator := &AnthropicFormatTranslator{}
+
+	body := `{
+		"model": "claude-sonnet-4-20250514",
+		"messages": [
+			{"role": "system", "content": [
+				{"type": "text", "text": "You are a helpful assistant."},
+				{"type": "text", "text": "Always be concise."}
+			]},
+			{"role": "user", "content": "Hello"}
+		]
+	}`
+
+	translated, _, err := translator.TranslateRequest([]byte(body))
+	if err != nil {
+		t.Fatalf("TranslateRequest failed: %v", err)
+	}
+
+	var raw map[string]interface{}
+	if err := json.Unmarshal(translated, &raw); err != nil {
+		t.Fatalf("failed to unmarshal: %v", err)
+	}
+
+	// System should be passed through as an array of content blocks.
+	sysBlocks, ok := raw["system"].([]interface{})
+	if !ok {
+		t.Fatalf("system should be []interface{} for array input, got %T", raw["system"])
+	}
+	if len(sysBlocks) != 2 {
+		t.Fatalf("system blocks = %d, want 2", len(sysBlocks))
+	}
+
+	// Messages should not contain the system message.
+	messages := raw["messages"].([]interface{})
+	if len(messages) != 1 {
+		t.Errorf("messages len = %d, want 1 (system extracted)", len(messages))
+	}
+}
+
+func TestTranslateRequest_SystemMessageArrayWithCaching(t *testing.T) {
+	// Array system content + PromptCaching should add cache_control to last block.
+	translator := &AnthropicFormatTranslator{PromptCaching: true}
+
+	body := `{
+		"model": "claude-sonnet-4-20250514",
+		"messages": [
+			{"role": "system", "content": [
+				{"type": "text", "text": "You are a helpful assistant."},
+				{"type": "text", "text": "Always be concise."}
+			]},
+			{"role": "user", "content": "Hello"}
+		]
+	}`
+
+	translated, _, err := translator.TranslateRequest([]byte(body))
+	if err != nil {
+		t.Fatalf("TranslateRequest failed: %v", err)
+	}
+
+	var raw map[string]interface{}
+	if err := json.Unmarshal(translated, &raw); err != nil {
+		t.Fatalf("failed to unmarshal: %v", err)
+	}
+
+	sysBlocks, ok := raw["system"].([]interface{})
+	if !ok {
+		t.Fatalf("system should be []interface{}, got %T", raw["system"])
+	}
+	if len(sysBlocks) != 2 {
+		t.Fatalf("system blocks = %d, want 2", len(sysBlocks))
+	}
+
+	// First block should NOT have cache_control.
+	firstBlock := sysBlocks[0].(map[string]interface{})
+	if _, hasCc := firstBlock["cache_control"]; hasCc {
+		t.Error("first block should not have cache_control")
+	}
+
+	// Last block should have cache_control.
+	lastBlock := sysBlocks[1].(map[string]interface{})
+	cc, ok := lastBlock["cache_control"].(map[string]interface{})
+	if !ok {
+		t.Fatal("last system block missing cache_control")
+	}
+	if cc["type"] != "ephemeral" {
+		t.Errorf("cache_control type = %v, want ephemeral", cc["type"])
 	}
 }
 

@@ -48,7 +48,13 @@ func ParseModelName(raw string) ModelNameInfo {
 
 // AnthropicFormatTranslator translates between OpenAI Chat Completions format
 // and Anthropic Messages format.
-type AnthropicFormatTranslator struct{}
+type AnthropicFormatTranslator struct {
+	// PromptCaching enables automatic injection of cache_control breakpoints
+	// on the system prompt and last user message. When true, this enables
+	// Anthropic prompt caching on Vertex AI, reducing costs ~10x for
+	// multi-turn conversations. Requires Vertex AI region support for caching.
+	PromptCaching bool
+}
 
 // --- Request Translation: OpenAI → Anthropic ---
 
@@ -96,8 +102,33 @@ func (t *AnthropicFormatTranslator) TranslateRequest(body []byte) ([]byte, strin
 	for _, msg := range oaiReq.Messages {
 		switch msg.Role {
 		case "system":
-			content, _ := msg.Content.(string)
-			anthReq.System = content
+			// OpenAI allows system content as a string or an array of content blocks.
+			switch c := msg.Content.(type) {
+			case string:
+				if c == "" {
+					break
+				}
+				if t.PromptCaching {
+					anthReq.System = []interface{}{
+						map[string]interface{}{
+							"type":          "text",
+							"text":          c,
+							"cache_control": map[string]string{"type": "ephemeral"},
+						},
+					}
+				} else {
+					anthReq.System = c
+				}
+			case []interface{}:
+				// Array of content blocks — pass through as-is.
+				if t.PromptCaching && len(c) > 0 {
+					// Add cache_control to the last block.
+					if block, ok := c[len(c)-1].(map[string]interface{}); ok {
+						block["cache_control"] = map[string]string{"type": "ephemeral"}
+					}
+				}
+				anthReq.System = c
+			}
 
 		case "assistant":
 			if len(msg.ToolCalls) > 0 {
@@ -158,6 +189,13 @@ func (t *AnthropicFormatTranslator) TranslateRequest(body []byte) ([]byte, strin
 		default:
 			anthReq.Messages = append(anthReq.Messages, anthropicMessage(msg.toAnthropicMessage()))
 		}
+	}
+
+	// Add cache_control to the last user/tool message's content so the
+	// entire conversation prefix is cached. This is Anthropic's recommended
+	// two-breakpoint pattern: system prompt + end of conversation history.
+	if t.PromptCaching {
+		injectLastMessageCacheControl(anthReq.Messages)
 	}
 
 	translated, err := json.Marshal(anthReq)
@@ -499,7 +537,7 @@ type openAIDelta struct {
 type anthropicRequest struct {
 	Model            string             `json:"model,omitempty"`
 	Messages         []anthropicMessage `json:"messages"`
-	System           string             `json:"system,omitempty"`
+	System           interface{}        `json:"system,omitempty"` // string or []content_block with cache_control
 	MaxTokens        int                `json:"max_tokens"`
 	Temperature      *float64           `json:"temperature,omitempty"`
 	TopP             *float64           `json:"top_p,omitempty"`
@@ -582,4 +620,42 @@ func getStringField(m map[string]interface{}, keys ...string) string {
 		current = next
 	}
 	return ""
+}
+
+// injectLastMessageCacheControl adds a cache_control breakpoint to the last
+// user-role message in the conversation. This implements Anthropic's
+// recommended two-breakpoint pattern:
+//
+//  1. System prompt (always cached — set above)
+//  2. End of conversation history (this function)
+//
+// Together they cache the entire stable prefix so each new turn only pays
+// full price for the latest user message.
+func injectLastMessageCacheControl(messages []anthropicMessage) {
+	// Walk backwards to find the last user or tool-result message.
+	for i := len(messages) - 1; i >= 0; i-- {
+		if messages[i].Role != "user" {
+			continue
+		}
+
+		switch content := messages[i].Content.(type) {
+		case string:
+			// Simple string content → convert to cached content block.
+			messages[i].Content = []interface{}{
+				map[string]interface{}{
+					"type":          "text",
+					"text":          content,
+					"cache_control": map[string]string{"type": "ephemeral"},
+				},
+			}
+		case []interface{}:
+			// Array of content blocks → add cache_control to the last block.
+			if len(content) > 0 {
+				if block, ok := content[len(content)-1].(map[string]interface{}); ok {
+					block["cache_control"] = map[string]string{"type": "ephemeral"}
+				}
+			}
+		}
+		return
+	}
 }

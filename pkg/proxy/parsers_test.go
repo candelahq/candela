@@ -407,3 +407,120 @@ data: [DONE]
 		t.Errorf("CacheCreationTokens = %d, want 200", ct.CacheCreationTokens)
 	}
 }
+
+// ── OpenAI streaming cache normalization ─────────────────────────────────────
+
+func TestOpenAIParser_ParseStreamingResponse_CacheTokens(t *testing.T) {
+	// OpenAI streaming includes usage in the final chunk when
+	// stream_options.include_usage is set.
+	stream := `data: {"choices":[{"delta":{"content":"hi"}}]}
+data: {"choices":[],"usage":{"prompt_tokens":1000,"completion_tokens":50,"prompt_tokens_details":{"cached_tokens":900}}}
+data: [DONE]
+`
+	parser := &openaiParser{}
+	content, inputTokens, outputTokens := parser.ParseStreamingResponse([]byte(stream))
+
+	if content != "hi" {
+		t.Errorf("content = %q, want %q", content, "hi")
+	}
+	// nonCached = 1000 - 900 = 100
+	// Cost-equivalent = 100 + round(900 * 0.5) = 100 + 450 = 550
+	if inputTokens != 550 {
+		t.Errorf("inputTokens = %d, want 550 (100 non-cached + 450 cached@0.5x)", inputTokens)
+	}
+	if outputTokens != 50 {
+		t.Errorf("outputTokens = %d, want 50", outputTokens)
+	}
+}
+
+func TestOpenAIParser_ParseStreamingResponse_NoCacheTokens(t *testing.T) {
+	stream := `data: {"choices":[{"delta":{"content":"ok"}}]}
+data: {"choices":[],"usage":{"prompt_tokens":200,"completion_tokens":30}}
+data: [DONE]
+`
+	parser := &openaiParser{}
+	_, inputTokens, _ := parser.ParseStreamingResponse([]byte(stream))
+
+	if inputTokens != 200 {
+		t.Errorf("inputTokens = %d, want 200 (no cache, unchanged)", inputTokens)
+	}
+}
+
+// ── Google streaming cache normalization ─────────────────────────────────────
+
+func TestGoogleParser_ParseStreamingResponse_CacheTokens(t *testing.T) {
+	// Google streaming returns a JSON array; the last chunk has usageMetadata.
+	stream := `[
+		{"candidates":[{"content":{"parts":[{"text":"hello"}]}}]},
+		{"candidates":[{"content":{"parts":[{"text":" world"}]}}],
+		 "usageMetadata":{"promptTokenCount":5000,"cachedContentTokenCount":4000,"candidatesTokenCount":10}}
+	]`
+
+	parser := &googleParser{}
+	content, inputTokens, outputTokens := parser.ParseStreamingResponse([]byte(stream))
+
+	if content != "hello world" {
+		t.Errorf("content = %q, want %q", content, "hello world")
+	}
+	// nonCached = 5000 - 4000 = 1000
+	// Cost-equivalent = 1000 + round(4000 * 0.25) = 1000 + 1000 = 2000
+	if inputTokens != 2000 {
+		t.Errorf("inputTokens = %d, want 2000 (1000 non-cached + 1000 cached@0.25x)", inputTokens)
+	}
+	if outputTokens != 10 {
+		t.Errorf("outputTokens = %d, want 10", outputTokens)
+	}
+}
+
+// ── Helper function edge cases ───────────────────────────────────────────────
+
+func TestNormalizeCachedInput_ZeroCached(t *testing.T) {
+	// No cached tokens — should return raw input unchanged.
+	result := normalizeCachedInput(500, 0, 0.5)
+	if result != 500 {
+		t.Errorf("normalizeCachedInput(500, 0, 0.5) = %d, want 500", result)
+	}
+}
+
+func TestNormalizeCachedInput_AllCached(t *testing.T) {
+	// All tokens are cached (e.g. repeated identical prompt).
+	// nonCached = 100 - 100 = 0
+	// result = 0 + round(100 * 0.5) = 50
+	result := normalizeCachedInput(100, 100, 0.5)
+	if result != 50 {
+		t.Errorf("normalizeCachedInput(100, 100, 0.5) = %d, want 50", result)
+	}
+}
+
+func TestNormalizeCachedInput_CachedExceedsRaw(t *testing.T) {
+	// API inconsistency: cached > raw. Should clamp nonCached to 0.
+	result := normalizeCachedInput(50, 100, 0.5)
+	if result != 50 {
+		t.Errorf("normalizeCachedInput(50, 100, 0.5) = %d, want 50 (clamped)", result)
+	}
+}
+
+func TestNormalizeCachedInput_NegativeCached(t *testing.T) {
+	// Negative cached tokens should be treated as zero.
+	result := normalizeCachedInput(500, -10, 0.5)
+	if result != 500 {
+		t.Errorf("normalizeCachedInput(500, -10, 0.5) = %d, want 500", result)
+	}
+}
+
+func TestNormalizeAnthropicInput_BothCacheTypes(t *testing.T) {
+	// 100 total, 80 cache_read, 10 cache_creation, 10 new
+	result := normalizeAnthropicInput(100, 80, 10)
+	// nonCached = 100 - 80 - 10 = 10
+	// result = 10 + round(80*0.1) + round(10*1.25) = 10 + 8 + 13 = 31
+	if result != 31 {
+		t.Errorf("normalizeAnthropicInput(100, 80, 10) = %d, want 31", result)
+	}
+}
+
+func TestNormalizeAnthropicInput_NoCaching(t *testing.T) {
+	result := normalizeAnthropicInput(100, 0, 0)
+	if result != 100 {
+		t.Errorf("normalizeAnthropicInput(100, 0, 0) = %d, want 100", result)
+	}
+}

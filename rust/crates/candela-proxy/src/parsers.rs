@@ -695,6 +695,40 @@ mod tests {
         assert_eq!(cache.cache_creation_tokens, 10);
     }
 
+    #[test]
+    fn streaming_cache_tokens_openai() {
+        let data = b"data: {\"choices\":[{\"delta\":{\"content\":\"Hi\"}}]}\ndata: {\"usage\":{\"prompt_tokens\":100,\"completion_tokens\":20,\"prompt_tokens_details\":{\"cached_tokens\":60}}}\ndata: [DONE]\n";
+        let cache = extract_streaming_cache_tokens("openai", data);
+        assert_eq!(cache.cache_read_tokens, 60);
+        assert_eq!(cache.cache_creation_tokens, 0);
+    }
+
+    #[test]
+    fn streaming_cache_tokens_gemini_oai() {
+        let data = b"data: {\"usage\":{\"prompt_tokens\":200,\"prompt_tokens_details\":{\"cached_tokens\":120}}}\ndata: [DONE]\n";
+        let cache = extract_streaming_cache_tokens("gemini-oai", data);
+        assert_eq!(cache.cache_read_tokens, 120);
+        assert_eq!(cache.cache_creation_tokens, 0);
+    }
+
+    #[test]
+    fn streaming_cache_tokens_google() {
+        let data =
+            b"{\"usageMetadata\":{\"promptTokenCount\":100,\"cachedContentTokenCount\":45}}\n";
+        let cache = extract_streaming_cache_tokens("google", data);
+        assert_eq!(cache.cache_read_tokens, 45);
+        assert_eq!(cache.cache_creation_tokens, 0);
+    }
+
+    #[test]
+    fn streaming_cache_tokens_openai_no_cache() {
+        // Streaming response with no cache data should return defaults.
+        let data = b"data: {\"choices\":[{\"delta\":{\"content\":\"Hello\"}}]}\ndata: {\"usage\":{\"prompt_tokens\":50,\"completion_tokens\":10}}\ndata: [DONE]\n";
+        let cache = extract_streaming_cache_tokens("openai", data);
+        assert_eq!(cache.cache_read_tokens, 0);
+        assert_eq!(cache.cache_creation_tokens, 0);
+    }
+
     // ── Fallback / edge cases ──
 
     #[test]

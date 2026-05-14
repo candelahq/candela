@@ -17,7 +17,6 @@ This will automatically install:
 - **Node.js 22** & **pnpm**
 - **Python 3.12** & **uv**
 - **cloudflared** (Cloudflare tunnel for Cursor 3 integration)
-- **docker-compose**
 
 ---
 

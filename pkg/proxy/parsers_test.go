@@ -100,6 +100,74 @@ data: [DONE]
 	}
 }
 
+// ── OpenAI cache token tests ─────────────────────────────────────────────────
+
+func TestOpenAIParser_ParseResponse_CacheTokens(t *testing.T) {
+	// OpenAI's prompt_tokens includes cached_tokens in the total.
+	// prompt_tokens = 100 (total: 10 new + 90 cached)
+	body := []byte(`{
+		"choices": [{"message": {"role": "assistant", "content": "ok"}}],
+		"usage": {
+			"prompt_tokens": 100,
+			"completion_tokens": 20,
+			"prompt_tokens_details": {"cached_tokens": 90}
+		}
+	}`)
+
+	parser := &openaiParser{}
+	_, inputTokens, outputTokens := parser.ParseResponse(body)
+
+	// nonCached = 100 - 90 = 10
+	// Cost-equivalent = 10 + round(90 * 0.5) = 10 + 45 = 55
+	if inputTokens != 55 {
+		t.Errorf("inputTokens = %d, want 55 (10 non-cached + 45 cached@0.5x)", inputTokens)
+	}
+	if outputTokens != 20 {
+		t.Errorf("outputTokens = %d, want 20", outputTokens)
+	}
+}
+
+func TestOpenAIParser_ParseResponse_NoCacheTokens(t *testing.T) {
+	body := []byte(`{
+		"choices": [{"message": {"role": "assistant", "content": "hi"}}],
+		"usage": {"prompt_tokens": 50, "completion_tokens": 10}
+	}`)
+
+	parser := &openaiParser{}
+	_, inputTokens, _ := parser.ParseResponse(body)
+
+	if inputTokens != 50 {
+		t.Errorf("inputTokens = %d, want 50 (no cache, unchanged)", inputTokens)
+	}
+}
+
+// ── Google cache token tests ─────────────────────────────────────────────────
+
+func TestGoogleParser_ParseResponse_CacheTokens(t *testing.T) {
+	// Google's promptTokenCount includes cachedContentTokenCount.
+	body := []byte(`{
+		"candidates": [{"content": {"parts": [{"text": "result"}]}}],
+		"usageMetadata": {
+			"promptTokenCount": 1000,
+			"cachedContentTokenCount": 800,
+			"candidatesTokenCount": 50,
+			"totalTokenCount": 1050
+		}
+	}`)
+
+	parser := &googleParser{}
+	_, inputTokens, outputTokens := parser.ParseResponse(body)
+
+	// nonCached = 1000 - 800 = 200
+	// Cost-equivalent = 200 + round(800 * 0.25) = 200 + 200 = 400
+	if inputTokens != 400 {
+		t.Errorf("inputTokens = %d, want 400 (200 non-cached + 200 cached@0.25x)", inputTokens)
+	}
+	if outputTokens != 50 {
+		t.Errorf("outputTokens = %d, want 50", outputTokens)
+	}
+}
+
 // ── Google thinking token tests ──────────────────────────────────────────────
 
 func TestGoogleParser_ParseResponse_ThinkingTokens(t *testing.T) {

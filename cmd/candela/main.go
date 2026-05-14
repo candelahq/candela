@@ -459,9 +459,6 @@ func runForeground() {
 					slog.Error("failed to get auth token", "error", err)
 					return
 				}
-				// For service accounts, AccessToken is the audience-scoped OIDC ID token.
-				// For user credentials, AccessToken is the OAuth2 access token which
-				// the server validates via Google's userinfo endpoint.
 				req.Header.Set("Authorization", "Bearer "+token.AccessToken)
 
 				// Preserve the original path.

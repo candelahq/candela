@@ -7,6 +7,46 @@ import (
 	"strings"
 )
 
+// Cache discount rates by provider. Each provider includes cached tokens in
+// their total input count but bills them at a reduced rate. We normalize to
+// cost-equivalent tokens by subtracting cached from the total, then adding
+// them back at the discounted rate.
+const (
+	openAICacheDiscount      = 0.5  // 50% off
+	anthropicCacheReadRate   = 0.1  // 90% off
+	anthropicCacheCreateRate = 1.25 // 25% surcharge
+	googleCacheDiscount      = 0.25 // 75% off
+)
+
+// normalizeCachedInput computes cost-equivalent input tokens by subtracting
+// cached tokens from rawInput and adding them back at the discounted rate.
+// Returns rawInput unchanged when cachedTokens is 0.
+func normalizeCachedInput(rawInput, cachedTokens int64, discount float64) int64 {
+	if cachedTokens <= 0 {
+		return rawInput
+	}
+	nonCached := rawInput - cachedTokens
+	if nonCached < 0 {
+		nonCached = 0
+	}
+	return nonCached + int64(math.Round(float64(cachedTokens)*discount))
+}
+
+// normalizeAnthropicInput handles Anthropic's two-tier cache pricing
+// (read @ 0.1×, creation @ 1.25×) in a single call.
+func normalizeAnthropicInput(rawInput, cacheRead, cacheCreation int64) int64 {
+	if cacheRead <= 0 && cacheCreation <= 0 {
+		return rawInput
+	}
+	nonCached := rawInput - cacheRead - cacheCreation
+	if nonCached < 0 {
+		nonCached = 0
+	}
+	return nonCached +
+		int64(math.Round(float64(cacheRead)*anthropicCacheReadRate)) +
+		int64(math.Round(float64(cacheCreation)*anthropicCacheCreateRate))
+}
+
 // ProviderParser extracts LLM request/response data for a specific provider.
 // Implement this interface to add support for a new LLM provider.
 type ProviderParser interface {
@@ -76,8 +116,14 @@ func (p *openaiParser) ParseResponse(body []byte) (content string, inputTokens, 
 	}
 
 	if usage, ok := resp["usage"].(map[string]interface{}); ok {
-		inputTokens = toInt64(usage["prompt_tokens"])
+		rawInput := toInt64(usage["prompt_tokens"])
 		outputTokens = toInt64(usage["completion_tokens"])
+
+		var cachedTokens int64
+		if details, ok := usage["prompt_tokens_details"].(map[string]interface{}); ok {
+			cachedTokens = toInt64(details["cached_tokens"])
+		}
+		inputTokens = normalizeCachedInput(rawInput, cachedTokens, openAICacheDiscount)
 	}
 	if choices, ok := resp["choices"].([]interface{}); ok && len(choices) > 0 {
 		if choice, ok := choices[0].(map[string]interface{}); ok {
@@ -117,8 +163,14 @@ func (p *openaiParser) ParseStreamingResponse(data []byte) (content string, inpu
 			}
 		}
 		if usage, ok := chunk["usage"].(map[string]interface{}); ok {
-			inputTokens = toInt64(usage["prompt_tokens"])
+			rawInput := toInt64(usage["prompt_tokens"])
 			outputTokens = toInt64(usage["completion_tokens"])
+
+			var cachedTokens int64
+			if details, ok := usage["prompt_tokens_details"].(map[string]interface{}); ok {
+				cachedTokens = toInt64(details["cached_tokens"])
+			}
+			inputTokens = normalizeCachedInput(rawInput, cachedTokens, openAICacheDiscount)
 		}
 	}
 
@@ -161,17 +213,13 @@ func (p *anthropicParser) ParseResponse(body []byte) (content string, inputToken
 	}
 
 	if usage, ok := resp["usage"].(map[string]interface{}); ok {
-		// Anthropic reports cache tokens separately with different billing rates:
-		//   input_tokens:          1.0× base rate
-		//   cache_read_input_tokens:  0.1× base rate (90% savings)
-		//   cache_creation_input_tokens: 1.25× base rate
-		// We normalize to cost-equivalent token counts at the base rate so the
-		// Calculator's per-million-token math produces correct costs.
-		cacheRead := toInt64(usage["cache_read_input_tokens"])
-		cacheCreation := toInt64(usage["cache_creation_input_tokens"])
-		inputTokens = toInt64(usage["input_tokens"]) +
-			int64(math.Round(float64(cacheRead)*0.1)) +
-			int64(math.Round(float64(cacheCreation)*1.25))
+		// Anthropic's input_tokens INCLUDES cached tokens in the total.
+		// See normalizeAnthropicInput for the two-tier discount formula.
+		inputTokens = normalizeAnthropicInput(
+			toInt64(usage["input_tokens"]),
+			toInt64(usage["cache_read_input_tokens"]),
+			toInt64(usage["cache_creation_input_tokens"]),
+		)
 		outputTokens = toInt64(usage["output_tokens"])
 	}
 	if contentArr, ok := resp["content"].([]interface{}); ok && len(contentArr) > 0 {
@@ -212,12 +260,11 @@ func (p *anthropicParser) ParseStreamingResponse(data []byte) (content string, i
 		}
 		if msg, ok := chunk["message"].(map[string]interface{}); ok {
 			if usage, ok := msg["usage"].(map[string]interface{}); ok {
-				// Normalize cache tokens to cost-equivalent values — see ParseResponse.
-				cacheRead := toInt64(usage["cache_read_input_tokens"])
-				cacheCreation := toInt64(usage["cache_creation_input_tokens"])
-				inputTokens = toInt64(usage["input_tokens"]) +
-					int64(math.Round(float64(cacheRead)*0.1)) +
-					int64(math.Round(float64(cacheCreation)*1.25))
+				inputTokens = normalizeAnthropicInput(
+					toInt64(usage["input_tokens"]),
+					toInt64(usage["cache_read_input_tokens"]),
+					toInt64(usage["cache_creation_input_tokens"]),
+				)
 			}
 		}
 	}
@@ -257,7 +304,11 @@ func (p *googleParser) ParseResponse(body []byte) (content string, inputTokens, 
 	}
 
 	if meta, ok := resp["usageMetadata"].(map[string]interface{}); ok {
-		inputTokens = toInt64(meta["promptTokenCount"])
+		inputTokens = normalizeCachedInput(
+			toInt64(meta["promptTokenCount"]),
+			toInt64(meta["cachedContentTokenCount"]),
+			googleCacheDiscount,
+		)
 		// Gemini 2.5 "thinking" models report reasoning tokens separately.
 		// These are billed at the output rate but NOT included in candidatesTokenCount.
 		// Without this, thinking-heavy responses undercount output by 2-10×.
@@ -345,7 +396,11 @@ func (p *googleParser) ParseStreamingResponse(data []byte) (content string, inpu
 
 	content = contentBuilder.String()
 	if lastMeta != nil {
-		inputTokens = toInt64(lastMeta["promptTokenCount"])
+		inputTokens = normalizeCachedInput(
+			toInt64(lastMeta["promptTokenCount"]),
+			toInt64(lastMeta["cachedContentTokenCount"]),
+			googleCacheDiscount,
+		)
 		outputTokens = toInt64(lastMeta["candidatesTokenCount"]) +
 			toInt64(lastMeta["thoughtsTokenCount"])
 	}

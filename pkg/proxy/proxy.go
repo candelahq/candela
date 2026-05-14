@@ -566,6 +566,14 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 		upstreamPath = provider.PathRewriter.RewritePath(modelForPath, isStreaming)
 	}
 
+	// --- Stream usage injection ---
+	// OpenAI/Gemini-OAI only include usage data in the final SSE chunk when
+	// stream_options.include_usage is set. Without this, streaming responses
+	// return 0 tokens. Inject it transparently so token counting always works.
+	if isStreaming && provider.FormatTranslator == nil {
+		upstreamBody = injectStreamUsageOption(providerName, upstreamBody)
+	}
+
 	// Build the upstream request.
 	upstreamURL := provider.UpstreamURL + upstreamPath
 	if r.URL.RawQuery != "" {

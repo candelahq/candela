@@ -561,3 +561,38 @@ func extractGoogleStreamingCache(data []byte) CacheTokens {
 	}
 	return ct
 }
+
+// injectStreamUsageOption ensures "stream_options": {"include_usage": true} is
+// present in an OpenAI-format request body. Without this, OpenAI and Gemini-OAI
+// streaming responses omit usage data from the final SSE chunk, making token
+// counting impossible for streaming requests.
+//
+// This is a no-op if stream_options is already set or if the body is not valid JSON.
+func injectStreamUsageOption(provider string, body []byte) []byte {
+	switch provider {
+	case "openai", "gemini-oai":
+		// Only inject for OpenAI-compatible providers.
+	default:
+		return body
+	}
+
+	var req map[string]interface{}
+	if err := json.Unmarshal(body, &req); err != nil {
+		return body // Not valid JSON — pass through unchanged.
+	}
+
+	// Don't override if the client already set stream_options.
+	if _, exists := req["stream_options"]; exists {
+		return body
+	}
+
+	req["stream_options"] = map[string]interface{}{
+		"include_usage": true,
+	}
+
+	modified, err := json.Marshal(req)
+	if err != nil {
+		return body // Marshal failed — pass through unchanged.
+	}
+	return modified
+}

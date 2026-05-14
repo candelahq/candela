@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"encoding/json"
 	"testing"
 )
 
@@ -522,5 +523,62 @@ func TestNormalizeAnthropicInput_NoCaching(t *testing.T) {
 	result := normalizeAnthropicInput(100, 0, 0)
 	if result != 100 {
 		t.Errorf("normalizeAnthropicInput(100, 0, 0) = %d, want 100", result)
+	}
+}
+
+// ── Stream usage option injection ────────────────────────────────────────────
+
+func TestInjectStreamUsageOption_OpenAI(t *testing.T) {
+	body := []byte(`{"model":"gpt-4o","messages":[{"role":"user","content":"hi"}],"stream":true}`)
+	result := injectStreamUsageOption("openai", body)
+
+	var parsed map[string]interface{}
+	if err := json.Unmarshal(result, &parsed); err != nil {
+		t.Fatalf("failed to unmarshal: %v", err)
+	}
+
+	so, ok := parsed["stream_options"].(map[string]interface{})
+	if !ok {
+		t.Fatal("stream_options not injected")
+	}
+	if so["include_usage"] != true {
+		t.Errorf("include_usage = %v, want true", so["include_usage"])
+	}
+}
+
+func TestInjectStreamUsageOption_GeminiOAI(t *testing.T) {
+	body := []byte(`{"model":"gemini-2.5-pro","stream":true}`)
+	result := injectStreamUsageOption("gemini-oai", body)
+
+	var parsed map[string]interface{}
+	if err := json.Unmarshal(result, &parsed); err != nil {
+		t.Fatalf("failed to unmarshal: %v", err)
+	}
+	if _, ok := parsed["stream_options"]; !ok {
+		t.Fatal("stream_options not injected for gemini-oai")
+	}
+}
+
+func TestInjectStreamUsageOption_Anthropic_NoOp(t *testing.T) {
+	body := []byte(`{"messages":[{"role":"user","content":"hi"}],"stream":true}`)
+	result := injectStreamUsageOption("anthropic", body)
+
+	// Anthropic should not be modified.
+	if string(result) != string(body) {
+		t.Errorf("anthropic body was modified: %s", string(result))
+	}
+}
+
+func TestInjectStreamUsageOption_PreservesExisting(t *testing.T) {
+	body := []byte(`{"stream":true,"stream_options":{"include_usage":false}}`)
+	result := injectStreamUsageOption("openai", body)
+
+	var parsed map[string]interface{}
+	if err := json.Unmarshal(result, &parsed); err != nil {
+		t.Fatalf("failed to unmarshal: %v", err)
+	}
+	so := parsed["stream_options"].(map[string]interface{})
+	if so["include_usage"] != false {
+		t.Errorf("should not override existing stream_options, got include_usage=%v", so["include_usage"])
 	}
 }

@@ -562,13 +562,11 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 		var bodyMap map[string]interface{}
 		if json.Unmarshal(upstreamBody, &bodyMap) == nil {
 			modified := false
-			// Inject anthropic_version from header if missing.
+			// Inject anthropic_version — Vertex AI rawPredict requires
+			// "vertex-2023-10-16", not the standard "2023-06-01" that
+			// Claude Code sends. Always override.
 			if _, hasVersion := bodyMap["anthropic_version"]; !hasVersion {
-				version := r.Header.Get("anthropic-version")
-				if version == "" {
-					version = "vertex-2023-10-16"
-				}
-				bodyMap["anthropic_version"] = version
+				bodyMap["anthropic_version"] = "vertex-2023-10-16"
 				modified = true
 			}
 			// Strip model — Vertex AI gets it from the URL path and

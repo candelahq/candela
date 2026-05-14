@@ -65,8 +65,9 @@ type Config struct {
 		ProjectID string   `yaml:"project_id"`
 		Providers []string `yaml:"providers"` // e.g. ["openai", "google", "anthropic", "anthropic-direct", "gemini-oai"]
 		VertexAI  struct {
-			ProjectID string `yaml:"project_id"` // GCP project for Vertex AI
-			Region    string `yaml:"region"`     // e.g. "us-central1"
+			ProjectID     string `yaml:"project_id"`     // GCP project for Vertex AI
+			Region        string `yaml:"region"`         // e.g. "us-central1"
+			PromptCaching bool   `yaml:"prompt_caching"` // inject cache_control for Anthropic prompt caching
 		} `yaml:"vertex_ai"`
 		LMStudio struct {
 			Enabled bool                `yaml:"enabled"`
@@ -251,14 +252,17 @@ func main() {
 					// Only add format translation for the OpenAI-compat "anthropic" provider.
 					// anthropic-vertex is a native Messages API passthrough (for Claude Code).
 					if p.Name == "anthropic" {
-						allProviders[i].FormatTranslator = &proxy.AnthropicFormatTranslator{}
+						allProviders[i].FormatTranslator = &proxy.AnthropicFormatTranslator{
+							PromptCaching: cfg.Proxy.VertexAI.PromptCaching,
+						}
 					}
 					slog.Info("🔐 Anthropic via Vertex AI configured",
 						"provider", p.Name,
 						"project", cfg.Proxy.VertexAI.ProjectID,
 						"region", region,
 						"adc", tokenSource != nil,
-						"format_translation", p.Name == "anthropic")
+						"format_translation", p.Name == "anthropic",
+						"prompt_caching", cfg.Proxy.VertexAI.PromptCaching)
 				}
 			}
 		}

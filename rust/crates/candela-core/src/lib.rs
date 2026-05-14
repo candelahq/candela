@@ -82,6 +82,12 @@ pub struct GenAIAttributes {
     pub input_content: String,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub output_content: String,
+    /// Number of input tokens served from prompt cache (read hits).
+    #[serde(default, skip_serializing_if = "is_zero_i64")]
+    pub cache_read_tokens: i64,
+    /// Number of input tokens written into prompt cache (cache misses that populated the cache).
+    #[serde(default, skip_serializing_if = "is_zero_i64")]
+    pub cache_creation_tokens: i64,
 }
 
 /// A single observability span in the storage layer.

@@ -34,6 +34,8 @@ proxy:
     - openai
     - google
     - anthropic
+    - anthropic-vertex
+    - anthropic-direct
     - gemini-oai
   lmstudio:
     enabled: ${CANDELA_LMSTUDIO_ENABLED:-true}

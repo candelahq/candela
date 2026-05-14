@@ -364,3 +364,145 @@ func (p *fallbackParser) ParseResponse(_ []byte) (string, int64, int64) { return
 func (p *fallbackParser) ParseStreamingResponse(_ []byte) (string, int64, int64) {
 	return "", 0, 0
 }
+
+// ──────────────────────────────────────────
+// Cache token extraction (all providers)
+// ──────────────────────────────────────────
+
+// CacheTokens holds the raw prompt caching breakdown from the provider API.
+// These are the unmodified counts — not cost-normalized.
+type CacheTokens struct {
+	CacheReadTokens     int64
+	CacheCreationTokens int64 // Anthropic-only (cache writes); 0 for OpenAI/Google
+}
+
+// extractCacheTokens extracts raw cache token counts from a standard response.
+func extractCacheTokens(provider string, body []byte) CacheTokens {
+	var resp map[string]interface{}
+	if err := json.Unmarshal(body, &resp); err != nil {
+		return CacheTokens{}
+	}
+
+	switch provider {
+	case "anthropic", "anthropic-direct", "anthropic-vertex":
+		if usage, ok := resp["usage"].(map[string]interface{}); ok {
+			return CacheTokens{
+				CacheReadTokens:     toInt64(usage["cache_read_input_tokens"]),
+				CacheCreationTokens: toInt64(usage["cache_creation_input_tokens"]),
+			}
+		}
+
+	case "openai", "gemini-oai":
+		// OpenAI reports cached tokens inside usage.prompt_tokens_details.cached_tokens
+		if usage, ok := resp["usage"].(map[string]interface{}); ok {
+			if details, ok := usage["prompt_tokens_details"].(map[string]interface{}); ok {
+				return CacheTokens{
+					CacheReadTokens: toInt64(details["cached_tokens"]),
+				}
+			}
+		}
+
+	case "google":
+		// Google reports cached tokens in usageMetadata.cachedContentTokenCount
+		if meta, ok := resp["usageMetadata"].(map[string]interface{}); ok {
+			return CacheTokens{
+				CacheReadTokens: toInt64(meta["cachedContentTokenCount"]),
+			}
+		}
+	}
+
+	return CacheTokens{}
+}
+
+// extractStreamingCacheTokens extracts raw cache token counts from SSE stream data.
+func extractStreamingCacheTokens(provider string, data []byte) CacheTokens {
+	switch provider {
+	case "anthropic", "anthropic-direct", "anthropic-vertex":
+		return extractAnthropicStreamingCache(data)
+
+	case "openai", "gemini-oai":
+		return extractOpenAIStreamingCache(data)
+
+	case "google":
+		return extractGoogleStreamingCache(data)
+	}
+
+	return CacheTokens{}
+}
+
+func extractAnthropicStreamingCache(data []byte) CacheTokens {
+	var ct CacheTokens
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if !strings.HasPrefix(line, "data: ") {
+			continue
+		}
+		payload := strings.TrimPrefix(line, "data: ")
+		if payload == "[DONE]" {
+			continue
+		}
+		var chunk map[string]interface{}
+		if err := json.Unmarshal([]byte(payload), &chunk); err != nil {
+			continue
+		}
+		if msg, ok := chunk["message"].(map[string]interface{}); ok {
+			if usage, ok := msg["usage"].(map[string]interface{}); ok {
+				ct.CacheReadTokens = toInt64(usage["cache_read_input_tokens"])
+				ct.CacheCreationTokens = toInt64(usage["cache_creation_input_tokens"])
+			}
+		}
+	}
+	return ct
+}
+
+func extractOpenAIStreamingCache(data []byte) CacheTokens {
+	var ct CacheTokens
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if !strings.HasPrefix(line, "data: ") {
+			continue
+		}
+		payload := strings.TrimPrefix(line, "data: ")
+		if payload == "[DONE]" {
+			continue
+		}
+		var chunk map[string]interface{}
+		if err := json.Unmarshal([]byte(payload), &chunk); err != nil {
+			continue
+		}
+		// OpenAI includes usage in the final chunk when stream_options.include_usage is set.
+		if usage, ok := chunk["usage"].(map[string]interface{}); ok {
+			if details, ok := usage["prompt_tokens_details"].(map[string]interface{}); ok {
+				ct.CacheReadTokens = toInt64(details["cached_tokens"])
+			}
+		}
+	}
+	return ct
+}
+
+func extractGoogleStreamingCache(data []byte) CacheTokens {
+	var ct CacheTokens
+	// Google streaming returns JSON array or newline-delimited JSON.
+	// The last chunk contains usageMetadata. Try JSON array first.
+	var chunks []map[string]interface{}
+	if err := json.Unmarshal(data, &chunks); err == nil {
+		for _, chunk := range chunks {
+			if meta, ok := chunk["usageMetadata"].(map[string]interface{}); ok {
+				ct.CacheReadTokens = toInt64(meta["cachedContentTokenCount"])
+			}
+		}
+	} else {
+		// Fallback: newline-delimited JSON.
+		dec := json.NewDecoder(bytes.NewReader(data))
+		for dec.More() {
+			var chunk map[string]interface{}
+			if err := dec.Decode(&chunk); err != nil {
+				break
+			}
+			if meta, ok := chunk["usageMetadata"].(map[string]interface{}); ok {
+				ct.CacheReadTokens = toInt64(meta["cachedContentTokenCount"])
+			}
+		}
+	}
+	return ct
+}

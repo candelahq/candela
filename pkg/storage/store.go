@@ -91,6 +91,13 @@ type GenAIAttributes struct {
 	TopP          float64 `json:"top_p,omitempty"`
 	InputContent  string  `json:"input_content,omitempty"`
 	OutputContent string  `json:"output_content,omitempty"`
+
+	// Cache token breakdown (Anthropic prompt caching).
+	// These are the RAW counts from the API — not cost-normalized.
+	// InputTokens above is the cost-equivalent value (base + cache_read×0.1 + cache_creation×1.25).
+	// Showing both lets developers see their cache hit rate and optimize prompts.
+	CacheReadTokens     int64 `json:"cache_read_tokens,omitempty"`
+	CacheCreationTokens int64 `json:"cache_creation_tokens,omitempty"`
 }
 
 // Span represents a single span in the storage layer.

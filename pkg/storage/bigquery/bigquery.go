@@ -389,7 +389,7 @@ func (s *Store) QueryTraces(ctx context.Context, tq storage.TraceQuery) (*storag
 	query := fmt.Sprintf(`
 		SELECT trace_id, MIN(start_time) AS earliest
 		FROM %s
-		WHERE project_id = @projectID
+		WHERE (@projectID = '' OR project_id = @projectID)
 		  AND start_time >= @startTime
 		  AND start_time <= @endTime
 		  AND (@userID = '' OR user_id = @userID)
@@ -497,7 +497,7 @@ func (s *Store) SearchSpans(ctx context.Context, sq storage.SpanQuery) (*storage
 
 	query := fmt.Sprintf(`
 		SELECT * FROM %s
-		WHERE project_id = @projectID
+		WHERE (@projectID = '' OR project_id = @projectID)
 		  AND start_time >= @startTime
 		  AND start_time <= @endTime
 		  AND (@kind = 0 OR kind = @kind)
@@ -544,7 +544,7 @@ func (s *Store) GetUsageSummary(ctx context.Context, uq storage.UsageQuery) (*st
 			COALESCE(SUM(gen_ai_cost_usd), 0) AS total_cost_usd,
 			COALESCE(AVG(duration_ns), 0) AS avg_duration_ns
 		FROM %s
-		WHERE project_id = @projectID
+		WHERE (@projectID = '' OR project_id = @projectID)
 		  AND start_time >= @startTime
 		  AND start_time <= @endTime
 		  AND (@userID = '' OR user_id = @userID)
@@ -609,7 +609,7 @@ func (s *Store) GetModelBreakdown(ctx context.Context, uq storage.UsageQuery) ([
 			COALESCE(SUM(gen_ai_cost_usd), 0) AS total_cost_usd,
 			COALESCE(AVG(duration_ns), 0) AS avg_duration_ns
 		FROM %s
-		WHERE project_id = @projectID
+		WHERE (@projectID = '' OR project_id = @projectID)
 		  AND start_time >= @startTime
 		  AND start_time <= @endTime
 		  AND gen_ai_model != ''
@@ -680,7 +680,7 @@ func (s *Store) GetUserLeaderboard(ctx context.Context, uq storage.UsageQuery, l
 			COALESCE(SUM(gen_ai_cost_usd), 0) AS total_cost_usd,
 			COALESCE(AVG(duration_ns), 0) AS avg_duration_ns
 		FROM %s
-		WHERE project_id = @projectID
+		WHERE (@projectID = '' OR project_id = @projectID)
 		  AND start_time >= @startTime
 		  AND start_time <= @endTime
 		  AND user_id != ''
@@ -753,7 +753,7 @@ func (s *Store) GetTenantLeaderboard(ctx context.Context, uq storage.UsageQuery,
 				duration_ns,
 				SUM(gen_ai_cost_usd) OVER (PARTITION BY tenant_id, gen_ai_model) AS model_cost
 			FROM %s
-			WHERE project_id = @projectID
+			WHERE (@projectID = '' OR project_id = @projectID)
 			  AND start_time >= @startTime
 			  AND start_time <= @endTime
 			  AND tenant_id IS NOT NULL AND tenant_id != '' AND gen_ai_model != ''
@@ -814,14 +814,18 @@ func (s *Store) GetJobLeaderboard(ctx context.Context, uq storage.UsageQuery, li
 		COALESCE((
 			SELECT s2.gen_ai_model FROM %s s2
 			WHERE s2.job_id = spans.job_id
-				AND s2.project_id = @projectID AND s2.start_time >= @startTime AND s2.start_time <= @endTime
+				AND (@projectID = '' OR s2.project_id = @projectID)
+				AND s2.start_time >= @startTime
+				AND s2.start_time <= @endTime
 				AND s2.gen_ai_model IS NOT NULL AND s2.gen_ai_model != ''
 			GROUP BY s2.gen_ai_model
 			ORDER BY SUM(s2.gen_ai_cost_usd) DESC
 			LIMIT 1
 		), '') AS top_model
 	FROM %s spans
-	WHERE project_id = @projectID AND start_time >= @startTime AND start_time <= @endTime
+	WHERE (@projectID = '' OR project_id = @projectID)
+		AND start_time >= @startTime
+		AND start_time <= @endTime
 		AND job_id IS NOT NULL AND job_id != ''
 	GROUP BY job_id
 	ORDER BY total_cost_usd DESC

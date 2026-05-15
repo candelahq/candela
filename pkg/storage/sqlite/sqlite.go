@@ -245,14 +245,14 @@ func (s *Store) QueryTraces(ctx context.Context, q storage.TraceQuery) (*storage
 			MAX(gen_ai_provider) as primary_provider,
 			MAX(status) as status
 		FROM spans
-		WHERE project_id = ? AND start_time >= ? AND start_time <= ?
+		WHERE (? = '' OR project_id = ?) AND start_time >= ? AND start_time <= ?
 			AND (? = '' OR user_id = ?)
 			AND (? = '' OR tenant_id = ?)
 			AND (? = '' OR environment = ?)
 		GROUP BY trace_id
 		ORDER BY `+orderExpr+` `+dir+`
 		LIMIT ?
-	`, q.ProjectID, q.StartTime.Format(time.RFC3339Nano), q.EndTime.Format(time.RFC3339Nano),
+	`, q.ProjectID, q.ProjectID, q.StartTime.Format(time.RFC3339Nano), q.EndTime.Format(time.RFC3339Nano),
 		q.UserID, q.UserID, q.TenantID, q.TenantID, q.Environment, q.Environment, q.PageSize)
 	if err != nil {
 		return nil, fmt.Errorf("querying traces: %w", err)
@@ -300,7 +300,7 @@ func (s *Store) SearchSpans(ctx context.Context, q storage.SpanQuery) (*storage.
 			gen_ai_total_tokens, gen_ai_cost_usd, gen_ai_temperature, gen_ai_max_tokens,
 			gen_ai_input_content, gen_ai_output_content, attributes_json, user_id, session_id, tenant_id, job_id
 		FROM spans
-		WHERE project_id = ? AND start_time >= ? AND start_time <= ?
+		WHERE (? = '' OR project_id = ?) AND start_time >= ? AND start_time <= ?
 			AND (? = 0 OR kind = ?)
 			AND (? = '' OR gen_ai_model = ?)
 			AND (? = '' OR name LIKE '%' || ? || '%' ESCAPE '\')
@@ -308,7 +308,7 @@ func (s *Store) SearchSpans(ctx context.Context, q storage.SpanQuery) (*storage.
 			AND (? = '' OR tenant_id = ?)
 		ORDER BY start_time DESC
 		LIMIT ?
-	`, q.ProjectID,
+	`, q.ProjectID, q.ProjectID,
 		q.StartTime.Format(time.RFC3339Nano), q.EndTime.Format(time.RFC3339Nano),
 		int(q.Kind), int(q.Kind),
 		q.Model, q.Model,
@@ -336,7 +336,7 @@ func (s *Store) GetUsageSummary(ctx context.Context, q storage.UsageQuery) (*sto
 		SELECT
 			COUNT(DISTINCT trace_id),
 			COUNT(*),
-			SUM(CASE WHEN kind = 1 THEN 1 ELSE 0 END),
+			COALESCE(SUM(CASE WHEN kind = 1 THEN 1 ELSE 0 END), 0),
 			COALESCE(SUM(gen_ai_input_tokens), 0),
 			COALESCE(SUM(gen_ai_output_tokens), 0),
 			COALESCE(SUM(gen_ai_cost_usd), 0),
@@ -345,10 +345,10 @@ func (s *Store) GetUsageSummary(ctx context.Context, q storage.UsageQuery) (*sto
 				THEN CAST(SUM(CASE WHEN status = 2 THEN 1 ELSE 0 END) AS REAL) / COUNT(*)
 				ELSE 0 END
 		FROM spans
-		WHERE project_id = ? AND start_time >= ? AND start_time <= ?
+		WHERE (? = '' OR project_id = ?) AND start_time >= ? AND start_time <= ?
 			AND (? = '' OR user_id = ?)
 			AND (? = '' OR tenant_id = ?)
-	`, q.ProjectID, q.StartTime.Format(time.RFC3339Nano), q.EndTime.Format(time.RFC3339Nano), q.UserID, q.UserID, q.TenantID, q.TenantID).Scan(
+	`, q.ProjectID, q.ProjectID, q.StartTime.Format(time.RFC3339Nano), q.EndTime.Format(time.RFC3339Nano), q.UserID, q.UserID, q.TenantID, q.TenantID).Scan(
 		&summary.TotalTraces, &summary.TotalSpans, &summary.TotalLLMCalls,
 		&summary.TotalInputTokens, &summary.TotalOutputTokens, &summary.TotalCostUSD,
 		&summary.AvgLatencyMs, &summary.ErrorRate,
@@ -365,13 +365,13 @@ func (s *Store) GetModelBreakdown(ctx context.Context, q storage.UsageQuery) ([]
 			COUNT(*), SUM(gen_ai_input_tokens), SUM(gen_ai_output_tokens),
 			SUM(gen_ai_cost_usd), AVG(duration_ns) / 1000000.0
 		FROM spans
-		WHERE project_id = ? AND start_time >= ? AND start_time <= ?
+		WHERE (? = '' OR project_id = ?) AND start_time >= ? AND start_time <= ?
 			AND gen_ai_model != ''
 			AND (? = '' OR user_id = ?)
 			AND (? = '' OR tenant_id = ?)
 		GROUP BY gen_ai_model, gen_ai_provider
 		ORDER BY SUM(gen_ai_cost_usd) DESC
-	`, q.ProjectID, q.StartTime.Format(time.RFC3339Nano), q.EndTime.Format(time.RFC3339Nano), q.UserID, q.UserID, q.TenantID, q.TenantID)
+	`, q.ProjectID, q.ProjectID, q.StartTime.Format(time.RFC3339Nano), q.EndTime.Format(time.RFC3339Nano), q.UserID, q.UserID, q.TenantID, q.TenantID)
 	if err != nil {
 		return nil, fmt.Errorf("querying model breakdown: %w", err)
 	}
@@ -407,20 +407,20 @@ func (s *Store) GetUserLeaderboard(ctx context.Context, q storage.UsageQuery, li
 			COALESCE((
 				SELECT s2.gen_ai_model FROM spans s2
 				WHERE s2.user_id = spans.user_id
-					AND s2.project_id = ? AND s2.start_time >= ? AND s2.start_time <= ?
+					AND (? = '' OR s2.project_id = ?) AND s2.start_time >= ? AND s2.start_time <= ?
 					AND s2.gen_ai_model != ''
 				GROUP BY s2.gen_ai_model
 				ORDER BY SUM(s2.gen_ai_cost_usd) DESC
 				LIMIT 1
 			), '') AS top_model
 		FROM spans
-		WHERE project_id = ? AND start_time >= ? AND start_time <= ?
+		WHERE (? = '' OR project_id = ?) AND start_time >= ? AND start_time <= ?
 			AND user_id != ''
 		GROUP BY user_id
 		ORDER BY SUM(gen_ai_cost_usd) DESC
 		LIMIT ?
-	`, q.ProjectID, q.StartTime.Format(time.RFC3339Nano), q.EndTime.Format(time.RFC3339Nano),
-		q.ProjectID, q.StartTime.Format(time.RFC3339Nano), q.EndTime.Format(time.RFC3339Nano), limit)
+	`, q.ProjectID, q.ProjectID, q.StartTime.Format(time.RFC3339Nano), q.EndTime.Format(time.RFC3339Nano),
+		q.ProjectID, q.ProjectID, q.StartTime.Format(time.RFC3339Nano), q.EndTime.Format(time.RFC3339Nano), limit)
 	if err != nil {
 		return nil, fmt.Errorf("querying user leaderboard: %w", err)
 	}
@@ -457,20 +457,20 @@ func (s *Store) GetTenantLeaderboard(ctx context.Context, q storage.UsageQuery, 
 			COALESCE((
 				SELECT s2.gen_ai_model FROM spans s2
 				WHERE s2.tenant_id = spans.tenant_id
-					AND s2.project_id = ? AND s2.start_time >= ? AND s2.start_time <= ?
+					AND (? = '' OR s2.project_id = ?) AND s2.start_time >= ? AND s2.start_time <= ?
 					AND s2.gen_ai_model != ''
 				GROUP BY s2.gen_ai_model
 				ORDER BY SUM(s2.gen_ai_cost_usd) DESC
 				LIMIT 1
 			), '') AS top_model
 		FROM spans
-		WHERE project_id = ? AND start_time >= ? AND start_time <= ?
+		WHERE (? = '' OR project_id = ?) AND start_time >= ? AND start_time <= ?
 			AND tenant_id IS NOT NULL AND tenant_id != ''
 		GROUP BY tenant_id
 		ORDER BY SUM(gen_ai_cost_usd) DESC
 		LIMIT ?
-	`, q.ProjectID, q.StartTime.Format(time.RFC3339Nano), q.EndTime.Format(time.RFC3339Nano),
-		q.ProjectID, q.StartTime.Format(time.RFC3339Nano), q.EndTime.Format(time.RFC3339Nano), limit)
+	`, q.ProjectID, q.ProjectID, q.StartTime.Format(time.RFC3339Nano), q.EndTime.Format(time.RFC3339Nano),
+		q.ProjectID, q.ProjectID, q.StartTime.Format(time.RFC3339Nano), q.EndTime.Format(time.RFC3339Nano), limit)
 	if err != nil {
 		return nil, fmt.Errorf("querying tenant leaderboard: %w", err)
 	}
@@ -500,20 +500,20 @@ func (s *Store) GetJobLeaderboard(ctx context.Context, q storage.UsageQuery, lim
 			COALESCE((
 				SELECT s2.gen_ai_model FROM spans s2
 				WHERE s2.job_id = spans.job_id
-					AND s2.project_id = ? AND s2.start_time >= ? AND s2.start_time <= ?
+					AND (? = '' OR s2.project_id = ?) AND s2.start_time >= ? AND s2.start_time <= ?
 					AND s2.gen_ai_model != ''
 				GROUP BY s2.gen_ai_model
 				ORDER BY SUM(s2.gen_ai_cost_usd) DESC
 				LIMIT 1
 			), '') AS top_model
 		FROM spans
-		WHERE project_id = ? AND start_time >= ? AND start_time <= ?
+		WHERE (? = '' OR project_id = ?) AND start_time >= ? AND start_time <= ?
 			AND job_id IS NOT NULL AND job_id != ''
 		GROUP BY job_id
 		ORDER BY SUM(gen_ai_cost_usd) DESC
 		LIMIT ?
-	`, q.ProjectID, q.StartTime.Format(time.RFC3339Nano), q.EndTime.Format(time.RFC3339Nano),
-		q.ProjectID, q.StartTime.Format(time.RFC3339Nano), q.EndTime.Format(time.RFC3339Nano), limit)
+	`, q.ProjectID, q.ProjectID, q.StartTime.Format(time.RFC3339Nano), q.EndTime.Format(time.RFC3339Nano),
+		q.ProjectID, q.ProjectID, q.StartTime.Format(time.RFC3339Nano), q.EndTime.Format(time.RFC3339Nano), limit)
 	if err != nil {
 		return nil, fmt.Errorf("querying job leaderboard: %w", err)
 	}

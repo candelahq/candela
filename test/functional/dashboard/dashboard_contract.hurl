@@ -39,10 +39,8 @@ Connect-Protocol-Version: 1
   "time_range": "24h"
 }
 
-HTTP *
+HTTP 400
 [Asserts]
-# Must return 400 (invalid_argument), not 500 or 200.
-status == 400
 jsonpath "$.code" == "invalid_argument"
 
 

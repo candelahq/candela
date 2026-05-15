@@ -1,6 +1,11 @@
 # DASH-01..06: Dashboard ConnectRPC auth and endpoint validation
 # These tests verify the candela-analysis DashboardService endpoints
 # used by Candela Desktop in Team mode.
+#
+# NOTE: Auth failures return plain HTTP JSON from the auth middleware
+# (pkg/auth/{firebase,iap}.go writeError), NOT ConnectRPC error format.
+# The middleware uses {"error": "..."}, while ConnectRPC uses {"message": "..."}.
+# These assertions use $.error because auth is rejected BEFORE reaching ConnectRPC.
 
 # ── DASH-01: GetModelBreakdown without auth → 401 ──────────────────────────
 POST {{ANALYSIS_URL}}/candela.v1.DashboardService/GetModelBreakdown

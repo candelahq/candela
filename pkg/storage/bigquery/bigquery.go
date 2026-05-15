@@ -814,14 +814,18 @@ func (s *Store) GetJobLeaderboard(ctx context.Context, uq storage.UsageQuery, li
 		COALESCE((
 			SELECT s2.gen_ai_model FROM %s s2
 			WHERE s2.job_id = spans.job_id
-				AND (@projectID = '' OR s2.project_id = @projectID) AND s2.start_time >= @startTime AND s2.start_time <= @endTime
+				AND (@projectID = '' OR s2.project_id = @projectID)
+				AND s2.start_time >= @startTime
+				AND s2.start_time <= @endTime
 				AND s2.gen_ai_model IS NOT NULL AND s2.gen_ai_model != ''
 			GROUP BY s2.gen_ai_model
 			ORDER BY SUM(s2.gen_ai_cost_usd) DESC
 			LIMIT 1
 		), '') AS top_model
 	FROM %s spans
-	WHERE (@projectID = '' OR project_id = @projectID) AND start_time >= @startTime AND start_time <= @endTime
+	WHERE (@projectID = '' OR project_id = @projectID)
+		AND start_time >= @startTime
+		AND start_time <= @endTime
 		AND job_id IS NOT NULL AND job_id != ''
 	GROUP BY job_id
 	ORDER BY total_cost_usd DESC

@@ -208,8 +208,10 @@ func TestGetUsageSummary(t *testing.T) {
 	if summary.TotalInputTokens != 1200 {
 		t.Errorf("total_input_tokens = %d, want 1200", summary.TotalInputTokens)
 	}
-	if summary.ErrorRate < 0.4 || summary.ErrorRate > 0.6 {
-		t.Errorf("error_rate = %f, want ~0.5", summary.ErrorRate)
+	// Both spans belong to trace t1. Since t1 contains an errored span,
+	// the trace-level error rate is 1.0 (1 errored trace / 1 total trace).
+	if summary.ErrorRate < 0.9 || summary.ErrorRate > 1.1 {
+		t.Errorf("error_rate = %f, want ~1.0 (trace-level)", summary.ErrorRate)
 	}
 }
 
@@ -376,8 +378,9 @@ func TestGetTenantLeaderboard(t *testing.T) {
 	if leaderboard[1].TenantID != "tenant-a" {
 		t.Errorf("second tenant = %s, want tenant-a", leaderboard[1].TenantID)
 	}
-	if leaderboard[1].CallCount != 2 {
-		t.Errorf("tenant-a calls = %d, want 2", leaderboard[1].CallCount)
+	// tenant-a has 2 spans but both belong to trace t1, so CallCount = 1 distinct trace.
+	if leaderboard[1].CallCount != 1 {
+		t.Errorf("tenant-a calls = %d, want 1 (distinct traces)", leaderboard[1].CallCount)
 	}
 	if leaderboard[1].CostUSD != 0.02 {
 		t.Errorf("tenant-a cost = %f, want 0.02", leaderboard[1].CostUSD)

@@ -221,9 +221,11 @@ func (c *Calculator) NormalizeCachedInput(provider, model string, rawInput, cach
 		return rawInput
 	}
 
-	// Google/Gemini models have model-aware cache discount rates.
+	// Google/Gemini models have model-aware cache discount rates by default.
+	// Only apply if the config hasn't been overridden via SetCacheDiscount.
 	readDiscount := cfg.ReadDiscount
-	if canonical == "google" {
+	defaultGoogleCfg := defaultCacheDiscounts["google"]
+	if canonical == "google" && cfg.ReadDiscount == defaultGoogleCfg.ReadDiscount {
 		readDiscount = googleCacheReadDiscount(model)
 	}
 

@@ -774,6 +774,9 @@ func (p *Proxy) handleStandardResponse(
 		// and model-specific cache discounts (e.g. Anthropic 90% read,
 		// Google 90% for 2.5+, OpenAI 50%).
 		ct := extractCacheTokens(provider.Name, respBody)
+		if model == "" {
+			model = extractModelFromResponse(provider.Name, respBody)
+		}
 		inputTokens = p.calc.NormalizeCachedInput(provider.Name, model, inputTokens, ct.CacheReadTokens, ct.CacheCreationTokens)
 		deductCtx, deductCancel := context.WithTimeout(context.WithoutCancel(r.Context()), 15*time.Second)
 		p.deductBudget(deductCtx, provider, model, effectiveUserID, inputTokens, outputTokens)
@@ -911,6 +914,9 @@ func (p *Proxy) handleStreamingResponse(
 		model, _ := extractRequestInfo(provider.Name, reqBody)
 		_, inputTokens, outputTokens := extractStreamingUsage(provider.Name, parseData)
 		ct := extractStreamingCacheTokens(provider.Name, parseData)
+		if model == "" {
+			model = extractModelFromStreamingResponse(provider.Name, parseData)
+		}
 		inputTokens = p.calc.NormalizeCachedInput(provider.Name, model, inputTokens, ct.CacheReadTokens, ct.CacheCreationTokens)
 		deductCtx, deductCancel := context.WithTimeout(context.WithoutCancel(r.Context()), 15*time.Second)
 		p.deductBudget(deductCtx, provider, model, effectiveUserID, inputTokens, outputTokens)
@@ -1144,6 +1150,12 @@ func (p *Proxy) createSpan(
 	outputContent, inputTokens, outputTokens := extractResponseInfo(provider.Name, respBody)
 	ct := extractCacheTokens(provider.Name, respBody)
 
+	// For Google native, model is in the URL path, not the body.
+	// Fall back to the response's modelVersion field.
+	if model == "" {
+		model = extractModelFromResponse(provider.Name, respBody)
+	}
+
 	// Normalize cached input tokens via the calculator (handles all providers).
 	inputTokens = p.calc.NormalizeCachedInput(provider.Name, model, inputTokens, ct.CacheReadTokens, ct.CacheCreationTokens)
 
@@ -1196,6 +1208,12 @@ func (p *Proxy) createStreamingSpan(
 	model, inputContent := extractRequestInfo(provider.Name, reqBody)
 	outputContent, inputTokens, outputTokens := extractStreamingUsage(provider.Name, streamData)
 	ct := extractStreamingCacheTokens(provider.Name, streamData)
+
+	// For Google native, model is in the URL path, not the body.
+	// Fall back to the response's modelVersion field.
+	if model == "" {
+		model = extractModelFromStreamingResponse(provider.Name, streamData)
+	}
 
 	// Normalize cached input tokens via the calculator (handles all providers).
 	inputTokens = p.calc.NormalizeCachedInput(provider.Name, model, inputTokens, ct.CacheReadTokens, ct.CacheCreationTokens)

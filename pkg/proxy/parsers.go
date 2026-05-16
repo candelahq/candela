@@ -365,6 +365,83 @@ func (p *fallbackParser) ParseStreamingResponse(_ []byte) (string, int64, int64)
 }
 
 // ──────────────────────────────────────────
+// Model extraction from response body
+// ──────────────────────────────────────────
+
+// extractModelFromResponse extracts the model name from a provider's response
+// body. This is the primary source for Google (which has modelVersion in the
+// response but NOT in the request body), and a fallback for other providers.
+func extractModelFromResponse(provider string, body []byte) string {
+	var resp map[string]interface{}
+	if err := json.Unmarshal(body, &resp); err != nil {
+		return ""
+	}
+
+	switch provider {
+	case "google":
+		// Google returns modelVersion at the response top level.
+		// e.g. "gemini-2.0-flash-lite-001" or "gemini-2.5-pro-preview-05-06"
+		if mv, ok := resp["modelVersion"].(string); ok && mv != "" {
+			return mv
+		}
+	case "openai", "gemini-oai":
+		if m, ok := resp["model"].(string); ok && m != "" {
+			return m
+		}
+	case "anthropic", "anthropic-direct", "anthropic-vertex":
+		if m, ok := resp["model"].(string); ok && m != "" {
+			return m
+		}
+	}
+	return ""
+}
+
+// extractModelFromStreamingResponse extracts the model name from streaming
+// response data. Scans SSE lines for the model field in any chunk.
+func extractModelFromStreamingResponse(provider string, data []byte) string {
+	switch provider {
+	case "google":
+		// Google streaming: look for modelVersion in any JSON chunk.
+		// It's typically in the last chunk alongside usageMetadata.
+		var arr []map[string]interface{}
+		if json.Unmarshal(data, &arr) == nil {
+			for _, chunk := range arr {
+				if mv, ok := chunk["modelVersion"].(string); ok && mv != "" {
+					return mv
+				}
+			}
+		}
+		// Try as single JSON object.
+		var single map[string]interface{}
+		if json.Unmarshal(data, &single) == nil {
+			if mv, ok := single["modelVersion"].(string); ok && mv != "" {
+				return mv
+			}
+		}
+
+	default:
+		// OpenAI/Anthropic SSE: scan for "model" in any data line.
+		for _, line := range strings.Split(string(data), "\n") {
+			line = strings.TrimSpace(line)
+			if !strings.HasPrefix(line, "data: ") {
+				continue
+			}
+			payload := strings.TrimPrefix(line, "data: ")
+			if payload == "[DONE]" {
+				continue
+			}
+			var chunk map[string]interface{}
+			if json.Unmarshal([]byte(payload), &chunk) == nil {
+				if m, ok := chunk["model"].(string); ok && m != "" {
+					return m
+				}
+			}
+		}
+	}
+	return ""
+}
+
+// ──────────────────────────────────────────
 // Cache token extraction (all providers)
 // ──────────────────────────────────────────
 

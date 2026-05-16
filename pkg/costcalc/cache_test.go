@@ -247,3 +247,31 @@ func TestProviderAliases_GeminiOAI(t *testing.T) {
 		t.Errorf("gemini-oai alias = %q, want %q", canonical, "google")
 	}
 }
+
+// ── Gemini review fix: SetCacheDiscount overrides model-aware Google logic ────
+
+func TestNormalizeCachedInput_GoogleOverride_TakesPrecedence(t *testing.T) {
+	c := New()
+	// Override Google's cache discount to a flat 30% off (0.70× multiplier).
+	// This should bypass model-aware logic entirely.
+	c.SetCacheDiscount("google", CacheDiscountConfig{
+		ReadDiscount:     0.70,
+		CreateMultiplier: 1.0,
+	})
+
+	// Even for a Gemini 2.5 model that normally gets 90% off,
+	// the override should apply 30% off instead.
+	// 1000 total, 800 cache_read, 0 cache_creation
+	// nonCached = 200, cached_eq = round(800 * 0.70) = 560
+	// result = 200 + 560 = 760
+	result := c.NormalizeCachedInput("google", "gemini-2.5-pro", 1000, 800, 0)
+	if result != 760 {
+		t.Errorf("Google override = %d, want 760 (custom 30%% off, not model-aware 90%%)", result)
+	}
+
+	// Same for a 2.0 model — should also use the override, not 75%.
+	result2 := c.NormalizeCachedInput("google", "gemini-2.0-flash", 1000, 800, 0)
+	if result2 != 760 {
+		t.Errorf("Google override (2.0) = %d, want 760 (custom 30%% off, not legacy 75%%)", result2)
+	}
+}

@@ -3,8 +3,10 @@ package duckdb
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/candelahq/candela/pkg/storage"
@@ -97,6 +99,13 @@ func (s *Store) migrate() error {
 		// Migration: add job_id for job-level cost attribution.
 		`ALTER TABLE spans ADD COLUMN IF NOT EXISTS job_id VARCHAR DEFAULT ''`,
 		`CREATE INDEX IF NOT EXISTS idx_spans_job ON spans(job_id)`,
+		// Sync Outbox
+		`CREATE TABLE IF NOT EXISTS outbox_spans (
+			span_id VARCHAR,
+			payload_json VARCHAR NOT NULL,
+			attempt_count INTEGER DEFAULT 0,
+			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+		)`,
 	}
 
 	for _, q := range queries {
@@ -125,6 +134,12 @@ func (s *Store) IngestSpans(ctx context.Context, spans []storage.Span) error {
 			return fmt.Errorf("creating appender: %w", err)
 		}
 		defer func() { _ = appender.Close() }()
+
+		outboxAppender, err := duckdb.NewAppenderFromConn(duckConn, "", "outbox_spans")
+		if err != nil {
+			return fmt.Errorf("creating outbox appender: %w", err)
+		}
+		defer func() { _ = outboxAppender.Close() }()
 
 		for _, span := range spans {
 			genAI := span.GenAI
@@ -157,10 +172,24 @@ func (s *Store) IngestSpans(ctx context.Context, spans []storage.Span) error {
 			); err != nil {
 				return fmt.Errorf("appending span %s: %w", span.SpanID, err)
 			}
+
+			// Also write to sync outbox
+			payloadBytes, err := json.Marshal(span)
+			if err != nil {
+				return fmt.Errorf("marshaling span for outbox %s: %w", span.SpanID, err)
+			}
+			if err := outboxAppender.AppendRow(
+				span.SpanID, string(payloadBytes), int32(0), time.Now(),
+			); err != nil {
+				return fmt.Errorf("appending to outbox %s: %w", span.SpanID, err)
+			}
 		}
 
 		if err := appender.Flush(); err != nil {
 			return fmt.Errorf("flushing appender: %w", err)
+		}
+		if err := outboxAppender.Flush(); err != nil {
+			return fmt.Errorf("flushing outbox appender: %w", err)
 		}
 		return nil
 	})
@@ -623,4 +652,106 @@ func buildTrace(traceID string, spans []storage.Span) *storage.Trace {
 	}
 	trace.Duration = trace.EndTime.Sub(trace.StartTime)
 	return trace
+}
+
+// --- SyncStore Implementation ---
+
+func (s *Store) GetOutboxSpans(ctx context.Context, limit int) ([]storage.OutboxSpan, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT span_id, payload_json, attempt_count, created_at
+		FROM outbox_spans
+		ORDER BY created_at ASC
+		LIMIT ?`, limit)
+	if err != nil {
+		return nil, fmt.Errorf("querying outbox: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var spans []storage.OutboxSpan
+	for rows.Next() {
+		var span storage.OutboxSpan
+		var createdAt time.Time
+		if err := rows.Scan(&span.SpanID, &span.PayloadJSON, &span.AttemptCount, &createdAt); err != nil {
+			return nil, fmt.Errorf("scanning outbox span: %w", err)
+		}
+		span.CreatedAt = createdAt
+		spans = append(spans, span)
+	}
+	return spans, rows.Err()
+}
+
+func (s *Store) DeleteOutboxSpans(ctx context.Context, spanIDs []string) error {
+	if len(spanIDs) == 0 {
+		return nil
+	}
+
+	const chunkSize = 500
+	for i := 0; i < len(spanIDs); i += chunkSize {
+		end := i + chunkSize
+		if end > len(spanIDs) {
+			end = len(spanIDs)
+		}
+		chunk := spanIDs[i:end]
+
+		placeholders := strings.TrimSuffix(strings.Repeat("?,", len(chunk)), ",")
+		query := fmt.Sprintf("DELETE FROM outbox_spans WHERE span_id IN (%s)", placeholders)
+
+		args := make([]any, len(chunk))
+		for j, id := range chunk {
+			args[j] = id
+		}
+
+		if _, err := s.db.ExecContext(ctx, query, args...); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *Store) IncrementOutboxAttempt(ctx context.Context, spanIDs []string) error {
+	if len(spanIDs) == 0 {
+		return nil
+	}
+
+	const chunkSize = 500
+	for i := 0; i < len(spanIDs); i += chunkSize {
+		end := i + chunkSize
+		if end > len(spanIDs) {
+			end = len(spanIDs)
+		}
+		chunk := spanIDs[i:end]
+
+		placeholders := strings.TrimSuffix(strings.Repeat("?,", len(chunk)), ",")
+		query := fmt.Sprintf("UPDATE outbox_spans SET attempt_count = attempt_count + 1 WHERE span_id IN (%s)", placeholders)
+
+		args := make([]any, len(chunk))
+		for j, id := range chunk {
+			args[j] = id
+		}
+
+		if _, err := s.db.ExecContext(ctx, query, args...); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *Store) PruneLocalSpans(ctx context.Context, keepCount int) error {
+	// Prune main observability table
+	_, err := s.db.ExecContext(ctx, `
+		DELETE FROM spans
+		WHERE span_id NOT IN (
+			SELECT span_id FROM spans ORDER BY start_time DESC LIMIT ?
+		)`, keepCount)
+	if err != nil {
+		return err
+	}
+
+	// Prune offline sync outbox queue
+	_, err = s.db.ExecContext(ctx, `
+		DELETE FROM outbox_spans
+		WHERE span_id NOT IN (
+			SELECT span_id FROM outbox_spans ORDER BY created_at DESC LIMIT ?
+		)`, keepCount)
+	return err
 }

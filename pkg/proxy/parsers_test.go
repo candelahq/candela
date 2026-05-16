@@ -5,11 +5,13 @@ import (
 	"testing"
 )
 
-// ── Anthropic cache token tests ──────────────────────────────────────────────
+// ── Anthropic parser tests ───────────────────────────────────────────────────
+// All parsers return RAW token counts. Cache normalization is handled by
+// costcalc.Calculator.NormalizeCachedInput at the proxy call site.
 
 func TestAnthropicParser_ParseResponse_CacheTokens(t *testing.T) {
 	// Anthropic's input_tokens INCLUDES cache_read + cache_creation in the total.
-	// input_tokens = 21 (new) + 188086 (cache_read) + 500 (cache_creation) = 188607
+	// Parser returns raw input_tokens — no cache normalization.
 	body := []byte(`{
 		"id": "msg_01",
 		"type": "message",
@@ -29,11 +31,9 @@ func TestAnthropicParser_ParseResponse_CacheTokens(t *testing.T) {
 	if content != "hello" {
 		t.Errorf("content = %q, want %q", content, "hello")
 	}
-	// nonCached = 188607 - 188086 - 500 = 21
-	// Cost-equivalent = 21 + round(188086 * 0.1) + round(500 * 1.25)
-	//                = 21 + 18809 + 625 = 19455
-	if inputTokens != 19455 {
-		t.Errorf("inputTokens = %d, want 19455 (21 non-cached + 18809 cache_read@0.1x + 625 cache_creation@1.25x)", inputTokens)
+	// Parser returns raw input_tokens (no cache normalization).
+	if inputTokens != 188607 {
+		t.Errorf("inputTokens = %d, want 188607 (raw, no normalization)", inputTokens)
 	}
 	if outputTokens != 393 {
 		t.Errorf("outputTokens = %d, want 393", outputTokens)
@@ -41,7 +41,6 @@ func TestAnthropicParser_ParseResponse_CacheTokens(t *testing.T) {
 }
 
 func TestAnthropicParser_ParseResponse_NoCacheTokens(t *testing.T) {
-	// When no caching is used, the cache fields are absent — should still work.
 	body := []byte(`{
 		"content": [{"type": "text", "text": "hi"}],
 		"usage": {"input_tokens": 100, "output_tokens": 50}
@@ -59,8 +58,7 @@ func TestAnthropicParser_ParseResponse_NoCacheTokens(t *testing.T) {
 }
 
 func TestAnthropicParser_ParseStreamingResponse_CacheTokens(t *testing.T) {
-	// In streaming, input tokens (including cache) come in message_start.message.usage.
-	// Anthropic's input_tokens = 50210 (total: 10 new + 50000 cache_read + 200 cache_creation).
+	// Anthropic streaming: parser returns raw input_tokens from message_start.
 	stream := `data: {"type":"message_start","message":{"usage":{"input_tokens":50210,"cache_read_input_tokens":50000,"cache_creation_input_tokens":200}}}
 data: {"type":"content_block_delta","delta":{"type":"text_delta","text":"hello"}}
 data: {"type":"message_delta","usage":{"output_tokens":42}}
@@ -73,11 +71,9 @@ data: [DONE]
 	if content != "hello" {
 		t.Errorf("content = %q, want %q", content, "hello")
 	}
-	// nonCached = 50210 - 50000 - 200 = 10
-	// Cost-equivalent = 10 + round(50000 * 0.1) + round(200 * 1.25)
-	//                = 10 + 5000 + 250 = 5260
-	if inputTokens != 5260 {
-		t.Errorf("inputTokens = %d, want 5260 (10 non-cached + 5000 cache_read@0.1x + 250 cache_creation@1.25x)", inputTokens)
+	// Parser returns raw input_tokens (no cache normalization).
+	if inputTokens != 50210 {
+		t.Errorf("inputTokens = %d, want 50210 (raw, no normalization)", inputTokens)
 	}
 	if outputTokens != 42 {
 		t.Errorf("outputTokens = %d, want 42", outputTokens)
@@ -101,11 +97,11 @@ data: [DONE]
 	}
 }
 
-// ── OpenAI cache token tests ─────────────────────────────────────────────────
+// ── OpenAI parser tests ─────────────────────────────────────────────────────
 
 func TestOpenAIParser_ParseResponse_CacheTokens(t *testing.T) {
 	// OpenAI's prompt_tokens includes cached_tokens in the total.
-	// prompt_tokens = 100 (total: 10 new + 90 cached)
+	// Parser returns raw prompt_tokens — no cache normalization.
 	body := []byte(`{
 		"choices": [{"message": {"role": "assistant", "content": "ok"}}],
 		"usage": {
@@ -118,10 +114,9 @@ func TestOpenAIParser_ParseResponse_CacheTokens(t *testing.T) {
 	parser := &openaiParser{}
 	_, inputTokens, outputTokens := parser.ParseResponse(body)
 
-	// nonCached = 100 - 90 = 10
-	// Cost-equivalent = 10 + round(90 * 0.5) = 10 + 45 = 55
-	if inputTokens != 55 {
-		t.Errorf("inputTokens = %d, want 55 (10 non-cached + 45 cached@0.5x)", inputTokens)
+	// Parser returns raw prompt_tokens (no cache normalization).
+	if inputTokens != 100 {
+		t.Errorf("inputTokens = %d, want 100 (raw, no normalization)", inputTokens)
 	}
 	if outputTokens != 20 {
 		t.Errorf("outputTokens = %d, want 20", outputTokens)
@@ -138,16 +133,15 @@ func TestOpenAIParser_ParseResponse_NoCacheTokens(t *testing.T) {
 	_, inputTokens, _ := parser.ParseResponse(body)
 
 	if inputTokens != 50 {
-		t.Errorf("inputTokens = %d, want 50 (no cache, unchanged)", inputTokens)
+		t.Errorf("inputTokens = %d, want 50", inputTokens)
 	}
 }
 
-// ── Google cache token tests ─────────────────────────────────────────────────
+// ── Google parser tests ─────────────────────────────────────────────────────
 
 func TestGoogleParser_ParseResponse_CacheTokens(t *testing.T) {
 	// Google's promptTokenCount includes cachedContentTokenCount.
-	// The parser returns RAW promptTokenCount — cache normalization is
-	// applied at the call site (createSpan) where the model is known.
+	// Parser returns raw promptTokenCount — no cache normalization.
 	body := []byte(`{
 		"candidates": [{"content": {"parts": [{"text": "result"}]}}],
 		"usageMetadata": {
@@ -161,9 +155,9 @@ func TestGoogleParser_ParseResponse_CacheTokens(t *testing.T) {
 	parser := &googleParser{}
 	_, inputTokens, outputTokens := parser.ParseResponse(body)
 
-	// Parser returns raw promptTokenCount (no cache normalization applied).
+	// Parser returns raw promptTokenCount (no cache normalization).
 	if inputTokens != 1000 {
-		t.Errorf("inputTokens = %d, want 1000 (raw promptTokenCount, no normalization)", inputTokens)
+		t.Errorf("inputTokens = %d, want 1000 (raw promptTokenCount)", inputTokens)
 	}
 	if outputTokens != 50 {
 		t.Errorf("outputTokens = %d, want 50", outputTokens)
@@ -201,7 +195,6 @@ func TestGoogleParser_ParseResponse_ThinkingTokens(t *testing.T) {
 }
 
 func TestGoogleParser_ParseResponse_NoThinkingTokens(t *testing.T) {
-	// Non-thinking models (Gemini 2.0 Flash, etc.) don't have thoughtsTokenCount.
 	body := []byte(`{
 		"candidates": [{"content": {"parts": [{"text": "hi"}]}}],
 		"usageMetadata": {
@@ -225,8 +218,6 @@ func TestGoogleParser_ParseResponse_NoThinkingTokens(t *testing.T) {
 // ── Google streaming parser tests ────────────────────────────────────────────
 
 func TestGoogleParser_ParseStreamingResponse_ChunkedJSON(t *testing.T) {
-	// Google streaming returns newline-delimited JSON chunks wrapped in an array.
-	// The usageMetadata appears in the last chunk.
 	data := []byte(`[{
   "candidates": [{"content": {"parts": [{"text": "chunk1"}]}}]
 },
@@ -253,7 +244,6 @@ func TestGoogleParser_ParseStreamingResponse_ChunkedJSON(t *testing.T) {
 }
 
 func TestGoogleParser_ParseStreamingResponse_SingleChunk(t *testing.T) {
-	// When only a single chunk is buffered, the standard ParseResponse path handles it.
 	data := []byte(`{
 		"candidates": [{"content": {"parts": [{"text": "one shot"}]}}],
 		"usageMetadata": {
@@ -280,7 +270,6 @@ func TestGoogleParser_ParseStreamingResponse_SingleChunk(t *testing.T) {
 // ── Provider registry tests ─────────────────────────────────────────────────
 
 func TestGetParser_AllProviders(t *testing.T) {
-	// Verify all registered providers return the correct parser type.
 	providers := map[string]string{
 		"openai":           "*proxy.openaiParser",
 		"gemini-oai":       "*proxy.openaiParser",
@@ -296,7 +285,6 @@ func TestGetParser_AllProviders(t *testing.T) {
 			t.Errorf("getParser(%q) returned nil", name)
 			continue
 		}
-		// Fallback parser means the provider isn't registered.
 		if _, isFallback := p.(*fallbackParser); isFallback {
 			t.Errorf("getParser(%q) returned fallback parser, want %s", name, wantType)
 		}
@@ -410,11 +398,10 @@ data: [DONE]
 	}
 }
 
-// ── OpenAI streaming cache normalization ─────────────────────────────────────
+// ── OpenAI streaming parser tests ────────────────────────────────────────────
 
 func TestOpenAIParser_ParseStreamingResponse_CacheTokens(t *testing.T) {
-	// OpenAI streaming includes usage in the final chunk when
-	// stream_options.include_usage is set.
+	// Parser returns raw prompt_tokens — no cache normalization.
 	stream := `data: {"choices":[{"delta":{"content":"hi"}}]}
 data: {"choices":[],"usage":{"prompt_tokens":1000,"completion_tokens":50,"prompt_tokens_details":{"cached_tokens":900}}}
 data: [DONE]
@@ -425,10 +412,9 @@ data: [DONE]
 	if content != "hi" {
 		t.Errorf("content = %q, want %q", content, "hi")
 	}
-	// nonCached = 1000 - 900 = 100
-	// Cost-equivalent = 100 + round(900 * 0.5) = 100 + 450 = 550
-	if inputTokens != 550 {
-		t.Errorf("inputTokens = %d, want 550 (100 non-cached + 450 cached@0.5x)", inputTokens)
+	// Parser returns raw prompt_tokens (no cache normalization).
+	if inputTokens != 1000 {
+		t.Errorf("inputTokens = %d, want 1000 (raw, no normalization)", inputTokens)
 	}
 	if outputTokens != 50 {
 		t.Errorf("outputTokens = %d, want 50", outputTokens)
@@ -448,11 +434,10 @@ data: [DONE]
 	}
 }
 
-// ── Google streaming cache normalization ─────────────────────────────────────
+// ── Google streaming cache tests ─────────────────────────────────────────────
 
 func TestGoogleParser_ParseStreamingResponse_CacheTokens(t *testing.T) {
-	// Google streaming returns a JSON array; the last chunk has usageMetadata.
-	// Parser returns RAW promptTokenCount — normalization happens at call site.
+	// Parser returns raw promptTokenCount — no cache normalization.
 	stream := `[
 		{"candidates":[{"content":{"parts":[{"text":"hello"}]}}]},
 		{"candidates":[{"content":{"parts":[{"text":" world"}]}}],
@@ -471,132 +456,6 @@ func TestGoogleParser_ParseStreamingResponse_CacheTokens(t *testing.T) {
 	}
 	if outputTokens != 10 {
 		t.Errorf("outputTokens = %d, want 10", outputTokens)
-	}
-}
-
-// ── Helper function edge cases ───────────────────────────────────────────────
-
-func TestNormalizeCachedInput_ZeroCached(t *testing.T) {
-	// No cached tokens — should return raw input unchanged.
-	result := normalizeCachedInput(500, 0, 0.5)
-	if result != 500 {
-		t.Errorf("normalizeCachedInput(500, 0, 0.5) = %d, want 500", result)
-	}
-}
-
-func TestNormalizeCachedInput_AllCached(t *testing.T) {
-	// All tokens are cached (e.g. repeated identical prompt).
-	// nonCached = 100 - 100 = 0
-	// result = 0 + round(100 * 0.5) = 50
-	result := normalizeCachedInput(100, 100, 0.5)
-	if result != 50 {
-		t.Errorf("normalizeCachedInput(100, 100, 0.5) = %d, want 50", result)
-	}
-}
-
-func TestNormalizeCachedInput_CachedExceedsRaw(t *testing.T) {
-	// API inconsistency: cached > raw. Should clamp nonCached to 0.
-	result := normalizeCachedInput(50, 100, 0.5)
-	if result != 50 {
-		t.Errorf("normalizeCachedInput(50, 100, 0.5) = %d, want 50 (clamped)", result)
-	}
-}
-
-func TestNormalizeCachedInput_NegativeCached(t *testing.T) {
-	// Negative cached tokens should be treated as zero.
-	result := normalizeCachedInput(500, -10, 0.5)
-	if result != 500 {
-		t.Errorf("normalizeCachedInput(500, -10, 0.5) = %d, want 500", result)
-	}
-}
-
-func TestNormalizeAnthropicInput_BothCacheTypes(t *testing.T) {
-	// 100 total, 80 cache_read, 10 cache_creation, 10 new
-	result := normalizeAnthropicInput(100, 80, 10)
-	// nonCached = 100 - 80 - 10 = 10
-	// result = 10 + round(80*0.1) + round(10*1.25) = 10 + 8 + 13 = 31
-	if result != 31 {
-		t.Errorf("normalizeAnthropicInput(100, 80, 10) = %d, want 31", result)
-	}
-}
-
-func TestNormalizeAnthropicInput_NoCaching(t *testing.T) {
-	result := normalizeAnthropicInput(100, 0, 0)
-	if result != 100 {
-		t.Errorf("normalizeAnthropicInput(100, 0, 0) = %d, want 100", result)
-	}
-}
-
-// ── Google model-aware cache discount tests ──────────────────────────────────
-
-func TestGoogleCacheDiscountForModel(t *testing.T) {
-	tests := []struct {
-		model    string
-		wantRate float64
-	}{
-		// Gemini 2.5+ models: 90% off (0.10)
-		{"gemini-2.5-pro", 0.10},
-		{"gemini-2.5-pro-preview-05-06", 0.10},
-		{"gemini-2.5-flash", 0.10},
-		{"gemini-2.5-flash-lite", 0.10},
-		// Gemini 3.x models: 90% off (0.10)
-		{"gemini-3-flash", 0.10},
-		{"gemini-3.1-pro", 0.10},
-		{"gemini-3.1-flash-lite", 0.10},
-		// Future models default to 90% off
-		{"gemini-4-ultra", 0.10},
-		{"some-future-model", 0.10},
-		// Gemini 2.0 models: 75% off (0.25)
-		{"gemini-2.0-flash", 0.25},
-		{"gemini-2.0-flash-001", 0.25},
-		{"gemini-2.0-flash-lite", 0.25},
-		// Gemini 1.5 models: 75% off (0.25)
-		{"gemini-1.5-pro", 0.25},
-		{"gemini-1.5-flash", 0.25},
-		// Gemini 1.0 models: 75% off (0.25)
-		{"gemini-1.0-pro", 0.25},
-		// Case insensitive
-		{"Gemini-2.5-Pro", 0.10},
-		{"GEMINI-2.0-FLASH", 0.25},
-		// Empty model defaults to 90%
-		{"", 0.10},
-	}
-
-	for _, tt := range tests {
-		got := googleCacheDiscountForModel(tt.model)
-		if got != tt.wantRate {
-			t.Errorf("googleCacheDiscountForModel(%q) = %v, want %v", tt.model, got, tt.wantRate)
-		}
-	}
-}
-
-func TestNormalizeGoogleCacheInput_Gemini25(t *testing.T) {
-	// Gemini 2.5: 90% off → 0.10 multiplier
-	// 1000 total, 800 cached
-	// nonCached = 200, cached_eq = round(800 * 0.10) = 80
-	// result = 200 + 80 = 280
-	result := normalizeGoogleCacheInput(1000, 800, "gemini-2.5-pro")
-	if result != 280 {
-		t.Errorf("normalizeGoogleCacheInput(1000, 800, gemini-2.5-pro) = %d, want 280", result)
-	}
-}
-
-func TestNormalizeGoogleCacheInput_Gemini20(t *testing.T) {
-	// Gemini 2.0: 75% off → 0.25 multiplier
-	// 1000 total, 800 cached
-	// nonCached = 200, cached_eq = round(800 * 0.25) = 200
-	// result = 200 + 200 = 400
-	result := normalizeGoogleCacheInput(1000, 800, "gemini-2.0-flash")
-	if result != 400 {
-		t.Errorf("normalizeGoogleCacheInput(1000, 800, gemini-2.0-flash) = %d, want 400", result)
-	}
-}
-
-func TestNormalizeGoogleCacheInput_NoCaching(t *testing.T) {
-	// No cached tokens — returns raw input unchanged.
-	result := normalizeGoogleCacheInput(500, 0, "gemini-2.5-pro")
-	if result != 500 {
-		t.Errorf("normalizeGoogleCacheInput(500, 0, ...) = %d, want 500", result)
 	}
 }
 

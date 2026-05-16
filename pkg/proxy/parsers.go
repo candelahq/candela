@@ -3,73 +3,13 @@ package proxy
 import (
 	"bytes"
 	"encoding/json"
-	"math"
 	"strings"
 )
 
-// Cache discount rates by provider. Each provider includes cached tokens in
-// their total input count but bills them at a reduced rate. We normalize to
-// cost-equivalent tokens by subtracting cached from the total, then adding
-// them back at the discounted rate.
-const (
-	openAICacheDiscount      = 0.5  // 50% off
-	anthropicCacheReadRate   = 0.1  // 90% off
-	anthropicCacheCreateRate = 1.25 // 25% surcharge
-)
-
-// googleCacheDiscountForModel returns the cache discount multiplier for a
-// Google/Gemini model. Per GEAP pricing (May 2026):
-//   - Gemini 2.5+ and 3.x models: 90% off (multiply cached tokens by 0.10)
-//   - Gemini 2.0 and older models: 75% off (multiply cached tokens by 0.25)
-//
-// See: https://docs.cloud.google.com/gemini-enterprise-agent-platform/models/context-cache/context-cache-overview
-func googleCacheDiscountForModel(model string) float64 {
-	m := strings.ToLower(model)
-	// Gemini 2.0 and older: 75% off.
-	if strings.Contains(m, "gemini-2.0") ||
-		strings.Contains(m, "gemini-1.5") ||
-		strings.Contains(m, "gemini-1.0") {
-		return 0.25
-	}
-	// Gemini 2.5, 3.x, and future models default to 90% off.
-	return 0.10
-}
-
-// normalizeGoogleCacheInput applies model-aware cache normalization to raw
-// Google/Gemini input token counts. Call this after googleParser.ParseResponse
-// (which returns raw promptTokenCount without cache normalization).
-func normalizeGoogleCacheInput(rawInput, cachedTokens int64, model string) int64 {
-	return normalizeCachedInput(rawInput, cachedTokens, googleCacheDiscountForModel(model))
-}
-
-// normalizeCachedInput computes cost-equivalent input tokens by subtracting
-// cached tokens from rawInput and adding them back at the discounted rate.
-// Returns rawInput unchanged when cachedTokens is 0.
-func normalizeCachedInput(rawInput, cachedTokens int64, discount float64) int64 {
-	if cachedTokens <= 0 {
-		return rawInput
-	}
-	nonCached := rawInput - cachedTokens
-	if nonCached < 0 {
-		nonCached = 0
-	}
-	return nonCached + int64(math.Round(float64(cachedTokens)*discount))
-}
-
-// normalizeAnthropicInput handles Anthropic's two-tier cache pricing
-// (read @ 0.1×, creation @ 1.25×) in a single call.
-func normalizeAnthropicInput(rawInput, cacheRead, cacheCreation int64) int64 {
-	if cacheRead <= 0 && cacheCreation <= 0 {
-		return rawInput
-	}
-	nonCached := rawInput - cacheRead - cacheCreation
-	if nonCached < 0 {
-		nonCached = 0
-	}
-	return nonCached +
-		int64(math.Round(float64(cacheRead)*anthropicCacheReadRate)) +
-		int64(math.Round(float64(cacheCreation)*anthropicCacheCreateRate))
-}
+// NOTE: All cache normalization has been moved to costcalc.Calculator.
+// Parsers return RAW token counts; the proxy applies model-aware and
+// provider-aware cache discounts at the call site via
+// Calculator.NormalizeCachedInput(provider, model, rawInput, cacheRead, cacheCreate).
 
 // ProviderParser extracts LLM request/response data for a specific provider.
 // Implement this interface to add support for a new LLM provider.
@@ -140,14 +80,10 @@ func (p *openaiParser) ParseResponse(body []byte) (content string, inputTokens, 
 	}
 
 	if usage, ok := resp["usage"].(map[string]interface{}); ok {
-		rawInput := toInt64(usage["prompt_tokens"])
+		// Return RAW prompt_tokens — cache normalization is applied at
+		// the call site via Calculator.NormalizeCachedInput.
+		inputTokens = toInt64(usage["prompt_tokens"])
 		outputTokens = toInt64(usage["completion_tokens"])
-
-		var cachedTokens int64
-		if details, ok := usage["prompt_tokens_details"].(map[string]interface{}); ok {
-			cachedTokens = toInt64(details["cached_tokens"])
-		}
-		inputTokens = normalizeCachedInput(rawInput, cachedTokens, openAICacheDiscount)
 	}
 	if choices, ok := resp["choices"].([]interface{}); ok && len(choices) > 0 {
 		if choice, ok := choices[0].(map[string]interface{}); ok {
@@ -187,14 +123,9 @@ func (p *openaiParser) ParseStreamingResponse(data []byte) (content string, inpu
 			}
 		}
 		if usage, ok := chunk["usage"].(map[string]interface{}); ok {
-			rawInput := toInt64(usage["prompt_tokens"])
+			// Return RAW prompt_tokens — same as ParseResponse.
+			inputTokens = toInt64(usage["prompt_tokens"])
 			outputTokens = toInt64(usage["completion_tokens"])
-
-			var cachedTokens int64
-			if details, ok := usage["prompt_tokens_details"].(map[string]interface{}); ok {
-				cachedTokens = toInt64(details["cached_tokens"])
-			}
-			inputTokens = normalizeCachedInput(rawInput, cachedTokens, openAICacheDiscount)
 		}
 	}
 
@@ -237,13 +168,9 @@ func (p *anthropicParser) ParseResponse(body []byte) (content string, inputToken
 	}
 
 	if usage, ok := resp["usage"].(map[string]interface{}); ok {
-		// Anthropic's input_tokens INCLUDES cached tokens in the total.
-		// See normalizeAnthropicInput for the two-tier discount formula.
-		inputTokens = normalizeAnthropicInput(
-			toInt64(usage["input_tokens"]),
-			toInt64(usage["cache_read_input_tokens"]),
-			toInt64(usage["cache_creation_input_tokens"]),
-		)
+		// Return RAW input_tokens — cache normalization is applied at
+		// the call site via Calculator.NormalizeCachedInput.
+		inputTokens = toInt64(usage["input_tokens"])
 		outputTokens = toInt64(usage["output_tokens"])
 	}
 	if contentArr, ok := resp["content"].([]interface{}); ok && len(contentArr) > 0 {
@@ -284,11 +211,8 @@ func (p *anthropicParser) ParseStreamingResponse(data []byte) (content string, i
 		}
 		if msg, ok := chunk["message"].(map[string]interface{}); ok {
 			if usage, ok := msg["usage"].(map[string]interface{}); ok {
-				inputTokens = normalizeAnthropicInput(
-					toInt64(usage["input_tokens"]),
-					toInt64(usage["cache_read_input_tokens"]),
-					toInt64(usage["cache_creation_input_tokens"]),
-				)
+				// Return RAW input_tokens — same as ParseResponse.
+				inputTokens = toInt64(usage["input_tokens"])
 			}
 		}
 	}

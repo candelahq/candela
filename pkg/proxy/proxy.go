@@ -769,11 +769,12 @@ func (p *Proxy) handleStandardResponse(
 	if cbAllow && p.users != nil && effectiveUserID != "" {
 		model, _ := extractRequestInfo(provider.Name, reqBody)
 		_, inputTokens, outputTokens := extractResponseInfo(provider.Name, respBody)
-		// Apply model-aware Google cache normalization (parser returns raw tokens).
-		if provider.Name == "google" {
-			ct := extractCacheTokens(provider.Name, respBody)
-			inputTokens = normalizeGoogleCacheInput(inputTokens, ct.CacheReadTokens, model)
-		}
+		// Normalize cached input tokens for accurate budget deduction.
+		// All parsers return raw counts; the calculator applies provider-
+		// and model-specific cache discounts (e.g. Anthropic 90% read,
+		// Google 90% for 2.5+, OpenAI 50%).
+		ct := extractCacheTokens(provider.Name, respBody)
+		inputTokens = p.calc.NormalizeCachedInput(provider.Name, model, inputTokens, ct.CacheReadTokens, ct.CacheCreationTokens)
 		deductCtx, deductCancel := context.WithTimeout(context.WithoutCancel(r.Context()), 15*time.Second)
 		p.deductBudget(deductCtx, provider, model, effectiveUserID, inputTokens, outputTokens)
 		deductCancel()
@@ -909,11 +910,8 @@ func (p *Proxy) handleStreamingResponse(
 	if cbAllow && p.users != nil && effectiveUserID != "" {
 		model, _ := extractRequestInfo(provider.Name, reqBody)
 		_, inputTokens, outputTokens := extractStreamingUsage(provider.Name, parseData)
-		// Apply model-aware Google cache normalization (parser returns raw tokens).
-		if provider.Name == "google" {
-			ct := extractStreamingCacheTokens(provider.Name, parseData)
-			inputTokens = normalizeGoogleCacheInput(inputTokens, ct.CacheReadTokens, model)
-		}
+		ct := extractStreamingCacheTokens(provider.Name, parseData)
+		inputTokens = p.calc.NormalizeCachedInput(provider.Name, model, inputTokens, ct.CacheReadTokens, ct.CacheCreationTokens)
 		deductCtx, deductCancel := context.WithTimeout(context.WithoutCancel(r.Context()), 15*time.Second)
 		p.deductBudget(deductCtx, provider, model, effectiveUserID, inputTokens, outputTokens)
 		deductCancel()
@@ -1146,12 +1144,8 @@ func (p *Proxy) createSpan(
 	outputContent, inputTokens, outputTokens := extractResponseInfo(provider.Name, respBody)
 	ct := extractCacheTokens(provider.Name, respBody)
 
-	// Apply model-aware Google cache normalization.
-	// googleParser.ParseResponse returns raw promptTokenCount; we normalize
-	// here where the model is known (Gemini 2.5+ = 90% off, 2.0 = 75% off).
-	if provider.Name == "google" {
-		inputTokens = normalizeGoogleCacheInput(inputTokens, ct.CacheReadTokens, model)
-	}
+	// Normalize cached input tokens via the calculator (handles all providers).
+	inputTokens = p.calc.NormalizeCachedInput(provider.Name, model, inputTokens, ct.CacheReadTokens, ct.CacheCreationTokens)
 
 	status := storage.SpanStatusOK
 	if statusCode >= 400 {
@@ -1203,10 +1197,8 @@ func (p *Proxy) createStreamingSpan(
 	outputContent, inputTokens, outputTokens := extractStreamingUsage(provider.Name, streamData)
 	ct := extractStreamingCacheTokens(provider.Name, streamData)
 
-	// Apply model-aware Google cache normalization (same as createSpan).
-	if provider.Name == "google" {
-		inputTokens = normalizeGoogleCacheInput(inputTokens, ct.CacheReadTokens, model)
-	}
+	// Normalize cached input tokens via the calculator (handles all providers).
+	inputTokens = p.calc.NormalizeCachedInput(provider.Name, model, inputTokens, ct.CacheReadTokens, ct.CacheCreationTokens)
 
 	p.buildSpan(ctx, spanParams{
 		provider:        provider,

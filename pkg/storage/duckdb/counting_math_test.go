@@ -473,3 +473,187 @@ func TestGetUsageSummary_AvgLatency_NoRootSpans_FallsBackToZero(t *testing.T) {
 		t.Errorf("AvgLatencyMs = %.1f, want 0 (no root spans)", summary.AvgLatencyMs)
 	}
 }
+
+// ─── Primary Model/Provider: cost-based attribution ──────────────────────────
+
+// TestQueryTraces_PrimaryModel_ByHighestCost verifies that the primary model
+// is the one with the highest total cost, not alphabetically last (MAX).
+func TestQueryTraces_PrimaryModel_ByHighestCost(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	now := time.Now().Truncate(time.Microsecond)
+
+	spans := []storage.Span{
+		// Root span
+		{
+			SpanID: "root", TraceID: "trace-mixed", Name: "agent.run",
+			Kind: storage.SpanKindAgent, Status: storage.SpanStatusOK,
+			StartTime: now, EndTime: now.Add(3 * time.Second),
+			Duration: 3 * time.Second, ProjectID: "proj-test",
+		},
+		// gpt-4o: called 1x with $0.50 cost
+		{
+			SpanID: "llm-gpt", TraceID: "trace-mixed", ParentSpanID: "root",
+			Name: "llm.chat", Kind: storage.SpanKindLLM, Status: storage.SpanStatusOK,
+			StartTime: now.Add(100 * time.Millisecond), EndTime: now.Add(500 * time.Millisecond),
+			Duration: 400 * time.Millisecond, ProjectID: "proj-test",
+			GenAI: &storage.GenAIAttributes{Model: "gpt-4o", Provider: "openai", CostUSD: 0.50},
+		},
+		// claude-4-sonnet: called 2x with $0.01 each = $0.02 total
+		{
+			SpanID: "llm-claude-1", TraceID: "trace-mixed", ParentSpanID: "root",
+			Name: "llm.chat", Kind: storage.SpanKindLLM, Status: storage.SpanStatusOK,
+			StartTime: now.Add(1 * time.Second), EndTime: now.Add(1500 * time.Millisecond),
+			Duration: 500 * time.Millisecond, ProjectID: "proj-test",
+			GenAI: &storage.GenAIAttributes{Model: "claude-4-sonnet", Provider: "anthropic", CostUSD: 0.01},
+		},
+		{
+			SpanID: "llm-claude-2", TraceID: "trace-mixed", ParentSpanID: "root",
+			Name: "llm.chat", Kind: storage.SpanKindLLM, Status: storage.SpanStatusOK,
+			StartTime: now.Add(2 * time.Second), EndTime: now.Add(2500 * time.Millisecond),
+			Duration: 500 * time.Millisecond, ProjectID: "proj-test",
+			GenAI: &storage.GenAIAttributes{Model: "claude-4-sonnet", Provider: "anthropic", CostUSD: 0.01},
+		},
+	}
+
+	if err := store.IngestSpans(ctx, spans); err != nil {
+		t.Fatalf("ingest: %v", err)
+	}
+
+	result, err := store.QueryTraces(ctx, storage.TraceQuery{
+		ProjectID: "proj-test",
+		StartTime: now.Add(-10 * time.Second),
+		EndTime:   now.Add(10 * time.Second),
+		PageSize:  10,
+	})
+	if err != nil {
+		t.Fatalf("query traces: %v", err)
+	}
+
+	if len(result.Traces) != 1 {
+		t.Fatalf("got %d traces, want 1", len(result.Traces))
+	}
+
+	tr := result.Traces[0]
+
+	// Before fix: MAX("gpt-4o", "claude-4-sonnet") = "gpt-4o" (alphabetical MAX).
+	// This happened to be correct by coincidence, but is wrong semantically.
+	// After fix: gpt-4o has $0.50 cost vs claude-4-sonnet $0.02 → gpt-4o is primary.
+	if tr.PrimaryModel != "gpt-4o" {
+		t.Errorf("PrimaryModel = %q, want gpt-4o (highest cost model)", tr.PrimaryModel)
+	}
+	if tr.PrimaryProvider != "openai" {
+		t.Errorf("PrimaryProvider = %q, want openai (provider of highest cost model)", tr.PrimaryProvider)
+	}
+}
+
+// TestQueryTraces_PrimaryProvider_MatchesModel verifies that the provider
+// always corresponds to the primary model, not the last-seen provider.
+func TestQueryTraces_PrimaryProvider_MatchesModel(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	now := time.Now().Truncate(time.Microsecond)
+
+	spans := []storage.Span{
+		{
+			SpanID: "root", TraceID: "trace-provider", Name: "agent.run",
+			Kind: storage.SpanKindAgent, Status: storage.SpanStatusOK,
+			StartTime: now, EndTime: now.Add(2 * time.Second),
+			Duration: 2 * time.Second, ProjectID: "proj-test",
+		},
+		// Anthropic model — expensive, should be primary
+		{
+			SpanID: "llm-1", TraceID: "trace-provider", ParentSpanID: "root",
+			Name: "llm.chat", Kind: storage.SpanKindLLM, Status: storage.SpanStatusOK,
+			StartTime: now.Add(100 * time.Millisecond), EndTime: now.Add(500 * time.Millisecond),
+			Duration: 400 * time.Millisecond, ProjectID: "proj-test",
+			GenAI: &storage.GenAIAttributes{Model: "claude-4-sonnet", Provider: "anthropic", CostUSD: 1.00},
+		},
+		// OpenAI model — cheaper, ingested last (old bug: provider = "openai")
+		{
+			SpanID: "llm-2", TraceID: "trace-provider", ParentSpanID: "root",
+			Name: "llm.chat", Kind: storage.SpanKindLLM, Status: storage.SpanStatusOK,
+			StartTime: now.Add(1 * time.Second), EndTime: now.Add(1500 * time.Millisecond),
+			Duration: 500 * time.Millisecond, ProjectID: "proj-test",
+			GenAI: &storage.GenAIAttributes{Model: "gpt-4o-mini", Provider: "openai", CostUSD: 0.001},
+		},
+	}
+
+	if err := store.IngestSpans(ctx, spans); err != nil {
+		t.Fatalf("ingest: %v", err)
+	}
+
+	result, err := store.QueryTraces(ctx, storage.TraceQuery{
+		ProjectID: "proj-test",
+		StartTime: now.Add(-10 * time.Second),
+		EndTime:   now.Add(10 * time.Second),
+		PageSize:  10,
+	})
+	if err != nil {
+		t.Fatalf("query traces: %v", err)
+	}
+
+	tr := result.Traces[0]
+
+	// Before fix (BigQuery): primaryProvider = "openai" (last-seen, WRONG)
+	// Before fix (SQLite/DuckDB): MAX("openai","anthropic") = "openai" (alphabetical, WRONG)
+	// After fix: claude-4-sonnet ($1.00) > gpt-4o-mini ($0.001) → anthropic
+	if tr.PrimaryModel != "claude-4-sonnet" {
+		t.Errorf("PrimaryModel = %q, want claude-4-sonnet", tr.PrimaryModel)
+	}
+	if tr.PrimaryProvider != "anthropic" {
+		t.Errorf("PrimaryProvider = %q, want anthropic (matches primary model)", tr.PrimaryProvider)
+	}
+}
+
+// ─── Trace Status: error detection ───────────────────────────────────────────
+
+// TestQueryTraces_Status_DetectsChildErrors verifies that a trace is marked
+// as errored if ANY child span has an error status.
+func TestQueryTraces_Status_DetectsChildErrors(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	now := time.Now().Truncate(time.Microsecond)
+
+	spans := []storage.Span{
+		// Root: OK (status=1)
+		{
+			SpanID: "root", TraceID: "trace-err", Name: "agent.run",
+			Kind: storage.SpanKindAgent, Status: storage.SpanStatusOK,
+			StartTime: now, EndTime: now.Add(time.Second),
+			Duration: time.Second, ProjectID: "proj-test",
+		},
+		// Child: ERROR (status=2)
+		{
+			SpanID: "llm-fail", TraceID: "trace-err", ParentSpanID: "root",
+			Name: "llm.chat", Kind: storage.SpanKindLLM, Status: storage.SpanStatusError,
+			StartTime: now.Add(100 * time.Millisecond), EndTime: now.Add(200 * time.Millisecond),
+			Duration: 100 * time.Millisecond, ProjectID: "proj-test",
+			GenAI: &storage.GenAIAttributes{Model: "gpt-4o", Provider: "openai"},
+		},
+	}
+
+	if err := store.IngestSpans(ctx, spans); err != nil {
+		t.Fatalf("ingest: %v", err)
+	}
+
+	result, err := store.QueryTraces(ctx, storage.TraceQuery{
+		ProjectID: "proj-test",
+		StartTime: now.Add(-10 * time.Second),
+		EndTime:   now.Add(10 * time.Second),
+		PageSize:  10,
+	})
+	if err != nil {
+		t.Fatalf("query traces: %v", err)
+	}
+
+	if len(result.Traces) != 1 {
+		t.Fatalf("got %d traces, want 1", len(result.Traces))
+	}
+
+	// Trace should have error status because child span errored.
+	if result.Traces[0].Status != storage.SpanStatusError {
+		t.Errorf("Status = %d, want %d (error, because child span errored)",
+			result.Traces[0].Status, storage.SpanStatusError)
+	}
+}

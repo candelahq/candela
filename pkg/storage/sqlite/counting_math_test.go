@@ -361,3 +361,108 @@ func TestGetUsageSummary_AvgLatency_NoRootSpans_ReturnsZero(t *testing.T) {
 		t.Errorf("AvgLatencyMs = %.1f, want 0 (no root spans)", summary.AvgLatencyMs)
 	}
 }
+
+// ─── Primary Model/Provider: cost-based attribution ──────────────────────────
+
+// TestQueryTraces_PrimaryProvider_MatchesModel verifies that the provider
+// always corresponds to the primary model, not the last-seen provider.
+func TestQueryTraces_PrimaryProvider_MatchesModel(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(time.Microsecond)
+
+	spans := []storage.Span{
+		{
+			SpanID: "root", TraceID: "trace-provider", Name: "agent.run",
+			Kind: storage.SpanKindAgent, Status: storage.SpanStatusOK,
+			StartTime: now, EndTime: now.Add(2 * time.Second),
+			Duration: 2 * time.Second, ProjectID: "proj-1",
+		},
+		// Anthropic model — expensive, should be primary
+		{
+			SpanID: "llm-1", TraceID: "trace-provider", ParentSpanID: "root",
+			Name: "llm.chat", Kind: storage.SpanKindLLM, Status: storage.SpanStatusOK,
+			StartTime: now.Add(100 * time.Millisecond), EndTime: now.Add(500 * time.Millisecond),
+			Duration: 400 * time.Millisecond, ProjectID: "proj-1",
+			GenAI: &storage.GenAIAttributes{Model: "claude-4-sonnet", Provider: "anthropic", CostUSD: 1.00},
+		},
+		// OpenAI model — cheaper, ingested last
+		{
+			SpanID: "llm-2", TraceID: "trace-provider", ParentSpanID: "root",
+			Name: "llm.chat", Kind: storage.SpanKindLLM, Status: storage.SpanStatusOK,
+			StartTime: now.Add(1 * time.Second), EndTime: now.Add(1500 * time.Millisecond),
+			Duration: 500 * time.Millisecond, ProjectID: "proj-1",
+			GenAI: &storage.GenAIAttributes{Model: "gpt-4o-mini", Provider: "openai", CostUSD: 0.001},
+		},
+	}
+
+	if err := s.IngestSpans(ctx, spans); err != nil {
+		t.Fatalf("ingest: %v", err)
+	}
+
+	result, err := s.QueryTraces(ctx, storage.TraceQuery{
+		ProjectID: "proj-1",
+		StartTime: now.Add(-time.Hour),
+		EndTime:   now.Add(time.Hour),
+		PageSize:  10,
+	})
+	if err != nil {
+		t.Fatalf("query traces: %v", err)
+	}
+
+	tr := result.Traces[0]
+
+	// Before fix: MAX("openai","anthropic") = "openai" (alphabetical, WRONG)
+	// After fix: claude-4-sonnet ($1.00) > gpt-4o-mini ($0.001) → anthropic
+	if tr.PrimaryModel != "claude-4-sonnet" {
+		t.Errorf("PrimaryModel = %q, want claude-4-sonnet", tr.PrimaryModel)
+	}
+	if tr.PrimaryProvider != "anthropic" {
+		t.Errorf("PrimaryProvider = %q, want anthropic (matches primary model)", tr.PrimaryProvider)
+	}
+}
+
+// ─── Trace Status: error detection ───────────────────────────────────────────
+
+// TestQueryTraces_Status_DetectsChildErrors verifies that a trace is marked
+// as errored if ANY child span has an error status.
+func TestQueryTraces_Status_DetectsChildErrors(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(time.Microsecond)
+
+	spans := []storage.Span{
+		{
+			SpanID: "root", TraceID: "trace-err", Name: "agent.run",
+			Kind: storage.SpanKindAgent, Status: storage.SpanStatusOK,
+			StartTime: now, EndTime: now.Add(time.Second),
+			Duration: time.Second, ProjectID: "proj-1",
+		},
+		{
+			SpanID: "llm-fail", TraceID: "trace-err", ParentSpanID: "root",
+			Name: "llm.chat", Kind: storage.SpanKindLLM, Status: storage.SpanStatusError,
+			StartTime: now.Add(100 * time.Millisecond), EndTime: now.Add(200 * time.Millisecond),
+			Duration: 100 * time.Millisecond, ProjectID: "proj-1",
+			GenAI: &storage.GenAIAttributes{Model: "gpt-4o", Provider: "openai"},
+		},
+	}
+
+	if err := s.IngestSpans(ctx, spans); err != nil {
+		t.Fatalf("ingest: %v", err)
+	}
+
+	result, err := s.QueryTraces(ctx, storage.TraceQuery{
+		ProjectID: "proj-1",
+		StartTime: now.Add(-time.Hour),
+		EndTime:   now.Add(time.Hour),
+		PageSize:  10,
+	})
+	if err != nil {
+		t.Fatalf("query traces: %v", err)
+	}
+
+	if result.Traces[0].Status != storage.SpanStatusError {
+		t.Errorf("Status = %d, want %d (error, because child span errored)",
+			result.Traces[0].Status, storage.SpanStatusError)
+	}
+}

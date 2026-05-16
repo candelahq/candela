@@ -241,9 +241,25 @@ func (s *Store) QueryTraces(ctx context.Context, q storage.TraceQuery) (*storage
 			SUM(gen_ai_total_tokens) as total_tokens,
 			SUM(gen_ai_cost_usd) as total_cost,
 			MAX(CASE WHEN parent_span_id = '' THEN name ELSE '' END) as root_name,
-			MAX(gen_ai_model) as primary_model,
-			MAX(gen_ai_provider) as primary_provider,
-			MAX(status) as status
+			COALESCE((
+				SELECT s2.gen_ai_model FROM spans s2
+				WHERE s2.trace_id = spans.trace_id
+					AND (? = '' OR s2.project_id = ?)
+					AND s2.gen_ai_model != ''
+				GROUP BY s2.gen_ai_model
+				ORDER BY SUM(s2.gen_ai_cost_usd) DESC
+				LIMIT 1
+			), '') as primary_model,
+			COALESCE((
+				SELECT s2.gen_ai_provider FROM spans s2
+				WHERE s2.trace_id = spans.trace_id
+					AND (? = '' OR s2.project_id = ?)
+					AND s2.gen_ai_model != ''
+				GROUP BY s2.gen_ai_model, s2.gen_ai_provider
+				ORDER BY SUM(s2.gen_ai_cost_usd) DESC
+				LIMIT 1
+			), '') as primary_provider,
+			MAX(CASE WHEN status = 2 THEN 2 ELSE 0 END) as status
 		FROM spans
 		WHERE (? = '' OR project_id = ?) AND start_time >= ? AND start_time <= ?
 			AND (? = '' OR user_id = ?)
@@ -252,7 +268,10 @@ func (s *Store) QueryTraces(ctx context.Context, q storage.TraceQuery) (*storage
 		GROUP BY trace_id
 		ORDER BY `+orderExpr+` `+dir+`
 		LIMIT ?
-	`, q.ProjectID, q.ProjectID, q.StartTime.Format(time.RFC3339Nano), q.EndTime.Format(time.RFC3339Nano),
+	`, q.ProjectID, q.ProjectID, // subquery 1: primary_model
+		q.ProjectID, q.ProjectID, // subquery 2: primary_provider
+		q.ProjectID, q.ProjectID, // WHERE clause
+		q.StartTime.Format(time.RFC3339Nano), q.EndTime.Format(time.RFC3339Nano),
 		q.UserID, q.UserID, q.TenantID, q.TenantID, q.Environment, q.Environment, q.PageSize)
 	if err != nil {
 		return nil, fmt.Errorf("querying traces: %w", err)

@@ -482,21 +482,23 @@ func (s *Store) QueryTraces(ctx context.Context, tq storage.TraceQuery) (*storag
 		// Count LLM spans and find the most common model.
 		var llmCount int
 		modelCounts := make(map[string]int)
-		var primaryProvider string
+		modelProviders := make(map[string]string)
 		for _, sp := range spans {
 			if sp.Kind == storage.SpanKindLLM {
 				llmCount++
 			}
 			if sp.GenAI != nil && sp.GenAI.Model != "" {
 				modelCounts[sp.GenAI.Model]++
-				primaryProvider = sp.GenAI.Provider
+				modelProviders[sp.GenAI.Model] = sp.GenAI.Provider
 			}
 		}
 		var primaryModel string
+		var primaryProvider string
 		var maxCount int
 		for m, c := range modelCounts {
 			if c > maxCount {
 				primaryModel = m
+				primaryProvider = modelProviders[m]
 				maxCount = c
 			}
 		}

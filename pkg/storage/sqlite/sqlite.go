@@ -318,8 +318,15 @@ func (s *Store) QueryTraces(ctx context.Context, q storage.TraceQuery) (*storage
 			return nil, fmt.Errorf("scanning trace: %w", err)
 		}
 
-		t.StartTime, _ = time.Parse(time.RFC3339Nano, startStr)
-		end, _ := time.Parse(time.RFC3339Nano, endStr)
+		t.StartTime, err = time.Parse(time.RFC3339Nano, startStr)
+		if err != nil {
+			t.StartTime = time.Time{}
+		}
+
+		end, err := time.Parse(time.RFC3339Nano, endStr)
+		if err != nil {
+			end = time.Time{}
+		}
 		t.Duration = end.Sub(t.StartTime)
 		t.Status = storage.SpanStatus(status)
 		t.ProjectID = q.ProjectID
@@ -698,7 +705,10 @@ func (s *Store) GetOutboxSpans(ctx context.Context, limit int) ([]storage.Outbox
 		if err := rows.Scan(&span.SpanID, &span.PayloadJSON, &span.AttemptCount, &createdAt); err != nil {
 			return nil, fmt.Errorf("scanning outbox span: %w", err)
 		}
-		t, _ := time.Parse(time.RFC3339Nano, createdAt)
+		t, err := time.Parse(time.RFC3339Nano, createdAt)
+		if err != nil {
+			t = time.Time{}
+		}
 		span.CreatedAt = t
 		spans = append(spans, span)
 	}

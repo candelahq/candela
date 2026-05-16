@@ -89,15 +89,14 @@ func (w *SyncWorker) processBatch() {
 	var spans []storage.Span
 	var spanIDs []string
 	var failedIDs []string
+	var corruptedIDs []string
 
 	// 2. Deserialize and flag retries
 	for _, obs := range outboxSpans {
 		var span storage.Span
 		if err := json.Unmarshal([]byte(obs.PayloadJSON), &span); err != nil {
 			slog.Error("SyncWorker failed to unmarshal outbox span, dropping", "span_id", obs.SpanID, "error", err)
-			// We consider corrupted payloads as "failed" so they eventually drop or just delete them.
-			// For safety, delete corrupted spans so they don't block the queue.
-			_ = w.store.DeleteOutboxSpans(ctx, []string{obs.SpanID})
+			corruptedIDs = append(corruptedIDs, obs.SpanID)
 			continue
 		}
 
@@ -111,6 +110,12 @@ func (w *SyncWorker) processBatch() {
 
 		spans = append(spans, span)
 		spanIDs = append(spanIDs, obs.SpanID)
+	}
+
+	if len(corruptedIDs) > 0 {
+		if err := w.store.DeleteOutboxSpans(ctx, corruptedIDs); err != nil {
+			slog.Error("SyncWorker failed to delete corrupted outbox spans", "error", err)
+		}
 	}
 
 	if len(spans) == 0 {
@@ -198,14 +203,14 @@ func (w *SyncWorker) pruneLoop() {
 	defer ticker.Stop()
 
 	// Initial prune on startup
-	w.pruneLocal(context.Background())
+	w.pruneLocal(w.ctx)
 
 	for {
 		select {
 		case <-w.done:
 			return
 		case <-ticker.C:
-			w.pruneLocal(context.Background())
+			w.pruneLocal(w.ctx)
 		}
 	}
 }

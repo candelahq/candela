@@ -728,7 +728,7 @@ func (s *Store) DeleteOutboxSpans(ctx context.Context, spanIDs []string) error {
 		}
 		chunk := spanIDs[i:end]
 
-		placeholders := strings.Repeat("?,", len(chunk)-1) + "?"
+		placeholders := strings.TrimSuffix(strings.Repeat("?,", len(chunk)), ",")
 		query := fmt.Sprintf("DELETE FROM outbox_spans WHERE span_id IN (%s)", placeholders)
 
 		args := make([]any, len(chunk))
@@ -756,7 +756,7 @@ func (s *Store) IncrementOutboxAttempt(ctx context.Context, spanIDs []string) er
 		}
 		chunk := spanIDs[i:end]
 
-		placeholders := strings.Repeat("?,", len(chunk)-1) + "?"
+		placeholders := strings.TrimSuffix(strings.Repeat("?,", len(chunk)), ",")
 		query := fmt.Sprintf("UPDATE outbox_spans SET attempt_count = attempt_count + 1 WHERE span_id IN (%s)", placeholders)
 
 		args := make([]any, len(chunk))

@@ -320,19 +320,74 @@ func (s *Store) IngestSpans(ctx context.Context, spans []storage.Span) error {
 		return nil
 	}
 
-	inserter := s.client.Dataset(s.config.Dataset).Table(s.config.Table).Inserter()
+	var optimisticSpans []storage.Span
+	var pessimisticRows []spanRow
 
-	var rows []*bigquery.StructSaver
 	for _, span := range spans {
-		row := spanToRow(span)
-		rows = append(rows, &bigquery.StructSaver{
-			Struct:   row,
-			InsertID: span.TraceID + "-" + span.SpanID, // dedup key
-		})
+		if span.Attributes != nil && span.Attributes["candela.is_retry"] == "true" {
+			delete(span.Attributes, "candela.is_retry")
+			pessimisticRows = append(pessimisticRows, spanToRow(span))
+		} else {
+			optimisticSpans = append(optimisticSpans, span)
+		}
 	}
 
-	if err := inserter.Put(ctx, rows); err != nil {
-		return fmt.Errorf("bigquery insert: %w", err)
+	// 1. Process optimistic spans via streaming insert (fast path)
+	if len(optimisticSpans) > 0 {
+		inserter := s.client.Dataset(s.config.Dataset).Table(s.config.Table).Inserter()
+		var rows []*bigquery.StructSaver
+		for _, span := range optimisticSpans {
+			row := spanToRow(span)
+			rows = append(rows, &bigquery.StructSaver{
+				Struct:   row,
+				InsertID: span.TraceID + "-" + span.SpanID, // best-effort dedup key
+			})
+		}
+		if err := inserter.Put(ctx, rows); err != nil {
+			return fmt.Errorf("bigquery insert (optimistic): %w", err)
+		}
+	}
+
+	// 2. Process pessimistic spans (retries) via MERGE for strict deduplication
+	if len(pessimisticRows) > 0 {
+		query := fmt.Sprintf(`
+			MERGE %s T
+			USING UNNEST(@spans) S
+			ON T.span_id = S.span_id AND T.start_time = S.start_time
+			WHEN NOT MATCHED THEN
+				INSERT (
+					span_id, trace_id, parent_span_id, name, kind, status, status_message,
+					start_time, end_time, duration_ns, project_id, environment, service_name,
+					gen_ai_model, gen_ai_provider, gen_ai_input_tokens, gen_ai_output_tokens,
+					gen_ai_total_tokens, gen_ai_cost_usd, gen_ai_temperature, gen_ai_max_tokens,
+					gen_ai_input_content, gen_ai_output_content, gen_ai_cache_read_tokens, gen_ai_cache_creation_tokens,
+					attributes, user_id, session_id, tenant_id
+				) VALUES (
+					S.span_id, S.trace_id, S.parent_span_id, S.name, S.kind, S.status, S.status_message,
+					S.start_time, S.end_time, S.duration_ns, S.project_id, S.environment, S.service_name,
+					S.gen_ai_model, S.gen_ai_provider, S.gen_ai_input_tokens, S.gen_ai_output_tokens,
+					S.gen_ai_total_tokens, S.gen_ai_cost_usd, S.gen_ai_temperature, S.gen_ai_max_tokens,
+					S.gen_ai_input_content, S.gen_ai_output_content, S.gen_ai_cache_read_tokens, S.gen_ai_cache_creation_tokens,
+					S.attributes, S.user_id, S.session_id, S.tenant_id
+				)
+		`, quoteTable(s.tableID))
+
+		q := s.client.Query(query)
+		q.Parameters = []bigquery.QueryParameter{
+			{Name: "spans", Value: pessimisticRows},
+		}
+
+		job, err := q.Run(ctx)
+		if err != nil {
+			return fmt.Errorf("bigquery merge (pessimistic) job creation: %w", err)
+		}
+		status, err := job.Wait(ctx)
+		if err != nil {
+			return fmt.Errorf("bigquery merge (pessimistic) wait: %w", err)
+		}
+		if status.Err() != nil {
+			return fmt.Errorf("bigquery merge (pessimistic) failed: %w", status.Err())
+		}
 	}
 
 	return nil

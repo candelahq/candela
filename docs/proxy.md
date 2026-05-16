@@ -250,7 +250,7 @@ endpoints via environment variables — route all traffic through Candela with t
 ### Prerequisites
 
 1. **Candela running locally**: `nix develop -c go run ./cmd/candela-server`
-2. **Gemini CLI installed**: `npm install -g @anthropic/gemini-cli` (or see [geminicli.com](https://geminicli.com/docs/get-started/installation))
+2. **Gemini CLI installed**: `npm install -g @google/gemini-cli` (or see [geminicli.com](https://geminicli.com/docs/get-started/installation))
 3. **Gemini API key**: Required for `GEMINI_API_KEY`
 
 ### Setup

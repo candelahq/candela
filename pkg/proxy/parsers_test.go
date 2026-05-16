@@ -146,6 +146,8 @@ func TestOpenAIParser_ParseResponse_NoCacheTokens(t *testing.T) {
 
 func TestGoogleParser_ParseResponse_CacheTokens(t *testing.T) {
 	// Google's promptTokenCount includes cachedContentTokenCount.
+	// The parser returns RAW promptTokenCount — cache normalization is
+	// applied at the call site (createSpan) where the model is known.
 	body := []byte(`{
 		"candidates": [{"content": {"parts": [{"text": "result"}]}}],
 		"usageMetadata": {
@@ -159,10 +161,9 @@ func TestGoogleParser_ParseResponse_CacheTokens(t *testing.T) {
 	parser := &googleParser{}
 	_, inputTokens, outputTokens := parser.ParseResponse(body)
 
-	// nonCached = 1000 - 800 = 200
-	// Cost-equivalent = 200 + round(800 * 0.25) = 200 + 200 = 400
-	if inputTokens != 400 {
-		t.Errorf("inputTokens = %d, want 400 (200 non-cached + 200 cached@0.25x)", inputTokens)
+	// Parser returns raw promptTokenCount (no cache normalization applied).
+	if inputTokens != 1000 {
+		t.Errorf("inputTokens = %d, want 1000 (raw promptTokenCount, no normalization)", inputTokens)
 	}
 	if outputTokens != 50 {
 		t.Errorf("outputTokens = %d, want 50", outputTokens)
@@ -451,6 +452,7 @@ data: [DONE]
 
 func TestGoogleParser_ParseStreamingResponse_CacheTokens(t *testing.T) {
 	// Google streaming returns a JSON array; the last chunk has usageMetadata.
+	// Parser returns RAW promptTokenCount — normalization happens at call site.
 	stream := `[
 		{"candidates":[{"content":{"parts":[{"text":"hello"}]}}]},
 		{"candidates":[{"content":{"parts":[{"text":" world"}]}}],
@@ -463,10 +465,9 @@ func TestGoogleParser_ParseStreamingResponse_CacheTokens(t *testing.T) {
 	if content != "hello world" {
 		t.Errorf("content = %q, want %q", content, "hello world")
 	}
-	// nonCached = 5000 - 4000 = 1000
-	// Cost-equivalent = 1000 + round(4000 * 0.25) = 1000 + 1000 = 2000
-	if inputTokens != 2000 {
-		t.Errorf("inputTokens = %d, want 2000 (1000 non-cached + 1000 cached@0.25x)", inputTokens)
+	// Parser returns raw promptTokenCount (no cache normalization).
+	if inputTokens != 5000 {
+		t.Errorf("inputTokens = %d, want 5000 (raw promptTokenCount)", inputTokens)
 	}
 	if outputTokens != 10 {
 		t.Errorf("outputTokens = %d, want 10", outputTokens)
@@ -523,6 +524,79 @@ func TestNormalizeAnthropicInput_NoCaching(t *testing.T) {
 	result := normalizeAnthropicInput(100, 0, 0)
 	if result != 100 {
 		t.Errorf("normalizeAnthropicInput(100, 0, 0) = %d, want 100", result)
+	}
+}
+
+// ── Google model-aware cache discount tests ──────────────────────────────────
+
+func TestGoogleCacheDiscountForModel(t *testing.T) {
+	tests := []struct {
+		model    string
+		wantRate float64
+	}{
+		// Gemini 2.5+ models: 90% off (0.10)
+		{"gemini-2.5-pro", 0.10},
+		{"gemini-2.5-pro-preview-05-06", 0.10},
+		{"gemini-2.5-flash", 0.10},
+		{"gemini-2.5-flash-lite", 0.10},
+		// Gemini 3.x models: 90% off (0.10)
+		{"gemini-3-flash", 0.10},
+		{"gemini-3.1-pro", 0.10},
+		{"gemini-3.1-flash-lite", 0.10},
+		// Future models default to 90% off
+		{"gemini-4-ultra", 0.10},
+		{"some-future-model", 0.10},
+		// Gemini 2.0 models: 75% off (0.25)
+		{"gemini-2.0-flash", 0.25},
+		{"gemini-2.0-flash-001", 0.25},
+		{"gemini-2.0-flash-lite", 0.25},
+		// Gemini 1.5 models: 75% off (0.25)
+		{"gemini-1.5-pro", 0.25},
+		{"gemini-1.5-flash", 0.25},
+		// Gemini 1.0 models: 75% off (0.25)
+		{"gemini-1.0-pro", 0.25},
+		// Case insensitive
+		{"Gemini-2.5-Pro", 0.10},
+		{"GEMINI-2.0-FLASH", 0.25},
+		// Empty model defaults to 90%
+		{"", 0.10},
+	}
+
+	for _, tt := range tests {
+		got := googleCacheDiscountForModel(tt.model)
+		if got != tt.wantRate {
+			t.Errorf("googleCacheDiscountForModel(%q) = %v, want %v", tt.model, got, tt.wantRate)
+		}
+	}
+}
+
+func TestNormalizeGoogleCacheInput_Gemini25(t *testing.T) {
+	// Gemini 2.5: 90% off → 0.10 multiplier
+	// 1000 total, 800 cached
+	// nonCached = 200, cached_eq = round(800 * 0.10) = 80
+	// result = 200 + 80 = 280
+	result := normalizeGoogleCacheInput(1000, 800, "gemini-2.5-pro")
+	if result != 280 {
+		t.Errorf("normalizeGoogleCacheInput(1000, 800, gemini-2.5-pro) = %d, want 280", result)
+	}
+}
+
+func TestNormalizeGoogleCacheInput_Gemini20(t *testing.T) {
+	// Gemini 2.0: 75% off → 0.25 multiplier
+	// 1000 total, 800 cached
+	// nonCached = 200, cached_eq = round(800 * 0.25) = 200
+	// result = 200 + 200 = 400
+	result := normalizeGoogleCacheInput(1000, 800, "gemini-2.0-flash")
+	if result != 400 {
+		t.Errorf("normalizeGoogleCacheInput(1000, 800, gemini-2.0-flash) = %d, want 400", result)
+	}
+}
+
+func TestNormalizeGoogleCacheInput_NoCaching(t *testing.T) {
+	// No cached tokens — returns raw input unchanged.
+	result := normalizeGoogleCacheInput(500, 0, "gemini-2.5-pro")
+	if result != 500 {
+		t.Errorf("normalizeGoogleCacheInput(500, 0, ...) = %d, want 500", result)
 	}
 }
 

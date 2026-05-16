@@ -15,8 +15,32 @@ const (
 	openAICacheDiscount      = 0.5  // 50% off
 	anthropicCacheReadRate   = 0.1  // 90% off
 	anthropicCacheCreateRate = 1.25 // 25% surcharge
-	googleCacheDiscount      = 0.25 // 75% off
 )
+
+// googleCacheDiscountForModel returns the cache discount multiplier for a
+// Google/Gemini model. Per GEAP pricing (May 2026):
+//   - Gemini 2.5+ and 3.x models: 90% off (multiply cached tokens by 0.10)
+//   - Gemini 2.0 and older models: 75% off (multiply cached tokens by 0.25)
+//
+// See: https://docs.cloud.google.com/gemini-enterprise-agent-platform/models/context-cache/context-cache-overview
+func googleCacheDiscountForModel(model string) float64 {
+	m := strings.ToLower(model)
+	// Gemini 2.0 and older: 75% off.
+	if strings.Contains(m, "gemini-2.0") ||
+		strings.Contains(m, "gemini-1.5") ||
+		strings.Contains(m, "gemini-1.0") {
+		return 0.25
+	}
+	// Gemini 2.5, 3.x, and future models default to 90% off.
+	return 0.10
+}
+
+// normalizeGoogleCacheInput applies model-aware cache normalization to raw
+// Google/Gemini input token counts. Call this after googleParser.ParseResponse
+// (which returns raw promptTokenCount without cache normalization).
+func normalizeGoogleCacheInput(rawInput, cachedTokens int64, model string) int64 {
+	return normalizeCachedInput(rawInput, cachedTokens, googleCacheDiscountForModel(model))
+}
 
 // normalizeCachedInput computes cost-equivalent input tokens by subtracting
 // cached tokens from rawInput and adding them back at the discounted rate.
@@ -304,11 +328,10 @@ func (p *googleParser) ParseResponse(body []byte) (content string, inputTokens, 
 	}
 
 	if meta, ok := resp["usageMetadata"].(map[string]interface{}); ok {
-		inputTokens = normalizeCachedInput(
-			toInt64(meta["promptTokenCount"]),
-			toInt64(meta["cachedContentTokenCount"]),
-			googleCacheDiscount,
-		)
+		// Return RAW promptTokenCount — cache normalization is applied at
+		// the call site (createSpan/deductBudget) where the model is known,
+		// since Gemini 2.5+ and 2.0 have different cache discount rates.
+		inputTokens = toInt64(meta["promptTokenCount"])
 		// Gemini 2.5 "thinking" models report reasoning tokens separately.
 		// These are billed at the output rate but NOT included in candidatesTokenCount.
 		// Without this, thinking-heavy responses undercount output by 2-10×.
@@ -396,11 +419,8 @@ func (p *googleParser) ParseStreamingResponse(data []byte) (content string, inpu
 
 	content = contentBuilder.String()
 	if lastMeta != nil {
-		inputTokens = normalizeCachedInput(
-			toInt64(lastMeta["promptTokenCount"]),
-			toInt64(lastMeta["cachedContentTokenCount"]),
-			googleCacheDiscount,
-		)
+		// Return RAW promptTokenCount — same rationale as ParseResponse.
+		inputTokens = toInt64(lastMeta["promptTokenCount"])
 		outputTokens = toInt64(lastMeta["candidatesTokenCount"]) +
 			toInt64(lastMeta["thoughtsTokenCount"])
 	}

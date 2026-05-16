@@ -242,6 +242,67 @@ Send a message in the OpenCode TUI. You should see:
 
 ---
 
+## 💎 Gemini CLI Integration
+
+[Gemini CLI](https://geminicli.com/) is Google's official terminal AI coding assistant. It supports custom API
+endpoints via environment variables — route all traffic through Candela with two exports.
+
+### Prerequisites
+
+1. **Candela running locally**: `nix develop -c go run ./cmd/candela-server`
+2. **Gemini CLI installed**: `npm install -g @google/gemini-cli` (or see [geminicli.com](https://geminicli.com/docs/get-started/installation))
+3. **Gemini API key**: Required for `GEMINI_API_KEY`
+
+### Setup
+
+Set two environment variables in your shell profile (`~/.zshrc`, `~/.bashrc`, etc.):
+
+```bash
+# Route all Gemini CLI API traffic through Candela
+export GOOGLE_GEMINI_BASE_URL="http://localhost:8181/proxy/google"
+
+# Your Gemini API key (forwarded by Candela to upstream)
+export GEMINI_API_KEY="your-gemini-api-key"
+```
+
+That's it. Launch `gemini` as usual — every request is now proxied through Candela.
+
+> **💡 Why does this work?** Gemini CLI uses `GOOGLE_GEMINI_BASE_URL` to override the default
+> `https://generativelanguage.googleapis.com` endpoint. Candela's `/proxy/google/` route speaks
+> the **native Gemini API format** — no translation needed. The CLI allows plain `http://` for
+> `localhost` / `127.0.0.1` / `[::1]`, so no TLS is required for local proxying.
+
+### Optional: Export Gemini CLI Telemetry to Candela
+
+Gemini CLI has built-in OTLP telemetry support. You can point it at Candela's OTel Collector to
+get **client-side spans** (tool use, session duration) alongside **proxy spans** (tokens, cost, TTFB):
+
+```bash
+# Enable Gemini CLI's native telemetry export
+export GEMINI_TELEMETRY_ENABLED=true
+export GEMINI_TELEMETRY_TARGET=local
+export GEMINI_TELEMETRY_USE_COLLECTOR=true
+export GEMINI_TELEMETRY_OTLP_ENDPOINT="http://localhost:4318"
+export GEMINI_TELEMETRY_OTLP_PROTOCOL=http
+```
+
+This gives you end-to-end visibility: client-side session spans correlated with server-side
+LLM proxy spans in a single trace tree.
+
+### Verify
+
+1. Run `gemini` in any project directory
+2. Send a prompt — you should see the response in your terminal
+3. Check the Candela dashboard at `http://localhost:3000` for a new trace
+
+### Using with Anthropic (Claude via Vertex AI)
+
+Gemini CLI natively speaks the Gemini API. To use **Claude** through Gemini CLI, you would need a
+separate tool (see [OpenCode Integration](#-opencode-integration) or [Zed Integration](#️-zed-integration))
+since Gemini CLI does not support OpenAI-compatible endpoints.
+
+---
+
 ## 🤖 Google ADK Integration
 
 Route [ADK](https://adk.dev/) agent LLM calls through Candela with one line:

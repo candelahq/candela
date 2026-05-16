@@ -208,6 +208,7 @@ response = client.messages.create(...)
 graph TD
     subgraph "Developer Tools"
         JB[JetBrains / Cline]
+        GemCLI[Gemini CLI]
         App[App / Agent]
         SDK[OTel SDK]
     end
@@ -242,6 +243,7 @@ graph TD
     end
 
     JB -->|/v1/models<br/>/v1/chat/completions| LM
+    GemCLI -->|GOOGLE_GEMINI_BASE_URL| RP
     LM -->|Local model| SC
     SC --> LP
     SC -.->|Capture| SP

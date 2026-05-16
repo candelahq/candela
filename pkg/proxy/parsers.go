@@ -3,49 +3,13 @@ package proxy
 import (
 	"bytes"
 	"encoding/json"
-	"math"
 	"strings"
 )
 
-// Cache discount rates by provider. Each provider includes cached tokens in
-// their total input count but bills them at a reduced rate. We normalize to
-// cost-equivalent tokens by subtracting cached from the total, then adding
-// them back at the discounted rate.
-const (
-	openAICacheDiscount      = 0.5  // 50% off
-	anthropicCacheReadRate   = 0.1  // 90% off
-	anthropicCacheCreateRate = 1.25 // 25% surcharge
-	googleCacheDiscount      = 0.25 // 75% off
-)
-
-// normalizeCachedInput computes cost-equivalent input tokens by subtracting
-// cached tokens from rawInput and adding them back at the discounted rate.
-// Returns rawInput unchanged when cachedTokens is 0.
-func normalizeCachedInput(rawInput, cachedTokens int64, discount float64) int64 {
-	if cachedTokens <= 0 {
-		return rawInput
-	}
-	nonCached := rawInput - cachedTokens
-	if nonCached < 0 {
-		nonCached = 0
-	}
-	return nonCached + int64(math.Round(float64(cachedTokens)*discount))
-}
-
-// normalizeAnthropicInput handles Anthropic's two-tier cache pricing
-// (read @ 0.1×, creation @ 1.25×) in a single call.
-func normalizeAnthropicInput(rawInput, cacheRead, cacheCreation int64) int64 {
-	if cacheRead <= 0 && cacheCreation <= 0 {
-		return rawInput
-	}
-	nonCached := rawInput - cacheRead - cacheCreation
-	if nonCached < 0 {
-		nonCached = 0
-	}
-	return nonCached +
-		int64(math.Round(float64(cacheRead)*anthropicCacheReadRate)) +
-		int64(math.Round(float64(cacheCreation)*anthropicCacheCreateRate))
-}
+// NOTE: All cache normalization has been moved to costcalc.Calculator.
+// Parsers return RAW token counts; the proxy applies model-aware and
+// provider-aware cache discounts at the call site via
+// Calculator.NormalizeCachedInput(provider, model, rawInput, cacheRead, cacheCreate).
 
 // ProviderParser extracts LLM request/response data for a specific provider.
 // Implement this interface to add support for a new LLM provider.
@@ -116,14 +80,10 @@ func (p *openaiParser) ParseResponse(body []byte) (content string, inputTokens, 
 	}
 
 	if usage, ok := resp["usage"].(map[string]interface{}); ok {
-		rawInput := toInt64(usage["prompt_tokens"])
+		// Return RAW prompt_tokens — cache normalization is applied at
+		// the call site via Calculator.NormalizeCachedInput.
+		inputTokens = toInt64(usage["prompt_tokens"])
 		outputTokens = toInt64(usage["completion_tokens"])
-
-		var cachedTokens int64
-		if details, ok := usage["prompt_tokens_details"].(map[string]interface{}); ok {
-			cachedTokens = toInt64(details["cached_tokens"])
-		}
-		inputTokens = normalizeCachedInput(rawInput, cachedTokens, openAICacheDiscount)
 	}
 	if choices, ok := resp["choices"].([]interface{}); ok && len(choices) > 0 {
 		if choice, ok := choices[0].(map[string]interface{}); ok {
@@ -163,14 +123,9 @@ func (p *openaiParser) ParseStreamingResponse(data []byte) (content string, inpu
 			}
 		}
 		if usage, ok := chunk["usage"].(map[string]interface{}); ok {
-			rawInput := toInt64(usage["prompt_tokens"])
+			// Return RAW prompt_tokens — same as ParseResponse.
+			inputTokens = toInt64(usage["prompt_tokens"])
 			outputTokens = toInt64(usage["completion_tokens"])
-
-			var cachedTokens int64
-			if details, ok := usage["prompt_tokens_details"].(map[string]interface{}); ok {
-				cachedTokens = toInt64(details["cached_tokens"])
-			}
-			inputTokens = normalizeCachedInput(rawInput, cachedTokens, openAICacheDiscount)
 		}
 	}
 
@@ -213,13 +168,9 @@ func (p *anthropicParser) ParseResponse(body []byte) (content string, inputToken
 	}
 
 	if usage, ok := resp["usage"].(map[string]interface{}); ok {
-		// Anthropic's input_tokens INCLUDES cached tokens in the total.
-		// See normalizeAnthropicInput for the two-tier discount formula.
-		inputTokens = normalizeAnthropicInput(
-			toInt64(usage["input_tokens"]),
-			toInt64(usage["cache_read_input_tokens"]),
-			toInt64(usage["cache_creation_input_tokens"]),
-		)
+		// Return RAW input_tokens — cache normalization is applied at
+		// the call site via Calculator.NormalizeCachedInput.
+		inputTokens = toInt64(usage["input_tokens"])
 		outputTokens = toInt64(usage["output_tokens"])
 	}
 	if contentArr, ok := resp["content"].([]interface{}); ok && len(contentArr) > 0 {
@@ -260,11 +211,8 @@ func (p *anthropicParser) ParseStreamingResponse(data []byte) (content string, i
 		}
 		if msg, ok := chunk["message"].(map[string]interface{}); ok {
 			if usage, ok := msg["usage"].(map[string]interface{}); ok {
-				inputTokens = normalizeAnthropicInput(
-					toInt64(usage["input_tokens"]),
-					toInt64(usage["cache_read_input_tokens"]),
-					toInt64(usage["cache_creation_input_tokens"]),
-				)
+				// Return RAW input_tokens — same as ParseResponse.
+				inputTokens = toInt64(usage["input_tokens"])
 			}
 		}
 	}
@@ -304,11 +252,10 @@ func (p *googleParser) ParseResponse(body []byte) (content string, inputTokens, 
 	}
 
 	if meta, ok := resp["usageMetadata"].(map[string]interface{}); ok {
-		inputTokens = normalizeCachedInput(
-			toInt64(meta["promptTokenCount"]),
-			toInt64(meta["cachedContentTokenCount"]),
-			googleCacheDiscount,
-		)
+		// Return RAW promptTokenCount — cache normalization is applied at
+		// the call site (createSpan/deductBudget) where the model is known,
+		// since Gemini 2.5+ and 2.0 have different cache discount rates.
+		inputTokens = toInt64(meta["promptTokenCount"])
 		// Gemini 2.5 "thinking" models report reasoning tokens separately.
 		// These are billed at the output rate but NOT included in candidatesTokenCount.
 		// Without this, thinking-heavy responses undercount output by 2-10×.
@@ -396,11 +343,8 @@ func (p *googleParser) ParseStreamingResponse(data []byte) (content string, inpu
 
 	content = contentBuilder.String()
 	if lastMeta != nil {
-		inputTokens = normalizeCachedInput(
-			toInt64(lastMeta["promptTokenCount"]),
-			toInt64(lastMeta["cachedContentTokenCount"]),
-			googleCacheDiscount,
-		)
+		// Return RAW promptTokenCount — same rationale as ParseResponse.
+		inputTokens = toInt64(lastMeta["promptTokenCount"])
 		outputTokens = toInt64(lastMeta["candidatesTokenCount"]) +
 			toInt64(lastMeta["thoughtsTokenCount"])
 	}
@@ -418,6 +362,83 @@ func (p *fallbackParser) ParseRequest(_ []byte) (string, string)        { return
 func (p *fallbackParser) ParseResponse(_ []byte) (string, int64, int64) { return "", 0, 0 }
 func (p *fallbackParser) ParseStreamingResponse(_ []byte) (string, int64, int64) {
 	return "", 0, 0
+}
+
+// ──────────────────────────────────────────
+// Model extraction from response body
+// ──────────────────────────────────────────
+
+// extractModelFromResponse extracts the model name from a provider's response
+// body. This is the primary source for Google (which has modelVersion in the
+// response but NOT in the request body), and a fallback for other providers.
+func extractModelFromResponse(provider string, body []byte) string {
+	var resp map[string]interface{}
+	if err := json.Unmarshal(body, &resp); err != nil {
+		return ""
+	}
+
+	switch provider {
+	case "google":
+		// Google returns modelVersion at the response top level.
+		// e.g. "gemini-2.0-flash-lite-001" or "gemini-2.5-pro-preview-05-06"
+		if mv, ok := resp["modelVersion"].(string); ok && mv != "" {
+			return mv
+		}
+	case "openai", "gemini-oai":
+		if m, ok := resp["model"].(string); ok && m != "" {
+			return m
+		}
+	case "anthropic", "anthropic-direct", "anthropic-vertex":
+		if m, ok := resp["model"].(string); ok && m != "" {
+			return m
+		}
+	}
+	return ""
+}
+
+// extractModelFromStreamingResponse extracts the model name from streaming
+// response data. Scans SSE lines for the model field in any chunk.
+func extractModelFromStreamingResponse(provider string, data []byte) string {
+	switch provider {
+	case "google":
+		// Google streaming: look for modelVersion in any JSON chunk.
+		// It's typically in the last chunk alongside usageMetadata.
+		var arr []map[string]interface{}
+		if json.Unmarshal(data, &arr) == nil {
+			for _, chunk := range arr {
+				if mv, ok := chunk["modelVersion"].(string); ok && mv != "" {
+					return mv
+				}
+			}
+		}
+		// Try as single JSON object.
+		var single map[string]interface{}
+		if json.Unmarshal(data, &single) == nil {
+			if mv, ok := single["modelVersion"].(string); ok && mv != "" {
+				return mv
+			}
+		}
+
+	default:
+		// OpenAI/Anthropic SSE: scan for "model" in any data line.
+		for _, line := range strings.Split(string(data), "\n") {
+			line = strings.TrimSpace(line)
+			if !strings.HasPrefix(line, "data: ") {
+				continue
+			}
+			payload := strings.TrimPrefix(line, "data: ")
+			if payload == "[DONE]" {
+				continue
+			}
+			var chunk map[string]interface{}
+			if json.Unmarshal([]byte(payload), &chunk) == nil {
+				if m, ok := chunk["model"].(string); ok && m != "" {
+					return m
+				}
+			}
+		}
+	}
+	return ""
 }
 
 // ──────────────────────────────────────────

@@ -6,6 +6,7 @@ package costcalc
 
 import (
 	"log/slog"
+	"math"
 	"strings"
 	"sync"
 )
@@ -33,32 +34,58 @@ type PricingConfig struct {
 	Models          []ModelPricing `yaml:"models"`           // Per-model overrides
 }
 
+// CacheDiscountConfig defines the cache token discount rates for a provider.
+// When a provider includes cached tokens in its total input count, these
+// rates control how we normalize to cost-equivalent tokens.
+type CacheDiscountConfig struct {
+	ReadDiscount     float64 `yaml:"read_discount"`     // Multiplier for cache read tokens (e.g. 0.1 = 90% off)
+	CreateMultiplier float64 `yaml:"create_multiplier"` // Multiplier for cache creation tokens (e.g. 1.25 = 25% surcharge)
+}
+
+// defaultCacheDiscounts defines cache pricing per canonical provider.
+// Anthropic: 90% off reads, 25% surcharge on creation.
+// Google/Gemini 2.5+: 90% off (model-aware, see googleCacheReadDiscount).
+// Google/Gemini 2.0:  75% off (model-aware).
+// OpenAI: 50% off reads, no creation concept.
+var defaultCacheDiscounts = map[string]CacheDiscountConfig{
+	"anthropic": {ReadDiscount: 0.1, CreateMultiplier: 1.25},
+	"google":    {ReadDiscount: 0.10, CreateMultiplier: 1.0}, // Base rate, overridden by model-aware logic
+	"openai":    {ReadDiscount: 0.5, CreateMultiplier: 1.0},
+}
+
 // Calculator computes costs from token usage and model pricing.
 type Calculator struct {
 	mu             sync.RWMutex
-	defaults       map[string]ModelPricing // key: "provider/model" — built-in list prices
-	overrides      map[string]ModelPricing // key: "provider/model" — config overrides
-	fallback       map[string]ModelPricing // key: "model" — deterministic name-only match
-	aliases        map[string]string       // provider name aliases (e.g. "anthropic-direct" → "anthropic")
-	globalDiscount float64                 // 0.0–1.0
-	loggedUnknown  sync.Map                // key: "provider/model" — track logged warnings
+	defaults       map[string]ModelPricing        // key: "provider/model" — built-in list prices
+	overrides      map[string]ModelPricing        // key: "provider/model" — config overrides
+	fallback       map[string]ModelPricing        // key: "model" — deterministic name-only match
+	aliases        map[string]string              // provider name aliases (e.g. "anthropic-direct" → "anthropic")
+	cacheDiscounts map[string]CacheDiscountConfig // key: canonical provider name
+	globalDiscount float64                        // 0.0–1.0
+	loggedUnknown  sync.Map                       // key: "provider/model" — track logged warnings
 }
 
 // providerAliases maps proxy route names to their canonical pricing provider.
 // This ensures that passthrough routes (e.g. anthropic-direct) share pricing
-// with their canonical provider, including config overrides.
+// with their canonical provider, including config overrides and cache discounts.
 var providerAliases = map[string]string{
 	"anthropic-direct": "anthropic",
 	"anthropic-vertex": "anthropic",
+	"gemini-oai":       "google", // Gemini via OpenAI-compat shares Google cache pricing
 }
 
 // New creates a Calculator with default pricing for all supported cloud models.
 func New() *Calculator {
 	c := &Calculator{
-		defaults:  make(map[string]ModelPricing),
-		overrides: make(map[string]ModelPricing),
-		fallback:  make(map[string]ModelPricing),
-		aliases:   providerAliases,
+		defaults:       make(map[string]ModelPricing),
+		overrides:      make(map[string]ModelPricing),
+		fallback:       make(map[string]ModelPricing),
+		aliases:        providerAliases,
+		cacheDiscounts: make(map[string]CacheDiscountConfig),
+	}
+	// Copy default cache discounts.
+	for k, v := range defaultCacheDiscounts {
+		c.cacheDiscounts[k] = v
 	}
 	c.loadDefaults()
 	c.rebuildFallback()
@@ -149,6 +176,81 @@ func (c *Calculator) SetPricing(p ModelPricing) {
 	defer c.mu.Unlock()
 	c.overrides[c.key(p.Provider, p.Model)] = p
 	c.rebuildFallback()
+}
+
+// SetCacheDiscount overrides the cache discount config for a canonical provider.
+// Use this for providers with non-standard cache pricing (e.g. Anthropic on
+// Vertex AI if Google charges different cache rates than direct Anthropic).
+func (c *Calculator) SetCacheDiscount(provider string, cfg CacheDiscountConfig) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.cacheDiscounts[strings.ToLower(provider)] = cfg
+}
+
+// NormalizeCachedInput returns cost-equivalent input tokens by applying
+// provider-specific and model-specific cache discounts to raw token counts.
+//
+// All parsers return raw input token counts (including cached tokens at full
+// price). This method adjusts them:
+//   - Subtracts cached tokens from the total
+//   - Adds them back at the discounted rate (e.g. 0.1× for 90% off)
+//   - Applies cache creation surcharges (e.g. Anthropic's 1.25× creation cost)
+//
+// Provider aliases are resolved (e.g. "anthropic-vertex" → "anthropic",
+// "gemini-oai" → "google"), and Google models get model-aware rates
+// (Gemini 2.5+: 90% off, Gemini 2.0: 75% off).
+//
+// Returns rawInput unchanged when both cacheRead and cacheCreate are 0.
+func (c *Calculator) NormalizeCachedInput(provider, model string, rawInput, cacheRead, cacheCreate int64) int64 {
+	if cacheRead <= 0 && cacheCreate <= 0 {
+		return rawInput
+	}
+
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	// Resolve provider alias (e.g. "gemini-oai" → "google").
+	canonical := strings.ToLower(provider)
+	if alias, ok := c.aliases[canonical]; ok {
+		canonical = alias
+	}
+
+	cfg, ok := c.cacheDiscounts[canonical]
+	if !ok {
+		// Unknown provider — no cache discount info, return raw.
+		return rawInput
+	}
+
+	// Google/Gemini models have model-aware cache discount rates by default.
+	// Only apply if the config hasn't been overridden via SetCacheDiscount.
+	readDiscount := cfg.ReadDiscount
+	defaultGoogleCfg := defaultCacheDiscounts["google"]
+	if canonical == "google" && cfg.ReadDiscount == defaultGoogleCfg.ReadDiscount {
+		readDiscount = googleCacheReadDiscount(model)
+	}
+
+	nonCached := rawInput - cacheRead - cacheCreate
+	if nonCached < 0 {
+		nonCached = 0
+	}
+
+	return nonCached +
+		int64(math.Round(float64(cacheRead)*readDiscount)) +
+		int64(math.Round(float64(cacheCreate)*cfg.CreateMultiplier))
+}
+
+// googleCacheReadDiscount returns the cache read discount for a Google/Gemini
+// model. Per GEAP pricing (May 2026):
+//   - Gemini 2.5+ and 3.x models: 90% off (0.10×)
+//   - Gemini 2.0 and older:       75% off (0.25×)
+func googleCacheReadDiscount(model string) float64 {
+	m := strings.ToLower(model)
+	if strings.Contains(m, "gemini-2.0") ||
+		strings.Contains(m, "gemini-1.5") ||
+		strings.Contains(m, "gemini-1.0") {
+		return 0.25
+	}
+	return 0.10
 }
 
 // SetGlobalDiscount sets the global discount percentage (0.0–1.0).

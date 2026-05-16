@@ -226,9 +226,19 @@ func (s *Store) QueryTraces(ctx context.Context, q storage.TraceQuery) (*storage
 			COALESCE(SUM(gen_ai_total_tokens), 0)::BIGINT as total_tokens,
 			COALESCE(SUM(gen_ai_cost_usd), 0)::DOUBLE as total_cost,
 			MAX(CASE WHEN parent_span_id = '' THEN name ELSE '' END) as root_name,
-			MAX(gen_ai_model) as primary_model,
-			MAX(gen_ai_provider) as primary_provider,
-			MAX(status)::INTEGER as status
+			(SELECT s2.gen_ai_model FROM spans s2
+				WHERE s2.trace_id = spans.trace_id AND s2.project_id = ?
+					AND s2.gen_ai_model != ''
+				GROUP BY s2.gen_ai_model
+				ORDER BY SUM(s2.gen_ai_cost_usd) DESC
+				LIMIT 1) as primary_model,
+			(SELECT s2.gen_ai_provider FROM spans s2
+				WHERE s2.trace_id = spans.trace_id AND s2.project_id = ?
+					AND s2.gen_ai_model != ''
+				GROUP BY s2.gen_ai_model, s2.gen_ai_provider
+				ORDER BY SUM(s2.gen_ai_cost_usd) DESC
+				LIMIT 1) as primary_provider,
+			MAX(CASE WHEN status = 2 THEN 2 ELSE 0 END)::INTEGER as status
 		FROM spans
 		WHERE project_id = ? AND start_time >= ? AND start_time <= ?
 			AND (? = '' OR user_id = ?)
@@ -237,7 +247,7 @@ func (s *Store) QueryTraces(ctx context.Context, q storage.TraceQuery) (*storage
 		GROUP BY trace_id
 		ORDER BY `+orderExpr+` `+dir+`
 		LIMIT ?
-	`, q.ProjectID, q.StartTime, q.EndTime, q.UserID, q.UserID, q.Environment, q.Environment, q.TenantID, q.TenantID, q.PageSize)
+	`, q.ProjectID, q.ProjectID, q.ProjectID, q.StartTime, q.EndTime, q.UserID, q.UserID, q.Environment, q.Environment, q.TenantID, q.TenantID, q.PageSize)
 	if err != nil {
 		return nil, fmt.Errorf("querying traces: %w", err)
 	}
@@ -321,9 +331,9 @@ func (s *Store) GetUsageSummary(ctx context.Context, q storage.UsageQuery) (*sto
 			COALESCE(SUM(gen_ai_input_tokens), 0)::BIGINT,
 			COALESCE(SUM(gen_ai_output_tokens), 0)::BIGINT,
 			COALESCE(SUM(gen_ai_cost_usd), 0)::DOUBLE,
-			COALESCE(AVG(duration_ns), 0)::DOUBLE / 1000000.0,
-			CASE WHEN COUNT(*) > 0
-				THEN CAST(SUM(CASE WHEN status = 2 THEN 1 ELSE 0 END) AS DOUBLE) / COUNT(*)
+			COALESCE(AVG(CASE WHEN parent_span_id = '' THEN duration_ns ELSE NULL END), 0)::DOUBLE / 1000000.0,
+			CASE WHEN COUNT(DISTINCT trace_id) > 0
+				THEN CAST(COUNT(DISTINCT CASE WHEN status = 2 THEN trace_id ELSE NULL END) AS DOUBLE) / COUNT(DISTINCT trace_id)
 				ELSE 0 END
 		FROM spans
 		WHERE project_id = ? AND start_time >= ? AND start_time <= ?
@@ -382,10 +392,10 @@ func (s *Store) GetUserLeaderboard(ctx context.Context, q storage.UsageQuery, li
 
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT user_id,
-			COUNT(*)::BIGINT,
+			COUNT(DISTINCT trace_id)::BIGINT,
 			COALESCE(SUM(gen_ai_total_tokens), 0)::BIGINT,
 			COALESCE(SUM(gen_ai_cost_usd), 0)::DOUBLE,
-			COALESCE(AVG(duration_ns), 0)::DOUBLE / 1000000.0,
+			COALESCE(AVG(CASE WHEN parent_span_id = '' THEN duration_ns ELSE NULL END), 0)::DOUBLE / 1000000.0,
 			COALESCE((
 				SELECT s2.gen_ai_model FROM spans s2
 				WHERE s2.user_id = spans.user_id
@@ -432,10 +442,10 @@ func (s *Store) GetTenantLeaderboard(ctx context.Context, q storage.UsageQuery, 
 
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT tenant_id,
-			COUNT(*)::BIGINT,
+			COUNT(DISTINCT trace_id)::BIGINT,
 			COALESCE(SUM(gen_ai_total_tokens), 0)::BIGINT,
 			COALESCE(SUM(gen_ai_cost_usd), 0)::DOUBLE,
-			COALESCE(AVG(duration_ns), 0)::DOUBLE / 1000000.0,
+			COALESCE(AVG(CASE WHEN parent_span_id = '' THEN duration_ns ELSE NULL END), 0)::DOUBLE / 1000000.0,
 			COALESCE((
 				SELECT s2.gen_ai_model FROM spans s2
 				WHERE s2.tenant_id = spans.tenant_id
@@ -474,10 +484,10 @@ func (s *Store) GetTenantLeaderboard(ctx context.Context, q storage.UsageQuery, 
 
 func (s *Store) GetJobLeaderboard(ctx context.Context, q storage.UsageQuery, limit int) ([]storage.JobUsageSummary, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT job_id, COUNT(*)::BIGINT,
+		SELECT job_id, COUNT(DISTINCT trace_id)::BIGINT,
 			COALESCE(SUM(gen_ai_total_tokens), 0)::BIGINT,
 			COALESCE(SUM(gen_ai_cost_usd), 0)::DOUBLE,
-			COALESCE(AVG(duration_ns), 0)::DOUBLE / 1000000.0,
+			COALESCE(AVG(CASE WHEN parent_span_id = '' THEN duration_ns ELSE NULL END), 0)::DOUBLE / 1000000.0,
 			COALESCE((
 				SELECT s2.gen_ai_model FROM spans s2
 				WHERE s2.job_id = spans.job_id

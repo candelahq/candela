@@ -175,7 +175,12 @@ func rowToSpan(row spanRow) storage.Span {
 		TenantID:      row.TenantID,
 	}
 
-	if row.GenAIModel != "" {
+	// Populate GenAI whenever any meaningful field is set — not just when
+	// model is known. A span may carry token/cost data from an unrecognized
+	// provider, or may report input/output counts without a total.
+	if row.GenAIModel != "" || row.GenAIProvider != "" ||
+		row.InputTokens > 0 || row.OutputTokens > 0 ||
+		row.TotalTokens > 0 || row.CostUSD > 0 {
 		span.GenAI = &storage.GenAIAttributes{
 			Model:               row.GenAIModel,
 			Provider:            row.GenAIProvider,
@@ -474,15 +479,41 @@ func (s *Store) QueryTraces(ctx context.Context, tq storage.TraceQuery) (*storag
 			continue
 		}
 		trace := buildTrace(tid, spans)
+		// Count LLM spans and find the most common model.
+		var llmCount int
+		modelCounts := make(map[string]int)
+		modelProviders := make(map[string]string)
+		for _, sp := range spans {
+			if sp.Kind == storage.SpanKindLLM {
+				llmCount++
+			}
+			if sp.GenAI != nil && sp.GenAI.Model != "" {
+				modelCounts[sp.GenAI.Model]++
+				modelProviders[sp.GenAI.Model] = sp.GenAI.Provider
+			}
+		}
+		var primaryModel string
+		var primaryProvider string
+		var maxCount int
+		for m, c := range modelCounts {
+			if c > maxCount {
+				primaryModel = m
+				primaryProvider = modelProviders[m]
+				maxCount = c
+			}
+		}
 		traces = append(traces, storage.TraceSummary{
-			TraceID:      trace.TraceID,
-			RootSpanName: trace.RootSpanName,
-			StartTime:    trace.StartTime,
-			Duration:     trace.Duration,
-			SpanCount:    trace.SpanCount,
-			TotalTokens:  trace.TotalTokens,
-			TotalCostUSD: trace.TotalCostUSD,
-			Environment:  trace.Environment,
+			TraceID:         trace.TraceID,
+			RootSpanName:    trace.RootSpanName,
+			StartTime:       trace.StartTime,
+			Duration:        trace.Duration,
+			SpanCount:       trace.SpanCount,
+			LLMCallCount:    llmCount,
+			TotalTokens:     trace.TotalTokens,
+			TotalCostUSD:    trace.TotalCostUSD,
+			Environment:     trace.Environment,
+			PrimaryModel:    primaryModel,
+			PrimaryProvider: primaryProvider,
 		})
 	}
 
@@ -542,7 +573,10 @@ func (s *Store) GetUsageSummary(ctx context.Context, uq storage.UsageQuery) (*st
 			COALESCE(SUM(gen_ai_output_tokens), 0) AS total_output_tokens,
 			COALESCE(SUM(gen_ai_total_tokens), 0) AS total_tokens,
 			COALESCE(SUM(gen_ai_cost_usd), 0) AS total_cost_usd,
-			COALESCE(AVG(duration_ns), 0) AS avg_duration_ns
+			COALESCE(AVG(CASE WHEN parent_span_id = '' THEN duration_ns ELSE NULL END), 0) AS avg_duration_ns,
+			CASE WHEN COUNT(DISTINCT trace_id) > 0
+				THEN CAST(COUNT(DISTINCT CASE WHEN status = 2 THEN trace_id ELSE NULL END) AS FLOAT64) / COUNT(DISTINCT trace_id)
+				ELSE 0 END AS error_rate
 		FROM %s
 		WHERE (@projectID = '' OR project_id = @projectID)
 		  AND start_time >= @startTime
@@ -576,6 +610,7 @@ func (s *Store) GetUsageSummary(ctx context.Context, uq storage.UsageQuery) (*st
 		TotalTokens       int64   `bigquery:"total_tokens"`
 		TotalCostUSD      float64 `bigquery:"total_cost_usd"`
 		AvgDurationNs     float64 `bigquery:"avg_duration_ns"`
+		ErrorRate         float64 `bigquery:"error_rate"`
 	}
 	if err := it.Next(&row); err != nil && err != iterator.Done {
 		return nil, fmt.Errorf("reading usage: %w", err)
@@ -592,6 +627,7 @@ func (s *Store) GetUsageSummary(ctx context.Context, uq storage.UsageQuery) (*st
 	_ = row.TotalTokens
 	summary.TotalCostUSD = row.TotalCostUSD
 	summary.AvgLatencyMs = float64(row.AvgDurationNs) / 1e6
+	summary.ErrorRate = row.ErrorRate
 
 	return &summary, nil
 }
@@ -675,10 +711,10 @@ func (s *Store) GetUserLeaderboard(ctx context.Context, uq storage.UsageQuery, l
 	query := fmt.Sprintf(`
 		SELECT
 			user_id,
-			COUNT(*) AS call_count,
+			COUNT(DISTINCT trace_id) AS call_count,
 			COALESCE(SUM(gen_ai_total_tokens), 0) AS total_tokens,
 			COALESCE(SUM(gen_ai_cost_usd), 0) AS total_cost_usd,
-			COALESCE(AVG(duration_ns), 0) AS avg_duration_ns
+			COALESCE(AVG(CASE WHEN parent_span_id = '' THEN duration_ns ELSE NULL END), 0) AS avg_duration_ns
 		FROM %s
 		WHERE (@projectID = '' OR project_id = @projectID)
 		  AND start_time >= @startTime
@@ -739,10 +775,10 @@ func (s *Store) GetTenantLeaderboard(ctx context.Context, uq storage.UsageQuery,
 	query := fmt.Sprintf(`
 		SELECT
 			tenant_id,
-			COUNT(*) AS call_count,
+			COUNT(DISTINCT trace_id) AS call_count,
 			COALESCE(SUM(gen_ai_total_tokens), 0) AS total_tokens,
 			COALESCE(SUM(gen_ai_cost_usd), 0) AS total_cost_usd,
-			COALESCE(AVG(duration_ns), 0) AS avg_duration_ns,
+			COALESCE(AVG(CASE WHEN parent_span_id = '' THEN duration_ns ELSE NULL END), 0) AS avg_duration_ns,
 			COALESCE(
 				(SELECT m FROM UNNEST(ARRAY_AGG(gen_ai_model ORDER BY model_cost DESC LIMIT 1)) AS m),
 				''
@@ -807,10 +843,10 @@ func (s *Store) GetTenantLeaderboard(ctx context.Context, uq storage.UsageQuery,
 }
 
 func (s *Store) GetJobLeaderboard(ctx context.Context, uq storage.UsageQuery, limit int) ([]storage.JobUsageSummary, error) {
-	query := fmt.Sprintf(`SELECT job_id, COUNT(*) AS call_count,
+	query := fmt.Sprintf(`SELECT job_id, COUNT(DISTINCT trace_id) AS call_count,
 		COALESCE(SUM(gen_ai_total_tokens),0) AS total_tokens,
 		COALESCE(SUM(gen_ai_cost_usd),0) AS total_cost_usd,
-		COALESCE(AVG(duration_ns),0) AS avg_duration_ns,
+		COALESCE(AVG(CASE WHEN parent_span_id = '' THEN duration_ns ELSE NULL END),0) AS avg_duration_ns,
 		COALESCE((
 			SELECT s2.gen_ai_model FROM %s s2
 			WHERE s2.job_id = spans.job_id

@@ -339,6 +339,27 @@ type TraceStore interface {
 	SpanReader
 }
 
+// OutboxSpan represents a serialized span waiting to be synced upstream.
+type OutboxSpan struct {
+	SpanID       string
+	PayloadJSON  string
+	AttemptCount int
+	CreatedAt    time.Time
+}
+
+// SyncStore is implemented by local embedded databases (DuckDB, SQLite)
+// to support offline store-and-forward syncing to a centralized proxy.
+type SyncStore interface {
+	// GetOutboxSpans retrieves a batch of spans from the local sync outbox.
+	GetOutboxSpans(ctx context.Context, limit int) ([]OutboxSpan, error)
+	// DeleteOutboxSpans deletes a batch of successfully synced spans.
+	DeleteOutboxSpans(ctx context.Context, spanIDs []string) error
+	// IncrementOutboxAttempt increments the attempt count for failed spans.
+	IncrementOutboxAttempt(ctx context.Context, spanIDs []string) error
+	// PruneLocalSpans deletes local traces keeping only the specified number of most recent traces to save disk space.
+	PruneLocalSpans(ctx context.Context, keepCount int) error
+}
+
 type AnnotationType int
 
 const (

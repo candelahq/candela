@@ -154,8 +154,8 @@ func (s *Store) IngestSpans(ctx context.Context, spans []storage.Span) error {
 	defer func() { _ = stmt.Close() }()
 
 	outboxStmt, err := tx.PrepareContext(ctx, `INSERT OR REPLACE INTO outbox_spans (
-		span_id, payload_json, attempt_count
-	) VALUES (?, ?, 0)`)
+		span_id, payload_json, attempt_count, created_at
+	) VALUES (?, ?, 0, ?)`)
 	if err != nil {
 		return fmt.Errorf("preparing outbox stmt: %w", err)
 	}
@@ -198,7 +198,7 @@ func (s *Store) IngestSpans(ctx context.Context, spans []storage.Span) error {
 		if err != nil {
 			return fmt.Errorf("marshaling span for outbox %s: %w", span.SpanID, err)
 		}
-		_, err = outboxStmt.ExecContext(ctx, span.SpanID, string(payloadBytes))
+		_, err = outboxStmt.ExecContext(ctx, span.SpanID, string(payloadBytes), time.Now().Format(time.RFC3339Nano))
 		if err != nil {
 			return fmt.Errorf("inserting to outbox: %w", err)
 		}

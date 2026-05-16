@@ -92,7 +92,6 @@ func (w *SyncWorker) processBatch() {
 	var corruptedIDs []string
 
 	// 2. Deserialize and flag retries
-	var corruptedIDs []string
 	for _, obs := range outboxSpans {
 		var span storage.Span
 		if err := json.Unmarshal([]byte(obs.PayloadJSON), &span); err != nil {
@@ -100,13 +99,6 @@ func (w *SyncWorker) processBatch() {
 			corruptedIDs = append(corruptedIDs, obs.SpanID)
 			continue
 		}
-
-		// ... rest of the loop ...
-	}
-
-	if len(corruptedIDs) > 0 {
-		_ = w.store.DeleteOutboxSpans(ctx, corruptedIDs)
-	}
 
 		// Optimistic Ingestion with Pessimistic Retries pattern.
 		if obs.AttemptCount > 0 {

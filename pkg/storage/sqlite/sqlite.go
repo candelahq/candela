@@ -114,6 +114,13 @@ func (s *Store) migrate() error {
 		// Migration: add job_id for job-level cost attribution.
 		`ALTER TABLE spans ADD COLUMN job_id TEXT DEFAULT ''`,
 		`CREATE INDEX IF NOT EXISTS idx_spans_job ON spans(job_id)`,
+		// Sync Outbox
+		`CREATE TABLE IF NOT EXISTS outbox_spans (
+			span_id TEXT PRIMARY KEY,
+			payload_json TEXT NOT NULL,
+			attempt_count INTEGER DEFAULT 0,
+			created_at TEXT DEFAULT CURRENT_TIMESTAMP
+		)`,
 	}
 
 	for _, q := range queries {
@@ -142,9 +149,17 @@ func (s *Store) IngestSpans(ctx context.Context, spans []storage.Span) error {
 		gen_ai_input_content, gen_ai_output_content, attributes_json, user_id, session_id, tenant_id, job_id
 	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
 	if err != nil {
-		return fmt.Errorf("preparing stmt: %w", err)
+		return fmt.Errorf("preparing spans stmt: %w", err)
 	}
 	defer func() { _ = stmt.Close() }()
+
+	outboxStmt, err := tx.PrepareContext(ctx, `INSERT OR REPLACE INTO outbox_spans (
+		span_id, payload_json, attempt_count
+	) VALUES (?, ?, 0)`)
+	if err != nil {
+		return fmt.Errorf("preparing outbox stmt: %w", err)
+	}
+	defer func() { _ = outboxStmt.Close() }()
 
 	for _, span := range spans {
 		genAI := span.GenAI
@@ -176,6 +191,16 @@ func (s *Store) IngestSpans(ctx context.Context, spans []storage.Span) error {
 		)
 		if err != nil {
 			return fmt.Errorf("inserting span: %w", err)
+		}
+
+		// Also write to sync outbox
+		payloadBytes, err := json.Marshal(span)
+		if err != nil {
+			return fmt.Errorf("marshaling span for outbox %s: %w", span.SpanID, err)
+		}
+		_, err = outboxStmt.ExecContext(ctx, span.SpanID, string(payloadBytes))
+		if err != nil {
+			return fmt.Errorf("inserting to outbox: %w", err)
 		}
 	}
 
@@ -651,6 +676,109 @@ func buildTrace(traceID string, spans []storage.Span) *storage.Trace {
 	}
 	trace.Duration = trace.EndTime.Sub(trace.StartTime)
 	return trace
+}
+
+// --- SyncStore Implementation ---
+
+func (s *Store) GetOutboxSpans(ctx context.Context, limit int) ([]storage.OutboxSpan, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT span_id, payload_json, attempt_count, created_at
+		FROM outbox_spans
+		ORDER BY created_at ASC
+		LIMIT ?`, limit)
+	if err != nil {
+		return nil, fmt.Errorf("querying outbox: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var spans []storage.OutboxSpan
+	for rows.Next() {
+		var span storage.OutboxSpan
+		var createdAt string
+		if err := rows.Scan(&span.SpanID, &span.PayloadJSON, &span.AttemptCount, &createdAt); err != nil {
+			return nil, fmt.Errorf("scanning outbox span: %w", err)
+		}
+		t, _ := time.Parse(time.RFC3339Nano, createdAt)
+		span.CreatedAt = t
+		spans = append(spans, span)
+	}
+	return spans, rows.Err()
+}
+
+func (s *Store) DeleteOutboxSpans(ctx context.Context, spanIDs []string) error {
+	if len(spanIDs) == 0 {
+		return nil
+	}
+
+	const chunkSize = 500
+	for i := 0; i < len(spanIDs); i += chunkSize {
+		end := i + chunkSize
+		if end > len(spanIDs) {
+			end = len(spanIDs)
+		}
+		chunk := spanIDs[i:end]
+
+		placeholders := strings.Repeat("?,", len(chunk)-1) + "?"
+		query := fmt.Sprintf("DELETE FROM outbox_spans WHERE span_id IN (%s)", placeholders)
+
+		args := make([]any, len(chunk))
+		for j, id := range chunk {
+			args[j] = id
+		}
+
+		if _, err := s.db.ExecContext(ctx, query, args...); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *Store) IncrementOutboxAttempt(ctx context.Context, spanIDs []string) error {
+	if len(spanIDs) == 0 {
+		return nil
+	}
+
+	const chunkSize = 500
+	for i := 0; i < len(spanIDs); i += chunkSize {
+		end := i + chunkSize
+		if end > len(spanIDs) {
+			end = len(spanIDs)
+		}
+		chunk := spanIDs[i:end]
+
+		placeholders := strings.Repeat("?,", len(chunk)-1) + "?"
+		query := fmt.Sprintf("UPDATE outbox_spans SET attempt_count = attempt_count + 1 WHERE span_id IN (%s)", placeholders)
+
+		args := make([]any, len(chunk))
+		for j, id := range chunk {
+			args[j] = id
+		}
+
+		if _, err := s.db.ExecContext(ctx, query, args...); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *Store) PruneLocalSpans(ctx context.Context, keepCount int) error {
+	// Prune main observability table
+	_, err := s.db.ExecContext(ctx, `
+		DELETE FROM spans
+		WHERE span_id NOT IN (
+			SELECT span_id FROM spans ORDER BY start_time DESC LIMIT ?
+		)`, keepCount)
+	if err != nil {
+		return err
+	}
+
+	// Prune offline sync outbox queue
+	_, err = s.db.ExecContext(ctx, `
+		DELETE FROM outbox_spans
+		WHERE span_id NOT IN (
+			SELECT span_id FROM outbox_spans ORDER BY created_at DESC LIMIT ?
+		)`, keepCount)
+	return err
 }
 
 // isDuplicateColumn returns true if the error is a "duplicate column" error

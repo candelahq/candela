@@ -40,6 +40,7 @@ import (
 	"github.com/candelahq/candela/pkg/costcalc"
 	"github.com/candelahq/candela/pkg/processor"
 	"github.com/candelahq/candela/pkg/proxy"
+	"github.com/candelahq/candela/pkg/proxy/worker"
 	"github.com/candelahq/candela/pkg/runtime"
 	"github.com/candelahq/candela/pkg/session"
 	"github.com/candelahq/candela/pkg/storage"
@@ -54,6 +55,7 @@ import (
 	"google.golang.org/api/idtoken"
 	"gopkg.in/yaml.v3"
 
+	"github.com/candelahq/candela/pkg/storage/otlpexporter"
 	sqlitestore "github.com/candelahq/candela/pkg/storage/sqlite"
 )
 
@@ -472,6 +474,64 @@ func runForeground() {
 				w.WriteHeader(http.StatusBadGateway)
 				_ = json.NewEncoder(w).Encode(map[string]string{"error": "remote server unavailable"})
 			},
+		}
+
+		// Initialize local traces store for offline sync.
+		home, homeErr := os.UserHomeDir()
+		if homeErr != nil {
+			slog.Warn("could not resolve home directory — offline sync disabled", "error", homeErr)
+		} else {
+			tracesDir := filepath.Join(home, ".candela")
+			if err := os.MkdirAll(tracesDir, 0o700); err != nil {
+				slog.Warn("failed to create traces directory", "path", tracesDir, "error", err)
+			}
+			tracesPath := filepath.Join(tracesDir, "traces.db")
+			traceStore, err := sqlitestore.New(sqlitestore.Config{Path: tracesPath})
+			if err != nil {
+				slog.Warn("failed to initialize traces store — offline sync disabled", "error", err)
+			} else {
+				defer func() { _ = traceStore.Close() }()
+
+				// OTLP exporter pointing to Candela server
+				// For HTTP, standard path is /v1/traces
+				endpoint := singleJoiningSlash(cfg.Remote, "/v1/traces")
+
+				// Re-use tokenSource for the exporter's Auth header if needed
+				var headers map[string]string
+				if token, err := tokenSource.Token(); err == nil {
+					headers = map[string]string{
+						"Authorization": "Bearer " + token.AccessToken,
+					}
+				}
+
+				otlpCfg := otlpexporter.Config{
+					Endpoint:    endpoint,
+					Protocol:    "http",
+					Headers:     headers,
+					Compression: "gzip",
+				}
+
+				upstream, err := otlpexporter.New(ctx, otlpCfg)
+				if err != nil {
+					slog.Warn("failed to initialize OTLP exporter for sync worker", "error", err)
+				} else {
+					defer func() { _ = upstream.Close() }()
+
+					// Start the Sync Worker
+					syncWorker := worker.NewSyncWorker(traceStore, upstream, 5*time.Second)
+					syncWorker.Start()
+					defer syncWorker.Stop()
+
+					// Also initialize spanProc to capture local runtime traces
+					calc := costcalc.New()
+					spanProc = processor.New([]storage.SpanWriter{traceStore}, calc, 50)
+					go spanProc.Run(ctx)
+					defer spanProc.Stop()
+					traceReader = traceStore
+
+					slog.Info("🔄 offline sync worker enabled", "endpoint", endpoint)
+				}
+			}
 		}
 	}
 

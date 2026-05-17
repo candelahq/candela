@@ -570,18 +570,18 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 	upstreamBody := reqBody
 	if provider.FormatTranslator != nil {
 		// Per-request caching override via X-Candela-Caching header.
-		// This allows clients (Desktop, CLI) to override the server's default
-		// caching mode on a per-request basis without modifying the body.
+		// Uses TranslateRequestWithMode to avoid mutating shared translator
+		// state, which would race with concurrent requests.
 		if ft, ok := provider.FormatTranslator.(*AnthropicFormatTranslator); ok {
 			if override := r.Header.Get(CachingHeader); override != "" {
-				original := ft.GetCachingMode()
-				ft.SetCachingMode(ParseCachingMode(override))
-				defer ft.SetCachingMode(original) // restore after this request
-				r.Header.Del(CachingHeader)       // don't forward to upstream
+				r.Header.Del(CachingHeader) // don't forward to upstream
+				upstreamBody, translatedModel, err = ft.TranslateRequestWithMode(reqBody, ParseCachingMode(override))
+			} else {
+				upstreamBody, translatedModel, err = provider.FormatTranslator.TranslateRequest(reqBody)
 			}
+		} else {
+			upstreamBody, translatedModel, err = provider.FormatTranslator.TranslateRequest(reqBody)
 		}
-
-		upstreamBody, translatedModel, err = provider.FormatTranslator.TranslateRequest(reqBody)
 		if err != nil {
 			http.Error(w, fmt.Sprintf("request translation error: %v", err), http.StatusBadRequest)
 			return

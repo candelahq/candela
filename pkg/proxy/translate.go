@@ -105,7 +105,21 @@ func (t *AnthropicFormatTranslator) GetCachingMode() CachingMode {
 
 // --- Request Translation: OpenAI → Anthropic ---
 
+// TranslateRequest converts an OpenAI request using the translator's configured
+// caching mode. The mode is snapshotted once at the start of the call, ensuring
+// a consistent view even if another goroutine changes the mode concurrently.
 func (t *AnthropicFormatTranslator) TranslateRequest(body []byte) ([]byte, string, error) {
+	return t.translateRequestWithMode(body, t.GetCachingMode())
+}
+
+// TranslateRequestWithMode converts an OpenAI request using an explicit caching
+// mode. This is used for per-request header overrides (X-Candela-Caching) to
+// avoid mutating shared translator state, which would race with concurrent requests.
+func (t *AnthropicFormatTranslator) TranslateRequestWithMode(body []byte, mode CachingMode) ([]byte, string, error) {
+	return t.translateRequestWithMode(body, mode)
+}
+
+func (t *AnthropicFormatTranslator) translateRequestWithMode(body []byte, mode CachingMode) ([]byte, string, error) {
 	var oaiReq openAIRequest
 	if err := json.Unmarshal(body, &oaiReq); err != nil {
 		return nil, "", fmt.Errorf("invalid OpenAI request: %w", err)
@@ -155,7 +169,6 @@ func (t *AnthropicFormatTranslator) TranslateRequest(body []byte) ([]byte, strin
 				if c == "" {
 					break
 				}
-				mode := t.GetCachingMode()
 				if mode == CachingAuto || mode == CachingSystemOnly {
 					anthReq.System = []interface{}{
 						map[string]interface{}{
@@ -169,7 +182,6 @@ func (t *AnthropicFormatTranslator) TranslateRequest(body []byte) ([]byte, strin
 				}
 			case []interface{}:
 				// Array of content blocks — pass through as-is.
-				mode := t.GetCachingMode()
 				if (mode == CachingAuto || mode == CachingSystemOnly) && len(c) > 0 {
 					// Add cache_control to the last block.
 					if block, ok := c[len(c)-1].(map[string]interface{}); ok {
@@ -243,7 +255,7 @@ func (t *AnthropicFormatTranslator) TranslateRequest(body []byte) ([]byte, strin
 	// Add cache_control to the last user/tool message's content so the
 	// entire conversation prefix is cached. This is Anthropic's recommended
 	// two-breakpoint pattern: system prompt + end of conversation history.
-	if t.GetCachingMode() == CachingAuto {
+	if mode == CachingAuto {
 		injectLastMessageCacheControl(anthReq.Messages)
 	}
 

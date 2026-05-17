@@ -105,41 +105,110 @@ func TestProxy_GetCachingMode_NoTranslators(t *testing.T) {
 }
 
 func TestCachingHeader_PerRequestOverride(t *testing.T) {
+	// Verify that TranslateRequestWithMode does NOT mutate shared state.
 	ft := &AnthropicFormatTranslator{} // default: auto
-	provider := Provider{
-		Name:             "anthropic",
-		FormatTranslator: ft,
-	}
 
-	// Simulate the header override logic from proxy.go.
+	body := []byte(`{
+		"model": "claude-sonnet-4-20250514",
+		"messages": [
+			{"role": "system", "content": "You are helpful."},
+			{"role": "user", "content": "Hello"}
+		]
+	}`)
+
+	// Simulate per-request override: header says "off".
 	r := httptest.NewRequest(http.MethodPost, "/proxy/anthropic/v1/chat/completions", nil)
 	r.Header.Set(CachingHeader, "off")
 
-	// Apply override.
 	override := r.Header.Get(CachingHeader)
-	if override == "" {
-		t.Fatal("expected X-Candela-Caching header")
-	}
-	original := ft.GetCachingMode()
-	ft.SetCachingMode(ParseCachingMode(override))
 	r.Header.Del(CachingHeader)
 
-	// During request processing, mode should be "off".
-	if ft.GetCachingMode() != CachingOff {
-		t.Errorf("mode during override = %q, want off", ft.GetCachingMode())
+	// Use TranslateRequestWithMode — shared state should NOT change.
+	result, _, err := ft.TranslateRequestWithMode(body, ParseCachingMode(override))
+	if err != nil {
+		t.Fatalf("TranslateRequestWithMode failed: %v", err)
 	}
+
+	// Result should have NO cache_control (mode=off was used).
+	if containsCacheControl(result) {
+		t.Error("override=off: result should not contain cache_control")
+	}
+
 	// Header should be stripped.
 	if r.Header.Get(CachingHeader) != "" {
-		t.Error("X-Candela-Caching header should be stripped after override")
+		t.Error("X-Candela-Caching header should be stripped")
 	}
 
-	// Restore.
-	ft.SetCachingMode(original)
+	// Shared translator state should be UNCHANGED (still auto).
 	if ft.GetCachingMode() != CachingAuto {
-		t.Errorf("mode after restore = %q, want auto", ft.GetCachingMode())
+		t.Errorf("shared state changed! mode = %q, want auto", ft.GetCachingMode())
 	}
 
-	_ = provider // suppress unused
+	// A normal request (no override) should still use auto mode.
+	result2, _, _ := ft.TranslateRequest(body)
+	if !containsCacheControl(result2) {
+		t.Error("normal request after override should still have cache_control (auto mode)")
+	}
+}
+
+func TestCachingHeader_ConcurrentIsolation(t *testing.T) {
+	// Verify that concurrent requests with different overrides don't interfere.
+	ft := &AnthropicFormatTranslator{} // default: auto
+
+	body := []byte(`{
+		"model": "claude-sonnet-4-20250514",
+		"messages": [
+			{"role": "system", "content": "You are helpful."},
+			{"role": "user", "content": "Hello"}
+		]
+	}`)
+
+	var wg sync.WaitGroup
+	errCh := make(chan string, 200)
+
+	// 50 requests with override=off (should NOT have cache_control).
+	for i := 0; i < 50; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			result, _, err := ft.TranslateRequestWithMode(body, CachingOff)
+			if err != nil {
+				errCh <- "off request failed: " + err.Error()
+				return
+			}
+			if containsCacheControl(result) {
+				errCh <- "override=off request got cache_control (race!)"
+			}
+		}()
+	}
+
+	// 50 requests with no override (should use auto, HAVE cache_control).
+	for i := 0; i < 50; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			result, _, err := ft.TranslateRequest(body)
+			if err != nil {
+				errCh <- "auto request failed: " + err.Error()
+				return
+			}
+			if !containsCacheControl(result) {
+				errCh <- "auto request missing cache_control (race!)"
+			}
+		}()
+	}
+
+	wg.Wait()
+	close(errCh)
+
+	for e := range errCh {
+		t.Error(e)
+	}
+
+	// Shared state should still be auto after all requests complete.
+	if ft.GetCachingMode() != CachingAuto {
+		t.Errorf("shared state changed after concurrent requests! mode = %q", ft.GetCachingMode())
+	}
 }
 
 func TestTranslateRequest_CachingOff_NoBreakpoints(t *testing.T) {

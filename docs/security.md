@@ -256,3 +256,73 @@ See [docs/user-management.md](user-management.md) for the full validation rule r
 | `pkg/connecthandlers/errors.go` | `internalError()` — sanitized error responses |
 | `cmd/candela-server/main.go` | Middleware wiring, Firebase init, dev mode |
 | `cmd/candela/main.go` | ADC token injection for Team Mode |
+
+---
+
+## 🐝 eBPF Enforcement & Transparent Proxy *(coming soon)*
+
+> [!NOTE]
+> This feature is in active design. See the internal project board for tracking.
+
+Candela will add kernel-level enforcement to guarantee that **all LLM API traffic flows through the proxy** — making observability and budget controls impossible to bypass, even by misconfigured or malicious workloads.
+
+### Architecture
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│  Pod                                                        │
+│                                                             │
+│  ┌─────────────┐        iptables redirect        ┌───────┐ │
+│  │ Application │ ──── port 443 ─────────────────→ │Candela│ │
+│  │ (any SDK)   │                                  │Sidecar│ │
+│  └─────────────┘                                  │:15001 │ │
+│                                                   └───┬───┘ │
+└───────────────────────────────────────────────────────┼─────┘
+                                                        │
+        ┌───────────────────────────────────────────────┘
+        ▼
+   Upstream LLM APIs (OpenAI, Anthropic, Gemini)
+```
+
+### Enforcement Layers
+
+| Layer | Technology | Purpose |
+|-------|-----------|---------|
+| **Network** | Cilium `FQDNNetworkPolicy` | Block direct egress to LLM provider hostnames |
+| **Kernel** | Tetragon `TracingPolicy` (eBPF kprobes) | Detect/kill unauthorized binaries connecting to port 443 |
+| **Redirect** | `iptables` init container | Transparently redirect outbound TLS to sidecar |
+| **TLS** | Ephemeral CA + SNI-based routing | MITM for transparent interception without SDK changes |
+
+### Single Source of Truth
+
+All enforcement resources are generated from `candela-policy.yaml` — the same file
+the sidecar reads for provider routing. Providers are defined **once**; Helm templates
+derive FQDNNetworkPolicy, TracingPolicy, and iptables rules automatically.
+
+```yaml
+# candela-policy.yaml (excerpt)
+providers:
+  - name: openai
+    upstream: https://api.openai.com
+    intercept: true
+
+enforcement:
+  enabled: true
+  mode: transparent        # transparent | explicit
+  tetragon:
+    enabled: true
+    mode: audit            # audit (Post) | enforce (Sigkill)
+```
+
+### Phased Rollout
+
+| Phase | Milestone |
+|-------|-----------|
+| 0 | Config schema design (`candela-policy.yaml`) |
+| 1 | Extend `Provider` struct with host/intercept fields |
+| 2 | Config file loading in `candela-sidecar` |
+| 3 | Helm chart with enforcement templates |
+| 4 | Transparent listener (Go — SNI routing) |
+| 5 | Transparent listener (Rust — `rustls`) |
+| 6 | Tetragon + Hubble observability integration |
+

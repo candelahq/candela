@@ -35,22 +35,27 @@ type PricingConfig struct {
 }
 
 // CacheDiscountConfig defines the cache token discount rates for a provider.
-// When a provider includes cached tokens in its total input count, these
-// rates control how we normalize to cost-equivalent tokens.
+// These rates control how we normalize cached tokens to cost-equivalent tokens.
 type CacheDiscountConfig struct {
-	ReadDiscount     float64 `yaml:"read_discount"`     // Multiplier for cache read tokens (e.g. 0.1 = 90% off)
-	CreateMultiplier float64 `yaml:"create_multiplier"` // Multiplier for cache creation tokens (e.g. 1.25 = 25% surcharge)
+	ReadDiscount       float64 `yaml:"read_discount"`        // Multiplier for cache read tokens (e.g. 0.1 = 90% off)
+	CreateMultiplier   float64 `yaml:"create_multiplier"`    // Multiplier for cache creation tokens (e.g. 1.25 = 25% surcharge)
+	InputIncludesCache bool    `yaml:"input_includes_cache"` // True if rawInput already includes cache tokens (OpenAI/Google), false if they're additive (Anthropic)
 }
 
 // defaultCacheDiscounts defines cache pricing per canonical provider.
-// Anthropic: 90% off reads, 25% surcharge on creation.
-// Google/Gemini 2.5+: 90% off (model-aware, see googleCacheReadDiscount).
-// Google/Gemini 2.0:  75% off (model-aware).
-// OpenAI: 50% off reads, no creation concept.
+//
+// Token reporting semantics differ by provider:
+//   - OpenAI:    prompt_tokens includes cached_tokens (inclusive)
+//   - Google:    promptTokenCount includes cachedContentTokenCount (inclusive)
+//   - Anthropic: input_tokens is ONLY fresh tokens; cache_read/creation are additive
+//
+// See: https://docs.anthropic.com/en/docs/build-with-claude/prompt-caching#tracking-cache-performance
+//
+//	"total_input_tokens = cache_read_input_tokens + cache_creation_input_tokens + input_tokens"
 var defaultCacheDiscounts = map[string]CacheDiscountConfig{
-	"anthropic": {ReadDiscount: 0.1, CreateMultiplier: 1.25},
-	"google":    {ReadDiscount: 0.10, CreateMultiplier: 1.0}, // Base rate, overridden by model-aware logic
-	"openai":    {ReadDiscount: 0.5, CreateMultiplier: 1.0},
+	"anthropic": {ReadDiscount: 0.1, CreateMultiplier: 1.25, InputIncludesCache: false},
+	"google":    {ReadDiscount: 0.10, CreateMultiplier: 1.0, InputIncludesCache: true}, // Base rate, overridden by model-aware logic
+	"openai":    {ReadDiscount: 0.5, CreateMultiplier: 1.0, InputIncludesCache: true},
 }
 
 // Calculator computes costs from token usage and model pricing.
@@ -190,11 +195,11 @@ func (c *Calculator) SetCacheDiscount(provider string, cfg CacheDiscountConfig) 
 // NormalizeCachedInput returns cost-equivalent input tokens by applying
 // provider-specific and model-specific cache discounts to raw token counts.
 //
-// All parsers return raw input token counts (including cached tokens at full
-// price). This method adjusts them:
-//   - Subtracts cached tokens from the total
-//   - Adds them back at the discounted rate (e.g. 0.1× for 90% off)
-//   - Applies cache creation surcharges (e.g. Anthropic's 1.25× creation cost)
+// Token reporting differs by provider:
+//   - Inclusive (OpenAI/Google): rawInput includes cache tokens. We subtract
+//     them and re-add at the discounted rate.
+//   - Additive (Anthropic): rawInput is ONLY fresh tokens. Cache tokens are
+//     separate. We add them at the discounted rate on top of rawInput.
 //
 // Provider aliases are resolved (e.g. "anthropic-vertex" → "anthropic",
 // "gemini-oai" → "google"), and Google models get model-aware rates
@@ -229,14 +234,22 @@ func (c *Calculator) NormalizeCachedInput(provider, model string, rawInput, cach
 		readDiscount = googleCacheReadDiscount(model)
 	}
 
-	nonCached := rawInput - cacheRead - cacheCreate
-	if nonCached < 0 {
-		nonCached = 0
+	cachedReadEq := int64(math.Round(float64(cacheRead) * readDiscount))
+	cachedCreateEq := int64(math.Round(float64(cacheCreate) * cfg.CreateMultiplier))
+
+	if cfg.InputIncludesCache {
+		// Inclusive mode (OpenAI, Google): rawInput already contains cache tokens.
+		// Subtract them out, then re-add at discounted rate.
+		nonCached := rawInput - cacheRead - cacheCreate
+		if nonCached < 0 {
+			nonCached = 0
+		}
+		return nonCached + cachedReadEq + cachedCreateEq
 	}
 
-	return nonCached +
-		int64(math.Round(float64(cacheRead)*readDiscount)) +
-		int64(math.Round(float64(cacheCreate)*cfg.CreateMultiplier))
+	// Additive mode (Anthropic): rawInput is ONLY fresh tokens.
+	// Cache tokens are separate — just add their discounted equivalents.
+	return rawInput + cachedReadEq + cachedCreateEq
 }
 
 // googleCacheReadDiscount returns the cache read discount for a Google/Gemini

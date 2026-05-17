@@ -6,41 +6,41 @@ import "testing"
 
 func TestNormalizeCachedInput_Anthropic(t *testing.T) {
 	c := New()
-	// 100 total, 80 cache_read, 10 cache_creation, 10 new
-	// nonCached = 100 - 80 - 10 = 10
-	// result = 10 + round(80*0.1) + round(10*1.25) = 10 + 8 + 13 = 31
+	// Anthropic: input_tokens is FRESH only (additive, not inclusive).
+	// rawInput=100 (fresh), cacheRead=80, cacheCreate=10
+	// result = 100 + round(80*0.1) + round(10*1.25) = 100 + 8 + 13 = 121
 	result := c.NormalizeCachedInput("anthropic", "claude-sonnet-4-20250514", 100, 80, 10)
-	if result != 31 {
-		t.Errorf("Anthropic = %d, want 31 (10 new + 8 read@0.1× + 13 create@1.25×)", result)
+	if result != 121 {
+		t.Errorf("Anthropic = %d, want 121 (100 fresh + 8 read@0.1× + 13 create@1.25×)", result)
 	}
 }
 
 func TestNormalizeCachedInput_AnthropicVertex(t *testing.T) {
 	c := New()
-	// anthropic-vertex should resolve to anthropic via alias and get same rates.
+	// anthropic-vertex should resolve to anthropic via alias and get same additive rates.
 	result := c.NormalizeCachedInput("anthropic-vertex", "claude-sonnet-4-20250514", 100, 80, 10)
-	if result != 31 {
-		t.Errorf("anthropic-vertex = %d, want 31 (same as anthropic)", result)
+	if result != 121 {
+		t.Errorf("anthropic-vertex = %d, want 121 (same as anthropic)", result)
 	}
 }
 
 func TestNormalizeCachedInput_AnthropicDirect(t *testing.T) {
 	c := New()
-	// anthropic-direct should also resolve to anthropic.
+	// anthropic-direct should also resolve to anthropic (additive).
 	result := c.NormalizeCachedInput("anthropic-direct", "claude-sonnet-4-20250514", 100, 80, 10)
-	if result != 31 {
-		t.Errorf("anthropic-direct = %d, want 31 (same as anthropic)", result)
+	if result != 121 {
+		t.Errorf("anthropic-direct = %d, want 121 (same as anthropic)", result)
 	}
 }
 
 func TestNormalizeCachedInput_AnthropicReadOnly(t *testing.T) {
 	c := New()
-	// 188607 total, 188086 cache_read, 0 cache_creation
-	// nonCached = 188607 - 188086 = 521
-	// result = 521 + round(188086*0.1) + 0 = 521 + 18809 = 19330
-	result := c.NormalizeCachedInput("anthropic", "claude-sonnet-4-20250514", 188607, 188086, 0)
-	if result != 19330 {
-		t.Errorf("Anthropic read-only = %d, want 19330", result)
+	// Based on Anthropic docs example: 50 fresh tokens, 100000 cache_read.
+	// input_tokens=50, cache_read=100000, cache_creation=0
+	// result = 50 + round(100000*0.1) + 0 = 50 + 10000 = 10050
+	result := c.NormalizeCachedInput("anthropic", "claude-sonnet-4-20250514", 50, 100000, 0)
+	if result != 10050 {
+		t.Errorf("Anthropic read-only = %d, want 10050", result)
 	}
 }
 
@@ -150,18 +150,19 @@ func TestNormalizeCachedInput_GeminiOAI_Gemini20(t *testing.T) {
 
 func TestNormalizeCachedInput_CustomOverride(t *testing.T) {
 	c := New()
-	// Override anthropic-vertex to use different cache rates (e.g. Google's Vertex pricing).
+	// Override anthropic to use different cache rates.
+	// Note: InputIncludesCache defaults to false (additive), matching Anthropic.
 	c.SetCacheDiscount("anthropic", CacheDiscountConfig{
-		ReadDiscount:     0.25, // hypothetical: only 75% off on Vertex
-		CreateMultiplier: 1.0,  // no creation surcharge
+		ReadDiscount:       0.25,  // hypothetical: only 75% off on Vertex
+		CreateMultiplier:   1.0,   // no creation surcharge
+		InputIncludesCache: false, // Anthropic is additive
 	})
 
-	// 100 total, 80 cache_read, 10 cache_creation
-	// nonCached = 100 - 80 - 10 = 10
-	// result = 10 + round(80*0.25) + round(10*1.0) = 10 + 20 + 10 = 40
+	// rawInput=100 (fresh), cacheRead=80, cacheCreate=10
+	// result = 100 + round(80*0.25) + round(10*1.0) = 100 + 20 + 10 = 130
 	result := c.NormalizeCachedInput("anthropic-vertex", "claude-sonnet-4-20250514", 100, 80, 10)
-	if result != 40 {
-		t.Errorf("custom anthropic-vertex = %d, want 40 (overridden rates)", result)
+	if result != 130 {
+		t.Errorf("custom anthropic-vertex = %d, want 130 (overridden rates, additive)", result)
 	}
 }
 
@@ -255,8 +256,9 @@ func TestNormalizeCachedInput_GoogleOverride_TakesPrecedence(t *testing.T) {
 	// Override Google's cache discount to a flat 30% off (0.70× multiplier).
 	// This should bypass model-aware logic entirely.
 	c.SetCacheDiscount("google", CacheDiscountConfig{
-		ReadDiscount:     0.70,
-		CreateMultiplier: 1.0,
+		ReadDiscount:       0.70,
+		CreateMultiplier:   1.0,
+		InputIncludesCache: true, // Google is inclusive
 	})
 
 	// Even for a Gemini 2.5 model that normally gets 90% off,
@@ -273,5 +275,159 @@ func TestNormalizeCachedInput_GoogleOverride_TakesPrecedence(t *testing.T) {
 	result2 := c.NormalizeCachedInput("google", "gemini-2.0-flash", 1000, 800, 0)
 	if result2 != 760 {
 		t.Errorf("Google override (2.0) = %d, want 760 (custom 30%% off, not legacy 75%%)", result2)
+	}
+}
+
+// ── Anthropic additive semantics: real-world data from official docs ──────────
+
+func TestNormalizeCachedInput_AnthropicDocsExample(t *testing.T) {
+	// From https://docs.anthropic.com/en/docs/build-with-claude/prompt-caching#tracking-cache-performance
+	// "If you have a request with 100,000 tokens of cached content (read from cache),
+	// 0 tokens of new content being cached, and 50 tokens in your user message"
+	// → input_tokens: 50, cache_read: 100000, cache_creation: 0
+	c := New()
+	result := c.NormalizeCachedInput("anthropic", "claude-sonnet-4-20250514", 50, 100000, 0)
+	// 50 + round(100000 * 0.1) = 50 + 10000 = 10050
+	if result != 10050 {
+		t.Errorf("docs example = %d, want 10050", result)
+	}
+}
+
+func TestNormalizeCachedInput_AnthropicPreWarm(t *testing.T) {
+	// From official docs — pre-warm response:
+	// {"input_tokens": 8, "cache_creation_input_tokens": 5120, "cache_read_input_tokens": 0}
+	c := New()
+	result := c.NormalizeCachedInput("anthropic", "claude-opus-4-7-20251101", 8, 0, 5120)
+	// 8 + round(0 * 0.1) + round(5120 * 1.25) = 8 + 0 + 6400 = 6408
+	if result != 6408 {
+		t.Errorf("pre-warm = %d, want 6408", result)
+	}
+}
+
+func TestNormalizeCachedInput_AnthropicMixedTTL(t *testing.T) {
+	// From official docs: mixed 5-min and 1-hour TTL response
+	// {"input_tokens": 2048, "cache_read": 1800, "cache_creation": 248}
+	// Our code treats all creation as 1.25× (5-min default).
+	// This is a known gap for 1-hour TTL (should be 2.0× for that portion).
+	c := New()
+	result := c.NormalizeCachedInput("anthropic", "claude-sonnet-4-20250514", 2048, 1800, 248)
+	// Additive: 2048 + round(1800 * 0.1) + round(248 * 1.25)
+	//         = 2048 + 180 + 310 = 2538
+	if result != 2538 {
+		t.Errorf("mixed TTL = %d, want 2538", result)
+	}
+}
+
+func TestNormalizeCachedInput_AnthropicZeroFresh(t *testing.T) {
+	// Edge case: zero fresh tokens (all content is cached).
+	c := New()
+	result := c.NormalizeCachedInput("anthropic", "claude-sonnet-4-20250514", 0, 50000, 0)
+	// 0 + round(50000 * 0.1) = 5000
+	if result != 5000 {
+		t.Errorf("zero fresh = %d, want 5000", result)
+	}
+}
+
+// ── Inclusive vs Additive: same raw numbers, different results ────────────────
+
+func TestNormalizeCachedInput_InclusiveVsAdditive(t *testing.T) {
+	c := New()
+	// Same raw numbers, different providers → different results.
+	// This proves the mode matters.
+
+	// OpenAI (inclusive): rawInput=1000 includes 800 cached.
+	// nonCached = 1000 - 800 = 200, cached_eq = 400
+	// result = 200 + 400 = 600
+	oai := c.NormalizeCachedInput("openai", "gpt-4o", 1000, 800, 0)
+	if oai != 600 {
+		t.Errorf("OpenAI (inclusive) = %d, want 600", oai)
+	}
+
+	// Anthropic (additive): rawInput=1000 is FRESH ONLY, 800 cached is separate.
+	// result = 1000 + round(800 * 0.1) = 1000 + 80 = 1080
+	anth := c.NormalizeCachedInput("anthropic", "claude-sonnet-4-20250514", 1000, 800, 0)
+	if anth != 1080 {
+		t.Errorf("Anthropic (additive) = %d, want 1080", anth)
+	}
+
+	// The results MUST differ — same inputs, different modes.
+	if oai == anth {
+		t.Error("inclusive and additive modes must produce different results for same raw numbers")
+	}
+}
+
+// ── Custom override: switching mode from additive to inclusive ────────────────
+
+func TestNormalizeCachedInput_OverrideModeSwitch(t *testing.T) {
+	c := New()
+	// Hypothetical: a Bedrock-Claude provider that reports input_tokens inclusively
+	// (AWS changes the reporting semantics). Override to inclusive mode.
+	c.SetCacheDiscount("anthropic", CacheDiscountConfig{
+		ReadDiscount:       0.1,
+		CreateMultiplier:   1.25,
+		InputIncludesCache: true, // override: inclusive, not additive
+	})
+
+	// rawInput=100 (now INCLUSIVE), cacheRead=80, cacheCreate=10
+	// nonCached = 100 - 80 - 10 = 10
+	// result = 10 + round(80*0.1) + round(10*1.25) = 10 + 8 + 13 = 31
+	result := c.NormalizeCachedInput("anthropic", "claude-sonnet-4-20250514", 100, 80, 10)
+	if result != 31 {
+		t.Errorf("mode switch to inclusive = %d, want 31", result)
+	}
+}
+
+// ── End-to-end: normalize → Calculate → correct dollar amount ────────────────
+
+func TestNormalizeThenCalculate_Anthropic_E2E(t *testing.T) {
+	c := New()
+	// Claude Sonnet 4: $3.00/M input, $15.00/M output (built-in pricing).
+	// Anthropic response: 50 fresh + 100000 cached_read + 0 creation
+	normalized := c.NormalizeCachedInput("anthropic", "claude-sonnet-4-20250514", 50, 100000, 0)
+	// normalized = 50 + 10000 = 10050 cost-equivalent tokens
+
+	cost := c.Calculate("anthropic", "claude-sonnet-4-20250514", normalized, 500)
+
+	// Expected: input = 10050/1M * $3.00 = $0.030150
+	//           output = 500/1M * $15.00 = $0.007500
+	//           total = $0.037650
+	wantCost := 0.037650
+	if cost < wantCost-0.001 || cost > wantCost+0.001 {
+		t.Errorf("E2E cost = %f, want ~%f", cost, wantCost)
+	}
+}
+
+func TestNormalizeThenCalculate_Google_E2E(t *testing.T) {
+	c := New()
+	// Gemini 2.5 Flash: $0.15/M input, $0.60/M output (built-in pricing, below 200K tier).
+	// Google response: 1000 total (800 cached, 200 fresh)
+	normalized := c.NormalizeCachedInput("google", "gemini-2.5-flash", 1000, 800, 0)
+	// inclusive: nonCached = 200, cached_eq = round(800 * 0.10) = 80
+	// normalized = 280
+
+	cost := c.Calculate("google", "gemini-2.5-flash", normalized, 100)
+	// Expected: input = 280/1M * $0.15 = $0.000042
+	//           output = 100/1M * $0.60 = $0.000060
+	//           total ≈ $0.000102
+	if cost < 0.00005 || cost > 0.0005 {
+		t.Errorf("Google E2E cost = %f, expected small positive value", cost)
+	}
+}
+
+func TestNormalizeThenCalculate_OpenAI_E2E(t *testing.T) {
+	c := New()
+	// GPT-4o: $2.50/M input, $10.00/M output.
+	// OpenAI response: 10000 total (8000 cached, 2000 fresh)
+	normalized := c.NormalizeCachedInput("openai", "gpt-4o", 10000, 8000, 0)
+	// inclusive: nonCached = 2000, cached_eq = round(8000 * 0.5) = 4000
+	// normalized = 6000
+
+	cost := c.Calculate("openai", "gpt-4o", normalized, 1000)
+	// Expected: input = 6000/1M * $2.50 = $0.015
+	//           output = 1000/1M * $10.00 = $0.010
+	//           total = $0.025
+	wantCost := 0.025
+	if cost < wantCost-0.001 || cost > wantCost+0.001 {
+		t.Errorf("OpenAI E2E cost = %f, want ~%f", cost, wantCost)
 	}
 }

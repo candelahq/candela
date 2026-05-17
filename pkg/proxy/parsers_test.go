@@ -10,7 +10,8 @@ import (
 // costcalc.Calculator.NormalizeCachedInput at the proxy call site.
 
 func TestAnthropicParser_ParseResponse_CacheTokens(t *testing.T) {
-	// Anthropic's input_tokens INCLUDES cache_read + cache_creation in the total.
+	// Anthropic's input_tokens is ONLY fresh tokens (not cached).
+	// cache_read + cache_creation are separate additive fields.
 	// Parser returns raw input_tokens — no cache normalization.
 	body := []byte(`{
 		"id": "msg_01",

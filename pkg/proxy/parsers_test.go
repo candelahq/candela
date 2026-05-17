@@ -399,6 +399,70 @@ data: [DONE]
 	}
 }
 
+func TestExtractStreamingCacheTokens_Anthropic_MessageDelta(t *testing.T) {
+	// Some Vertex AI responses report cache tokens in the message_delta
+	// event (top-level usage) rather than message_start.
+	stream := []byte(`data: {"type":"message_start","message":{"usage":{"input_tokens":10}}}
+data: {"type":"content_block_delta","delta":{"type":"text_delta","text":"hello"}}
+data: {"type":"message_delta","usage":{"output_tokens":42,"cache_read_input_tokens":30000,"cache_creation_input_tokens":100}}
+data: [DONE]
+`)
+
+	ct := extractStreamingCacheTokens("anthropic", stream)
+	if ct.CacheReadTokens != 30000 {
+		t.Errorf("CacheReadTokens = %d, want 30000 (from message_delta)", ct.CacheReadTokens)
+	}
+	if ct.CacheCreationTokens != 100 {
+		t.Errorf("CacheCreationTokens = %d, want 100 (from message_delta)", ct.CacheCreationTokens)
+	}
+}
+
+func TestExtractStreamingCacheTokens_Anthropic_BothEvents(t *testing.T) {
+	// When both message_start and message_delta report cache tokens,
+	// message_delta (later in stream) should win.
+	stream := []byte(`data: {"type":"message_start","message":{"usage":{"input_tokens":10,"cache_read_input_tokens":5000,"cache_creation_input_tokens":50}}}
+data: {"type":"message_delta","usage":{"output_tokens":42,"cache_read_input_tokens":5000,"cache_creation_input_tokens":50}}
+data: [DONE]
+`)
+
+	ct := extractStreamingCacheTokens("anthropic", stream)
+	if ct.CacheReadTokens != 5000 {
+		t.Errorf("CacheReadTokens = %d, want 5000", ct.CacheReadTokens)
+	}
+	if ct.CacheCreationTokens != 50 {
+		t.Errorf("CacheCreationTokens = %d, want 50", ct.CacheCreationTokens)
+	}
+}
+
+func TestExtractStreamingCacheTokens_Anthropic_NullPayload(t *testing.T) {
+	// Ensure literal "null" SSE payload doesn't cause a panic.
+	stream := []byte(`data: null
+data: {"type":"message_start","message":{"usage":{"input_tokens":10,"cache_read_input_tokens":100}}}
+data: [DONE]
+`)
+
+	ct := extractStreamingCacheTokens("anthropic", stream)
+	if ct.CacheReadTokens != 100 {
+		t.Errorf("CacheReadTokens = %d, want 100", ct.CacheReadTokens)
+	}
+}
+
+func TestExtractStreamingCacheTokens_AnthropicVertex(t *testing.T) {
+	// anthropic-vertex uses the same parser as anthropic.
+	stream := []byte(`data: {"type":"message_start","message":{"usage":{"input_tokens":10,"cache_read_input_tokens":40000,"cache_creation_input_tokens":300}}}
+data: {"type":"message_delta","usage":{"output_tokens":42}}
+data: [DONE]
+`)
+
+	ct := extractStreamingCacheTokens("anthropic-vertex", stream)
+	if ct.CacheReadTokens != 40000 {
+		t.Errorf("CacheReadTokens = %d, want 40000", ct.CacheReadTokens)
+	}
+	if ct.CacheCreationTokens != 300 {
+		t.Errorf("CacheCreationTokens = %d, want 300", ct.CacheCreationTokens)
+	}
+}
+
 // ── OpenAI streaming parser tests ────────────────────────────────────────────
 
 func TestOpenAIParser_ParseStreamingResponse_CacheTokens(t *testing.T) {

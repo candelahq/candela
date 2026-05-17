@@ -518,13 +518,27 @@ func extractAnthropicStreamingCache(data []byte) CacheTokens {
 			continue
 		}
 		var chunk map[string]interface{}
-		if err := json.Unmarshal([]byte(payload), &chunk); err != nil {
+		if err := json.Unmarshal([]byte(payload), &chunk); err != nil || chunk == nil {
 			continue
 		}
+		// message_start event: cache tokens in chunk.message.usage
 		if msg, ok := chunk["message"].(map[string]interface{}); ok {
 			if usage, ok := msg["usage"].(map[string]interface{}); ok {
-				ct.CacheReadTokens = toInt64(usage["cache_read_input_tokens"])
-				ct.CacheCreationTokens = toInt64(usage["cache_creation_input_tokens"])
+				if v := toInt64(usage["cache_read_input_tokens"]); v > 0 {
+					ct.CacheReadTokens = v
+				}
+				if v := toInt64(usage["cache_creation_input_tokens"]); v > 0 {
+					ct.CacheCreationTokens = v
+				}
+			}
+		}
+		// message_delta event: cache tokens in chunk.usage (top-level)
+		if usage, ok := chunk["usage"].(map[string]interface{}); ok {
+			if v := toInt64(usage["cache_read_input_tokens"]); v > 0 {
+				ct.CacheReadTokens = v
+			}
+			if v := toInt64(usage["cache_creation_input_tokens"]); v > 0 {
+				ct.CacheCreationTokens = v
 			}
 		}
 	}

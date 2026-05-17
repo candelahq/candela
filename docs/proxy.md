@@ -338,6 +338,7 @@ proxy:
   vertex_ai:
     project_id: "my-gcp-project"
     region: "us-central1"
+    caching_mode: "auto"  # off | auto | system-only
 
   # Selective provider activation — only listed providers are registered.
   # If omitted or empty, all providers are enabled.
@@ -348,6 +349,107 @@ proxy:
     - anthropic
     - gemini-oai
 ```
+
+---
+
+## 🗃️ Anthropic Prompt Caching
+
+Anthropic's [prompt caching](https://docs.anthropic.com/en/docs/build-with-claude/prompt-caching)
+reduces costs up to **90%** and latency up to **85%** for multi-turn conversations by caching
+the system prompt and conversation prefix on Anthropic's servers.
+
+Candela automatically injects `cache_control` breakpoints into translated Anthropic requests.
+This is controlled by the **caching mode**.
+
+### Caching Modes
+
+| Mode | System Prompt | Last User Message | Best For |
+|------|:---:|:---:|---|
+| `auto` (default) | ✅ cached | ✅ cached | Most use cases — maximum cost savings |
+| `system-only` | ✅ cached | ❌ not cached | Frequently changing conversation history |
+| `off` | ❌ no caching | ❌ no caching | Debugging, or when you manage caching yourself |
+
+### Configuration
+
+#### Via `config.yaml` (sidecar)
+
+```yaml
+vertex_ai:
+  project: "my-project"
+  region: "us-central1"
+  caching_mode: "auto"  # off | auto | system-only
+```
+
+#### Via `config.yaml` (Cloud Run server)
+
+```yaml
+proxy:
+  vertex_ai:
+    project_id: "my-project"
+    region: "us-central1"
+    caching_mode: "auto"  # off | auto | system-only
+```
+
+### Runtime Toggling (No Restart Required)
+
+The caching mode can be changed at runtime via the sidecar's management API:
+
+```bash
+# Check current mode
+curl http://localhost:8080/_local/api/config
+
+# Switch to system-only
+curl -X POST http://localhost:8080/_local/api/config/caching \
+  -H "Content-Type: application/json" \
+  -d '{"anthropic": "system-only"}'
+
+# Disable caching
+curl -X POST http://localhost:8080/_local/api/config/caching \
+  -H "Content-Type: application/json" \
+  -d '{"anthropic": "off"}'
+```
+
+The Candela Desktop app also provides a segmented control in **Settings → Performance**
+to toggle between modes with immediate effect.
+
+### Per-Request Override via Header
+
+Clients can override the server's default caching mode on individual requests
+using the `X-Candela-Caching` header:
+
+```bash
+# Force caching off for this one request
+curl http://localhost:8080/proxy/anthropic/v1/chat/completions \
+  -H "X-Candela-Caching: off" \
+  -H "Content-Type: application/json" \
+  -d '{"model": "claude-sonnet-4-20250514", "messages": [...]}'
+```
+
+Valid header values: `off`, `auto`, `system-only`.
+
+The header is stripped before forwarding to the upstream provider and does not
+persist — the server's configured default is restored after each request.
+
+> **💡 Team Mode**: In team deployments (Desktop → Cloud Run → Vertex AI), the
+> `X-Candela-Caching` header lets each developer control their own caching
+> strategy without affecting the server's default for other users.
+
+### How It Works
+
+When caching is enabled, Candela injects `cache_control: {"type": "ephemeral"}`
+breakpoints into the translated Anthropic request:
+
+1. **System prompt breakpoint** — caches the system instructions (both `auto` and `system-only`)
+2. **Last user message breakpoint** — caches the conversation prefix (`auto` only)
+
+This follows [Anthropic's recommended two-breakpoint pattern](https://docs.anthropic.com/en/docs/build-with-claude/prompt-caching#cache-limitations)
+for maximum cache reuse across turns.
+
+### Backward Compatibility
+
+- `caching_mode: "auto"` is the default (caching ON) — no config change needed
+- The old `disable_prompt_caching: true` is equivalent to `caching_mode: "off"`
+- Boolean values (`true`/`false`) are accepted: `true` → `auto`, `false` → `off`
 
 ---
 

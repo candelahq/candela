@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 
+	"github.com/candelahq/candela/pkg/proxy"
 	"github.com/candelahq/candela/pkg/runtime"
 )
 
@@ -14,22 +15,29 @@ import (
 //
 // Endpoints:
 //
-//	GET  /_local/health        — runtime health + loaded models
-//	GET  /_local/models        — list available models
-//	POST /_local/models/pull   — pull/download a model
-//	GET  /_local/backends      — list registered runtime backends
+//	GET  /_local/health              — runtime health + loaded models
+//	GET  /_local/models              — list available models
+//	POST /_local/models/pull         — pull/download a model
+//	GET  /_local/backends            — list registered runtime backends
+//	GET  /_local/api/config          — current runtime configuration
+//	POST /_local/api/config/caching  — set Anthropic caching mode at runtime
 type localAPI struct {
-	mgr *runtime.Manager
+	mgr        *runtime.Manager
+	cloudProxy *proxy.Proxy
 }
 
 // registerLocalAPI mounts the /_local/* routes on the mux.
-func registerLocalAPI(mux *http.ServeMux, mgr *runtime.Manager) {
-	api := &localAPI{mgr: mgr}
+func registerLocalAPI(mux *http.ServeMux, mgr *runtime.Manager, cloudProxy *proxy.Proxy) {
+	api := &localAPI{mgr: mgr, cloudProxy: cloudProxy}
 
-	mux.HandleFunc("GET /_local/health", api.handleHealth)
-	mux.HandleFunc("GET /_local/models", api.handleListModels)
-	mux.HandleFunc("POST /_local/models/pull", api.handlePullModel)
-	mux.HandleFunc("GET /_local/backends", api.handleBackends)
+	if mgr != nil {
+		mux.HandleFunc("GET /_local/health", api.handleHealth)
+		mux.HandleFunc("GET /_local/models", api.handleListModels)
+		mux.HandleFunc("POST /_local/models/pull", api.handlePullModel)
+		mux.HandleFunc("GET /_local/backends", api.handleBackends)
+	}
+	mux.HandleFunc("GET /_local/api/config", api.handleGetConfig)
+	mux.HandleFunc("POST /_local/api/config/caching", api.handleSetCaching)
 }
 
 // GET /_local/health
@@ -106,6 +114,47 @@ func (a *localAPI) handlePullModel(w http.ResponseWriter, r *http.Request) {
 func (a *localAPI) handleBackends(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"backends": runtime.Names(),
+	})
+}
+
+// GET /_local/api/config — returns current runtime configuration state.
+func (a *localAPI) handleGetConfig(w http.ResponseWriter, _ *http.Request) {
+	cachingMode := string(proxy.CachingOff)
+	if a.cloudProxy != nil {
+		cachingMode = string(a.cloudProxy.GetCachingMode())
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"caching": map[string]string{
+			"anthropic": cachingMode,
+		},
+	})
+}
+
+// POST /_local/api/config/caching — set caching mode at runtime.
+// Body: {"anthropic": "auto"} — values: off, auto, system-only
+func (a *localAPI) handleSetCaching(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, 1024)
+	var req struct {
+		Anthropic string `json:"anthropic"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON"})
+		return
+	}
+
+	mode := proxy.ParseCachingMode(req.Anthropic)
+	if a.cloudProxy == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{
+			"error": "proxy not initialized",
+		})
+		return
+	}
+	a.cloudProxy.SetCachingMode(mode)
+	slog.Info("caching mode updated at runtime", "anthropic", string(mode))
+	writeJSON(w, http.StatusOK, map[string]any{
+		"caching": map[string]string{
+			"anthropic": string(mode),
+		},
 	})
 }
 

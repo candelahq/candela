@@ -166,6 +166,27 @@ func (p *Proxy) SetBudgetChecker(ck *notify.BudgetChecker) {
 	p.budgetCk = ck
 }
 
+// SetCachingMode updates the Anthropic caching strategy at runtime.
+// This is safe to call concurrently from any goroutine.
+func (p *Proxy) SetCachingMode(mode CachingMode) {
+	for _, provider := range p.providers {
+		if ft, ok := provider.FormatTranslator.(*AnthropicFormatTranslator); ok {
+			ft.SetCachingMode(mode)
+		}
+	}
+}
+
+// GetCachingMode returns the current Anthropic caching mode. If multiple
+// providers have translators, returns the first one found.
+func (p *Proxy) GetCachingMode() CachingMode {
+	for _, provider := range p.providers {
+		if ft, ok := provider.FormatTranslator.(*AnthropicFormatTranslator); ok {
+			return ft.GetCachingMode()
+		}
+	}
+	return CachingOff
+}
+
 // RegisterRoutes registers proxy routes on the given mux.
 // Pattern: /proxy/{provider}/...
 func (p *Proxy) RegisterRoutes(mux *http.ServeMux) {
@@ -547,8 +568,21 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 	// (e.g. OpenAI Chat Completions → Anthropic Messages).
 	var translatedModel string
 	upstreamBody := reqBody
+
+	// Always strip X-Candela-Caching before forwarding — it's a Candela-internal
+	// header and must never leak to any upstream (Anthropic, Gemini, etc.).
+	cachingOverride := r.Header.Get(CachingHeader)
+	r.Header.Del(CachingHeader)
+
 	if provider.FormatTranslator != nil {
-		upstreamBody, translatedModel, err = provider.FormatTranslator.TranslateRequest(reqBody)
+		// Per-request caching override via X-Candela-Caching header.
+		// Uses TranslateRequestWithMode to avoid mutating shared translator
+		// state, which would race with concurrent requests.
+		if ft, ok := provider.FormatTranslator.(*AnthropicFormatTranslator); ok && cachingOverride != "" {
+			upstreamBody, translatedModel, err = ft.TranslateRequestWithMode(reqBody, ParseCachingMode(cachingOverride))
+		} else {
+			upstreamBody, translatedModel, err = provider.FormatTranslator.TranslateRequest(reqBody)
+		}
 		if err != nil {
 			http.Error(w, fmt.Sprintf("request translation error: %v", err), http.StatusBadRequest)
 			return

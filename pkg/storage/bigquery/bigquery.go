@@ -775,7 +775,7 @@ func (s *Store) GetUserLeaderboard(ctx context.Context, uq storage.UsageQuery, l
 			COALESCE(SUM(gen_ai_cost_usd), 0) AS total_cost_usd,
 			COALESCE(
 				AVG(CASE WHEN parent_span_id = '' THEN duration_ns ELSE NULL END),
-				AVG(CASE WHEN kind = 1 THEN duration_ns ELSE NULL END),
+				AVG(CASE WHEN kind = @llmKind THEN duration_ns ELSE NULL END),
 				0
 			) AS avg_duration_ns
 		FROM %s
@@ -793,6 +793,7 @@ func (s *Store) GetUserLeaderboard(ctx context.Context, uq storage.UsageQuery, l
 		{Name: "projectID", Value: uq.ProjectID},
 		{Name: "startTime", Value: uq.StartTime},
 		{Name: "endTime", Value: uq.EndTime},
+		{Name: "llmKind", Value: int(storage.SpanKindLLM)},
 		{Name: "limit", Value: limit},
 	}
 
@@ -843,7 +844,7 @@ func (s *Store) GetTenantLeaderboard(ctx context.Context, uq storage.UsageQuery,
 			COALESCE(SUM(gen_ai_cost_usd), 0) AS total_cost_usd,
 			COALESCE(
 				AVG(CASE WHEN parent_span_id = '' THEN duration_ns ELSE NULL END),
-				AVG(CASE WHEN kind = 1 THEN duration_ns ELSE NULL END),
+				AVG(CASE WHEN kind = @llmKind THEN duration_ns ELSE NULL END),
 				0
 			) AS avg_duration_ns,
 			COALESCE(
@@ -853,13 +854,13 @@ func (s *Store) GetTenantLeaderboard(ctx context.Context, uq storage.UsageQuery,
 		FROM (
 			SELECT
 				tenant_id, gen_ai_model, gen_ai_total_tokens, gen_ai_cost_usd,
-				duration_ns,
+				duration_ns, parent_span_id, kind,
 				SUM(gen_ai_cost_usd) OVER (PARTITION BY tenant_id, gen_ai_model) AS model_cost
 			FROM %s
 			WHERE (@projectID = '' OR project_id = @projectID)
 			  AND start_time >= @startTime
 			  AND start_time <= @endTime
-			  AND tenant_id IS NOT NULL AND tenant_id != '' AND gen_ai_model != ''
+			  AND tenant_id IS NOT NULL AND tenant_id != ''
 		)
 		GROUP BY tenant_id
 		ORDER BY total_cost_usd DESC
@@ -871,6 +872,7 @@ func (s *Store) GetTenantLeaderboard(ctx context.Context, uq storage.UsageQuery,
 		{Name: "projectID", Value: uq.ProjectID},
 		{Name: "startTime", Value: uq.StartTime},
 		{Name: "endTime", Value: uq.EndTime},
+		{Name: "llmKind", Value: int(storage.SpanKindLLM)},
 		{Name: "limit", Value: limit},
 	}
 
@@ -915,7 +917,7 @@ func (s *Store) GetJobLeaderboard(ctx context.Context, uq storage.UsageQuery, li
 		COALESCE(SUM(gen_ai_cost_usd),0) AS total_cost_usd,
 		COALESCE(
 			AVG(CASE WHEN parent_span_id = '' THEN duration_ns ELSE NULL END),
-			AVG(CASE WHEN kind = 1 THEN duration_ns ELSE NULL END),
+			AVG(CASE WHEN kind = @llmKind THEN duration_ns ELSE NULL END),
 			0
 		) AS avg_duration_ns,
 		COALESCE((
@@ -938,7 +940,7 @@ func (s *Store) GetJobLeaderboard(ctx context.Context, uq storage.UsageQuery, li
 	ORDER BY total_cost_usd DESC
 	LIMIT @limit`, quoteTable(s.tableID), quoteTable(s.tableID))
 	q := s.client.Query(query)
-	q.Parameters = []bigquery.QueryParameter{{Name: "projectID", Value: uq.ProjectID}, {Name: "startTime", Value: uq.StartTime}, {Name: "endTime", Value: uq.EndTime}, {Name: "limit", Value: limit}}
+	q.Parameters = []bigquery.QueryParameter{{Name: "projectID", Value: uq.ProjectID}, {Name: "startTime", Value: uq.StartTime}, {Name: "endTime", Value: uq.EndTime}, {Name: "llmKind", Value: int(storage.SpanKindLLM)}, {Name: "limit", Value: limit}}
 	it, err := q.Read(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("querying job leaderboard: %w", err)

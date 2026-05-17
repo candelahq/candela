@@ -360,14 +360,18 @@ func (s *Store) GetUsageSummary(ctx context.Context, q storage.UsageQuery) (*sto
 			COALESCE(SUM(gen_ai_input_tokens), 0)::BIGINT,
 			COALESCE(SUM(gen_ai_output_tokens), 0)::BIGINT,
 			COALESCE(SUM(gen_ai_cost_usd), 0)::DOUBLE,
-			COALESCE(AVG(CASE WHEN parent_span_id = '' THEN duration_ns ELSE NULL END), 0)::DOUBLE / 1000000.0,
+			COALESCE(
+				AVG(CASE WHEN parent_span_id = '' THEN duration_ns ELSE NULL END),
+				AVG(CASE WHEN kind = ? THEN duration_ns ELSE NULL END),
+				0
+			)::DOUBLE / 1000000.0,
 			CASE WHEN COUNT(DISTINCT trace_id) > 0
 				THEN CAST(COUNT(DISTINCT CASE WHEN status = 2 THEN trace_id ELSE NULL END) AS DOUBLE) / COUNT(DISTINCT trace_id)
 				ELSE 0 END
 		FROM spans
 		WHERE project_id = ? AND start_time >= ? AND start_time <= ?
 			AND (? = '' OR user_id = ?)
-	`, q.ProjectID, q.StartTime, q.EndTime, q.UserID, q.UserID).Scan(
+	`, int(storage.SpanKindLLM), q.ProjectID, q.StartTime, q.EndTime, q.UserID, q.UserID).Scan(
 		&summary.TotalTraces, &summary.TotalSpans, &summary.TotalLLMCalls,
 		&summary.TotalInputTokens, &summary.TotalOutputTokens, &summary.TotalCostUSD,
 		&summary.AvgLatencyMs, &summary.ErrorRate,
@@ -424,7 +428,11 @@ func (s *Store) GetUserLeaderboard(ctx context.Context, q storage.UsageQuery, li
 			COUNT(DISTINCT trace_id)::BIGINT,
 			COALESCE(SUM(gen_ai_total_tokens), 0)::BIGINT,
 			COALESCE(SUM(gen_ai_cost_usd), 0)::DOUBLE,
-			COALESCE(AVG(CASE WHEN parent_span_id = '' THEN duration_ns ELSE NULL END), 0)::DOUBLE / 1000000.0,
+			COALESCE(
+				AVG(CASE WHEN parent_span_id = '' THEN duration_ns ELSE NULL END),
+				AVG(CASE WHEN kind = ? THEN duration_ns ELSE NULL END),
+				0
+			)::DOUBLE / 1000000.0,
 			COALESCE((
 				SELECT s2.gen_ai_model FROM spans s2
 				WHERE s2.user_id = spans.user_id
@@ -440,7 +448,7 @@ func (s *Store) GetUserLeaderboard(ctx context.Context, q storage.UsageQuery, li
 		GROUP BY user_id
 		ORDER BY SUM(gen_ai_cost_usd) DESC
 		LIMIT ?
-	`, q.ProjectID, q.StartTime, q.EndTime,
+	`, int(storage.SpanKindLLM), q.ProjectID, q.StartTime, q.EndTime,
 		q.ProjectID, q.StartTime, q.EndTime, limit)
 	if err != nil {
 		return nil, fmt.Errorf("querying user leaderboard: %w", err)
@@ -474,7 +482,11 @@ func (s *Store) GetTenantLeaderboard(ctx context.Context, q storage.UsageQuery, 
 			COUNT(DISTINCT trace_id)::BIGINT,
 			COALESCE(SUM(gen_ai_total_tokens), 0)::BIGINT,
 			COALESCE(SUM(gen_ai_cost_usd), 0)::DOUBLE,
-			COALESCE(AVG(CASE WHEN parent_span_id = '' THEN duration_ns ELSE NULL END), 0)::DOUBLE / 1000000.0,
+			COALESCE(
+				AVG(CASE WHEN parent_span_id = '' THEN duration_ns ELSE NULL END),
+				AVG(CASE WHEN kind = ? THEN duration_ns ELSE NULL END),
+				0
+			)::DOUBLE / 1000000.0,
 			COALESCE((
 				SELECT s2.gen_ai_model FROM spans s2
 				WHERE s2.tenant_id = spans.tenant_id
@@ -490,7 +502,7 @@ func (s *Store) GetTenantLeaderboard(ctx context.Context, q storage.UsageQuery, 
 		GROUP BY tenant_id
 		ORDER BY SUM(gen_ai_cost_usd) DESC
 		LIMIT ?
-	`, q.ProjectID, q.StartTime, q.EndTime, q.ProjectID, q.StartTime, q.EndTime, limit)
+	`, int(storage.SpanKindLLM), q.ProjectID, q.StartTime, q.EndTime, q.ProjectID, q.StartTime, q.EndTime, limit)
 	if err != nil {
 		return nil, fmt.Errorf("querying tenant leaderboard: %w", err)
 	}
@@ -516,7 +528,11 @@ func (s *Store) GetJobLeaderboard(ctx context.Context, q storage.UsageQuery, lim
 		SELECT job_id, COUNT(DISTINCT trace_id)::BIGINT,
 			COALESCE(SUM(gen_ai_total_tokens), 0)::BIGINT,
 			COALESCE(SUM(gen_ai_cost_usd), 0)::DOUBLE,
-			COALESCE(AVG(CASE WHEN parent_span_id = '' THEN duration_ns ELSE NULL END), 0)::DOUBLE / 1000000.0,
+			COALESCE(
+				AVG(CASE WHEN parent_span_id = '' THEN duration_ns ELSE NULL END),
+				AVG(CASE WHEN kind = ? THEN duration_ns ELSE NULL END),
+				0
+			)::DOUBLE / 1000000.0,
 			COALESCE((
 				SELECT s2.gen_ai_model FROM spans s2
 				WHERE s2.job_id = spans.job_id
@@ -532,7 +548,7 @@ func (s *Store) GetJobLeaderboard(ctx context.Context, q storage.UsageQuery, lim
 		GROUP BY job_id
 		ORDER BY SUM(gen_ai_cost_usd) DESC
 		LIMIT ?
-	`, q.ProjectID, q.StartTime, q.EndTime,
+	`, int(storage.SpanKindLLM), q.ProjectID, q.StartTime, q.EndTime,
 		q.ProjectID, q.StartTime, q.EndTime, limit)
 	if err != nil {
 		return nil, fmt.Errorf("querying job leaderboard: %w", err)

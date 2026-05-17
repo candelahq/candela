@@ -628,7 +628,11 @@ func (s *Store) GetUsageSummary(ctx context.Context, uq storage.UsageQuery) (*st
 			COALESCE(SUM(gen_ai_output_tokens), 0) AS total_output_tokens,
 			COALESCE(SUM(gen_ai_total_tokens), 0) AS total_tokens,
 			COALESCE(SUM(gen_ai_cost_usd), 0) AS total_cost_usd,
-			COALESCE(AVG(CASE WHEN parent_span_id = '' THEN duration_ns ELSE NULL END), 0) AS avg_duration_ns,
+			COALESCE(
+				AVG(CASE WHEN parent_span_id = '' THEN duration_ns ELSE NULL END),
+				AVG(CASE WHEN kind = @llmKind THEN duration_ns ELSE NULL END),
+				0
+			) AS avg_duration_ns,
 			CASE WHEN COUNT(DISTINCT trace_id) > 0
 				THEN CAST(COUNT(DISTINCT CASE WHEN status = 2 THEN trace_id ELSE NULL END) AS FLOAT64) / COUNT(DISTINCT trace_id)
 				ELSE 0 END AS error_rate
@@ -769,7 +773,11 @@ func (s *Store) GetUserLeaderboard(ctx context.Context, uq storage.UsageQuery, l
 			COUNT(DISTINCT trace_id) AS call_count,
 			COALESCE(SUM(gen_ai_total_tokens), 0) AS total_tokens,
 			COALESCE(SUM(gen_ai_cost_usd), 0) AS total_cost_usd,
-			COALESCE(AVG(CASE WHEN parent_span_id = '' THEN duration_ns ELSE NULL END), 0) AS avg_duration_ns
+			COALESCE(
+				AVG(CASE WHEN parent_span_id = '' THEN duration_ns ELSE NULL END),
+				AVG(CASE WHEN kind = 1 THEN duration_ns ELSE NULL END),
+				0
+			) AS avg_duration_ns
 		FROM %s
 		WHERE (@projectID = '' OR project_id = @projectID)
 		  AND start_time >= @startTime
@@ -833,7 +841,11 @@ func (s *Store) GetTenantLeaderboard(ctx context.Context, uq storage.UsageQuery,
 			COUNT(DISTINCT trace_id) AS call_count,
 			COALESCE(SUM(gen_ai_total_tokens), 0) AS total_tokens,
 			COALESCE(SUM(gen_ai_cost_usd), 0) AS total_cost_usd,
-			COALESCE(AVG(CASE WHEN parent_span_id = '' THEN duration_ns ELSE NULL END), 0) AS avg_duration_ns,
+			COALESCE(
+				AVG(CASE WHEN parent_span_id = '' THEN duration_ns ELSE NULL END),
+				AVG(CASE WHEN kind = 1 THEN duration_ns ELSE NULL END),
+				0
+			) AS avg_duration_ns,
 			COALESCE(
 				(SELECT m FROM UNNEST(ARRAY_AGG(gen_ai_model ORDER BY model_cost DESC LIMIT 1)) AS m),
 				''
@@ -901,7 +913,11 @@ func (s *Store) GetJobLeaderboard(ctx context.Context, uq storage.UsageQuery, li
 	query := fmt.Sprintf(`SELECT job_id, COUNT(DISTINCT trace_id) AS call_count,
 		COALESCE(SUM(gen_ai_total_tokens),0) AS total_tokens,
 		COALESCE(SUM(gen_ai_cost_usd),0) AS total_cost_usd,
-		COALESCE(AVG(CASE WHEN parent_span_id = '' THEN duration_ns ELSE NULL END),0) AS avg_duration_ns,
+		COALESCE(
+			AVG(CASE WHEN parent_span_id = '' THEN duration_ns ELSE NULL END),
+			AVG(CASE WHEN kind = 1 THEN duration_ns ELSE NULL END),
+			0
+		) AS avg_duration_ns,
 		COALESCE((
 			SELECT s2.gen_ai_model FROM %s s2
 			WHERE s2.job_id = spans.job_id

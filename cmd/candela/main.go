@@ -89,8 +89,9 @@ type LocalProvider struct {
 
 // VertexAIConfig holds GCP Vertex AI settings for direct cloud providers.
 type VertexAIConfig struct {
-	Project string `yaml:"project"` // GCP project ID (required)
-	Region  string `yaml:"region"`  // GCP region (default: us-central1)
+	Project     string `yaml:"project"`      // GCP project ID (required)
+	Region      string `yaml:"region"`       // GCP region (default: us-central1)
+	CachingMode string `yaml:"caching_mode"` // off|auto|system-only (default: auto)
 }
 
 // version is set at build time via ldflags.
@@ -631,6 +632,11 @@ func runForeground() {
 	mux.Handle("/_local/api/traces", newTracesHandler(traceReader))
 	mux.Handle("/_local/api/leaderboard", newLeaderboardHandler(traceReader))
 
+	// Register runtime config API — cloudProxy is nil until built below.
+	configAPI := &localAPI{}
+	mux.HandleFunc("GET /_local/api/config", configAPI.handleGetConfig)
+	mux.HandleFunc("POST /_local/api/config/caching", configAPI.handleSetCaching)
+
 	// Everything else → remote Candela server (if configured).
 	if remoteProxy != nil {
 		mux.Handle("/", remoteProxy)
@@ -692,6 +698,8 @@ func runForeground() {
 	if soloMode && len(cfg.Providers) > 0 {
 		cloudProxy, cloudModels = buildCloudProxy(*cfg, spanProc)
 	}
+	// Wire the cloud proxy into the config API for runtime caching control.
+	configAPI.cloudProxy = cloudProxy
 	// Create a calc for pricing-based model filtering.
 	// Uses the same defaults as the cloud proxy's embedded calc.
 	if len(cloudModels) > 0 {
@@ -941,7 +949,11 @@ func buildCloudProxy(cfg Config, submitter *processor.SpanProcessor) (*proxy.Pro
 			p.UpstreamURL = "https://generativelanguage.googleapis.com/v1beta/openai"
 		case "anthropic":
 			p.UpstreamURL = fmt.Sprintf("https://%s-aiplatform.googleapis.com", region)
-			p.FormatTranslator = &proxy.AnthropicFormatTranslator{}
+			ft := &proxy.AnthropicFormatTranslator{}
+			if cfg.VertexAI.CachingMode != "" {
+				ft.SetCachingMode(proxy.ParseCachingMode(cfg.VertexAI.CachingMode))
+			}
+			p.FormatTranslator = ft
 			p.PathRewriter = &proxy.VertexAIPathRewriter{
 				ProjectID: project,
 				Region:    region,

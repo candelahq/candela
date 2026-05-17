@@ -84,7 +84,7 @@ func setupAPI(t *testing.T) (*http.ServeMux, *apiMockRuntime) {
 	t.Cleanup(func() { _ = mgr.Stop(ctx) })
 
 	mux := http.NewServeMux()
-	registerLocalAPI(mux, mgr)
+	registerLocalAPI(mux, mgr, nil)
 
 	// Poll for the health loop's initial check to complete.
 	for i := 0; i < 10; i++ {

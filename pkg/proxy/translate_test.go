@@ -118,8 +118,9 @@ func TestTranslateRequest_Basic(t *testing.T) {
 	}
 }
 
-func TestTranslateRequest_SystemMessage(t *testing.T) {
-	translator := &AnthropicFormatTranslator{DisablePromptCaching: true}
+func TestTranslateRequest_SystemMessage_CachingOff(t *testing.T) {
+	translator := &AnthropicFormatTranslator{}
+	translator.SetCachingMode(CachingOff)
 
 	body := `{
 		"model": "claude-sonnet-4-20250514",
@@ -139,10 +140,10 @@ func TestTranslateRequest_SystemMessage(t *testing.T) {
 		t.Fatalf("failed to unmarshal: %v", err)
 	}
 
-	// With DisablePromptCaching=true, system should be a plain string.
+	// With CachingOff, system should be a plain string.
 	sysStr, ok := result.System.(string)
 	if !ok {
-		t.Fatalf("system should be a string when DisablePromptCaching=true, got %T", result.System)
+		t.Fatalf("system should be a string when CachingOff, got %T", result.System)
 	}
 	if sysStr != "You are a helpful assistant." {
 		t.Errorf("system = %q, want 'You are a helpful assistant.'", sysStr)
@@ -302,6 +303,82 @@ func TestTranslateRequest_SystemMessageArrayWithCaching(t *testing.T) {
 	}
 	if cc["type"] != "ephemeral" {
 		t.Errorf("cache_control type = %v, want ephemeral", cc["type"])
+	}
+}
+
+func TestTranslateRequest_CachingSystemOnly(t *testing.T) {
+	// system-only mode: system prompt gets cache_control, but last user message does NOT.
+	translator := &AnthropicFormatTranslator{}
+	translator.SetCachingMode(CachingSystemOnly)
+
+	body := `{
+		"model": "claude-sonnet-4-20250514",
+		"messages": [
+			{"role": "system", "content": "You are a helpful assistant."},
+			{"role": "user", "content": "Hello"},
+			{"role": "assistant", "content": "Hi there!"},
+			{"role": "user", "content": "How are you?"}
+		]
+	}`
+
+	translated, _, err := translator.TranslateRequest([]byte(body))
+	if err != nil {
+		t.Fatalf("TranslateRequest failed: %v", err)
+	}
+
+	var raw map[string]interface{}
+	if err := json.Unmarshal(translated, &raw); err != nil {
+		t.Fatalf("failed to unmarshal: %v", err)
+	}
+
+	// System should have cache_control.
+	sysBlocks, ok := raw["system"].([]interface{})
+	if !ok {
+		t.Fatalf("system should be []interface{} with CachingSystemOnly, got %T", raw["system"])
+	}
+	sysBlock := sysBlocks[0].(map[string]interface{})
+	if _, hasCc := sysBlock["cache_control"]; !hasCc {
+		t.Fatal("system block should have cache_control in system-only mode")
+	}
+
+	// Last user message should NOT have cache_control.
+	messages := raw["messages"].([]interface{})
+	lastMsg := messages[len(messages)-1].(map[string]interface{})
+	lastContent, ok := lastMsg["content"].([]interface{})
+	if ok {
+		lastBlock := lastContent[len(lastContent)-1].(map[string]interface{})
+		if _, hasCc := lastBlock["cache_control"]; hasCc {
+			t.Error("last user message should NOT have cache_control in system-only mode")
+		}
+	}
+}
+
+func TestParseCachingMode(t *testing.T) {
+	tests := []struct {
+		input string
+		want  CachingMode
+	}{
+		{"auto", CachingAuto},
+		{"Auto", CachingAuto},
+		{"AUTO", CachingAuto},
+		{"true", CachingAuto},
+		{"1", CachingAuto},
+		{"system-only", CachingSystemOnly},
+		{"system_only", CachingSystemOnly},
+		{"system", CachingSystemOnly},
+		{"off", CachingOff},
+		{"false", CachingOff},
+		{"0", CachingOff},
+		{"", CachingOff},
+		{"unknown", CachingOff},
+	}
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			got := ParseCachingMode(tt.input)
+			if got != tt.want {
+				t.Errorf("ParseCachingMode(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
 	}
 }
 

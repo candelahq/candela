@@ -166,6 +166,27 @@ func (p *Proxy) SetBudgetChecker(ck *notify.BudgetChecker) {
 	p.budgetCk = ck
 }
 
+// SetCachingMode updates the Anthropic caching strategy at runtime.
+// This is safe to call concurrently from any goroutine.
+func (p *Proxy) SetCachingMode(mode CachingMode) {
+	for _, provider := range p.providers {
+		if ft, ok := provider.FormatTranslator.(*AnthropicFormatTranslator); ok {
+			ft.SetCachingMode(mode)
+		}
+	}
+}
+
+// GetCachingMode returns the current Anthropic caching mode. If multiple
+// providers have translators, returns the first one found.
+func (p *Proxy) GetCachingMode() CachingMode {
+	for _, provider := range p.providers {
+		if ft, ok := provider.FormatTranslator.(*AnthropicFormatTranslator); ok {
+			return ft.GetCachingMode()
+		}
+	}
+	return CachingOff
+}
+
 // RegisterRoutes registers proxy routes on the given mux.
 // Pattern: /proxy/{provider}/...
 func (p *Proxy) RegisterRoutes(mux *http.ServeMux) {
@@ -548,6 +569,18 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 	var translatedModel string
 	upstreamBody := reqBody
 	if provider.FormatTranslator != nil {
+		// Per-request caching override via X-Candela-Caching header.
+		// This allows clients (Desktop, CLI) to override the server's default
+		// caching mode on a per-request basis without modifying the body.
+		if ft, ok := provider.FormatTranslator.(*AnthropicFormatTranslator); ok {
+			if override := r.Header.Get(CachingHeader); override != "" {
+				original := ft.GetCachingMode()
+				ft.SetCachingMode(ParseCachingMode(override))
+				defer ft.SetCachingMode(original) // restore after this request
+				r.Header.Del(CachingHeader)       // don't forward to upstream
+			}
+		}
+
 		upstreamBody, translatedModel, err = provider.FormatTranslator.TranslateRequest(reqBody)
 		if err != nil {
 			http.Error(w, fmt.Sprintf("request translation error: %v", err), http.StatusBadRequest)

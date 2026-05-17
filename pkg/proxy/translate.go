@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"sync/atomic"
 	"time"
 )
 
@@ -46,14 +47,60 @@ func ParseModelName(raw string) ModelNameInfo {
 // AnthropicFormatTranslator — implements FormatTranslator
 // ====================================================================
 
+// CachingMode controls how cache_control breakpoints are injected into
+// Anthropic requests. This determines the caching strategy for Vertex AI.
+type CachingMode string
+
+const (
+	// CachingOff disables cache_control injection entirely.
+	CachingOff CachingMode = "off"
+	// CachingAuto injects cache_control on both the system prompt and the
+	// last user message — Anthropic's recommended two-breakpoint pattern.
+	// This is the default for maximum cost savings.
+	CachingAuto CachingMode = "auto"
+	// CachingSystemOnly injects cache_control on the system prompt only.
+	// Useful when conversation history changes frequently.
+	CachingSystemOnly CachingMode = "system-only"
+)
+
+// CachingHeader is the HTTP header name for per-request caching overrides.
+// Clients can send X-Candela-Caching: off|auto|system-only to override
+// the server's default caching mode on a per-request basis.
+const CachingHeader = "X-Candela-Caching"
+
+// ParseCachingMode converts a config string to a CachingMode.
+// Supports backward compatibility: "true"/"1" → auto, "false"/"0"/"" → off.
+func ParseCachingMode(s string) CachingMode {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "auto", "true", "1":
+		return CachingAuto
+	case "system-only", "system_only", "system":
+		return CachingSystemOnly
+	case "off", "false", "0", "":
+		return CachingOff
+	default:
+		return CachingOff
+	}
+}
+
 // AnthropicFormatTranslator translates between OpenAI Chat Completions format
 // and Anthropic Messages format.
 type AnthropicFormatTranslator struct {
-	// DisablePromptCaching opts out of automatic cache_control breakpoint
-	// injection on the system prompt and last user message. By default (false),
-	// caching is ON — Anthropic prompt caching on Vertex AI reduces costs ~10x
-	// for multi-turn conversations.
-	DisablePromptCaching bool
+	cachingMode atomic.Value // stores CachingMode; default is CachingAuto
+}
+
+// SetCachingMode sets the caching strategy. Safe to call concurrently.
+func (t *AnthropicFormatTranslator) SetCachingMode(mode CachingMode) {
+	t.cachingMode.Store(mode)
+}
+
+// GetCachingMode returns the current caching strategy.
+func (t *AnthropicFormatTranslator) GetCachingMode() CachingMode {
+	v := t.cachingMode.Load()
+	if v == nil {
+		return CachingAuto // default: caching enabled
+	}
+	return v.(CachingMode)
 }
 
 // --- Request Translation: OpenAI → Anthropic ---
@@ -108,7 +155,8 @@ func (t *AnthropicFormatTranslator) TranslateRequest(body []byte) ([]byte, strin
 				if c == "" {
 					break
 				}
-				if !t.DisablePromptCaching {
+				mode := t.GetCachingMode()
+				if mode == CachingAuto || mode == CachingSystemOnly {
 					anthReq.System = []interface{}{
 						map[string]interface{}{
 							"type":          "text",
@@ -121,7 +169,8 @@ func (t *AnthropicFormatTranslator) TranslateRequest(body []byte) ([]byte, strin
 				}
 			case []interface{}:
 				// Array of content blocks — pass through as-is.
-				if !t.DisablePromptCaching && len(c) > 0 {
+				mode := t.GetCachingMode()
+				if (mode == CachingAuto || mode == CachingSystemOnly) && len(c) > 0 {
 					// Add cache_control to the last block.
 					if block, ok := c[len(c)-1].(map[string]interface{}); ok {
 						block["cache_control"] = map[string]string{"type": "ephemeral"}
@@ -194,7 +243,7 @@ func (t *AnthropicFormatTranslator) TranslateRequest(body []byte) ([]byte, strin
 	// Add cache_control to the last user/tool message's content so the
 	// entire conversation prefix is cached. This is Anthropic's recommended
 	// two-breakpoint pattern: system prompt + end of conversation history.
-	if !t.DisablePromptCaching {
+	if t.GetCachingMode() == CachingAuto {
 		injectLastMessageCacheControl(anthReq.Messages)
 	}
 

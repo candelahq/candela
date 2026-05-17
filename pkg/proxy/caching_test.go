@@ -340,6 +340,233 @@ func TestTranslateRequest_ModeSwitch_Sequential(t *testing.T) {
 	}
 }
 
+func TestTranslateRequest_ConcurrentTranslateWithModeSwitch(t *testing.T) {
+	// Verify that translating requests while modes change concurrently
+	// never panics or produces invalid JSON.
+	translator := &AnthropicFormatTranslator{}
+	body := []byte(`{
+		"model": "claude-sonnet-4-20250514",
+		"messages": [
+			{"role": "system", "content": "You are helpful."},
+			{"role": "user", "content": "Hello"}
+		]
+	}`)
+
+	var wg sync.WaitGroup
+	modes := []CachingMode{CachingOff, CachingAuto, CachingSystemOnly}
+
+	// 50 concurrent translators.
+	for i := 0; i < 50; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			result, _, err := translator.TranslateRequest(body)
+			if err != nil {
+				t.Errorf("concurrent TranslateRequest failed: %v", err)
+				return
+			}
+			// Must be valid JSON.
+			var raw map[string]interface{}
+			if err := json.Unmarshal(result, &raw); err != nil {
+				t.Errorf("concurrent TranslateRequest produced invalid JSON: %v", err)
+			}
+		}()
+	}
+
+	// 50 concurrent mode switchers.
+	for i := 0; i < 50; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			translator.SetCachingMode(modes[i%len(modes)])
+		}(i)
+	}
+	wg.Wait()
+}
+
+func TestTranslateRequest_CachingAuto_NoSystemPrompt(t *testing.T) {
+	// Even without a system message, caching should apply to last user message.
+	translator := &AnthropicFormatTranslator{} // auto
+
+	body := `{
+		"model": "claude-sonnet-4-20250514",
+		"messages": [
+			{"role": "user", "content": "Hello"},
+			{"role": "assistant", "content": "Hi!"},
+			{"role": "user", "content": "How are you?"}
+		]
+	}`
+
+	translated, _, err := translator.TranslateRequest([]byte(body))
+	if err != nil {
+		t.Fatalf("TranslateRequest failed: %v", err)
+	}
+
+	raw := parseJSON(t, translated)
+
+	// No system field.
+	if raw["system"] != nil {
+		t.Error("should not have system field when no system message provided")
+	}
+
+	// Last user message should still have cache_control in auto mode.
+	messages := raw["messages"].([]interface{})
+	lastMsg := messages[len(messages)-1].(map[string]interface{})
+	lastContent := lastMsg["content"].([]interface{})
+	lastBlock := lastContent[len(lastContent)-1].(map[string]interface{})
+	if _, ok := lastBlock["cache_control"]; !ok {
+		t.Error("auto mode: last user message should have cache_control even without system prompt")
+	}
+}
+
+func TestTranslateRequest_CachingOff_NoSystemPrompt(t *testing.T) {
+	translator := &AnthropicFormatTranslator{}
+	translator.SetCachingMode(CachingOff)
+
+	body := `{
+		"model": "claude-sonnet-4-20250514",
+		"messages": [
+			{"role": "user", "content": "Hello"}
+		]
+	}`
+
+	translated, _, err := translator.TranslateRequest([]byte(body))
+	if err != nil {
+		t.Fatalf("TranslateRequest failed: %v", err)
+	}
+
+	if containsCacheControl(translated) {
+		t.Error("CachingOff should never inject cache_control")
+	}
+}
+
+func TestTranslateRequest_CachingAuto_SingleUserMessage(t *testing.T) {
+	// Single user message — cache_control should still be applied.
+	translator := &AnthropicFormatTranslator{}
+
+	body := `{
+		"model": "claude-sonnet-4-20250514",
+		"messages": [
+			{"role": "system", "content": "Be concise."},
+			{"role": "user", "content": "Hello"}
+		]
+	}`
+
+	translated, _, err := translator.TranslateRequest([]byte(body))
+	if err != nil {
+		t.Fatalf("TranslateRequest failed: %v", err)
+	}
+
+	if !containsCacheControl(translated) {
+		t.Error("auto mode should inject cache_control even with single user message")
+	}
+}
+
+func TestTranslateRequest_CachingAuto_WithToolMessages(t *testing.T) {
+	// Tool results are merged into user messages — caching should not break.
+	translator := &AnthropicFormatTranslator{}
+
+	body := `{
+		"model": "claude-sonnet-4-20250514",
+		"messages": [
+			{"role": "system", "content": "You are helpful."},
+			{"role": "user", "content": "What time is it?"},
+			{"role": "assistant", "content": "", "tool_calls": [
+				{"id": "call_1", "type": "function", "function": {"name": "get_time", "arguments": "{}"}}
+			]},
+			{"role": "tool", "tool_call_id": "call_1", "content": "3:45 PM"},
+			{"role": "user", "content": "Thanks!"}
+		]
+	}`
+
+	translated, _, err := translator.TranslateRequest([]byte(body))
+	if err != nil {
+		t.Fatalf("TranslateRequest failed: %v", err)
+	}
+
+	raw := parseJSON(t, translated)
+
+	// System should have cache_control.
+	sysBlocks := raw["system"].([]interface{})
+	sysBlock := sysBlocks[0].(map[string]interface{})
+	if _, ok := sysBlock["cache_control"]; !ok {
+		t.Error("system prompt should have cache_control")
+	}
+
+	// Last user message "Thanks!" should have cache_control.
+	messages := raw["messages"].([]interface{})
+	lastMsg := messages[len(messages)-1].(map[string]interface{})
+	lastContent := lastMsg["content"].([]interface{})
+	lastBlock := lastContent[len(lastContent)-1].(map[string]interface{})
+	if _, ok := lastBlock["cache_control"]; !ok {
+		t.Error("last user message should have cache_control after tool messages")
+	}
+}
+
+func TestTranslateRequest_CachingSystemOnly_ArraySystem(t *testing.T) {
+	translator := &AnthropicFormatTranslator{}
+	translator.SetCachingMode(CachingSystemOnly)
+
+	body := `{
+		"model": "claude-sonnet-4-20250514",
+		"messages": [
+			{"role": "system", "content": [
+				{"type": "text", "text": "Rule A"},
+				{"type": "text", "text": "Rule B"}
+			]},
+			{"role": "user", "content": "Hello"}
+		]
+	}`
+
+	translated, _, err := translator.TranslateRequest([]byte(body))
+	if err != nil {
+		t.Fatalf("TranslateRequest failed: %v", err)
+	}
+
+	raw := parseJSON(t, translated)
+	sysBlocks := raw["system"].([]interface{})
+
+	// Last system block should have cache_control.
+	lastSys := sysBlocks[len(sysBlocks)-1].(map[string]interface{})
+	if _, ok := lastSys["cache_control"]; !ok {
+		t.Error("system-only mode: last system block should have cache_control")
+	}
+
+	// User message should NOT have cache_control.
+	messages := raw["messages"].([]interface{})
+	lastMsg := messages[len(messages)-1].(map[string]interface{})
+	if content, ok := lastMsg["content"].([]interface{}); ok {
+		lastBlock := content[len(content)-1].(map[string]interface{})
+		if _, hasCc := lastBlock["cache_control"]; hasCc {
+			t.Error("system-only: user message should NOT have cache_control")
+		}
+	}
+}
+
+func TestParseCachingMode_WhitespaceHandling(t *testing.T) {
+	tests := []struct {
+		input string
+		want  CachingMode
+	}{
+		{"  auto  ", CachingAuto},
+		{"\toff\n", CachingOff},
+		{" system-only ", CachingSystemOnly},
+		{"  TRUE  ", CachingAuto},
+	}
+	for _, tt := range tests {
+		got := ParseCachingMode(tt.input)
+		if got != tt.want {
+			t.Errorf("ParseCachingMode(%q) = %q, want %q", tt.input, got, tt.want)
+		}
+	}
+}
+
+func TestCachingHeader_Constant(t *testing.T) {
+	if CachingHeader != "X-Candela-Caching" {
+		t.Errorf("CachingHeader = %q, want X-Candela-Caching", CachingHeader)
+	}
+}
+
 // --- Helpers ---
 
 func containsCacheControl(data []byte) bool {

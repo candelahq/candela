@@ -62,6 +62,11 @@ type PathRewriter interface {
 	RewritePath(model string, streaming bool) string
 }
 
+// DefaultVertexAnthropicVersion is the API version required by Vertex AI rawPredict
+// for Anthropic models. Override via Provider.AnthropicVersion if Vertex AI
+// introduces a newer version.
+const DefaultVertexAnthropicVersion = "vertex-2023-10-16"
+
 // Provider defines an LLM API provider configuration.
 type Provider struct {
 	Name        string `yaml:"name"`     // "openai", "google", "anthropic", "gemini-oai"
@@ -75,6 +80,10 @@ type Provider struct {
 
 	// TokenSource provides auto-refreshing auth tokens (e.g. GCP ADC). Nil = forward client auth.
 	TokenSource oauth2.TokenSource `yaml:"-"`
+
+	// AnthropicVersion overrides the anthropic_version injected into Vertex AI
+	// rawPredict bodies. Empty = DefaultVertexAnthropicVersion.
+	AnthropicVersion string `yaml:"-"`
 }
 
 // Proxy handles LLM API proxying with observability.
@@ -560,13 +569,17 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 	//   2. `model` NOT in the body (Vertex AI identifies model from URL path)
 	if provider.FormatTranslator == nil && provider.PathRewriter != nil {
 		var bodyMap map[string]interface{}
-		if json.Unmarshal(upstreamBody, &bodyMap) == nil {
+		if json.Unmarshal(upstreamBody, &bodyMap) == nil && bodyMap != nil {
 			modified := false
 			// Inject anthropic_version — Vertex AI rawPredict requires
-			// "vertex-2023-10-16", not the standard "2023-06-01" that
-			// Claude Code sends. Always override.
-			if _, hasVersion := bodyMap["anthropic_version"]; !hasVersion {
-				bodyMap["anthropic_version"] = "vertex-2023-10-16"
+			// a specific version, not the standard "2023-06-01" that
+			// Claude Code / @ai-sdk/anthropic sends. Always override.
+			wantVersion := provider.AnthropicVersion
+			if wantVersion == "" {
+				wantVersion = DefaultVertexAnthropicVersion
+			}
+			if v, _ := bodyMap["anthropic_version"].(string); v != wantVersion {
+				bodyMap["anthropic_version"] = wantVersion
 				modified = true
 			}
 			// Strip model — Vertex AI gets it from the URL path and
@@ -1286,13 +1299,11 @@ func forwardHeaders(src *http.Request, dst *http.Request, provider string) {
 		}
 	case "anthropic-vertex":
 		// Native Anthropic Messages API routed via Vertex AI.
-		// Claude Code requires anthropic-beta and anthropic-version to be forwarded.
 		// Auth is handled by ADC TokenSource — no client API key needed.
-		for _, h := range []string{"Anthropic-Version", "Anthropic-Beta"} {
-			if v := src.Header.Get(h); v != "" {
-				dst.Header.Set(h, v)
-			}
-		}
+		// DO NOT forward Anthropic-Version or Anthropic-Beta headers:
+		// - anthropic_version is set in the body (vertex-2023-10-16)
+		// - Anthropic-Beta headers cause Vertex AI to reject or silently
+		//   ignore features like prompt caching.
 	case "google":
 		// Google uses API key in query params or Authorization header — both forwarded.
 	}

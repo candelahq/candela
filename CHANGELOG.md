@@ -2,6 +2,39 @@
 
 All notable changes to Candela are documented here, organized by development phase. PRs are merged to `main`.
 
+## v0.3.2 — 2026-05-16
+
+### Cache Normalization & Model-Aware Pricing (#205, #206)
+- Centralize cache token normalization in `costcalc.Calculator.NormalizeCachedInput`
+- Fix critical Anthropic cache token semantics: `input_tokens` is fresh-only (additive), not inclusive like OpenAI/Google
+- Model-aware Google cache discounts: Gemini 2.5+/3.x get 90% off, Gemini 2.0 gets 75% off
+- `SetCacheDiscount` API for custom override of cache pricing per provider
+- `InputIncludesCache` config field to distinguish inclusive (OpenAI/Google) vs additive (Anthropic) reporting
+- 55 cache-specific tests including end-to-end cost validation against official Anthropic docs
+
+### Offline Telemetry Sync (#203)
+- Resilient store-and-forward sync pipeline for offline/intermittent connectivity
+- SQLite-backed outbox with automatic retry and payload bisection on failure
+- Corruption-tolerant: skips malformed spans without blocking the batch
+
+### Trace Accuracy Fixes (#198)
+- Fix trace-level status detection, error rate, and latency calculations
+- Cost-aware primary model attribution (replaces arbitrary `MAX(model)`)
+- Correct model breakdown latency across BigQuery, DuckDB, and SQLite backends
+
+### Documentation (#202)
+- Gemini CLI integration guide in `docs/proxy.md`
+
+## v0.3.1 — 2026-05-15
+
+### BigQuery Dashboard Fix (#197)
+- Make `project_id` filter optional in dashboard queries
+
+### Dashboard Testing (#196)
+- ConnectRPC auth and contract hurl tests for dashboard endpoints
+
+---
+
 ## v0.3.0 — 2026-05-14
 
 ### Auth Fix — User ADC Token Forwarding (#195)

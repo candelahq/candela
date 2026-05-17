@@ -28,4 +28,5 @@ plugins:
   - local: protoc-gen-bq-schema
     out: gen/bq
 inputs:
-  - module: buf.build/candelahq/protos:v0.4.0
+  - git_repo: https://github.com/candelahq/candela-protos.git
+    branch: main

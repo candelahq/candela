@@ -188,6 +188,20 @@ func (x *GetUsageSummaryResponse) GetErrorRate() float64 {
 	return 0
 }
 
+func (x *GetUsageSummaryResponse) GetTotalCacheReadTokens() int64 {
+	if x != nil {
+		return x.TotalCacheReadTokens
+	}
+	return 0
+}
+
+func (x *GetUsageSummaryResponse) GetTotalCacheCreationTokens() int64 {
+	if x != nil {
+		return x.TotalCacheCreationTokens
+	}
+	return 0
+}
+
 func (x *GetUsageSummaryResponse) GetTracesOverTime() []*TimeSeriesPoint {
 	if x != nil {
 		return x.TracesOverTime
@@ -207,20 +221,6 @@ func (x *GetUsageSummaryResponse) GetTokensOverTime() []*TimeSeriesPoint {
 		return x.TokensOverTime
 	}
 	return nil
-}
-
-func (x *GetUsageSummaryResponse) GetTotalCacheReadTokens() int64 {
-	if x != nil {
-		return x.TotalCacheReadTokens
-	}
-	return 0
-}
-
-func (x *GetUsageSummaryResponse) GetTotalCacheCreationTokens() int64 {
-	if x != nil {
-		return x.TotalCacheCreationTokens
-	}
-	return 0
 }
 
 type TimeSeriesPoint struct {
@@ -1165,7 +1165,7 @@ const file_candela_v1_dashboard_service_proto_rawDesc = "" +
 	"project_id\x18\x01 \x01(\tR\tprojectId\x127\n" +
 	"\n" +
 	"time_range\x18\x02 \x01(\v2\x18.candela.types.TimeRangeR\ttimeRange\x12 \n" +
-	"\venvironment\x18\x03 \x01(\tR\venvironment\"\x9f\x04\n" +
+	"\venvironment\x18\x03 \x01(\tR\venvironment\"\x95\x05\n" +
 	"\x17GetUsageSummaryResponse\x12!\n" +
 	"\ftotal_traces\x18\x01 \x01(\x03R\vtotalTraces\x12\x1f\n" +
 	"\vtotal_spans\x18\x02 \x01(\x03R\n" +
@@ -1176,7 +1176,10 @@ const file_candela_v1_dashboard_service_proto_rawDesc = "" +
 	"\x0etotal_cost_usd\x18\x06 \x01(\x01R\ftotalCostUsd\x12$\n" +
 	"\x0eavg_latency_ms\x18\a \x01(\x01R\favgLatencyMs\x12\x1d\n" +
 	"\n" +
-	"error_rate\x18\b \x01(\x01R\terrorRate\x12E\n" +
+	"error_rate\x18\b \x01(\x01R\terrorRate\x125\n" +
+	"\x17total_cache_read_tokens\x18\t \x01(\x03R\x14totalCacheReadTokens\x12=\n" +
+	"\x1btotal_cache_creation_tokens\x18\n" +
+	" \x01(\x03R\x18totalCacheCreationTokens\x12E\n" +
 	"\x10traces_over_time\x18\x14 \x03(\v2\x1b.candela.v1.TimeSeriesPointR\x0etracesOverTime\x12A\n" +
 	"\x0ecost_over_time\x18\x15 \x03(\v2\x1b.candela.v1.TimeSeriesPointR\fcostOverTime\x12E\n" +
 	"\x10tokens_over_time\x18\x16 \x03(\v2\x1b.candela.v1.TimeSeriesPointR\x0etokensOverTime\"E\n" +

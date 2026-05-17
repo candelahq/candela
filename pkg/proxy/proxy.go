@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"regexp"
 	"strings"
 	"time"
@@ -592,6 +593,32 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 				if enriched, err := json.Marshal(bodyMap); err == nil {
 					upstreamBody = enriched
 				}
+			}
+
+			// Debug: log upstream body when CANDELA_DEBUG=proxy is set.
+			if os.Getenv("CANDELA_DEBUG") == "proxy" {
+				// Log top-level keys and cache_control presence for debugging.
+				keys := make([]string, 0, len(bodyMap))
+				for k := range bodyMap {
+					keys = append(keys, k)
+				}
+				// Check system for cache_control.
+				var systemSnippet string
+				if sys, ok := bodyMap["system"]; ok {
+					if b, err := json.Marshal(sys); err == nil {
+						if len(b) > 500 {
+							systemSnippet = string(b[:500]) + "..."
+						} else {
+							systemSnippet = string(b)
+						}
+					}
+				}
+				slog.Info("CANDELA_DEBUG: passthrough body",
+					"provider", providerName,
+					"keys", keys,
+					"anthropic_version", bodyMap["anthropic_version"],
+					"system_snippet", systemSnippet,
+					"body_len", len(upstreamBody))
 			}
 		}
 	}

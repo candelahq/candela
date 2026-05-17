@@ -437,10 +437,10 @@ func TestUserLeaderboard_AvgLatency_RootSpansOnly(t *testing.T) {
 	}
 }
 
-// TestGetUsageSummary_AvgLatency_NoRootSpans_FallsBackToZero tests the edge
+// TestGetUsageSummary_AvgLatency_NoRootSpans_FallsBackToLLMSpans tests the edge
 // case where all spans have a parent (e.g. W3C trace context propagation).
 // AVG(CASE WHEN parent_span_id=” ...) returns NULL → COALESCE to 0.
-func TestGetUsageSummary_AvgLatency_NoRootSpans_FallsBackToZero(t *testing.T) {
+func TestGetUsageSummary_AvgLatency_NoRootSpans_FallsBackToLLMSpans(t *testing.T) {
 	store := newTestStore(t)
 	ctx := context.Background()
 	now := time.Now().Truncate(time.Microsecond)
@@ -468,9 +468,9 @@ func TestGetUsageSummary_AvgLatency_NoRootSpans_FallsBackToZero(t *testing.T) {
 		t.Fatalf("usage summary: %v", err)
 	}
 
-	// No root spans → latency should be 0 (COALESCE NULL → 0), not crash.
-	if summary.AvgLatencyMs != 0 {
-		t.Errorf("AvgLatencyMs = %.1f, want 0 (no root spans)", summary.AvgLatencyMs)
+	// No root spans → falls back to LLM span latency (~500ms).
+	if summary.AvgLatencyMs < 400 || summary.AvgLatencyMs > 600 {
+		t.Errorf("AvgLatencyMs = %.1f, want ~500 (LLM span fallback when no root spans)", summary.AvgLatencyMs)
 	}
 }
 

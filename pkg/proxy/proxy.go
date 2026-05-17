@@ -568,17 +568,18 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 	// (e.g. OpenAI Chat Completions → Anthropic Messages).
 	var translatedModel string
 	upstreamBody := reqBody
+
+	// Always strip X-Candela-Caching before forwarding — it's a Candela-internal
+	// header and must never leak to any upstream (Anthropic, Gemini, etc.).
+	cachingOverride := r.Header.Get(CachingHeader)
+	r.Header.Del(CachingHeader)
+
 	if provider.FormatTranslator != nil {
 		// Per-request caching override via X-Candela-Caching header.
 		// Uses TranslateRequestWithMode to avoid mutating shared translator
 		// state, which would race with concurrent requests.
-		if ft, ok := provider.FormatTranslator.(*AnthropicFormatTranslator); ok {
-			if override := r.Header.Get(CachingHeader); override != "" {
-				r.Header.Del(CachingHeader) // don't forward to upstream
-				upstreamBody, translatedModel, err = ft.TranslateRequestWithMode(reqBody, ParseCachingMode(override))
-			} else {
-				upstreamBody, translatedModel, err = provider.FormatTranslator.TranslateRequest(reqBody)
-			}
+		if ft, ok := provider.FormatTranslator.(*AnthropicFormatTranslator); ok && cachingOverride != "" {
+			upstreamBody, translatedModel, err = ft.TranslateRequestWithMode(reqBody, ParseCachingMode(cachingOverride))
 		} else {
 			upstreamBody, translatedModel, err = provider.FormatTranslator.TranslateRequest(reqBody)
 		}

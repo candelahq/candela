@@ -3,6 +3,7 @@ package proxy
 import (
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"regexp"
 	"strings"
 	"sync/atomic"
@@ -79,6 +80,9 @@ func ParseCachingMode(s string) CachingMode {
 	case "off", "false", "0", "":
 		return CachingOff
 	default:
+		slog.Warn("unrecognized caching mode, defaulting to off",
+			"input", s,
+			"valid_modes", "off, auto, system-only")
 		return CachingOff
 	}
 }

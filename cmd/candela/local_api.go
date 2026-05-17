@@ -143,10 +143,14 @@ func (a *localAPI) handleSetCaching(w http.ResponseWriter, r *http.Request) {
 	}
 
 	mode := proxy.ParseCachingMode(req.Anthropic)
-	if a.cloudProxy != nil {
-		a.cloudProxy.SetCachingMode(mode)
-		slog.Info("caching mode updated at runtime", "anthropic", string(mode))
+	if a.cloudProxy == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{
+			"error": "proxy not initialized",
+		})
+		return
 	}
+	a.cloudProxy.SetCachingMode(mode)
+	slog.Info("caching mode updated at runtime", "anthropic", string(mode))
 	writeJSON(w, http.StatusOK, map[string]any{
 		"caching": map[string]string{
 			"anthropic": string(mode),

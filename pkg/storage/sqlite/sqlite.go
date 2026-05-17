@@ -114,6 +114,9 @@ func (s *Store) migrate() error {
 		// Migration: add job_id for job-level cost attribution.
 		`ALTER TABLE spans ADD COLUMN job_id TEXT DEFAULT ''`,
 		`CREATE INDEX IF NOT EXISTS idx_spans_job ON spans(job_id)`,
+		// Migration: add cache token columns for prompt caching visibility.
+		`ALTER TABLE spans ADD COLUMN gen_ai_cache_read_tokens INTEGER DEFAULT 0`,
+		`ALTER TABLE spans ADD COLUMN gen_ai_cache_creation_tokens INTEGER DEFAULT 0`,
 		// Sync Outbox
 		`CREATE TABLE IF NOT EXISTS outbox_spans (
 			span_id TEXT PRIMARY KEY,
@@ -146,8 +149,9 @@ func (s *Store) IngestSpans(ctx context.Context, spans []storage.Span) error {
 		start_time, end_time, duration_ns, project_id, environment, service_name,
 		gen_ai_model, gen_ai_provider, gen_ai_input_tokens, gen_ai_output_tokens,
 		gen_ai_total_tokens, gen_ai_cost_usd, gen_ai_temperature, gen_ai_max_tokens,
-		gen_ai_input_content, gen_ai_output_content, attributes_json, user_id, session_id, tenant_id, job_id
-	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+		gen_ai_input_content, gen_ai_output_content, attributes_json, user_id, session_id, tenant_id, job_id,
+		gen_ai_cache_read_tokens, gen_ai_cache_creation_tokens
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
 	if err != nil {
 		return fmt.Errorf("preparing spans stmt: %w", err)
 	}
@@ -188,6 +192,7 @@ func (s *Store) IngestSpans(ctx context.Context, spans []storage.Span) error {
 			span.SessionID,
 			span.TenantID,
 			span.JobID,
+			genAI.CacheReadTokens, genAI.CacheCreationTokens,
 		)
 		if err != nil {
 			return fmt.Errorf("inserting span: %w", err)
@@ -398,7 +403,9 @@ func (s *Store) GetUsageSummary(ctx context.Context, q storage.UsageQuery) (*sto
 			) / 1000000.0,
 			CASE WHEN COUNT(DISTINCT trace_id) > 0
 				THEN CAST(COUNT(DISTINCT CASE WHEN status = 2 THEN trace_id ELSE NULL END) AS REAL) / COUNT(DISTINCT trace_id)
-				ELSE 0 END
+				ELSE 0 END,
+			COALESCE(SUM(gen_ai_cache_read_tokens), 0),
+			COALESCE(SUM(gen_ai_cache_creation_tokens), 0)
 		FROM spans
 		WHERE (? = '' OR project_id = ?) AND start_time >= ? AND start_time <= ?
 			AND (? = '' OR user_id = ?)
@@ -407,6 +414,7 @@ func (s *Store) GetUsageSummary(ctx context.Context, q storage.UsageQuery) (*sto
 		&summary.TotalTraces, &summary.TotalSpans, &summary.TotalLLMCalls,
 		&summary.TotalInputTokens, &summary.TotalOutputTokens, &summary.TotalCostUSD,
 		&summary.AvgLatencyMs, &summary.ErrorRate,
+		&summary.TotalCacheReadTokens, &summary.TotalCacheCreationTokens,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("querying usage: %w", err)

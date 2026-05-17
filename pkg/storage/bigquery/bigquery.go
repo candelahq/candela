@@ -635,7 +635,9 @@ func (s *Store) GetUsageSummary(ctx context.Context, uq storage.UsageQuery) (*st
 			) AS avg_duration_ns,
 			CASE WHEN COUNT(DISTINCT trace_id) > 0
 				THEN CAST(COUNT(DISTINCT CASE WHEN status = 2 THEN trace_id ELSE NULL END) AS FLOAT64) / COUNT(DISTINCT trace_id)
-				ELSE 0 END AS error_rate
+				ELSE 0 END AS error_rate,
+			COALESCE(SUM(gen_ai_cache_read_tokens), 0) AS total_cache_read_tokens,
+			COALESCE(SUM(gen_ai_cache_creation_tokens), 0) AS total_cache_creation_tokens
 		FROM %s
 		WHERE (@projectID = '' OR project_id = @projectID)
 		  AND start_time >= @startTime
@@ -661,15 +663,17 @@ func (s *Store) GetUsageSummary(ctx context.Context, uq storage.UsageQuery) (*st
 
 	var summary storage.UsageSummary
 	var row struct {
-		TotalTraces       int64   `bigquery:"total_traces"`
-		TotalSpans        int64   `bigquery:"total_spans"`
-		TotalLLMCalls     int64   `bigquery:"total_llm_calls"`
-		TotalInputTokens  int64   `bigquery:"total_input_tokens"`
-		TotalOutputTokens int64   `bigquery:"total_output_tokens"`
-		TotalTokens       int64   `bigquery:"total_tokens"`
-		TotalCostUSD      float64 `bigquery:"total_cost_usd"`
-		AvgDurationNs     float64 `bigquery:"avg_duration_ns"`
-		ErrorRate         float64 `bigquery:"error_rate"`
+		TotalTraces              int64   `bigquery:"total_traces"`
+		TotalSpans               int64   `bigquery:"total_spans"`
+		TotalLLMCalls            int64   `bigquery:"total_llm_calls"`
+		TotalInputTokens         int64   `bigquery:"total_input_tokens"`
+		TotalOutputTokens        int64   `bigquery:"total_output_tokens"`
+		TotalTokens              int64   `bigquery:"total_tokens"`
+		TotalCostUSD             float64 `bigquery:"total_cost_usd"`
+		AvgDurationNs            float64 `bigquery:"avg_duration_ns"`
+		ErrorRate                float64 `bigquery:"error_rate"`
+		TotalCacheReadTokens     int64   `bigquery:"total_cache_read_tokens"`
+		TotalCacheCreationTokens int64   `bigquery:"total_cache_creation_tokens"`
 	}
 	if err := it.Next(&row); err != nil && err != iterator.Done {
 		return nil, fmt.Errorf("reading usage: %w", err)
@@ -687,6 +691,8 @@ func (s *Store) GetUsageSummary(ctx context.Context, uq storage.UsageQuery) (*st
 	summary.TotalCostUSD = row.TotalCostUSD
 	summary.AvgLatencyMs = float64(row.AvgDurationNs) / 1e6
 	summary.ErrorRate = row.ErrorRate
+	summary.TotalCacheReadTokens = row.TotalCacheReadTokens
+	summary.TotalCacheCreationTokens = row.TotalCacheCreationTokens
 
 	return &summary, nil
 }

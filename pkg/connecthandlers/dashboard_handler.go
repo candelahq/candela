@@ -57,14 +57,16 @@ func (h *DashboardHandler) GetUsageSummary(
 	}
 
 	return connect.NewResponse(&v1.GetUsageSummaryResponse{
-		TotalTraces:       summary.TotalTraces,
-		TotalSpans:        summary.TotalSpans,
-		TotalLlmCalls:     summary.TotalLLMCalls,
-		TotalInputTokens:  summary.TotalInputTokens,
-		TotalOutputTokens: summary.TotalOutputTokens,
-		TotalCostUsd:      summary.TotalCostUSD,
-		AvgLatencyMs:      summary.AvgLatencyMs,
-		ErrorRate:         summary.ErrorRate,
+		TotalTraces:              summary.TotalTraces,
+		TotalSpans:               summary.TotalSpans,
+		TotalLlmCalls:            summary.TotalLLMCalls,
+		TotalInputTokens:         summary.TotalInputTokens,
+		TotalOutputTokens:        summary.TotalOutputTokens,
+		TotalCostUsd:             summary.TotalCostUSD,
+		AvgLatencyMs:             summary.AvgLatencyMs,
+		ErrorRate:                summary.ErrorRate,
+		TotalCacheReadTokens:     summary.TotalCacheReadTokens,
+		TotalCacheCreationTokens: summary.TotalCacheCreationTokens,
 	}), nil
 }
 

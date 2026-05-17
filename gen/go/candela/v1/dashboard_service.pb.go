@@ -83,15 +83,17 @@ func (x *GetUsageSummaryRequest) GetEnvironment() string {
 }
 
 type GetUsageSummaryResponse struct {
-	state             protoimpl.MessageState `protogen:"open.v1"`
-	TotalTraces       int64                  `protobuf:"varint,1,opt,name=total_traces,json=totalTraces,proto3" json:"total_traces,omitempty"`
-	TotalSpans        int64                  `protobuf:"varint,2,opt,name=total_spans,json=totalSpans,proto3" json:"total_spans,omitempty"`
-	TotalLlmCalls     int64                  `protobuf:"varint,3,opt,name=total_llm_calls,json=totalLlmCalls,proto3" json:"total_llm_calls,omitempty"`
-	TotalInputTokens  int64                  `protobuf:"varint,4,opt,name=total_input_tokens,json=totalInputTokens,proto3" json:"total_input_tokens,omitempty"`
-	TotalOutputTokens int64                  `protobuf:"varint,5,opt,name=total_output_tokens,json=totalOutputTokens,proto3" json:"total_output_tokens,omitempty"`
-	TotalCostUsd      float64                `protobuf:"fixed64,6,opt,name=total_cost_usd,json=totalCostUsd,proto3" json:"total_cost_usd,omitempty"`
-	AvgLatencyMs      float64                `protobuf:"fixed64,7,opt,name=avg_latency_ms,json=avgLatencyMs,proto3" json:"avg_latency_ms,omitempty"`
-	ErrorRate         float64                `protobuf:"fixed64,8,opt,name=error_rate,json=errorRate,proto3" json:"error_rate,omitempty"`
+	state                    protoimpl.MessageState `protogen:"open.v1"`
+	TotalTraces              int64                  `protobuf:"varint,1,opt,name=total_traces,json=totalTraces,proto3" json:"total_traces,omitempty"`
+	TotalSpans               int64                  `protobuf:"varint,2,opt,name=total_spans,json=totalSpans,proto3" json:"total_spans,omitempty"`
+	TotalLlmCalls            int64                  `protobuf:"varint,3,opt,name=total_llm_calls,json=totalLlmCalls,proto3" json:"total_llm_calls,omitempty"`
+	TotalInputTokens         int64                  `protobuf:"varint,4,opt,name=total_input_tokens,json=totalInputTokens,proto3" json:"total_input_tokens,omitempty"`
+	TotalOutputTokens        int64                  `protobuf:"varint,5,opt,name=total_output_tokens,json=totalOutputTokens,proto3" json:"total_output_tokens,omitempty"`
+	TotalCostUsd             float64                `protobuf:"fixed64,6,opt,name=total_cost_usd,json=totalCostUsd,proto3" json:"total_cost_usd,omitempty"`
+	AvgLatencyMs             float64                `protobuf:"fixed64,7,opt,name=avg_latency_ms,json=avgLatencyMs,proto3" json:"avg_latency_ms,omitempty"`
+	ErrorRate                float64                `protobuf:"fixed64,8,opt,name=error_rate,json=errorRate,proto3" json:"error_rate,omitempty"`
+	TotalCacheReadTokens     int64                  `protobuf:"varint,9,opt,name=total_cache_read_tokens,json=totalCacheReadTokens,proto3" json:"total_cache_read_tokens,omitempty"`
+	TotalCacheCreationTokens int64                  `protobuf:"varint,10,opt,name=total_cache_creation_tokens,json=totalCacheCreationTokens,proto3" json:"total_cache_creation_tokens,omitempty"`
 	// Time series for charts
 	TracesOverTime []*TimeSeriesPoint `protobuf:"bytes,20,rep,name=traces_over_time,json=tracesOverTime,proto3" json:"traces_over_time,omitempty"`
 	CostOverTime   []*TimeSeriesPoint `protobuf:"bytes,21,rep,name=cost_over_time,json=costOverTime,proto3" json:"cost_over_time,omitempty"`
@@ -205,6 +207,20 @@ func (x *GetUsageSummaryResponse) GetTokensOverTime() []*TimeSeriesPoint {
 		return x.TokensOverTime
 	}
 	return nil
+}
+
+func (x *GetUsageSummaryResponse) GetTotalCacheReadTokens() int64 {
+	if x != nil {
+		return x.TotalCacheReadTokens
+	}
+	return 0
+}
+
+func (x *GetUsageSummaryResponse) GetTotalCacheCreationTokens() int64 {
+	if x != nil {
+		return x.TotalCacheCreationTokens
+	}
+	return 0
 }
 
 type TimeSeriesPoint struct {

@@ -49,11 +49,11 @@ func ParseModelName(raw string) ModelNameInfo {
 // AnthropicFormatTranslator translates between OpenAI Chat Completions format
 // and Anthropic Messages format.
 type AnthropicFormatTranslator struct {
-	// PromptCaching enables automatic injection of cache_control breakpoints
-	// on the system prompt and last user message. When true, this enables
-	// Anthropic prompt caching on Vertex AI, reducing costs ~10x for
-	// multi-turn conversations. Requires Vertex AI region support for caching.
-	PromptCaching bool
+	// DisablePromptCaching opts out of automatic cache_control breakpoint
+	// injection on the system prompt and last user message. By default (false),
+	// caching is ON — Anthropic prompt caching on Vertex AI reduces costs ~10x
+	// for multi-turn conversations.
+	DisablePromptCaching bool
 }
 
 // --- Request Translation: OpenAI → Anthropic ---
@@ -108,7 +108,7 @@ func (t *AnthropicFormatTranslator) TranslateRequest(body []byte) ([]byte, strin
 				if c == "" {
 					break
 				}
-				if t.PromptCaching {
+				if !t.DisablePromptCaching {
 					anthReq.System = []interface{}{
 						map[string]interface{}{
 							"type":          "text",
@@ -121,7 +121,7 @@ func (t *AnthropicFormatTranslator) TranslateRequest(body []byte) ([]byte, strin
 				}
 			case []interface{}:
 				// Array of content blocks — pass through as-is.
-				if t.PromptCaching && len(c) > 0 {
+				if !t.DisablePromptCaching && len(c) > 0 {
 					// Add cache_control to the last block.
 					if block, ok := c[len(c)-1].(map[string]interface{}); ok {
 						block["cache_control"] = map[string]string{"type": "ephemeral"}
@@ -194,7 +194,7 @@ func (t *AnthropicFormatTranslator) TranslateRequest(body []byte) ([]byte, strin
 	// Add cache_control to the last user/tool message's content so the
 	// entire conversation prefix is cached. This is Anthropic's recommended
 	// two-breakpoint pattern: system prompt + end of conversation history.
-	if t.PromptCaching {
+	if !t.DisablePromptCaching {
 		injectLastMessageCacheControl(anthReq.Messages)
 	}
 

@@ -83,15 +83,17 @@ func (x *GetUsageSummaryRequest) GetEnvironment() string {
 }
 
 type GetUsageSummaryResponse struct {
-	state             protoimpl.MessageState `protogen:"open.v1"`
-	TotalTraces       int64                  `protobuf:"varint,1,opt,name=total_traces,json=totalTraces,proto3" json:"total_traces,omitempty"`
-	TotalSpans        int64                  `protobuf:"varint,2,opt,name=total_spans,json=totalSpans,proto3" json:"total_spans,omitempty"`
-	TotalLlmCalls     int64                  `protobuf:"varint,3,opt,name=total_llm_calls,json=totalLlmCalls,proto3" json:"total_llm_calls,omitempty"`
-	TotalInputTokens  int64                  `protobuf:"varint,4,opt,name=total_input_tokens,json=totalInputTokens,proto3" json:"total_input_tokens,omitempty"`
-	TotalOutputTokens int64                  `protobuf:"varint,5,opt,name=total_output_tokens,json=totalOutputTokens,proto3" json:"total_output_tokens,omitempty"`
-	TotalCostUsd      float64                `protobuf:"fixed64,6,opt,name=total_cost_usd,json=totalCostUsd,proto3" json:"total_cost_usd,omitempty"`
-	AvgLatencyMs      float64                `protobuf:"fixed64,7,opt,name=avg_latency_ms,json=avgLatencyMs,proto3" json:"avg_latency_ms,omitempty"`
-	ErrorRate         float64                `protobuf:"fixed64,8,opt,name=error_rate,json=errorRate,proto3" json:"error_rate,omitempty"`
+	state                    protoimpl.MessageState `protogen:"open.v1"`
+	TotalTraces              int64                  `protobuf:"varint,1,opt,name=total_traces,json=totalTraces,proto3" json:"total_traces,omitempty"`
+	TotalSpans               int64                  `protobuf:"varint,2,opt,name=total_spans,json=totalSpans,proto3" json:"total_spans,omitempty"`
+	TotalLlmCalls            int64                  `protobuf:"varint,3,opt,name=total_llm_calls,json=totalLlmCalls,proto3" json:"total_llm_calls,omitempty"`
+	TotalInputTokens         int64                  `protobuf:"varint,4,opt,name=total_input_tokens,json=totalInputTokens,proto3" json:"total_input_tokens,omitempty"`
+	TotalOutputTokens        int64                  `protobuf:"varint,5,opt,name=total_output_tokens,json=totalOutputTokens,proto3" json:"total_output_tokens,omitempty"`
+	TotalCostUsd             float64                `protobuf:"fixed64,6,opt,name=total_cost_usd,json=totalCostUsd,proto3" json:"total_cost_usd,omitempty"`
+	AvgLatencyMs             float64                `protobuf:"fixed64,7,opt,name=avg_latency_ms,json=avgLatencyMs,proto3" json:"avg_latency_ms,omitempty"`
+	ErrorRate                float64                `protobuf:"fixed64,8,opt,name=error_rate,json=errorRate,proto3" json:"error_rate,omitempty"`
+	TotalCacheReadTokens     int64                  `protobuf:"varint,9,opt,name=total_cache_read_tokens,json=totalCacheReadTokens,proto3" json:"total_cache_read_tokens,omitempty"`
+	TotalCacheCreationTokens int64                  `protobuf:"varint,10,opt,name=total_cache_creation_tokens,json=totalCacheCreationTokens,proto3" json:"total_cache_creation_tokens,omitempty"`
 	// Time series for charts
 	TracesOverTime []*TimeSeriesPoint `protobuf:"bytes,20,rep,name=traces_over_time,json=tracesOverTime,proto3" json:"traces_over_time,omitempty"`
 	CostOverTime   []*TimeSeriesPoint `protobuf:"bytes,21,rep,name=cost_over_time,json=costOverTime,proto3" json:"cost_over_time,omitempty"`
@@ -182,6 +184,20 @@ func (x *GetUsageSummaryResponse) GetAvgLatencyMs() float64 {
 func (x *GetUsageSummaryResponse) GetErrorRate() float64 {
 	if x != nil {
 		return x.ErrorRate
+	}
+	return 0
+}
+
+func (x *GetUsageSummaryResponse) GetTotalCacheReadTokens() int64 {
+	if x != nil {
+		return x.TotalCacheReadTokens
+	}
+	return 0
+}
+
+func (x *GetUsageSummaryResponse) GetTotalCacheCreationTokens() int64 {
+	if x != nil {
+		return x.TotalCacheCreationTokens
 	}
 	return 0
 }
@@ -1149,7 +1165,7 @@ const file_candela_v1_dashboard_service_proto_rawDesc = "" +
 	"project_id\x18\x01 \x01(\tR\tprojectId\x127\n" +
 	"\n" +
 	"time_range\x18\x02 \x01(\v2\x18.candela.types.TimeRangeR\ttimeRange\x12 \n" +
-	"\venvironment\x18\x03 \x01(\tR\venvironment\"\x9f\x04\n" +
+	"\venvironment\x18\x03 \x01(\tR\venvironment\"\x95\x05\n" +
 	"\x17GetUsageSummaryResponse\x12!\n" +
 	"\ftotal_traces\x18\x01 \x01(\x03R\vtotalTraces\x12\x1f\n" +
 	"\vtotal_spans\x18\x02 \x01(\x03R\n" +
@@ -1160,7 +1176,10 @@ const file_candela_v1_dashboard_service_proto_rawDesc = "" +
 	"\x0etotal_cost_usd\x18\x06 \x01(\x01R\ftotalCostUsd\x12$\n" +
 	"\x0eavg_latency_ms\x18\a \x01(\x01R\favgLatencyMs\x12\x1d\n" +
 	"\n" +
-	"error_rate\x18\b \x01(\x01R\terrorRate\x12E\n" +
+	"error_rate\x18\b \x01(\x01R\terrorRate\x125\n" +
+	"\x17total_cache_read_tokens\x18\t \x01(\x03R\x14totalCacheReadTokens\x12=\n" +
+	"\x1btotal_cache_creation_tokens\x18\n" +
+	" \x01(\x03R\x18totalCacheCreationTokens\x12E\n" +
 	"\x10traces_over_time\x18\x14 \x03(\v2\x1b.candela.v1.TimeSeriesPointR\x0etracesOverTime\x12A\n" +
 	"\x0ecost_over_time\x18\x15 \x03(\v2\x1b.candela.v1.TimeSeriesPointR\fcostOverTime\x12E\n" +
 	"\x10tokens_over_time\x18\x16 \x03(\v2\x1b.candela.v1.TimeSeriesPointR\x0etokensOverTime\"E\n" +

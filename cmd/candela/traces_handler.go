@@ -23,20 +23,22 @@ type recentSpanResponse struct {
 }
 
 type spanJSON struct {
-	SpanID       string  `json:"span_id"`
-	TraceID      string  `json:"trace_id"`
-	Model        string  `json:"model"`
-	Provider     string  `json:"provider"`
-	InputTokens  int64   `json:"input_tokens"`
-	OutputTokens int64   `json:"output_tokens"`
-	TotalTokens  int64   `json:"total_tokens"`
-	CostUSD      float64 `json:"cost_usd"`
-	DurationMs   float64 `json:"duration_ms"`
-	Status       string  `json:"status"`
-	Timestamp    string  `json:"timestamp"`
-	Name         string  `json:"name"`
-	TenantID     string  `json:"tenant_id,omitempty"`
-	JobID        string  `json:"job_id,omitempty"`
+	SpanID              string  `json:"span_id"`
+	TraceID             string  `json:"trace_id"`
+	Model               string  `json:"model"`
+	Provider            string  `json:"provider"`
+	InputTokens         int64   `json:"input_tokens"`
+	OutputTokens        int64   `json:"output_tokens"`
+	TotalTokens         int64   `json:"total_tokens"`
+	CostUSD             float64 `json:"cost_usd"`
+	DurationMs          float64 `json:"duration_ms"`
+	Status              string  `json:"status"`
+	Timestamp           string  `json:"timestamp"`
+	Name                string  `json:"name"`
+	TenantID            string  `json:"tenant_id,omitempty"`
+	JobID               string  `json:"job_id,omitempty"`
+	CacheReadTokens     int64   `json:"cache_read_tokens,omitempty"`
+	CacheCreationTokens int64   `json:"cache_creation_tokens,omitempty"`
 }
 
 func newTracesHandler(reader storage.SpanReader) http.Handler {
@@ -108,6 +110,8 @@ func (h *tracesHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			sj.OutputTokens = s.GenAI.OutputTokens
 			sj.TotalTokens = s.GenAI.TotalTokens
 			sj.CostUSD = s.GenAI.CostUSD
+			sj.CacheReadTokens = s.GenAI.CacheReadTokens
+			sj.CacheCreationTokens = s.GenAI.CacheCreationTokens
 		}
 		spans = append(spans, sj)
 	}

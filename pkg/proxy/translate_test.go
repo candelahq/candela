@@ -119,7 +119,7 @@ func TestTranslateRequest_Basic(t *testing.T) {
 }
 
 func TestTranslateRequest_SystemMessage(t *testing.T) {
-	translator := &AnthropicFormatTranslator{}
+	translator := &AnthropicFormatTranslator{DisablePromptCaching: true}
 
 	body := `{
 		"model": "claude-sonnet-4-20250514",
@@ -139,10 +139,10 @@ func TestTranslateRequest_SystemMessage(t *testing.T) {
 		t.Fatalf("failed to unmarshal: %v", err)
 	}
 
-	// Without PromptCaching, system should be a plain string.
+	// With DisablePromptCaching=true, system should be a plain string.
 	sysStr, ok := result.System.(string)
 	if !ok {
-		t.Fatalf("system should be a string when PromptCaching=false, got %T", result.System)
+		t.Fatalf("system should be a string when DisablePromptCaching=true, got %T", result.System)
 	}
 	if sysStr != "You are a helpful assistant." {
 		t.Errorf("system = %q, want 'You are a helpful assistant.'", sysStr)
@@ -154,7 +154,7 @@ func TestTranslateRequest_SystemMessage(t *testing.T) {
 }
 
 func TestTranslateRequest_PromptCaching(t *testing.T) {
-	translator := &AnthropicFormatTranslator{PromptCaching: true}
+	translator := &AnthropicFormatTranslator{}
 
 	body := `{
 		"model": "claude-sonnet-4-20250514",
@@ -180,7 +180,7 @@ func TestTranslateRequest_PromptCaching(t *testing.T) {
 	// System should be a content block array with cache_control.
 	sysBlocks, ok := raw["system"].([]interface{})
 	if !ok {
-		t.Fatalf("system should be []interface{} with PromptCaching=true, got %T", raw["system"])
+		t.Fatalf("system should be []interface{} with caching enabled (default), got %T", raw["system"])
 	}
 	if len(sysBlocks) != 1 {
 		t.Fatalf("system blocks = %d, want 1", len(sysBlocks))
@@ -256,8 +256,8 @@ func TestTranslateRequest_SystemMessageArray(t *testing.T) {
 }
 
 func TestTranslateRequest_SystemMessageArrayWithCaching(t *testing.T) {
-	// Array system content + PromptCaching should add cache_control to last block.
-	translator := &AnthropicFormatTranslator{PromptCaching: true}
+	// Array system content should add cache_control to last block by default.
+	translator := &AnthropicFormatTranslator{}
 
 	body := `{
 		"model": "claude-sonnet-4-20250514",

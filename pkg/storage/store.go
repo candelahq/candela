@@ -231,6 +231,12 @@ type UsageSummary struct {
 	TotalCostUSD      float64
 	AvgLatencyMs      float64
 	ErrorRate         float64
+
+	// Cache token aggregates — raw counts from provider APIs.
+	// CacheReadTokens = tokens served from cache (cheap).
+	// CacheCreationTokens = tokens written to cache (Anthropic: 1.25× base cost).
+	TotalCacheReadTokens     int64
+	TotalCacheCreationTokens int64
 }
 
 // UsageQuery defines filters for usage summary queries.

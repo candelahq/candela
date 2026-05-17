@@ -80,6 +80,17 @@ export default function DashboardPage() {
               <div className="card-subtitle">Input + Output</div>
             </div>
             <div className="card">
+              <div className="card-title">Cached Tokens</div>
+              <div className="card-value">
+                {summary ? (summary.totalCacheReadTokens || 0).toLocaleString() : "—"}
+              </div>
+              <div className="card-subtitle">
+                {summary && summary.totalInputTokens > 0
+                  ? `${((summary.totalCacheReadTokens / summary.totalInputTokens) * 100).toFixed(1)}% cache hit rate`
+                  : "Cache read tokens"}
+              </div>
+            </div>
+            <div className="card">
               <div className="card-title">Total Cost</div>
               <div className="card-value">
                 {summary ? `$${(summary.totalCostUsd || 0).toFixed(2)}` : "—"}

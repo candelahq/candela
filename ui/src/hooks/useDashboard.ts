@@ -16,6 +16,8 @@ export interface DashboardSummary {
   totalCostUsd: number;
   avgLatencyMs: number;
   errorRate: number;
+  totalCacheReadTokens: number;
+  totalCacheCreationTokens: number;
   // Time series
   tracesOverTime: DataPoint[];
   costOverTime: DataPoint[];
@@ -155,6 +157,8 @@ export function useDashboard() {
             totalCostUsd: res.totalCostUsd,
             avgLatencyMs: res.avgLatencyMs,
             errorRate: res.errorRate,
+            totalCacheReadTokens: Number(res.totalCacheReadTokens ?? 0),
+            totalCacheCreationTokens: Number(res.totalCacheCreationTokens ?? 0),
             tracesOverTime: toDataPoints(res.tracesOverTime, state.timeRange),
             costOverTime: toDataPoints(res.costOverTime, state.timeRange),
             tokensOverTime: toDataPoints(res.tokensOverTime, state.timeRange),

@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"net"
+	"sync"
 	"testing"
 	"time"
 
@@ -125,7 +126,7 @@ func TestListenerWildcardSNI(t *testing.T) {
 		{
 			Name:        "anthropic",
 			UpstreamURL: "https://us-central1-aiplatform.googleapis.com",
-			HostPattern: "*.aiplatform.googleapis.com",
+			HostPattern: "*-aiplatform.googleapis.com",
 		},
 	}
 	sniMap := proxy.BuildSNIMap(providers)
@@ -197,5 +198,59 @@ func sendTLSClientHello(t *testing.T, addr, serverName string) {
 	select {
 	case <-done:
 	case <-time.After(1 * time.Second):
+	}
+}
+
+// TestListenerConcurrentRace hammers the listener with many concurrent
+// connections to verify the Stats counters are race-free.
+// Run with: go test -race -count=1 ./pkg/transparent/...
+func TestListenerConcurrentRace(t *testing.T) {
+	providers := []proxy.Provider{
+		{Name: "openai", UpstreamURL: "https://api.openai.com"},
+	}
+	sniMap := proxy.BuildSNIMap(providers)
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("failed to listen: %v", err)
+	}
+
+	listener := transparent.NewListener(transparent.Config{
+		ListenAddr: ln.Addr().String(),
+		SNIMap:     sniMap,
+		ProxyAddr:  "127.0.0.1:0", // won't connect; that's fine
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	go func() {
+		_ = listener.ListenAndServeOnListener(ctx, ln)
+	}()
+	time.Sleep(50 * time.Millisecond)
+
+	// Send 50 concurrent TLS connections.
+	const N = 50
+	var wg sync.WaitGroup
+	wg.Add(N)
+	for i := 0; i < N; i++ {
+		go func() {
+			defer wg.Done()
+			sendTLSClientHello(t, ln.Addr().String(), "api.openai.com")
+		}()
+	}
+	wg.Wait()
+
+	// Give listener time to process.
+	time.Sleep(200 * time.Millisecond)
+
+	intercepted, passthrough, errors := listener.Stats().Snapshot()
+	total := intercepted + passthrough + errors
+
+	// We don't assert exact counts because upstream dials may fail,
+	// but the total must equal N (each connection is counted exactly once).
+	if total != N {
+		t.Errorf("total stats (%d intercepted + %d passthrough + %d errors = %d) != %d connections",
+			intercepted, passthrough, errors, total, N)
 	}
 }

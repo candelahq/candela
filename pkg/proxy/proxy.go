@@ -129,8 +129,9 @@ func (p Provider) ShouldIntercept() bool {
 type SNIMap struct {
 	// exact maps exact hostnames (e.g. "api.openai.com") → provider name.
 	exact map[string]string
-	// wildcards maps wildcard patterns (e.g. "*.aiplatform.googleapis.com") → provider name.
-	// Stored without the "*." prefix for suffix matching.
+	// wildcards maps wildcard suffixes (e.g. ".aiplatform.googleapis.com" or
+	// "-aiplatform.googleapis.com") → provider name.
+	// Stored as the literal suffix after the "*" character.
 	wildcards map[string]string
 }
 
@@ -148,7 +149,9 @@ func BuildSNIMap(providers []Provider) *SNIMap {
 		}
 		// Register wildcard pattern if present.
 		if p.HostPattern != "" {
-			suffix := strings.TrimPrefix(p.HostPattern, "*.")
+			// Store the suffix after "*" (e.g. "*.foo.com" → ".foo.com",
+			// "*-foo.com" → "-foo.com").
+			suffix := strings.TrimPrefix(p.HostPattern, "*")
 			if _, exists := m.wildcards[suffix]; !exists {
 				m.wildcards[suffix] = p.Name
 			}
@@ -177,9 +180,13 @@ func (m *SNIMap) Lookup(hostname string) (provider string, ok bool) {
 	if name, found := m.exact[hostname]; found {
 		return name, true
 	}
-	// Wildcard suffix match: "us-central1-aiplatform.googleapis.com" matches "*.aiplatform.googleapis.com"
+	// Wildcard suffix match: e.g. "us-central1-aiplatform.googleapis.com"
+	// matches "*-aiplatform.googleapis.com" (suffix "-aiplatform.googleapis.com").
+	// Also supports subdomain wildcards: "sub.example.com" matches
+	// "*.example.com" (suffix ".example.com").
 	for suffix, name := range m.wildcards {
-		if strings.HasSuffix(hostname, suffix) {
+		if len(hostname) > len(suffix) &&
+			hostname[len(hostname)-len(suffix):] == suffix {
 			return name, true
 		}
 	}
@@ -197,7 +204,7 @@ func (m *SNIMap) Hosts() []string {
 		hosts = append(hosts, h)
 	}
 	for suffix := range m.wildcards {
-		hosts = append(hosts, "*."+suffix)
+		hosts = append(hosts, "*"+suffix)
 	}
 	return hosts
 }

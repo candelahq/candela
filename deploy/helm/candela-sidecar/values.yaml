@@ -36,7 +36,7 @@ providers:
     host: api.anthropic.com
     intercept: true
   - name: anthropic-vertex
-    hostPattern: "*.aiplatform.googleapis.com"
+    hostPattern: "*-aiplatform.googleapis.com"
     intercept: true
   - name: google
     host: generativelanguage.googleapis.com

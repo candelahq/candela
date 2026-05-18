@@ -93,8 +93,8 @@ func TestBuildSNIMap(t *testing.T) {
 		{Name: "google", UpstreamURL: "https://generativelanguage.googleapis.com"},
 		// gemini-oai shares host with google, should not intercept.
 		{Name: "gemini-oai", UpstreamURL: "https://generativelanguage.googleapis.com/v1beta/openai", Intercept: boolPtr(false)},
-		// anthropic uses wildcard pattern for regional Vertex AI endpoints.
-		{Name: "anthropic", UpstreamURL: "https://us-central1-aiplatform.googleapis.com", HostPattern: "*.aiplatform.googleapis.com"},
+		// anthropic uses suffix pattern for regional Vertex AI endpoints.
+		{Name: "anthropic", UpstreamURL: "https://us-central1-aiplatform.googleapis.com", HostPattern: "*-aiplatform.googleapis.com"},
 		// anthropic-vertex shares host with anthropic, should not intercept.
 		{Name: "anthropic-vertex", UpstreamURL: "https://us-central1-aiplatform.googleapis.com", Intercept: boolPtr(false)},
 		{Name: "anthropic-direct", UpstreamURL: "https://api.anthropic.com"},
@@ -152,7 +152,7 @@ func TestBuildSNIMap(t *testing.T) {
 	t.Run("Hosts returns all registered entries", func(t *testing.T) {
 		hosts := m.Hosts()
 		// Should have: api.openai.com, generativelanguage.googleapis.com,
-		// api.anthropic.com, *.aiplatform.googleapis.com
+		// api.anthropic.com, *-aiplatform.googleapis.com
 		if len(hosts) != 4 {
 			t.Errorf("Hosts() returned %d entries, want 4: %v", len(hosts), hosts)
 		}
@@ -194,5 +194,66 @@ func TestSNIMapNil(t *testing.T) {
 	hosts := m.Hosts()
 	if hosts != nil {
 		t.Errorf("nil SNIMap.Hosts() should return nil, got %v", hosts)
+	}
+}
+
+func TestSNIMapWildcardBoundary(t *testing.T) {
+	// SECURITY: wildcard *-aiplatform.googleapis.com uses suffix pattern.
+	// The "*" matches any prefix before "-aiplatform.googleapis.com".
+	providers := []Provider{
+		{Name: "anthropic", UpstreamURL: "https://us-central1-aiplatform.googleapis.com", HostPattern: "*-aiplatform.googleapis.com"},
+	}
+	m := BuildSNIMap(providers)
+
+	tests := []struct {
+		hostname string
+		wantOK   bool
+		desc     string
+	}{
+		// Should match: GCP regional endpoints.
+		{"us-central1-aiplatform.googleapis.com", true, "valid GCP region"},
+		{"europe-west4-aiplatform.googleapis.com", true, "valid GCP region"},
+		{"a-aiplatform.googleapis.com", true, "single-char prefix"},
+
+		// Must NOT match: no "-aiplatform" suffix.
+		{"aiplatform.googleapis.com", false, "bare suffix (no prefix)"},
+		{"api.openai.com", false, "unrelated hostname"},
+
+		// Now test subdomain-style wildcards too.
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.desc, func(t *testing.T) {
+			_, ok := m.Lookup(tt.hostname)
+			if ok != tt.wantOK {
+				t.Errorf("Lookup(%q) ok = %v, want %v", tt.hostname, ok, tt.wantOK)
+			}
+		})
+	}
+
+	// Also verify subdomain-style wildcards (*.example.com) still work.
+	subProviders := []Provider{
+		{Name: "test", HostPattern: "*.example.com"},
+	}
+	sm := BuildSNIMap(subProviders)
+
+	subTests := []struct {
+		hostname string
+		wantOK   bool
+		desc     string
+	}{
+		{"sub.example.com", true, "subdomain match"},
+		{"deep.sub.example.com", true, "deep subdomain"},
+		{"example.com", false, "bare domain (no subdomain)"},
+		{"notexample.com", false, "different domain entirely"},
+	}
+
+	for _, tt := range subTests {
+		t.Run("subdomain/"+tt.desc, func(t *testing.T) {
+			_, ok := sm.Lookup(tt.hostname)
+			if ok != tt.wantOK {
+				t.Errorf("Lookup(%q) ok = %v, want %v", tt.hostname, ok, tt.wantOK)
+			}
+		})
 	}
 }

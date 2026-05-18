@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net"
 	"sync"
+	"time"
 
 	"github.com/candelahq/candela/pkg/proxy"
 )
@@ -163,10 +164,12 @@ func (l *Listener) handleConn(conn net.Conn) {
 	defer func() { _ = conn.Close() }()
 
 	// Peek the first bytes to extract the TLS ClientHello SNI.
-	// We use a PeekConn to buffer the peeked bytes so they can be
-	// replayed to the upstream connection.
-	peekBuf := make([]byte, 4096)
+	// The peeked bytes are replayed to the upstream connection.
+	// 16KB is sufficient for TLS 1.3 ClientHello with ECH + GREASE extensions.
+	_ = conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+	peekBuf := make([]byte, 16384)
 	n, err := conn.Read(peekBuf)
+	_ = conn.SetReadDeadline(time.Time{}) // clear deadline for tunnel phase
 	if err != nil {
 		slog.Debug("transparent: failed to read ClientHello", "error", err)
 		l.stats.incErrors()

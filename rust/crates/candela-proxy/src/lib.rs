@@ -111,7 +111,9 @@ impl SNIMap {
             }
             // Register wildcard pattern if present.
             if let Some(ref pattern) = p.host_pattern {
-                let suffix = pattern.strip_prefix("*.").unwrap_or(pattern);
+                // Store the suffix after "*" (e.g. "*.foo.com" → ".foo.com",
+                // "*-foo.com" → "-foo.com").
+                let suffix = pattern.strip_prefix('*').unwrap_or(pattern);
                 wildcards
                     .entry(suffix.to_string())
                     .or_insert_with(|| p.name.clone());
@@ -133,9 +135,13 @@ impl SNIMap {
         if let Some(name) = self.exact.get(hostname) {
             return Some(name.as_str());
         }
-        // Wildcard suffix match.
+        // Wildcard suffix match: e.g. "us-central1-aiplatform.googleapis.com"
+        // matches "*-aiplatform.googleapis.com" (suffix "-aiplatform.googleapis.com").
+        // Also supports subdomain wildcards: "sub.example.com" matches
+        // "*.example.com" (suffix ".example.com").
         for (suffix, name) in &self.wildcards {
-            if hostname.ends_with(suffix.as_str()) {
+            if hostname.len() > suffix.len() && hostname[hostname.len() - suffix.len()..] == *suffix
+            {
                 return Some(name.as_str());
             }
         }
@@ -147,7 +153,7 @@ impl SNIMap {
     pub fn hosts(&self) -> Vec<String> {
         let mut result: Vec<String> = self.exact.keys().cloned().collect();
         for suffix in self.wildcards.keys() {
-            result.push(format!("*.{}", suffix));
+            result.push(format!("*{}", suffix));
         }
         result
     }
@@ -391,7 +397,7 @@ mod tests {
     #[test]
     fn sni_map_wildcard_lookup() {
         let providers = vec![Provider {
-            host_pattern: Some("*.aiplatform.googleapis.com".into()),
+            host_pattern: Some("*-aiplatform.googleapis.com".into()),
             ..test_provider("anthropic", "https://us-central1-aiplatform.googleapis.com")
         }];
         let m = SNIMap::build(&providers);
@@ -434,7 +440,7 @@ mod tests {
             test_provider("openai", "https://api.openai.com"),
             test_provider("anthropic-direct", "https://api.anthropic.com"),
             Provider {
-                host_pattern: Some("*.aiplatform.googleapis.com".into()),
+                host_pattern: Some("*-aiplatform.googleapis.com".into()),
                 ..test_provider("anthropic", "https://us-central1-aiplatform.googleapis.com")
             },
         ];
@@ -445,7 +451,7 @@ mod tests {
         assert_eq!(hosts.len(), 3);
         assert!(hosts.contains(&"api.openai.com".to_string()));
         assert!(hosts.contains(&"api.anthropic.com".to_string()));
-        assert!(hosts.contains(&"*.aiplatform.googleapis.com".to_string()));
+        assert!(hosts.contains(&"*-aiplatform.googleapis.com".to_string()));
     }
 
     #[test]
@@ -456,5 +462,60 @@ mod tests {
         ];
         let m = SNIMap::build(&providers);
         assert_eq!(m.lookup("api.openai.com"), Some("first"));
+    }
+
+    /// SECURITY: verify both suffix patterns (*-foo.com) and subdomain
+    /// patterns (*.foo.com) work correctly.
+    #[test]
+    fn sni_map_wildcard_boundary_security() {
+        // Test suffix pattern (GCP Vertex AI style).
+        let providers = vec![Provider {
+            host_pattern: Some("*-aiplatform.googleapis.com".into()),
+            ..test_provider("anthropic", "https://us-central1-aiplatform.googleapis.com")
+        }];
+        let m = SNIMap::build(&providers);
+
+        // Should match: GCP regional endpoints.
+        assert_eq!(
+            m.lookup("us-central1-aiplatform.googleapis.com"),
+            Some("anthropic"),
+            "valid GCP region should match"
+        );
+        assert_eq!(
+            m.lookup("europe-west4-aiplatform.googleapis.com"),
+            Some("anthropic"),
+            "valid GCP region should match"
+        );
+
+        // Must NOT match: bare suffix (no prefix).
+        assert_eq!(
+            m.lookup("aiplatform.googleapis.com"),
+            None,
+            "bare suffix must not match"
+        );
+
+        // Test subdomain pattern (traditional wildcard).
+        let sub_providers = vec![Provider {
+            host_pattern: Some("*.example.com".into()),
+            ..test_provider("test", "https://example.com")
+        }];
+        let sm = SNIMap::build(&sub_providers);
+
+        assert_eq!(
+            sm.lookup("sub.example.com"),
+            Some("test"),
+            "subdomain should match"
+        );
+        assert_eq!(
+            sm.lookup("deep.sub.example.com"),
+            Some("test"),
+            "deep subdomain should match"
+        );
+        assert_eq!(sm.lookup("example.com"), None, "bare domain must not match");
+        assert_eq!(
+            sm.lookup("notexample.com"),
+            None,
+            "different domain must not match"
+        );
     }
 }

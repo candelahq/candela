@@ -125,8 +125,8 @@ func TestADCTokenFailure(t *testing.T) {
 	}
 
 	body, _ := io.ReadAll(resp.Body)
-	if !strings.Contains(string(body), "GCP credentials") {
-		t.Errorf("error body = %q, should mention GCP credentials", body)
+	if !strings.Contains(string(body), "cloud credentials") {
+		t.Errorf("error body = %q, should mention cloud credentials", body)
 	}
 }
 

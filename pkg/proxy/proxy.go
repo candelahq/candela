@@ -29,6 +29,7 @@ import (
 
 	"github.com/candelahq/candela/pkg/attribution"
 	"github.com/candelahq/candela/pkg/auth"
+	"github.com/candelahq/candela/pkg/cloudauth"
 	"github.com/candelahq/candela/pkg/costcalc"
 	"github.com/candelahq/candela/pkg/notify"
 	"github.com/candelahq/candela/pkg/storage"
@@ -70,7 +71,7 @@ const DefaultVertexAnthropicVersion = "vertex-2023-10-16"
 
 // Provider defines an LLM API provider configuration.
 type Provider struct {
-	Name        string `yaml:"name"`     // "openai", "google", "anthropic", "gemini-oai"
+	Name        string `yaml:"name"`     // "openai", "google", "anthropic", "gemini-oai", "anthropic-bedrock"
 	UpstreamURL string `yaml:"upstream"` // e.g. "https://api.openai.com"
 
 	// FormatTranslator handles format translation (nil = transparent passthrough).
@@ -81,6 +82,11 @@ type Provider struct {
 
 	// TokenSource provides auto-refreshing auth tokens (e.g. GCP ADC). Nil = forward client auth.
 	TokenSource oauth2.TokenSource `yaml:"-"`
+
+	// RequestSigner signs outbound requests for providers that use request-level
+	// signing rather than Bearer tokens (e.g., AWS SigV4 for Bedrock).
+	// When set, takes precedence over TokenSource for auth injection.
+	RequestSigner cloudauth.RequestSigner `yaml:"-"`
 
 	// AnthropicVersion overrides the anthropic_version injected into Vertex AI
 	// rawPredict bodies. Empty = DefaultVertexAnthropicVersion.
@@ -736,13 +742,19 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 			fmt.Sprintf("00-%s-%s-01", traceCtx.traceID, proxySpanID))
 	}
 
-	// --- ADC token injection ---
-	// If the provider has a TokenSource, replace the auth header with a fresh token.
-	if provider.TokenSource != nil {
+	// --- Auth injection ---
+	// RequestSigner (e.g., AWS SigV4) takes precedence over TokenSource (Bearer tokens).
+	if provider.RequestSigner != nil {
+		if signErr := provider.RequestSigner.SignRequest(r.Context(), upstreamReq, upstreamBody); signErr != nil {
+			slog.Error("failed to sign request", "provider", providerName, "error", signErr)
+			http.Error(w, "failed to sign upstream request", http.StatusInternalServerError)
+			return
+		}
+	} else if provider.TokenSource != nil {
 		token, tokenErr := provider.TokenSource.Token()
 		if tokenErr != nil {
-			slog.Error("failed to get ADC token", "provider", providerName, "error", tokenErr)
-			http.Error(w, "failed to obtain GCP credentials", http.StatusInternalServerError)
+			slog.Error("failed to get auth token", "provider", providerName, "error", tokenErr)
+			http.Error(w, "failed to obtain cloud credentials", http.StatusInternalServerError)
 			return
 		}
 		upstreamReq.Header.Set("Authorization", "Bearer "+token.AccessToken)

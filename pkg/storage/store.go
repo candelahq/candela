@@ -280,6 +280,11 @@ type ModelUsage struct {
 	OutputTokens int64
 	CostUSD      float64
 	AvgLatencyMs float64
+
+	// Cache token aggregates per model — raw counts from provider APIs.
+	// Populated by CombinedUsageReader; zero when fetched via GetModelBreakdown.
+	CacheReadTokens     int64
+	CacheCreationTokens int64
 }
 
 type JobUsageSummary struct {

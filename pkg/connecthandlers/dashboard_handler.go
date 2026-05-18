@@ -179,7 +179,7 @@ func (h *DashboardHandler) GetMyUsage(
 	var models []storage.ModelUsage
 
 	if combined, ok := h.store.(storage.CombinedUsageReader); ok {
-		// Single BQ query via GROUP BY ROLLUP — halves BQ cost for this RPC.
+		// Single BQ query via GROUP BY GROUPING SETS — halves BQ cost for this RPC.
 		s, m, err := combined.GetUsageWithModelBreakdown(ctx, q)
 		if err != nil {
 			return nil, internalError("failed to get combined usage", err)

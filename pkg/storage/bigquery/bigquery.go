@@ -767,6 +767,44 @@ func (s *Store) GetModelBreakdown(ctx context.Context, uq storage.UsageQuery) ([
 	return models, nil
 }
 
+// combinedUsageSQL is the GROUPING SETS query used by GetUsageWithModelBreakdown.
+// Extracted as a const for reviewability. The single %s placeholder is the
+// fully-qualified table name injected via quoteTable().
+const combinedUsageSQL = `
+	SELECT
+		gen_ai_model AS model,
+		gen_ai_provider AS provider,
+		COUNT(DISTINCT trace_id) AS total_traces,
+		COUNT(*) AS total_spans,
+		COUNTIF(kind = @llmKind) AS total_llm_calls,
+		COALESCE(SUM(gen_ai_input_tokens), 0) AS total_input_tokens,
+		COALESCE(SUM(gen_ai_output_tokens), 0) AS total_output_tokens,
+		COALESCE(SUM(gen_ai_total_tokens), 0) AS total_tokens,
+		COALESCE(SUM(gen_ai_cost_usd), 0) AS total_cost_usd,
+		COALESCE(
+			AVG(CASE WHEN parent_span_id = '' THEN duration_ns ELSE NULL END),
+			AVG(CASE WHEN kind = @llmKind THEN duration_ns ELSE NULL END),
+			0
+		) AS avg_duration_ns,
+		CASE WHEN COUNT(DISTINCT trace_id) > 0
+			THEN CAST(COUNT(DISTINCT CASE WHEN status = 2 THEN trace_id ELSE NULL END) AS FLOAT64) / COUNT(DISTINCT trace_id)
+			ELSE 0 END AS error_rate,
+		COALESCE(SUM(gen_ai_cache_read_tokens), 0) AS total_cache_read_tokens,
+		COALESCE(SUM(gen_ai_cache_creation_tokens), 0) AS total_cache_creation_tokens,
+		GROUPING(gen_ai_model) AS is_total
+	FROM %s
+	WHERE (@projectID = '' OR project_id = @projectID)
+	  AND start_time >= @startTime
+	  AND start_time <= @endTime
+	  AND (@userID = '' OR user_id = @userID)
+	  AND (@tenantID = '' OR tenant_id = @tenantID)
+	GROUP BY GROUPING SETS (
+		(gen_ai_model, gen_ai_provider),
+		()
+	)
+	ORDER BY is_total DESC, total_cost_usd DESC
+`
+
 // GetUsageWithModelBreakdown fetches the usage summary and per-model breakdown
 // in a single BigQuery scan using GROUPING SETS. The overall summary is the row
 // where model IS NULL (the grand-total grouping set). Per-model rows have
@@ -775,40 +813,7 @@ func (s *Store) GetModelBreakdown(ctx context.Context, uq storage.UsageQuery) ([
 //
 // Implements [storage.CombinedUsageReader].
 func (s *Store) GetUsageWithModelBreakdown(ctx context.Context, uq storage.UsageQuery) (*storage.UsageSummary, []storage.ModelUsage, error) {
-	query := fmt.Sprintf(`
-		SELECT
-			gen_ai_model AS model,
-			gen_ai_provider AS provider,
-			COUNT(DISTINCT trace_id) AS total_traces,
-			COUNT(*) AS total_spans,
-			COUNTIF(kind = @llmKind) AS total_llm_calls,
-			COALESCE(SUM(gen_ai_input_tokens), 0) AS total_input_tokens,
-			COALESCE(SUM(gen_ai_output_tokens), 0) AS total_output_tokens,
-			COALESCE(SUM(gen_ai_total_tokens), 0) AS total_tokens,
-			COALESCE(SUM(gen_ai_cost_usd), 0) AS total_cost_usd,
-			COALESCE(
-				AVG(CASE WHEN parent_span_id = '' THEN duration_ns ELSE NULL END),
-				AVG(CASE WHEN kind = @llmKind THEN duration_ns ELSE NULL END),
-				0
-			) AS avg_duration_ns,
-			CASE WHEN COUNT(DISTINCT trace_id) > 0
-				THEN CAST(COUNT(DISTINCT CASE WHEN status = 2 THEN trace_id ELSE NULL END) AS FLOAT64) / COUNT(DISTINCT trace_id)
-				ELSE 0 END AS error_rate,
-			COALESCE(SUM(gen_ai_cache_read_tokens), 0) AS total_cache_read_tokens,
-			COALESCE(SUM(gen_ai_cache_creation_tokens), 0) AS total_cache_creation_tokens,
-			GROUPING(gen_ai_model) AS is_total
-		FROM %s
-		WHERE (@projectID = '' OR project_id = @projectID)
-		  AND start_time >= @startTime
-		  AND start_time <= @endTime
-		  AND (@userID = '' OR user_id = @userID)
-		  AND (@tenantID = '' OR tenant_id = @tenantID)
-		GROUP BY GROUPING SETS (
-			(gen_ai_model, gen_ai_provider),
-			()
-		)
-		ORDER BY is_total DESC, total_cost_usd DESC
-	`, quoteTable(s.tableID))
+	query := fmt.Sprintf(combinedUsageSQL, quoteTable(s.tableID))
 
 	q := s.client.Query(query)
 	q.Parameters = []bigquery.QueryParameter{
@@ -862,7 +867,7 @@ func (s *Store) GetUsageWithModelBreakdown(ctx context.Context, uq storage.Usage
 				TotalInputTokens:         row.TotalInputTokens,
 				TotalOutputTokens:        row.TotalOutputTokens,
 				TotalCostUSD:             row.TotalCostUSD,
-				AvgLatencyMs:             float64(row.AvgDurationNs) / 1e6,
+				AvgLatencyMs:             row.AvgDurationNs / 1e6,
 				ErrorRate:                row.ErrorRate,
 				TotalCacheReadTokens:     row.TotalCacheReadTokens,
 				TotalCacheCreationTokens: row.TotalCacheCreationTokens,
@@ -881,13 +886,15 @@ func (s *Store) GetUsageWithModelBreakdown(ctx context.Context, uq storage.Usage
 				provider = row.Provider.StringVal
 			}
 			models = append(models, storage.ModelUsage{
-				Model:        model,
-				Provider:     provider,
-				CallCount:    row.TotalLLMCalls,
-				InputTokens:  row.TotalInputTokens,
-				OutputTokens: row.TotalOutputTokens,
-				CostUSD:      row.TotalCostUSD,
-				AvgLatencyMs: float64(row.AvgDurationNs) / 1e6,
+				Model:               model,
+				Provider:            provider,
+				CallCount:           row.TotalLLMCalls,
+				InputTokens:         row.TotalInputTokens,
+				OutputTokens:        row.TotalOutputTokens,
+				CostUSD:             row.TotalCostUSD,
+				AvgLatencyMs:        row.AvgDurationNs / 1e6,
+				CacheReadTokens:     row.TotalCacheReadTokens,
+				CacheCreationTokens: row.TotalCacheCreationTokens,
 			})
 		}
 	}

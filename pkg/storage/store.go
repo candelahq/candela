@@ -336,6 +336,18 @@ type SpanReader interface {
 	Close() error
 }
 
+// CombinedUsageReader is an optional interface that storage backends can
+// implement to fetch a usage summary and per-model breakdown in a single
+// query instead of two separate queries. This is particularly beneficial
+// for columnar analytics engines (BigQuery, Databricks, Athena) where each
+// query job has fixed overhead.
+//
+// Backends that do not implement this interface will fall back to calling
+// GetUsageSummary + GetModelBreakdown concurrently.
+type CombinedUsageReader interface {
+	GetUsageWithModelBreakdown(ctx context.Context, q UsageQuery) (*UsageSummary, []ModelUsage, error)
+}
+
 // TraceStore combines read and write capabilities.
 // Embedded databases (DuckDB, SQLite) implement this. In production,
 // the write side (BigQuery Storage Write API) and read side (BigQuery SQL)

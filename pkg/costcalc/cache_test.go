@@ -306,15 +306,15 @@ func TestNormalizeCachedInput_AnthropicPreWarm(t *testing.T) {
 
 func TestNormalizeCachedInput_AnthropicMixedTTL(t *testing.T) {
 	// From official docs: mixed 5-min and 1-hour TTL response
-	// {"input_tokens": 2048, "cache_read": 1800, "cache_creation": 248}
-	// Our code treats all creation as 1.25× (5-min default).
-	// This is a known gap for 1-hour TTL (should be 2.0× for that portion).
+	// {\"input_tokens\": 2048, \"cache_read\": 1800, \"cache_creation\": 248}
+	// NormalizeCachedInput (no TTL arg) uses 5-min default: 1.25× for creation.
+	// For 1-hour TTL, use NormalizeCachedInputWithTTL with extendedTTL=true.
 	c := New()
 	result := c.NormalizeCachedInput("anthropic", "claude-sonnet-4-20250514", 2048, 1800, 248)
 	// Additive: 2048 + round(1800 * 0.1) + round(248 * 1.25)
 	//         = 2048 + 180 + 310 = 2538
 	if result != 2538 {
-		t.Errorf("mixed TTL = %d, want 2538", result)
+		t.Errorf("mixed TTL (5m default) = %d, want 2538", result)
 	}
 }
 
@@ -377,6 +377,96 @@ func TestNormalizeCachedInput_OverrideModeSwitch(t *testing.T) {
 	}
 }
 
+// ── Issue #191: Anthropic 1-hour cache TTL at 2.0× creation rate ─────────────
+
+func TestNormalizeCachedInputWithTTL_Anthropic_1hTTL(t *testing.T) {
+	c := New()
+	// 1-hour TTL: cache creation charged at 2.0× (not 1.25×).
+	// rawInput=100 (fresh), cacheRead=80, cacheCreate=10
+	// result = 100 + round(80*0.1) + round(10*2.0) = 100 + 8 + 20 = 128
+	result := c.NormalizeCachedInputWithTTL("anthropic", "claude-sonnet-4-20250514", 100, 80, 10, true)
+	if result != 128 {
+		t.Errorf("Anthropic 1h TTL = %d, want 128 (100 fresh + 8 read@0.1× + 20 create@2.0×)", result)
+	}
+}
+
+func TestNormalizeCachedInputWithTTL_Anthropic_5mTTL(t *testing.T) {
+	c := New()
+	// 5-minute TTL (extendedTTL=false): same as NormalizeCachedInput default.
+	// rawInput=100 (fresh), cacheRead=80, cacheCreate=10
+	// result = 100 + round(80*0.1) + round(10*1.25) = 100 + 8 + 13 = 121
+	result := c.NormalizeCachedInputWithTTL("anthropic", "claude-sonnet-4-20250514", 100, 80, 10, false)
+	if result != 121 {
+		t.Errorf("Anthropic 5m TTL = %d, want 121 (same as default)", result)
+	}
+}
+
+func TestNormalizeCachedInputWithTTL_AnthropicVertex_1hTTL(t *testing.T) {
+	c := New()
+	// anthropic-vertex alias should also get 2.0× for 1h TTL.
+	result := c.NormalizeCachedInputWithTTL("anthropic-vertex", "claude-sonnet-4-20250514", 100, 80, 10, true)
+	if result != 128 {
+		t.Errorf("anthropic-vertex 1h TTL = %d, want 128", result)
+	}
+}
+
+func TestNormalizeCachedInputWithTTL_AnthropicDirect_1hTTL(t *testing.T) {
+	c := New()
+	// anthropic-direct alias should also get 2.0× for 1h TTL.
+	result := c.NormalizeCachedInputWithTTL("anthropic-direct", "claude-sonnet-4-20250514", 100, 80, 10, true)
+	if result != 128 {
+		t.Errorf("anthropic-direct 1h TTL = %d, want 128", result)
+	}
+}
+
+func TestNormalizeCachedInputWithTTL_NonAnthropic_Ignored(t *testing.T) {
+	c := New()
+	// extendedTTL=true should be ignored for non-Anthropic providers.
+	// OpenAI: 100 total, 90 cache_read, 0 cache_creation
+	// nonCached = 10, cached_eq = round(90*0.5) = 45 → result = 55
+	result := c.NormalizeCachedInputWithTTL("openai", "gpt-4o", 100, 90, 0, true)
+	if result != 55 {
+		t.Errorf("OpenAI with extendedTTL=true = %d, want 55 (TTL ignored for non-Anthropic)", result)
+	}
+}
+
+func TestNormalizeCachedInputWithTTL_ReadOnly_TTLIrrelevant(t *testing.T) {
+	c := New()
+	// When there are no cache creation tokens, TTL doesn't matter.
+	// Read discount is always 0.1× regardless of TTL.
+	result5m := c.NormalizeCachedInputWithTTL("anthropic", "claude-sonnet-4-20250514", 50, 100000, 0, false)
+	result1h := c.NormalizeCachedInputWithTTL("anthropic", "claude-sonnet-4-20250514", 50, 100000, 0, true)
+	if result5m != result1h {
+		t.Errorf("read-only: 5m=%d vs 1h=%d — should be identical (no creation tokens)", result5m, result1h)
+	}
+	if result5m != 10050 {
+		t.Errorf("read-only = %d, want 10050", result5m)
+	}
+}
+
+func TestNormalizeCachedInputWithTTL_PreWarm_1hTTL(t *testing.T) {
+	c := New()
+	// Pre-warm with 1-hour TTL: all creation, no reads.
+	// {\"input_tokens\": 8, \"cache_creation_input_tokens\": 5120, \"cache_read_input_tokens\": 0}
+	// result = 8 + round(0 * 0.1) + round(5120 * 2.0) = 8 + 0 + 10240 = 10248
+	result := c.NormalizeCachedInputWithTTL("anthropic", "claude-opus-4.6", 8, 0, 5120, true)
+	if result != 10248 {
+		t.Errorf("pre-warm 1h TTL = %d, want 10248 (8 fresh + 10240 create@2.0×)", result)
+	}
+}
+
+func TestNormalizeCachedInputWithTTL_MixedTTL_1h(t *testing.T) {
+	c := New()
+	// Same scenario as TestNormalizeCachedInput_AnthropicMixedTTL, but with 1h TTL.
+	// {\"input_tokens\": 2048, \"cache_read\": 1800, \"cache_creation\": 248}
+	// Additive: 2048 + round(1800 * 0.1) + round(248 * 2.0)
+	//         = 2048 + 180 + 496 = 2724
+	result := c.NormalizeCachedInputWithTTL("anthropic", "claude-sonnet-4-20250514", 2048, 1800, 248, true)
+	if result != 2724 {
+		t.Errorf("mixed TTL (1h) = %d, want 2724", result)
+	}
+}
+
 // ── End-to-end: normalize → Calculate → correct dollar amount ────────────────
 
 func TestNormalizeThenCalculate_Anthropic_E2E(t *testing.T) {
@@ -429,5 +519,29 @@ func TestNormalizeThenCalculate_OpenAI_E2E(t *testing.T) {
 	wantCost := 0.025
 	if cost < wantCost-0.001 || cost > wantCost+0.001 {
 		t.Errorf("OpenAI E2E cost = %f, want ~%f", cost, wantCost)
+	}
+}
+
+func TestNormalizeThenCalculate_Anthropic_1hTTL_E2E(t *testing.T) {
+	c := New()
+	// Claude Sonnet 4: $3.00/M input, $15.00/M output.
+	// 1-hour TTL pre-warm: 8 fresh + 0 read + 5120 creation
+	normalized := c.NormalizeCachedInputWithTTL("anthropic", "claude-sonnet-4-20250514", 8, 0, 5120, true)
+	// normalized = 8 + 0 + round(5120 * 2.0) = 8 + 10240 = 10248
+
+	cost := c.Calculate("anthropic", "claude-sonnet-4-20250514", normalized, 0)
+	// Expected: input = 10248/1M * $3.00 = $0.030744
+	wantCost := 0.030744
+	if cost < wantCost-0.001 || cost > wantCost+0.001 {
+		t.Errorf("1h TTL E2E cost = %f, want ~%f", cost, wantCost)
+	}
+
+	// Compare with 5m TTL for same tokens — should be cheaper.
+	normalized5m := c.NormalizeCachedInputWithTTL("anthropic", "claude-sonnet-4-20250514", 8, 0, 5120, false)
+	cost5m := c.Calculate("anthropic", "claude-sonnet-4-20250514", normalized5m, 0)
+	// normalized5m = 8 + round(5120 * 1.25) = 8 + 6400 = 6408
+	// cost5m = 6408/1M * $3.00 = $0.019224
+	if cost <= cost5m {
+		t.Errorf("1h TTL cost ($%f) should be MORE than 5m TTL cost ($%f)", cost, cost5m)
 	}
 }

@@ -631,3 +631,82 @@ func injectStreamUsageOption(provider string, body []byte) []byte {
 	}
 	return modified
 }
+
+// isAnthropicProvider returns true if the provider name corresponds to an
+// Anthropic provider (direct, vertex, or canonical). Used to restrict
+// Anthropic-specific processing (like cache TTL body inspection) to only
+// relevant traffic, avoiding unnecessary overhead for other providers.
+func isAnthropicProvider(provider string) bool {
+	switch provider {
+	case "anthropic", "anthropic-direct", "anthropic-vertex":
+		return true
+	default:
+		return strings.HasPrefix(provider, "anthropic-")
+	}
+}
+
+// extractAnthropicCacheTTL inspects an Anthropic request body for cache_control
+// blocks that specify a 1-hour TTL. Returns true if ANY content block in the
+// system prompt or messages contains {"cache_control": {"ttl": "1h"}}.
+//
+// This is used for passthrough Anthropic routes (anthropic-direct,
+// anthropic-vertex) where the client sets cache_control directly — the proxy
+// doesn't inject it via FormatTranslator and thus has no TTL state.
+//
+// For translated requests (OpenAI → Anthropic), the proxy already knows the
+// TTL from the AnthropicFormatTranslator config.
+func extractAnthropicCacheTTL(body []byte) bool {
+	// Fast-path: skip full JSON parsing if the body doesn't contain "ttl"
+	// at all. This avoids expensive unmarshal for the common case where no
+	// extended TTL is set.
+	if !bytes.Contains(body, []byte(`"ttl"`)) {
+		return false
+	}
+
+	var req map[string]interface{}
+	if err := json.Unmarshal(body, &req); err != nil {
+		return false
+	}
+
+	// Check system prompt (can be string or []content_block).
+	if sys, ok := req["system"].([]interface{}); ok {
+		for _, block := range sys {
+			if hasCacheTTL1h(block) {
+				return true
+			}
+		}
+	}
+
+	// Check messages[].content blocks.
+	if messages, ok := req["messages"].([]interface{}); ok {
+		for _, msg := range messages {
+			msgMap, ok := msg.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			if content, ok := msgMap["content"].([]interface{}); ok {
+				for _, block := range content {
+					if hasCacheTTL1h(block) {
+						return true
+					}
+				}
+			}
+		}
+	}
+
+	return false
+}
+
+// hasCacheTTL1h checks if a content block has cache_control with ttl "1h".
+func hasCacheTTL1h(block interface{}) bool {
+	blockMap, ok := block.(map[string]interface{})
+	if !ok {
+		return false
+	}
+	cc, ok := blockMap["cache_control"].(map[string]interface{})
+	if !ok {
+		return false
+	}
+	ttl, _ := cc["ttl"].(string)
+	return ttl == "1h"
+}

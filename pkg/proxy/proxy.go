@@ -782,10 +782,26 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 			"provider", providerName, "path", upstreamPath, "request_id", requestID)
 	}
 
+	// ── Resolve effective cache TTL for Anthropic cost normalization (#191) ──
+	// Determines whether cache creation tokens should be charged at 2.0× (1h)
+	// or the default 1.25× (5m). Three sources, in priority order:
+	//   1. Per-request header override (X-Candela-Cache-TTL)
+	//   2. Translator config (AnthropicFormatTranslator.GetCacheTTL)
+	//   3. Request body inspection (passthrough routes: cache_control.ttl)
+	extendedTTL := false
+	if ttlOverride != "" {
+		extendedTTL = ParseCacheTTL(ttlOverride) == CacheTTL1h
+	} else if ft, ok := provider.FormatTranslator.(*AnthropicFormatTranslator); ok {
+		extendedTTL = ft.GetCacheTTL() == CacheTTL1h
+	} else if provider.FormatTranslator == nil && isAnthropicProvider(providerName) {
+		// Passthrough Anthropic routes — inspect request body.
+		extendedTTL = extractAnthropicCacheTTL(reqBody)
+	}
+
 	if isStreaming && resp.StatusCode == http.StatusOK {
-		p.handleStreamingResponse(w, r, resp, provider, reqBody, startTime, ttfb, requestID, sessionID, effectiveUserID, tenantID, jobID, cbAllow, traceCtx, proxySpanID)
+		p.handleStreamingResponse(w, r, resp, provider, reqBody, startTime, ttfb, requestID, sessionID, effectiveUserID, tenantID, jobID, cbAllow, traceCtx, proxySpanID, extendedTTL)
 	} else {
-		p.handleStandardResponse(w, r, resp, provider, reqBody, startTime, ttfb, requestID, sessionID, effectiveUserID, tenantID, jobID, cbAllow, traceCtx, proxySpanID)
+		p.handleStandardResponse(w, r, resp, provider, reqBody, startTime, ttfb, requestID, sessionID, effectiveUserID, tenantID, jobID, cbAllow, traceCtx, proxySpanID, extendedTTL)
 	}
 }
 
@@ -820,6 +836,7 @@ func (p *Proxy) handleStandardResponse(
 	cbAllow bool,
 	traceCtx *traceContext,
 	proxySpanID string,
+	extendedTTL bool, // true = Anthropic 1h TTL (2.0× cache creation rate)
 ) {
 	// Read the full response (reject if over 10MB to prevent OOM under concurrent load).
 	// CRIT-15: Previously 50MB — with 100 concurrent requests that's 5GB of heap.
@@ -882,7 +899,7 @@ func (p *Proxy) handleStandardResponse(
 		if model == "" {
 			model = extractModelFromResponse(provider.Name, respBody)
 		}
-		inputTokens = p.calc.NormalizeCachedInput(provider.Name, model, inputTokens, ct.CacheReadTokens, ct.CacheCreationTokens)
+		inputTokens = p.calc.NormalizeCachedInputWithTTL(provider.Name, model, inputTokens, ct.CacheReadTokens, ct.CacheCreationTokens, extendedTTL)
 		deductCtx, deductCancel := context.WithTimeout(context.WithoutCancel(r.Context()), 15*time.Second)
 		p.deductBudget(deductCtx, provider, model, effectiveUserID, inputTokens, outputTokens)
 		deductCancel()
@@ -898,7 +915,7 @@ func (p *Proxy) handleStandardResponse(
 			go func() {
 				defer func() { <-p.spanSem }()
 				defer spanCancel()
-				p.createSpan(spanCtx, provider, reqBody, respBody, startTime, endTime, resp.StatusCode, ttfb, requestID, sessionID, effectiveUserID, tenantID, jobID, traceCtx, proxySpanID)
+				p.createSpan(spanCtx, provider, reqBody, respBody, startTime, endTime, resp.StatusCode, ttfb, requestID, sessionID, effectiveUserID, tenantID, jobID, traceCtx, proxySpanID, extendedTTL)
 			}()
 		default:
 			spanCancel()
@@ -922,6 +939,7 @@ func (p *Proxy) handleStreamingResponse(
 	cbAllow bool,
 	traceCtx *traceContext,
 	proxySpanID string,
+	extendedTTL bool, // true = Anthropic 1h TTL (2.0× cache creation rate)
 ) {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
@@ -1022,7 +1040,7 @@ func (p *Proxy) handleStreamingResponse(
 		if model == "" {
 			model = extractModelFromStreamingResponse(provider.Name, parseData)
 		}
-		inputTokens = p.calc.NormalizeCachedInput(provider.Name, model, inputTokens, ct.CacheReadTokens, ct.CacheCreationTokens)
+		inputTokens = p.calc.NormalizeCachedInputWithTTL(provider.Name, model, inputTokens, ct.CacheReadTokens, ct.CacheCreationTokens, extendedTTL)
 		deductCtx, deductCancel := context.WithTimeout(context.WithoutCancel(r.Context()), 15*time.Second)
 		p.deductBudget(deductCtx, provider, model, effectiveUserID, inputTokens, outputTokens)
 		deductCancel()
@@ -1037,7 +1055,7 @@ func (p *Proxy) handleStreamingResponse(
 			go func() {
 				defer func() { <-p.spanSem }()
 				defer spanCancel()
-				p.createStreamingSpan(spanCtx, provider, reqBody, parseData, startTime, endTime, ttfb, ttft, requestID, sessionID, effectiveUserID, tenantID, jobID, streamStatus, traceCtx, proxySpanID)
+				p.createStreamingSpan(spanCtx, provider, reqBody, parseData, startTime, endTime, ttfb, ttft, requestID, sessionID, effectiveUserID, tenantID, jobID, streamStatus, traceCtx, proxySpanID, extendedTTL)
 			}()
 		default:
 			spanCancel()
@@ -1250,6 +1268,7 @@ func (p *Proxy) createSpan(
 	jobID string,
 	traceCtx *traceContext,
 	proxySpanID string,
+	extendedTTL bool,
 ) {
 	model, inputContent := extractRequestInfo(provider.Name, reqBody)
 	outputContent, inputTokens, outputTokens := extractResponseInfo(provider.Name, respBody)
@@ -1262,7 +1281,8 @@ func (p *Proxy) createSpan(
 	}
 
 	// Normalize cached input tokens via the calculator (handles all providers).
-	inputTokens = p.calc.NormalizeCachedInput(provider.Name, model, inputTokens, ct.CacheReadTokens, ct.CacheCreationTokens)
+	// extendedTTL applies 2.0× for Anthropic 1-hour cache creation (#191).
+	inputTokens = p.calc.NormalizeCachedInputWithTTL(provider.Name, model, inputTokens, ct.CacheReadTokens, ct.CacheCreationTokens, extendedTTL)
 
 	status := storage.SpanStatusOK
 	if statusCode >= 400 {
@@ -1309,6 +1329,7 @@ func (p *Proxy) createStreamingSpan(
 	streamStatus storage.SpanStatus,
 	traceCtx *traceContext,
 	proxySpanID string,
+	extendedTTL bool,
 ) {
 	model, inputContent := extractRequestInfo(provider.Name, reqBody)
 	outputContent, inputTokens, outputTokens := extractStreamingUsage(provider.Name, streamData)
@@ -1321,7 +1342,8 @@ func (p *Proxy) createStreamingSpan(
 	}
 
 	// Normalize cached input tokens via the calculator (handles all providers).
-	inputTokens = p.calc.NormalizeCachedInput(provider.Name, model, inputTokens, ct.CacheReadTokens, ct.CacheCreationTokens)
+	// extendedTTL applies 2.0× for Anthropic 1-hour cache creation (#191).
+	inputTokens = p.calc.NormalizeCachedInputWithTTL(provider.Name, model, inputTokens, ct.CacheReadTokens, ct.CacheCreationTokens, extendedTTL)
 
 	p.buildSpan(ctx, spanParams{
 		provider:        provider,

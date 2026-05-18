@@ -158,8 +158,8 @@ func TestGetDashboardData_EmptyBody_Returns200(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetDashboardData with empty body should return 200: %v", err)
 	}
-	if resp.Msg.TotalLlmCalls != 0 {
-		t.Errorf("TotalLlmCalls = %d, want 0", resp.Msg.TotalLlmCalls)
+	if resp.Msg.Summary.TotalLlmCalls != 0 {
+		t.Errorf("TotalLlmCalls = %d, want 0", resp.Msg.Summary.TotalLlmCalls)
 	}
 }
 
@@ -170,11 +170,11 @@ func TestGetDashboardData_WithTimeRange_ReturnsSummary(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetDashboardData should succeed: %v", err)
 	}
-	if resp.Msg.TotalLlmCalls != 42 {
-		t.Errorf("TotalLlmCalls = %d, want 42", resp.Msg.TotalLlmCalls)
+	if resp.Msg.Summary.TotalLlmCalls != 42 {
+		t.Errorf("TotalLlmCalls = %d, want 42", resp.Msg.Summary.TotalLlmCalls)
 	}
-	if resp.Msg.TotalCostUsd != 1.23 {
-		t.Errorf("TotalCostUsd = %f, want 1.23", resp.Msg.TotalCostUsd)
+	if resp.Msg.Summary.TotalCostUsd != 1.23 {
+		t.Errorf("TotalCostUsd = %f, want 1.23", resp.Msg.Summary.TotalCostUsd)
 	}
 }
 
@@ -191,8 +191,8 @@ func TestGetDashboardData_CombinedReader_SingleScan(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetDashboardData (combined) should succeed: %v", err)
 	}
-	if resp.Msg.TotalLlmCalls != 100 {
-		t.Errorf("TotalLlmCalls = %d, want 100", resp.Msg.TotalLlmCalls)
+	if resp.Msg.Summary.TotalLlmCalls != 100 {
+		t.Errorf("TotalLlmCalls = %d, want 100", resp.Msg.Summary.TotalLlmCalls)
 	}
 	if len(resp.Msg.Models) != 2 {
 		t.Errorf("Models count = %d, want 2", len(resp.Msg.Models))
@@ -209,11 +209,11 @@ func TestGetDashboardData_WithBudget(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetDashboardData with budget should succeed: %v", err)
 	}
-	if resp.Msg.Budget == nil {
-		t.Fatal("Budget should be populated when include_budget=true")
+	if resp.Msg.BudgetContext == nil || resp.Msg.BudgetContext.Budget == nil {
+		t.Fatal("BudgetContext.Budget should be populated when include_budget=true")
 	}
-	if resp.Msg.Budget.LimitUsd != 50.0 {
-		t.Errorf("Budget.LimitUsd = %f, want 50.0", resp.Msg.Budget.LimitUsd)
+	if resp.Msg.BudgetContext.Budget.LimitUsd != 50.0 {
+		t.Errorf("Budget.LimitUsd = %f, want 50.0", resp.Msg.BudgetContext.Budget.LimitUsd)
 	}
 }
 
@@ -227,8 +227,8 @@ func TestGetDashboardData_NoBudget_WhenFlagFalse(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetDashboardData should succeed: %v", err)
 	}
-	if resp.Msg.Budget != nil {
-		t.Error("Budget should be nil when include_budget=false")
+	if resp.Msg.BudgetContext != nil {
+		t.Error("BudgetContext should be nil when include_budget=false")
 	}
 }
 
@@ -239,11 +239,11 @@ func TestGetDashboardData_CacheTokenFields(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetDashboardData should succeed: %v", err)
 	}
-	if resp.Msg.TotalCacheReadTokens != 50000 {
-		t.Errorf("TotalCacheReadTokens = %d, want 50000", resp.Msg.TotalCacheReadTokens)
+	if resp.Msg.Summary.TotalCacheReadTokens != 50000 {
+		t.Errorf("TotalCacheReadTokens = %d, want 50000", resp.Msg.Summary.TotalCacheReadTokens)
 	}
-	if resp.Msg.TotalCacheCreationTokens != 10000 {
-		t.Errorf("TotalCacheCreationTokens = %d, want 10000", resp.Msg.TotalCacheCreationTokens)
+	if resp.Msg.Summary.TotalCacheCreationTokens != 10000 {
+		t.Errorf("TotalCacheCreationTokens = %d, want 10000", resp.Msg.Summary.TotalCacheCreationTokens)
 	}
 }
 
@@ -281,8 +281,8 @@ func TestGetDashboardData_UnauthenticatedUser_StillReturnsData(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetDashboardData without auth should succeed: %v", err)
 	}
-	if resp.Msg.TotalLlmCalls != 99 {
-		t.Errorf("TotalLlmCalls = %d, want 99", resp.Msg.TotalLlmCalls)
+	if resp.Msg.Summary.TotalLlmCalls != 99 {
+		t.Errorf("TotalLlmCalls = %d, want 99", resp.Msg.Summary.TotalLlmCalls)
 	}
 }
 
@@ -295,10 +295,10 @@ func TestGetDashboardData_AuthUserPropagated(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetDashboardData should succeed even if user not in store: %v", err)
 	}
-	if resp.Msg.Budget != nil {
-		t.Error("Budget should be nil when user not found in store")
+	if resp.Msg.BudgetContext != nil {
+		t.Error("BudgetContext should be nil when user not found in store")
 	}
-	if resp.Msg.TotalLlmCalls != 5 {
-		t.Errorf("TotalLlmCalls = %d, want 5", resp.Msg.TotalLlmCalls)
+	if resp.Msg.Summary.TotalLlmCalls != 5 {
+		t.Errorf("TotalLlmCalls = %d, want 5", resp.Msg.Summary.TotalLlmCalls)
 	}
 }

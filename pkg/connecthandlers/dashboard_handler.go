@@ -482,16 +482,18 @@ func (h *DashboardHandler) GetDashboardData(
 	// ── Build response ──────────────────────────────────────────────────────
 	resp := &v1.GetDashboardDataResponse{}
 	if summary != nil {
-		resp.TotalTraces = summary.TotalTraces
-		resp.TotalSpans = summary.TotalSpans
-		resp.TotalLlmCalls = summary.TotalLLMCalls
-		resp.TotalInputTokens = summary.TotalInputTokens
-		resp.TotalOutputTokens = summary.TotalOutputTokens
-		resp.TotalCostUsd = summary.TotalCostUSD
-		resp.AvgLatencyMs = summary.AvgLatencyMs
-		resp.ErrorRate = summary.ErrorRate
-		resp.TotalCacheReadTokens = summary.TotalCacheReadTokens
-		resp.TotalCacheCreationTokens = summary.TotalCacheCreationTokens
+		resp.Summary = &v1.GetUsageSummaryResponse{
+			TotalTraces:              summary.TotalTraces,
+			TotalSpans:               summary.TotalSpans,
+			TotalLlmCalls:            summary.TotalLLMCalls,
+			TotalInputTokens:         summary.TotalInputTokens,
+			TotalOutputTokens:        summary.TotalOutputTokens,
+			TotalCostUsd:             summary.TotalCostUSD,
+			AvgLatencyMs:             summary.AvgLatencyMs,
+			ErrorRate:                summary.ErrorRate,
+			TotalCacheReadTokens:     summary.TotalCacheReadTokens,
+			TotalCacheCreationTokens: summary.TotalCacheCreationTokens,
+		}
 	}
 	for _, m := range models {
 		resp.Models = append(resp.Models, &v1.ModelUsage{
@@ -518,11 +520,13 @@ func (h *DashboardHandler) GetDashboardData(
 				}
 				// Non-fatal: return data without budget context.
 			} else {
+				bc := &v1.GetDashboardDataResponse_BudgetContext{}
+
 				budget, err := h.users.GetBudget(ctx, userID)
 				if err != nil {
 					slog.Warn("GetDashboardData: failed to get budget", "error", err)
 				} else {
-					resp.Budget = budgetToProto(budget)
+					bc.Budget = budgetToProto(budget)
 				}
 
 				grants, err := h.users.ListGrants(ctx, userID, true)
@@ -530,14 +534,19 @@ func (h *DashboardHandler) GetDashboardData(
 					slog.Warn("GetDashboardData: failed to list grants", "error", err)
 				} else {
 					for _, g := range grants {
-						resp.ActiveGrants = append(resp.ActiveGrants, grantToProto(g))
+						bc.ActiveGrants = append(bc.ActiveGrants, grantToProto(g))
 					}
 				}
 
 				// Compute total remaining across budget + grants.
 				check, err := h.users.CheckBudget(ctx, userID, 0)
 				if err == nil && check != nil {
-					resp.TotalRemainingUsd = check.RemainingUSD
+					bc.TotalRemainingUsd = check.RemainingUSD
+				}
+
+				// Only attach BudgetContext if we got at least some data.
+				if bc.Budget != nil || len(bc.ActiveGrants) > 0 || bc.TotalRemainingUsd > 0 {
+					resp.BudgetContext = bc
 				}
 			}
 		}

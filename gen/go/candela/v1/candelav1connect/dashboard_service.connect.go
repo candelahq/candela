@@ -33,6 +33,9 @@ const (
 // reflection-formatted method names, remove the leading slash and convert the remaining slash to a
 // period.
 const (
+	// DashboardServiceGetDashboardDataProcedure is the fully-qualified name of the DashboardService's
+	// GetDashboardData RPC.
+	DashboardServiceGetDashboardDataProcedure = "/candela.v1.DashboardService/GetDashboardData"
 	// DashboardServiceGetUsageSummaryProcedure is the fully-qualified name of the DashboardService's
 	// GetUsageSummary RPC.
 	DashboardServiceGetUsageSummaryProcedure = "/candela.v1.DashboardService/GetUsageSummary"
@@ -55,14 +58,25 @@ const (
 
 // DashboardServiceClient is a client for the candela.v1.DashboardService service.
 type DashboardServiceClient interface {
-	// GetUsageSummary returns aggregated token usage, cost, and request counts.
+	// GetDashboardData returns a consolidated dashboard view including usage
+	// summary, per-model breakdown, and (if authenticated) per-user budget
+	// context. Replaces the concurrent fan-out of GetUsageSummary +
+	// GetModelBreakdown + GetMyUsage with a single round-trip.
+	GetDashboardData(context.Context, *connect.Request[v1.GetDashboardDataRequest]) (*connect.Response[v1.GetDashboardDataResponse], error)
+	// Deprecated: use GetDashboardData instead.
+	//
+	// Deprecated: do not use.
 	GetUsageSummary(context.Context, *connect.Request[v1.GetUsageSummaryRequest]) (*connect.Response[v1.GetUsageSummaryResponse], error)
-	// GetModelBreakdown returns usage broken down by model.
+	// Deprecated: use GetDashboardData instead.
+	//
+	// Deprecated: do not use.
 	GetModelBreakdown(context.Context, *connect.Request[v1.GetModelBreakdownRequest]) (*connect.Response[v1.GetModelBreakdownResponse], error)
 	// GetLatencyPercentiles returns latency distribution data.
 	GetLatencyPercentiles(context.Context, *connect.Request[v1.GetLatencyPercentilesRequest]) (*connect.Response[v1.GetLatencyPercentilesResponse], error)
-	// GetMyUsage returns the calling user's personal usage summary (BigQuery).
+	// Deprecated: use GetDashboardData with include_budget=true instead.
 	// For real-time budget/grant progress, see UserService.GetMyBudget.
+	//
+	// Deprecated: do not use.
 	GetMyUsage(context.Context, *connect.Request[v1.GetMyUsageRequest]) (*connect.Response[v1.GetMyUsageResponse], error)
 	// GetTeamLeaderboard returns per-user usage for the team (admin only).
 	GetTeamLeaderboard(context.Context, *connect.Request[v1.GetTeamLeaderboardRequest]) (*connect.Response[v1.GetTeamLeaderboardResponse], error)
@@ -81,6 +95,12 @@ func NewDashboardServiceClient(httpClient connect.HTTPClient, baseURL string, op
 	baseURL = strings.TrimRight(baseURL, "/")
 	dashboardServiceMethods := v1.File_candela_v1_dashboard_service_proto.Services().ByName("DashboardService").Methods()
 	return &dashboardServiceClient{
+		getDashboardData: connect.NewClient[v1.GetDashboardDataRequest, v1.GetDashboardDataResponse](
+			httpClient,
+			baseURL+DashboardServiceGetDashboardDataProcedure,
+			connect.WithSchema(dashboardServiceMethods.ByName("GetDashboardData")),
+			connect.WithClientOptions(opts...),
+		),
 		getUsageSummary: connect.NewClient[v1.GetUsageSummaryRequest, v1.GetUsageSummaryResponse](
 			httpClient,
 			baseURL+DashboardServiceGetUsageSummaryProcedure,
@@ -122,6 +142,7 @@ func NewDashboardServiceClient(httpClient connect.HTTPClient, baseURL string, op
 
 // dashboardServiceClient implements DashboardServiceClient.
 type dashboardServiceClient struct {
+	getDashboardData      *connect.Client[v1.GetDashboardDataRequest, v1.GetDashboardDataResponse]
 	getUsageSummary       *connect.Client[v1.GetUsageSummaryRequest, v1.GetUsageSummaryResponse]
 	getModelBreakdown     *connect.Client[v1.GetModelBreakdownRequest, v1.GetModelBreakdownResponse]
 	getLatencyPercentiles *connect.Client[v1.GetLatencyPercentilesRequest, v1.GetLatencyPercentilesResponse]
@@ -130,12 +151,21 @@ type dashboardServiceClient struct {
 	getJobLeaderboard     *connect.Client[v1.GetJobLeaderboardRequest, v1.GetJobLeaderboardResponse]
 }
 
+// GetDashboardData calls candela.v1.DashboardService.GetDashboardData.
+func (c *dashboardServiceClient) GetDashboardData(ctx context.Context, req *connect.Request[v1.GetDashboardDataRequest]) (*connect.Response[v1.GetDashboardDataResponse], error) {
+	return c.getDashboardData.CallUnary(ctx, req)
+}
+
 // GetUsageSummary calls candela.v1.DashboardService.GetUsageSummary.
+//
+// Deprecated: do not use.
 func (c *dashboardServiceClient) GetUsageSummary(ctx context.Context, req *connect.Request[v1.GetUsageSummaryRequest]) (*connect.Response[v1.GetUsageSummaryResponse], error) {
 	return c.getUsageSummary.CallUnary(ctx, req)
 }
 
 // GetModelBreakdown calls candela.v1.DashboardService.GetModelBreakdown.
+//
+// Deprecated: do not use.
 func (c *dashboardServiceClient) GetModelBreakdown(ctx context.Context, req *connect.Request[v1.GetModelBreakdownRequest]) (*connect.Response[v1.GetModelBreakdownResponse], error) {
 	return c.getModelBreakdown.CallUnary(ctx, req)
 }
@@ -146,6 +176,8 @@ func (c *dashboardServiceClient) GetLatencyPercentiles(ctx context.Context, req 
 }
 
 // GetMyUsage calls candela.v1.DashboardService.GetMyUsage.
+//
+// Deprecated: do not use.
 func (c *dashboardServiceClient) GetMyUsage(ctx context.Context, req *connect.Request[v1.GetMyUsageRequest]) (*connect.Response[v1.GetMyUsageResponse], error) {
 	return c.getMyUsage.CallUnary(ctx, req)
 }
@@ -162,14 +194,25 @@ func (c *dashboardServiceClient) GetJobLeaderboard(ctx context.Context, req *con
 
 // DashboardServiceHandler is an implementation of the candela.v1.DashboardService service.
 type DashboardServiceHandler interface {
-	// GetUsageSummary returns aggregated token usage, cost, and request counts.
+	// GetDashboardData returns a consolidated dashboard view including usage
+	// summary, per-model breakdown, and (if authenticated) per-user budget
+	// context. Replaces the concurrent fan-out of GetUsageSummary +
+	// GetModelBreakdown + GetMyUsage with a single round-trip.
+	GetDashboardData(context.Context, *connect.Request[v1.GetDashboardDataRequest]) (*connect.Response[v1.GetDashboardDataResponse], error)
+	// Deprecated: use GetDashboardData instead.
+	//
+	// Deprecated: do not use.
 	GetUsageSummary(context.Context, *connect.Request[v1.GetUsageSummaryRequest]) (*connect.Response[v1.GetUsageSummaryResponse], error)
-	// GetModelBreakdown returns usage broken down by model.
+	// Deprecated: use GetDashboardData instead.
+	//
+	// Deprecated: do not use.
 	GetModelBreakdown(context.Context, *connect.Request[v1.GetModelBreakdownRequest]) (*connect.Response[v1.GetModelBreakdownResponse], error)
 	// GetLatencyPercentiles returns latency distribution data.
 	GetLatencyPercentiles(context.Context, *connect.Request[v1.GetLatencyPercentilesRequest]) (*connect.Response[v1.GetLatencyPercentilesResponse], error)
-	// GetMyUsage returns the calling user's personal usage summary (BigQuery).
+	// Deprecated: use GetDashboardData with include_budget=true instead.
 	// For real-time budget/grant progress, see UserService.GetMyBudget.
+	//
+	// Deprecated: do not use.
 	GetMyUsage(context.Context, *connect.Request[v1.GetMyUsageRequest]) (*connect.Response[v1.GetMyUsageResponse], error)
 	// GetTeamLeaderboard returns per-user usage for the team (admin only).
 	GetTeamLeaderboard(context.Context, *connect.Request[v1.GetTeamLeaderboardRequest]) (*connect.Response[v1.GetTeamLeaderboardResponse], error)
@@ -184,6 +227,12 @@ type DashboardServiceHandler interface {
 // and JSON codecs. They also support gzip compression.
 func NewDashboardServiceHandler(svc DashboardServiceHandler, opts ...connect.HandlerOption) (string, http.Handler) {
 	dashboardServiceMethods := v1.File_candela_v1_dashboard_service_proto.Services().ByName("DashboardService").Methods()
+	dashboardServiceGetDashboardDataHandler := connect.NewUnaryHandler(
+		DashboardServiceGetDashboardDataProcedure,
+		svc.GetDashboardData,
+		connect.WithSchema(dashboardServiceMethods.ByName("GetDashboardData")),
+		connect.WithHandlerOptions(opts...),
+	)
 	dashboardServiceGetUsageSummaryHandler := connect.NewUnaryHandler(
 		DashboardServiceGetUsageSummaryProcedure,
 		svc.GetUsageSummary,
@@ -222,6 +271,8 @@ func NewDashboardServiceHandler(svc DashboardServiceHandler, opts ...connect.Han
 	)
 	return "/candela.v1.DashboardService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
+		case DashboardServiceGetDashboardDataProcedure:
+			dashboardServiceGetDashboardDataHandler.ServeHTTP(w, r)
 		case DashboardServiceGetUsageSummaryProcedure:
 			dashboardServiceGetUsageSummaryHandler.ServeHTTP(w, r)
 		case DashboardServiceGetModelBreakdownProcedure:
@@ -242,6 +293,10 @@ func NewDashboardServiceHandler(svc DashboardServiceHandler, opts ...connect.Han
 
 // UnimplementedDashboardServiceHandler returns CodeUnimplemented from all methods.
 type UnimplementedDashboardServiceHandler struct{}
+
+func (UnimplementedDashboardServiceHandler) GetDashboardData(context.Context, *connect.Request[v1.GetDashboardDataRequest]) (*connect.Response[v1.GetDashboardDataResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("candela.v1.DashboardService.GetDashboardData is not implemented"))
+}
 
 func (UnimplementedDashboardServiceHandler) GetUsageSummary(context.Context, *connect.Request[v1.GetUsageSummaryRequest]) (*connect.Response[v1.GetUsageSummaryResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("candela.v1.DashboardService.GetUsageSummary is not implemented"))

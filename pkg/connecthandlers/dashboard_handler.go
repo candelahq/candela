@@ -410,3 +410,174 @@ func (h *DashboardHandler) GetJobLeaderboard(ctx context.Context, req *connect.R
 	}
 	return connect.NewResponse(&v1.GetJobLeaderboardResponse{Jobs: pbJobs}), nil
 }
+
+// GetDashboardData returns a consolidated dashboard view: usage summary,
+// per-model breakdown, and optional per-user budget context. Replaces the
+// concurrent fan-out of GetUsageSummary + GetModelBreakdown + GetMyUsage
+// with a single round-trip.
+func (h *DashboardHandler) GetDashboardData(
+	ctx context.Context,
+	req *connect.Request[v1.GetDashboardDataRequest],
+) (*connect.Response[v1.GetDashboardDataResponse], error) {
+	msg := req.Msg
+
+	q := storage.UsageQuery{
+		ProjectID:   msg.ProjectId,
+		Environment: msg.Environment,
+		UserID:      scopeUserID(ctx, h.users),
+	}
+	if msg.TimeRange != nil {
+		if msg.TimeRange.Start != nil {
+			q.StartTime = msg.TimeRange.Start.AsTime()
+		}
+		if msg.TimeRange.End != nil {
+			q.EndTime = msg.TimeRange.End.AsTime()
+		}
+	}
+	if q.StartTime.IsZero() {
+		q.StartTime = time.Now().Add(-24 * time.Hour)
+	}
+	if q.EndTime.IsZero() {
+		q.EndTime = time.Now()
+	}
+
+	// ── Fetch summary + model breakdown ──────────────────────────────────────
+	var summary *storage.UsageSummary
+	var models []storage.ModelUsage
+
+	if combined, ok := h.store.(storage.CombinedUsageReader); ok {
+		s, m, err := combined.GetUsageWithModelBreakdown(ctx, q)
+		if err != nil {
+			return nil, internalError("failed to get dashboard data", err)
+		}
+		summary = s
+		models = m
+	} else {
+		type summaryResult struct {
+			v   *storage.UsageSummary
+			err error
+		}
+		type modelsResult struct {
+			v   []storage.ModelUsage
+			err error
+		}
+		summaryCh := make(chan summaryResult, 1)
+		modelsCh := make(chan modelsResult, 1)
+		go func() {
+			v, err := h.store.GetUsageSummary(ctx, q)
+			summaryCh <- summaryResult{v, err}
+		}()
+		go func() {
+			v, err := h.store.GetModelBreakdown(ctx, q)
+			modelsCh <- modelsResult{v, err}
+		}()
+		sr := <-summaryCh
+		mr := <-modelsCh
+		if sr.err != nil {
+			return nil, internalError("failed to get usage summary", sr.err)
+		}
+		if mr.err != nil {
+			return nil, internalError("failed to get model breakdown", mr.err)
+		}
+		summary = sr.v
+		models = mr.v
+	}
+
+	// ── Build response ───────────────────────────────────────────────────────
+	resp := &v1.GetDashboardDataResponse{}
+
+	if summary != nil {
+		// NOTE: Time series fields (TracesOverTime, CostOverTime, etc.) are
+		// defined in the proto but not yet returned by the storage layer.
+		// They will be populated once the time-bucketed query is implemented.
+		resp.Summary = &v1.GetUsageSummaryResponse{
+			TotalTraces:              summary.TotalTraces,
+			TotalSpans:               summary.TotalSpans,
+			TotalLlmCalls:            summary.TotalLLMCalls,
+			TotalInputTokens:         summary.TotalInputTokens,
+			TotalOutputTokens:        summary.TotalOutputTokens,
+			TotalCostUsd:             summary.TotalCostUSD,
+			AvgLatencyMs:             summary.AvgLatencyMs,
+			ErrorRate:                summary.ErrorRate,
+			TotalCacheReadTokens:     summary.TotalCacheReadTokens,
+			TotalCacheCreationTokens: summary.TotalCacheCreationTokens,
+		}
+	}
+
+	for _, m := range models {
+		resp.Models = append(resp.Models, &v1.ModelUsage{
+			Model:               m.Model,
+			Provider:            m.Provider,
+			CallCount:           m.CallCount,
+			InputTokens:         m.InputTokens,
+			OutputTokens:        m.OutputTokens,
+			CostUsd:             m.CostUSD,
+			AvgLatencyMs:        m.AvgLatencyMs,
+			CacheReadTokens:     m.CacheReadTokens,
+			CacheCreationTokens: m.CacheCreationTokens,
+		})
+	}
+
+	// ── Optional budget context (requires auth + include_budget) ─────────────
+	if msg.IncludeBudget {
+		authUser := auth.FromContext(ctx)
+		if authUser != nil && h.users != nil {
+			userID, err := resolveUserID(ctx, h.users, authUser.Email)
+			if err == nil {
+				// Fetch budget and grants concurrently — they are independent
+				// Firestore reads and the BQ scan above is the real bottleneck.
+				type budgetResult struct {
+					v   *storage.BudgetRecord
+					err error
+				}
+				type grantsResult struct {
+					v   []*storage.GrantRecord
+					err error
+				}
+				budgetCh := make(chan budgetResult, 1)
+				grantsCh := make(chan grantsResult, 1)
+				go func() {
+					v, err := h.users.GetBudget(ctx, userID)
+					budgetCh <- budgetResult{v, err}
+				}()
+				go func() {
+					v, err := h.users.ListGrants(ctx, userID, true)
+					grantsCh <- grantsResult{v, err}
+				}()
+
+				br := <-budgetCh
+				gr := <-grantsCh
+
+				if br.err == nil && br.v != nil {
+					remaining := br.v.LimitUSD - br.v.SpentUSD
+					bc := &v1.GetDashboardDataResponse_BudgetContext{
+						Budget: &types.UserBudget{
+							LimitUsd: br.v.LimitUSD,
+							SpentUsd: br.v.SpentUSD,
+						},
+						TotalRemainingUsd: remaining,
+					}
+
+					if gr.err == nil {
+						for _, g := range gr.v {
+							bc.ActiveGrants = append(bc.ActiveGrants, &types.BudgetGrant{
+								Id:        g.ID,
+								AmountUsd: g.AmountUSD,
+								SpentUsd:  g.SpentUSD,
+								Reason:    g.Reason,
+							})
+							bc.TotalRemainingUsd += g.Remaining()
+						}
+					}
+
+					resp.BudgetContext = bc
+				}
+			} else if !errors.Is(err, storage.ErrNotFound) {
+				slog.Warn("budget lookup failed, omitting from dashboard",
+					"error", err, "user", authUser.Email)
+			}
+		}
+	}
+
+	return connect.NewResponse(resp), nil
+}

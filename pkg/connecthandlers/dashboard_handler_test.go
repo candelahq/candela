@@ -102,7 +102,7 @@ func TestGetMyUsage_CombinedReaderBranch(t *testing.T) {
 
 	client := startDashboardServer(t, store)
 
-	resp, err := client.GetMyUsage(context.Background(), connect.NewRequest(&v1.GetMyUsageRequest{}))
+	resp, err := client.GetMyUsage(context.Background(), connect.NewRequest(&v1.GetMyUsageRequest{})) //nolint:staticcheck // testing deprecated method
 	if err != nil {
 		t.Fatalf("GetMyUsage failed: %v", err)
 	}
@@ -141,7 +141,7 @@ func TestGetMyUsage_FallbackBranch(t *testing.T) {
 
 	client := startDashboardServer(t, store)
 
-	resp, err := client.GetMyUsage(context.Background(), connect.NewRequest(&v1.GetMyUsageRequest{}))
+	resp, err := client.GetMyUsage(context.Background(), connect.NewRequest(&v1.GetMyUsageRequest{})) //nolint:staticcheck // testing deprecated method
 	if err != nil {
 		t.Fatalf("GetMyUsage fallback failed: %v", err)
 	}
@@ -162,3 +162,86 @@ var _ storage.CombinedUsageReader = (*combinedStore)(nil)
 
 // Suppress unused-import lint for time (used by mock stubs if needed).
 var _ = time.Now
+
+// ── GetDashboardData tests ──────────────────────────────────────────────────
+
+func TestGetDashboardData_CombinedReader(t *testing.T) {
+	store := &combinedStore{
+		summary: &storage.UsageSummary{
+			TotalTraces:              100,
+			TotalLLMCalls:            42,
+			TotalInputTokens:         10000,
+			TotalOutputTokens:        5000,
+			TotalCostUSD:             1.23,
+			TotalCacheReadTokens:     8000,
+			TotalCacheCreationTokens: 200,
+		},
+		models: []storage.ModelUsage{
+			{Model: "claude-sonnet-4-20250514", Provider: "anthropic", CallCount: 30, CostUSD: 0.90,
+				CacheReadTokens: 5000, CacheCreationTokens: 200},
+			{Model: "gpt-4o", Provider: "openai", CallCount: 12, CostUSD: 0.33},
+		},
+	}
+
+	client := startDashboardServer(t, store)
+
+	resp, err := client.GetDashboardData(context.Background(), connect.NewRequest(&v1.GetDashboardDataRequest{}))
+	if err != nil {
+		t.Fatalf("GetDashboardData failed: %v", err)
+	}
+
+	// Verify summary is populated.
+	if resp.Msg.Summary == nil {
+		t.Fatal("Summary is nil")
+	}
+	if resp.Msg.Summary.TotalLlmCalls != 42 {
+		t.Errorf("TotalLlmCalls = %d, want 42", resp.Msg.Summary.TotalLlmCalls)
+	}
+	if resp.Msg.Summary.TotalCacheReadTokens != 8000 {
+		t.Errorf("TotalCacheReadTokens = %d, want 8000", resp.Msg.Summary.TotalCacheReadTokens)
+	}
+	if resp.Msg.Summary.TotalCacheCreationTokens != 200 {
+		t.Errorf("TotalCacheCreationTokens = %d, want 200", resp.Msg.Summary.TotalCacheCreationTokens)
+	}
+
+	// Verify models.
+	if len(resp.Msg.Models) != 2 {
+		t.Fatalf("Models count = %d, want 2", len(resp.Msg.Models))
+	}
+	if resp.Msg.Models[0].CacheReadTokens != 5000 {
+		t.Errorf("Models[0].CacheReadTokens = %d, want 5000", resp.Msg.Models[0].CacheReadTokens)
+	}
+
+	// Budget context should be nil (no include_budget).
+	if resp.Msg.BudgetContext != nil {
+		t.Error("BudgetContext should be nil when include_budget is false")
+	}
+}
+
+func TestGetDashboardData_FallbackReader(t *testing.T) {
+	store := &fallbackStore{
+		summary: &storage.UsageSummary{
+			TotalLLMCalls: 10,
+			TotalCostUSD:  0.50,
+		},
+		models: []storage.ModelUsage{
+			{Model: "gpt-4o", Provider: "openai", CallCount: 10, CostUSD: 0.50},
+		},
+	}
+
+	client := startDashboardServer(t, store)
+
+	resp, err := client.GetDashboardData(context.Background(), connect.NewRequest(&v1.GetDashboardDataRequest{}))
+	if err != nil {
+		t.Fatalf("GetDashboardData fallback failed: %v", err)
+	}
+	if resp.Msg.Summary == nil {
+		t.Fatal("Summary is nil")
+	}
+	if resp.Msg.Summary.TotalLlmCalls != 10 {
+		t.Errorf("TotalLlmCalls = %d, want 10", resp.Msg.Summary.TotalLlmCalls)
+	}
+	if len(resp.Msg.Models) != 1 {
+		t.Errorf("Models count = %d, want 1", len(resp.Msg.Models))
+	}
+}

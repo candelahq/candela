@@ -64,6 +64,26 @@ const (
 	CachingSystemOnly CachingMode = "system-only"
 )
 
+// CacheTTL controls the time-to-live for Anthropic prompt cache entries.
+// Orthogonal to CachingMode: mode controls *where* breakpoints go,
+// TTL controls *how long* cache entries live.
+type CacheTTL string
+
+const (
+	// CacheTTL5m is the default 5-minute cache duration.
+	// Cache writes cost 1.25x base input price.
+	CacheTTL5m CacheTTL = "5m"
+	// CacheTTL1h is the extended 1-hour cache duration.
+	// Cache writes cost 2x base input price, but cache reads
+	// remain at 0.1x — ideal for long coding sessions.
+	CacheTTL1h CacheTTL = "1h"
+)
+
+// CacheTTLHeader is the HTTP header name for per-request cache TTL overrides.
+// Clients can send X-Candela-Cache-TTL: 5m|1h to override
+// the server's default TTL on a per-request basis.
+const CacheTTLHeader = "X-Candela-Cache-TTL"
+
 // CachingHeader is the HTTP header name for per-request caching overrides.
 // Clients can send X-Candela-Caching: off|auto|system-only to override
 // the server's default caching mode on a per-request basis.
@@ -87,10 +107,38 @@ func ParseCachingMode(s string) CachingMode {
 	}
 }
 
+// ParseCacheTTL converts a config string to a CacheTTL.
+// Accepts: "5m", "5min", "" (default) → 5m; "1h", "1hr", "1hour", "60m" → 1h.
+func ParseCacheTTL(s string) CacheTTL {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "1h", "1hr", "1hour", "60m":
+		return CacheTTL1h
+	case "5m", "5min", "", "default":
+		return CacheTTL5m
+	default:
+		slog.Warn("unrecognized cache TTL, defaulting to 5m",
+			"input", s,
+			"valid_ttls", "5m, 1h")
+		return CacheTTL5m
+	}
+}
+
+// buildCacheControl returns the cache_control map for injection into
+// Anthropic request bodies. When ttl is CacheTTL1h, includes "ttl": "1h".
+// When ttl is CacheTTL5m (default), omits the ttl field for backward compat.
+func buildCacheControl(ttl CacheTTL) map[string]string {
+	cc := map[string]string{"type": "ephemeral"}
+	if ttl == CacheTTL1h {
+		cc["ttl"] = "1h"
+	}
+	return cc
+}
+
 // AnthropicFormatTranslator translates between OpenAI Chat Completions format
 // and Anthropic Messages format.
 type AnthropicFormatTranslator struct {
 	cachingMode atomic.Value // stores CachingMode; default is CachingAuto
+	cacheTTL    atomic.Value // stores CacheTTL; default is CacheTTL5m
 }
 
 // SetCachingMode sets the caching strategy. Safe to call concurrently.
@@ -107,23 +155,43 @@ func (t *AnthropicFormatTranslator) GetCachingMode() CachingMode {
 	return v.(CachingMode)
 }
 
+// SetCacheTTL sets the cache TTL duration. Safe to call concurrently.
+func (t *AnthropicFormatTranslator) SetCacheTTL(ttl CacheTTL) {
+	t.cacheTTL.Store(ttl)
+}
+
+// GetCacheTTL returns the current cache TTL duration.
+func (t *AnthropicFormatTranslator) GetCacheTTL() CacheTTL {
+	v := t.cacheTTL.Load()
+	if v == nil {
+		return CacheTTL5m // default: 5-minute TTL
+	}
+	return v.(CacheTTL)
+}
+
 // --- Request Translation: OpenAI → Anthropic ---
 
 // TranslateRequest converts an OpenAI request using the translator's configured
-// caching mode. The mode is snapshotted once at the start of the call, ensuring
-// a consistent view even if another goroutine changes the mode concurrently.
+// caching mode and TTL. Both are snapshotted once at the start of the call,
+// ensuring a consistent view even if another goroutine changes them concurrently.
 func (t *AnthropicFormatTranslator) TranslateRequest(body []byte) ([]byte, string, error) {
-	return t.translateRequestWithMode(body, t.GetCachingMode())
+	return t.translateRequestFull(body, t.GetCachingMode(), t.GetCacheTTL())
 }
 
 // TranslateRequestWithMode converts an OpenAI request using an explicit caching
 // mode. This is used for per-request header overrides (X-Candela-Caching) to
 // avoid mutating shared translator state, which would race with concurrent requests.
 func (t *AnthropicFormatTranslator) TranslateRequestWithMode(body []byte, mode CachingMode) ([]byte, string, error) {
-	return t.translateRequestWithMode(body, mode)
+	return t.translateRequestFull(body, mode, t.GetCacheTTL())
 }
 
-func (t *AnthropicFormatTranslator) translateRequestWithMode(body []byte, mode CachingMode) ([]byte, string, error) {
+// TranslateRequestWithModeAndTTL converts an OpenAI request using explicit
+// caching mode and TTL. Used for per-request header overrides.
+func (t *AnthropicFormatTranslator) TranslateRequestWithModeAndTTL(body []byte, mode CachingMode, ttl CacheTTL) ([]byte, string, error) {
+	return t.translateRequestFull(body, mode, ttl)
+}
+
+func (t *AnthropicFormatTranslator) translateRequestFull(body []byte, mode CachingMode, ttl CacheTTL) ([]byte, string, error) {
 	var oaiReq openAIRequest
 	if err := json.Unmarshal(body, &oaiReq); err != nil {
 		return nil, "", fmt.Errorf("invalid OpenAI request: %w", err)
@@ -178,7 +246,7 @@ func (t *AnthropicFormatTranslator) translateRequestWithMode(body []byte, mode C
 						map[string]interface{}{
 							"type":          "text",
 							"text":          c,
-							"cache_control": map[string]string{"type": "ephemeral"},
+							"cache_control": buildCacheControl(ttl),
 						},
 					}
 				} else {
@@ -189,7 +257,7 @@ func (t *AnthropicFormatTranslator) translateRequestWithMode(body []byte, mode C
 				if (mode == CachingAuto || mode == CachingSystemOnly) && len(c) > 0 {
 					// Add cache_control to the last block.
 					if block, ok := c[len(c)-1].(map[string]interface{}); ok {
-						block["cache_control"] = map[string]string{"type": "ephemeral"}
+						block["cache_control"] = buildCacheControl(ttl)
 					}
 				}
 				anthReq.System = c
@@ -260,7 +328,7 @@ func (t *AnthropicFormatTranslator) translateRequestWithMode(body []byte, mode C
 	// entire conversation prefix is cached. This is Anthropic's recommended
 	// two-breakpoint pattern: system prompt + end of conversation history.
 	if mode == CachingAuto {
-		injectLastMessageCacheControl(anthReq.Messages)
+		injectLastMessageCacheControl(anthReq.Messages, ttl)
 	}
 
 	translated, err := json.Marshal(anthReq)
@@ -696,7 +764,7 @@ func getStringField(m map[string]interface{}, keys ...string) string {
 //
 // Together they cache the entire stable prefix so each new turn only pays
 // full price for the latest user message.
-func injectLastMessageCacheControl(messages []anthropicMessage) {
+func injectLastMessageCacheControl(messages []anthropicMessage, ttl CacheTTL) {
 	// Walk backwards to find the last user or tool-result message.
 	for i := len(messages) - 1; i >= 0; i-- {
 		if messages[i].Role != "user" {
@@ -710,14 +778,14 @@ func injectLastMessageCacheControl(messages []anthropicMessage) {
 				map[string]interface{}{
 					"type":          "text",
 					"text":          content,
-					"cache_control": map[string]string{"type": "ephemeral"},
+					"cache_control": buildCacheControl(ttl),
 				},
 			}
 		case []interface{}:
 			// Array of content blocks → add cache_control to the last block.
 			if len(content) > 0 {
 				if block, ok := content[len(content)-1].(map[string]interface{}); ok {
-					block["cache_control"] = map[string]string{"type": "ephemeral"}
+					block["cache_control"] = buildCacheControl(ttl)
 				}
 			}
 		}

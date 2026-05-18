@@ -642,6 +642,10 @@ func containsCacheControl(data []byte) bool {
 	return strings.Contains(string(data), "cache_control")
 }
 
+func containsTTL1h(data []byte) bool {
+	return strings.Contains(string(data), `"ttl":"1h"`) || strings.Contains(string(data), `"ttl": "1h"`)
+}
+
 func parseJSON(t *testing.T, data []byte) map[string]interface{} {
 	t.Helper()
 	var raw map[string]interface{}
@@ -649,4 +653,293 @@ func parseJSON(t *testing.T, data []byte) map[string]interface{} {
 		t.Fatalf("failed to unmarshal: %v", err)
 	}
 	return raw
+}
+
+// ====================================================================
+// Cache TTL Tests
+// ====================================================================
+
+func TestCacheTTL_DefaultIs5m(t *testing.T) {
+	ft := &AnthropicFormatTranslator{}
+	if got := ft.GetCacheTTL(); got != CacheTTL5m {
+		t.Errorf("default cache TTL = %q, want %q", got, CacheTTL5m)
+	}
+}
+
+func TestCacheTTL_SetGet(t *testing.T) {
+	ft := &AnthropicFormatTranslator{}
+	ttls := []CacheTTL{CacheTTL1h, CacheTTL5m, CacheTTL1h}
+	for _, ttl := range ttls {
+		ft.SetCacheTTL(ttl)
+		if got := ft.GetCacheTTL(); got != ttl {
+			t.Errorf("GetCacheTTL() = %q after SetCacheTTL(%q)", got, ttl)
+		}
+	}
+}
+
+func TestCacheTTL_ConcurrentAccess(t *testing.T) {
+	ft := &AnthropicFormatTranslator{}
+	var wg sync.WaitGroup
+	ttls := []CacheTTL{CacheTTL5m, CacheTTL1h}
+
+	for i := 0; i < 100; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			ft.SetCacheTTL(ttls[i%len(ttls)])
+		}(i)
+	}
+
+	for i := 0; i < 100; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			ttl := ft.GetCacheTTL()
+			switch ttl {
+			case CacheTTL5m, CacheTTL1h:
+				// valid
+			default:
+				t.Errorf("unexpected TTL: %q", ttl)
+			}
+		}()
+	}
+	wg.Wait()
+}
+
+func TestParseCacheTTL(t *testing.T) {
+	tests := []struct {
+		input string
+		want  CacheTTL
+	}{
+		{"1h", CacheTTL1h},
+		{"1hr", CacheTTL1h},
+		{"1hour", CacheTTL1h},
+		{"60m", CacheTTL1h},
+		{"5m", CacheTTL5m},
+		{"5min", CacheTTL5m},
+		{"", CacheTTL5m},
+		{"default", CacheTTL5m},
+		{"  1h  ", CacheTTL1h},
+		{"  5M  ", CacheTTL5m},
+		{"unknown", CacheTTL5m},
+	}
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			got := ParseCacheTTL(tt.input)
+			if got != tt.want {
+				t.Errorf("ParseCacheTTL(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestBuildCacheControl_5m_OmitsTTL(t *testing.T) {
+	cc := buildCacheControl(CacheTTL5m)
+	if cc["type"] != "ephemeral" {
+		t.Errorf("type = %q, want ephemeral", cc["type"])
+	}
+	if _, hasTTL := cc["ttl"]; hasTTL {
+		t.Error("5m TTL should NOT include ttl field (backward compat)")
+	}
+}
+
+func TestBuildCacheControl_1h_IncludesTTL(t *testing.T) {
+	cc := buildCacheControl(CacheTTL1h)
+	if cc["type"] != "ephemeral" {
+		t.Errorf("type = %q, want ephemeral", cc["type"])
+	}
+	if cc["ttl"] != "1h" {
+		t.Errorf("ttl = %q, want 1h", cc["ttl"])
+	}
+}
+
+func TestCacheTTL_1h_InjectsCorrectCacheControl(t *testing.T) {
+	translator := &AnthropicFormatTranslator{}
+	translator.SetCacheTTL(CacheTTL1h)
+
+	body := `{
+		"model": "claude-sonnet-4-20250514",
+		"messages": [
+			{"role": "system", "content": "You are helpful."},
+			{"role": "user", "content": "Hello"}
+		]
+	}`
+
+	translated, _, err := translator.TranslateRequest([]byte(body))
+	if err != nil {
+		t.Fatalf("TranslateRequest failed: %v", err)
+	}
+
+	// Should contain ttl: 1h in the output.
+	if !containsTTL1h(translated) {
+		t.Error("TTL=1h: translated body should contain \"ttl\":\"1h\"")
+	}
+
+	// Verify the structure: system prompt cache_control should have ttl.
+	raw := parseJSON(t, translated)
+	sysBlocks := raw["system"].([]interface{})
+	sysBlock := sysBlocks[0].(map[string]interface{})
+	cc := sysBlock["cache_control"].(map[string]interface{})
+	if cc["type"] != "ephemeral" {
+		t.Errorf("system cache_control.type = %v, want ephemeral", cc["type"])
+	}
+	if cc["ttl"] != "1h" {
+		t.Errorf("system cache_control.ttl = %v, want 1h", cc["ttl"])
+	}
+
+	// Last user message should also have ttl.
+	messages := raw["messages"].([]interface{})
+	lastMsg := messages[len(messages)-1].(map[string]interface{})
+	lastContent := lastMsg["content"].([]interface{})
+	lastBlock := lastContent[0].(map[string]interface{})
+	msgCc := lastBlock["cache_control"].(map[string]interface{})
+	if msgCc["ttl"] != "1h" {
+		t.Errorf("last user message cache_control.ttl = %v, want 1h", msgCc["ttl"])
+	}
+}
+
+func TestCacheTTL_5m_OmitsTTLField(t *testing.T) {
+	translator := &AnthropicFormatTranslator{}
+	// default TTL is 5m
+
+	body := `{
+		"model": "claude-sonnet-4-20250514",
+		"messages": [
+			{"role": "system", "content": "You are helpful."},
+			{"role": "user", "content": "Hello"}
+		]
+	}`
+
+	translated, _, err := translator.TranslateRequest([]byte(body))
+	if err != nil {
+		t.Fatalf("TranslateRequest failed: %v", err)
+	}
+
+	// Should NOT contain ttl field (backward compat).
+	if containsTTL1h(translated) {
+		t.Error("TTL=5m (default): translated body should NOT contain ttl field")
+	}
+
+	// Should still contain cache_control with type: ephemeral.
+	if !containsCacheControl(translated) {
+		t.Error("TTL=5m: should still have cache_control")
+	}
+}
+
+func TestCacheTTL_PerRequestOverride(t *testing.T) {
+	translator := &AnthropicFormatTranslator{} // default: auto, 5m
+
+	body := []byte(`{
+		"model": "claude-sonnet-4-20250514",
+		"messages": [
+			{"role": "system", "content": "You are helpful."},
+			{"role": "user", "content": "Hello"}
+		]
+	}`)
+
+	// Per-request TTL override: 1h
+	result, _, err := translator.TranslateRequestWithModeAndTTL(body, CachingAuto, CacheTTL1h)
+	if err != nil {
+		t.Fatalf("TranslateRequestWithModeAndTTL failed: %v", err)
+	}
+
+	if !containsTTL1h(result) {
+		t.Error("per-request TTL override: result should contain ttl:1h")
+	}
+
+	// Shared translator state should be UNCHANGED (still 5m).
+	if translator.GetCacheTTL() != CacheTTL5m {
+		t.Errorf("shared TTL state changed! got %q, want 5m", translator.GetCacheTTL())
+	}
+
+	// Normal request should NOT have ttl field.
+	result2, _, _ := translator.TranslateRequest(body)
+	if containsTTL1h(result2) {
+		t.Error("normal request after override should NOT contain ttl:1h")
+	}
+}
+
+func TestProxy_SetCacheTTL_PropagatesAllProviders(t *testing.T) {
+	ft1 := &AnthropicFormatTranslator{}
+	ft2 := &AnthropicFormatTranslator{}
+	p := &Proxy{
+		providers: map[string]Provider{
+			"anthropic":    {Name: "anthropic", FormatTranslator: ft1},
+			"anthropic-v2": {Name: "anthropic-v2", FormatTranslator: ft2},
+			"google":       {Name: "google"},
+		},
+	}
+
+	p.SetCacheTTL(CacheTTL1h)
+
+	if ft1.GetCacheTTL() != CacheTTL1h {
+		t.Errorf("ft1 TTL = %q, want 1h", ft1.GetCacheTTL())
+	}
+	if ft2.GetCacheTTL() != CacheTTL1h {
+		t.Errorf("ft2 TTL = %q, want 1h", ft2.GetCacheTTL())
+	}
+}
+
+func TestProxy_GetCacheTTL_ReturnsFirst(t *testing.T) {
+	ft := &AnthropicFormatTranslator{}
+	ft.SetCacheTTL(CacheTTL1h)
+	p := &Proxy{
+		providers: map[string]Provider{
+			"google":    {Name: "google"},
+			"anthropic": {Name: "anthropic", FormatTranslator: ft},
+		},
+	}
+	if got := p.GetCacheTTL(); got != CacheTTL1h {
+		t.Errorf("Proxy.GetCacheTTL() = %q, want 1h", got)
+	}
+}
+
+func TestProxy_GetCacheTTL_NoTranslators(t *testing.T) {
+	p := &Proxy{
+		providers: map[string]Provider{
+			"google": {Name: "google"},
+		},
+	}
+	if got := p.GetCacheTTL(); got != CacheTTL5m {
+		t.Errorf("Proxy.GetCacheTTL() with no translators = %q, want 5m", got)
+	}
+}
+
+func TestCacheTTLHeader_Constant(t *testing.T) {
+	if CacheTTLHeader != "X-Candela-Cache-TTL" {
+		t.Errorf("CacheTTLHeader = %q, want X-Candela-Cache-TTL", CacheTTLHeader)
+	}
+}
+
+func TestCacheTTL_ModeSwitch_WithTTL(t *testing.T) {
+	// Verify TTL applies correctly across mode switches.
+	translator := &AnthropicFormatTranslator{}
+	translator.SetCacheTTL(CacheTTL1h)
+	body := `{
+		"model": "claude-sonnet-4-20250514",
+		"messages": [
+			{"role": "system", "content": "You are helpful."},
+			{"role": "user", "content": "Hi"}
+		]
+	}`
+
+	// Auto + 1h → should have ttl.
+	translated, _, _ := translator.TranslateRequest([]byte(body))
+	if !containsTTL1h(translated) {
+		t.Error("auto+1h: should contain ttl:1h")
+	}
+
+	// Off + 1h → should NOT have any cache_control.
+	translator.SetCachingMode(CachingOff)
+	translated, _, _ = translator.TranslateRequest([]byte(body))
+	if containsCacheControl(translated) {
+		t.Error("off+1h: should NOT contain cache_control at all")
+	}
+
+	// System-only + 1h → should have ttl on system but not on user msg.
+	translator.SetCachingMode(CachingSystemOnly)
+	translated, _, _ = translator.TranslateRequest([]byte(body))
+	if !containsTTL1h(translated) {
+		t.Error("system-only+1h: should contain ttl:1h on system prompt")
+	}
 }

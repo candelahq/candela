@@ -92,6 +92,7 @@ type VertexAIConfig struct {
 	Project     string `yaml:"project"`      // GCP project ID (required)
 	Region      string `yaml:"region"`       // GCP region (default: us-central1)
 	CachingMode string `yaml:"caching_mode"` // off|auto|system-only (default: auto)
+	CacheTTL    string `yaml:"cache_ttl"`    // 5m|1h (default: 5m)
 }
 
 // version is set at build time via ldflags.
@@ -957,6 +958,9 @@ func buildCloudProxy(cfg Config, submitter *processor.SpanProcessor) (*proxy.Pro
 			ft := &proxy.AnthropicFormatTranslator{}
 			if cfg.VertexAI.CachingMode != "" {
 				ft.SetCachingMode(proxy.ParseCachingMode(cfg.VertexAI.CachingMode))
+			}
+			if cfg.VertexAI.CacheTTL != "" {
+				ft.SetCacheTTL(proxy.ParseCacheTTL(cfg.VertexAI.CacheTTL))
 			}
 			p.FormatTranslator = ft
 			p.PathRewriter = &proxy.VertexAIPathRewriter{

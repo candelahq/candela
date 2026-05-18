@@ -120,40 +120,56 @@ func (a *localAPI) handleBackends(w http.ResponseWriter, _ *http.Request) {
 // GET /_local/api/config — returns current runtime configuration state.
 func (a *localAPI) handleGetConfig(w http.ResponseWriter, _ *http.Request) {
 	cachingMode := string(proxy.CachingOff)
+	cacheTTL := string(proxy.CacheTTL5m)
 	if a.cloudProxy != nil {
 		cachingMode = string(a.cloudProxy.GetCachingMode())
+		cacheTTL = string(a.cloudProxy.GetCacheTTL())
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"caching": map[string]string{
 			"anthropic": cachingMode,
+			"cache_ttl": cacheTTL,
 		},
 	})
 }
 
-// POST /_local/api/config/caching — set caching mode at runtime.
-// Body: {"anthropic": "auto"} — values: off, auto, system-only
+// POST /_local/api/config/caching — set caching mode and TTL at runtime.
+// Body: {"anthropic": "auto", "cache_ttl": "1h"} — anthropic: off, auto, system-only; cache_ttl: 5m, 1h
+// Both fields are optional; omitted fields are left unchanged.
 func (a *localAPI) handleSetCaching(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, 1024)
 	var req struct {
-		Anthropic string `json:"anthropic"`
+		Anthropic *string `json:"anthropic"`
+		CacheTTL  *string `json:"cache_ttl"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON"})
 		return
 	}
 
-	mode := proxy.ParseCachingMode(req.Anthropic)
 	if a.cloudProxy == nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{
 			"error": "proxy not initialized",
 		})
 		return
 	}
-	a.cloudProxy.SetCachingMode(mode)
-	slog.Info("caching mode updated at runtime", "anthropic", string(mode))
+
+	if req.Anthropic != nil {
+		mode := proxy.ParseCachingMode(*req.Anthropic)
+		a.cloudProxy.SetCachingMode(mode)
+		slog.Info("caching mode updated at runtime", "anthropic", string(mode))
+	}
+
+	if req.CacheTTL != nil {
+		ttl := proxy.ParseCacheTTL(*req.CacheTTL)
+		a.cloudProxy.SetCacheTTL(ttl)
+		slog.Info("cache TTL updated at runtime", "cache_ttl", string(ttl))
+	}
+
 	writeJSON(w, http.StatusOK, map[string]any{
 		"caching": map[string]string{
-			"anthropic": string(mode),
+			"anthropic": string(a.cloudProxy.GetCachingMode()),
+			"cache_ttl": string(a.cloudProxy.GetCacheTTL()),
 		},
 	})
 }

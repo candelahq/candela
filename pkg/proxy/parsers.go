@@ -632,6 +632,19 @@ func injectStreamUsageOption(provider string, body []byte) []byte {
 	return modified
 }
 
+// isAnthropicProvider returns true if the provider name corresponds to an
+// Anthropic provider (direct, vertex, or canonical). Used to restrict
+// Anthropic-specific processing (like cache TTL body inspection) to only
+// relevant traffic, avoiding unnecessary overhead for other providers.
+func isAnthropicProvider(provider string) bool {
+	switch provider {
+	case "anthropic", "anthropic-direct", "anthropic-vertex":
+		return true
+	default:
+		return strings.HasPrefix(provider, "anthropic-")
+	}
+}
+
 // extractAnthropicCacheTTL inspects an Anthropic request body for cache_control
 // blocks that specify a 1-hour TTL. Returns true if ANY content block in the
 // system prompt or messages contains {"cache_control": {"ttl": "1h"}}.
@@ -643,6 +656,13 @@ func injectStreamUsageOption(provider string, body []byte) []byte {
 // For translated requests (OpenAI → Anthropic), the proxy already knows the
 // TTL from the AnthropicFormatTranslator config.
 func extractAnthropicCacheTTL(body []byte) bool {
+	// Fast-path: skip full JSON parsing if the body doesn't contain "ttl"
+	// at all. This avoids expensive unmarshal for the common case where no
+	// extended TTL is set.
+	if !bytes.Contains(body, []byte(`"ttl"`)) {
+		return false
+	}
+
 	var req map[string]interface{}
 	if err := json.Unmarshal(body, &req); err != nil {
 		return false

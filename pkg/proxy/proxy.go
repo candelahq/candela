@@ -793,7 +793,7 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 		extendedTTL = ParseCacheTTL(ttlOverride) == CacheTTL1h
 	} else if ft, ok := provider.FormatTranslator.(*AnthropicFormatTranslator); ok {
 		extendedTTL = ft.GetCacheTTL() == CacheTTL1h
-	} else if provider.FormatTranslator == nil {
+	} else if provider.FormatTranslator == nil && isAnthropicProvider(providerName) {
 		// Passthrough Anthropic routes — inspect request body.
 		extendedTTL = extractAnthropicCacheTTL(reqBody)
 	}

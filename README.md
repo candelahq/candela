@@ -407,7 +407,7 @@ candela start          Start proxy in background
 candela stop           Stop the background proxy
 candela status         Show proxy status
 candela run [flags]    Run in foreground
-candela auth login     Login via browser (Google OAuth)
+candela auth login     Login via browser
 candela auth status    Show credential status
 candela auth token     Print a fresh access token
 candela version        Print version
@@ -426,7 +426,7 @@ candela auth status
 candela auth token
 ```
 
-Credentials are stored in `~/.config/candela/adc.json` (ADC-compatible format). The proxy reads and refreshes them automatically — no `gcloud` CLI needed.
+Credentials are stored in ADC-compatible format at `~/.config/gcloud/application_default_credentials.json`. The proxy reads and refreshes them automatically — no `gcloud` CLI needed.
 
 ### 🏠 Solo Mode (Zero-Config)
 
@@ -716,7 +716,7 @@ CANDELA_CONFIG=test-config.yaml go run ./cmd/candela-server
 #### Anthropic/Vertex AI Errors
 ```bash
 # Verify ADC is working
-gcloud auth application-default print-access-token
+candela auth token
 
 # Check project/region settings
 gcloud config list

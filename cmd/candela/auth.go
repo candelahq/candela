@@ -20,7 +20,7 @@ import (
 )
 
 // adcCredentials represents the Application Default Credentials file format.
-// This is the same structure that `gcloud auth application-default login` writes.
+// Compatible with the structure that `gcloud auth application-default login` writes.
 type adcCredentials struct {
 	Account      string `json:"account"`
 	ClientID     string `json:"client_id"`
@@ -80,10 +80,10 @@ func handleAuth(args []string) {
 	case "token":
 		cmdAuthToken()
 	default:
-		_, _ = fmt.Fprintf(os.Stderr, `candela auth — manage Google Cloud credentials
+		_, _ = fmt.Fprintf(os.Stderr, `candela auth — manage cloud credentials
 
 Usage:
-  candela auth login      Login via browser (writes ADC credentials)
+  candela auth login      Login via browser (writes credentials)
   candela auth status     Show current credential status
   candela auth token      Print a fresh access token
 `)

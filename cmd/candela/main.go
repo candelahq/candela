@@ -143,7 +143,7 @@ Usage:
   candela stop           Stop the background proxy
   candela status         Show proxy status
   candela run [flags]    Run in foreground
-  candela auth login     Login via browser (Google OAuth)
+  candela auth login     Login via browser
   candela auth status    Show credential status
   candela auth token     Print a fresh access token
   candela version        Print version
@@ -938,7 +938,7 @@ func buildCloudProxy(cfg Config, submitter *processor.SpanProcessor) (*proxy.Pro
 	tokenSource, adcErr := google.DefaultTokenSource(context.Background(),
 		"https://www.googleapis.com/auth/cloud-platform")
 	if adcErr != nil {
-		slog.Error("failed to get Google ADC — run 'candela auth login'", "error", adcErr)
+		slog.Error("failed to get cloud credentials — run 'candela auth login'", "error", adcErr)
 		return nil, nil
 	}
 

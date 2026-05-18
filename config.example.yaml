@@ -22,7 +22,7 @@ proxy:
 
   # Vertex AI configuration (required for Anthropic proxy).
   # Set your GCP project and region. Auth is automatic via ADC
-  # (run: gcloud auth application-default login).
+  # (run: candela auth login).
   vertex_ai:
     project_id: "your-gcp-project-id"
     region: "us-east5"      # Vertex AI region (Claude available here)

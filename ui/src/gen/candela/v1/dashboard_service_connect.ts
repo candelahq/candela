@@ -3,7 +3,7 @@
 /* eslint-disable */
 // @ts-nocheck
 
-import { GetJobLeaderboardRequest, GetJobLeaderboardResponse, GetLatencyPercentilesRequest, GetLatencyPercentilesResponse, GetModelBreakdownRequest, GetModelBreakdownResponse, GetMyUsageRequest, GetMyUsageResponse, GetTeamLeaderboardRequest, GetTeamLeaderboardResponse, GetUsageSummaryRequest, GetUsageSummaryResponse } from "./dashboard_service_pb.js";
+import { GetDashboardDataRequest, GetDashboardDataResponse, GetJobLeaderboardRequest, GetJobLeaderboardResponse, GetLatencyPercentilesRequest, GetLatencyPercentilesResponse, GetModelBreakdownRequest, GetModelBreakdownResponse, GetMyUsageRequest, GetMyUsageResponse, GetTeamLeaderboardRequest, GetTeamLeaderboardResponse, GetUsageSummaryRequest, GetUsageSummaryResponse } from "./dashboard_service_pb.js";
 import { MethodKind } from "@bufbuild/protobuf";
 
 /**
@@ -16,9 +16,24 @@ export const DashboardService = {
   typeName: "candela.v1.DashboardService",
   methods: {
     /**
-     * GetUsageSummary returns aggregated token usage, cost, and request counts.
+     * GetDashboardData returns a consolidated dashboard view including usage
+     * summary, per-model breakdown, and (if authenticated) per-user budget
+     * context. Replaces the concurrent fan-out of GetUsageSummary +
+     * GetModelBreakdown + GetMyUsage with a single round-trip.
+     *
+     * @generated from rpc candela.v1.DashboardService.GetDashboardData
+     */
+    getDashboardData: {
+      name: "GetDashboardData",
+      I: GetDashboardDataRequest,
+      O: GetDashboardDataResponse,
+      kind: MethodKind.Unary,
+    },
+    /**
+     * Deprecated: use GetDashboardData instead.
      *
      * @generated from rpc candela.v1.DashboardService.GetUsageSummary
+     * @deprecated
      */
     getUsageSummary: {
       name: "GetUsageSummary",
@@ -27,9 +42,10 @@ export const DashboardService = {
       kind: MethodKind.Unary,
     },
     /**
-     * GetModelBreakdown returns usage broken down by model.
+     * Deprecated: use GetDashboardData instead.
      *
      * @generated from rpc candela.v1.DashboardService.GetModelBreakdown
+     * @deprecated
      */
     getModelBreakdown: {
       name: "GetModelBreakdown",
@@ -49,10 +65,11 @@ export const DashboardService = {
       kind: MethodKind.Unary,
     },
     /**
-     * GetMyUsage returns the calling user's personal usage summary (BigQuery).
+     * Deprecated: use GetDashboardData with include_budget=true instead.
      * For real-time budget/grant progress, see UserService.GetMyBudget.
      *
      * @generated from rpc candela.v1.DashboardService.GetMyUsage
+     * @deprecated
      */
     getMyUsage: {
       name: "GetMyUsage",

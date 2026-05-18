@@ -187,6 +187,27 @@ func (p *Proxy) GetCachingMode() CachingMode {
 	return CachingOff
 }
 
+// SetCacheTTL updates the Anthropic cache TTL at runtime.
+// This is safe to call concurrently from any goroutine.
+func (p *Proxy) SetCacheTTL(ttl CacheTTL) {
+	for _, provider := range p.providers {
+		if ft, ok := provider.FormatTranslator.(*AnthropicFormatTranslator); ok {
+			ft.SetCacheTTL(ttl)
+		}
+	}
+}
+
+// GetCacheTTL returns the current Anthropic cache TTL. If multiple
+// providers have translators, returns the first one found.
+func (p *Proxy) GetCacheTTL() CacheTTL {
+	for _, provider := range p.providers {
+		if ft, ok := provider.FormatTranslator.(*AnthropicFormatTranslator); ok {
+			return ft.GetCacheTTL()
+		}
+	}
+	return CacheTTL5m
+}
+
 // RegisterRoutes registers proxy routes on the given mux.
 // Pattern: /proxy/{provider}/...
 func (p *Proxy) RegisterRoutes(mux *http.ServeMux) {
@@ -569,17 +590,27 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 	var translatedModel string
 	upstreamBody := reqBody
 
-	// Always strip X-Candela-Caching before forwarding — it's a Candela-internal
-	// header and must never leak to any upstream (Anthropic, Gemini, etc.).
+	// Always strip Candela-internal headers before forwarding — they must
+	// never leak to any upstream (Anthropic, Gemini, etc.).
 	cachingOverride := r.Header.Get(CachingHeader)
 	r.Header.Del(CachingHeader)
+	ttlOverride := r.Header.Get(CacheTTLHeader)
+	r.Header.Del(CacheTTLHeader)
 
 	if provider.FormatTranslator != nil {
-		// Per-request caching override via X-Candela-Caching header.
-		// Uses TranslateRequestWithMode to avoid mutating shared translator
+		// Per-request caching override via X-Candela-Caching / X-Candela-Cache-TTL headers.
+		// Uses TranslateRequestWithModeAndTTL to avoid mutating shared translator
 		// state, which would race with concurrent requests.
-		if ft, ok := provider.FormatTranslator.(*AnthropicFormatTranslator); ok && cachingOverride != "" {
-			upstreamBody, translatedModel, err = ft.TranslateRequestWithMode(reqBody, ParseCachingMode(cachingOverride))
+		if ft, ok := provider.FormatTranslator.(*AnthropicFormatTranslator); ok && (cachingOverride != "" || ttlOverride != "") {
+			mode := ft.GetCachingMode()
+			ttl := ft.GetCacheTTL()
+			if cachingOverride != "" {
+				mode = ParseCachingMode(cachingOverride)
+			}
+			if ttlOverride != "" {
+				ttl = ParseCacheTTL(ttlOverride)
+			}
+			upstreamBody, translatedModel, err = ft.TranslateRequestWithModeAndTTL(reqBody, mode, ttl)
 		} else {
 			upstreamBody, translatedModel, err = provider.FormatTranslator.TranslateRequest(reqBody)
 		}

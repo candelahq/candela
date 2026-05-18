@@ -14,7 +14,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file candela/v1/dashboard_service.proto.
  */
 export const file_candela_v1_dashboard_service: GenFile = /*@__PURE__*/
-  fileDesc("CiJjYW5kZWxhL3YxL2Rhc2hib2FyZF9zZXJ2aWNlLnByb3RvEgpjYW5kZWxhLnYxIm8KFkdldFVzYWdlU3VtbWFyeVJlcXVlc3QSEgoKcHJvamVjdF9pZBgBIAEoCRIsCgp0aW1lX3JhbmdlGAIgASgLMhguY2FuZGVsYS50eXBlcy5UaW1lUmFuZ2USEwoLZW52aXJvbm1lbnQYAyABKAkiwwMKF0dldFVzYWdlU3VtbWFyeVJlc3BvbnNlEhQKDHRvdGFsX3RyYWNlcxgBIAEoAxITCgt0b3RhbF9zcGFucxgCIAEoAxIXCg90b3RhbF9sbG1fY2FsbHMYAyABKAMSGgoSdG90YWxfaW5wdXRfdG9rZW5zGAQgASgDEhsKE3RvdGFsX291dHB1dF90b2tlbnMYBSABKAMSFgoOdG90YWxfY29zdF91c2QYBiABKAESFgoOYXZnX2xhdGVuY3lfbXMYByABKAESEgoKZXJyb3JfcmF0ZRgIIAEoARIfChd0b3RhbF9jYWNoZV9yZWFkX3Rva2VucxgJIAEoAxIjCht0b3RhbF9jYWNoZV9jcmVhdGlvbl90b2tlbnMYCiABKAMSNQoQdHJhY2VzX292ZXJfdGltZRgUIAMoCzIbLmNhbmRlbGEudjEuVGltZVNlcmllc1BvaW50EjMKDmNvc3Rfb3Zlcl90aW1lGBUgAygLMhsuY2FuZGVsYS52MS5UaW1lU2VyaWVzUG9pbnQSNQoQdG9rZW5zX292ZXJfdGltZRgWIAMoCzIbLmNhbmRlbGEudjEuVGltZVNlcmllc1BvaW50IjMKD1RpbWVTZXJpZXNQb2ludBIRCgl0aW1lc3RhbXAYASABKAkSDQoFdmFsdWUYAiABKAEiXAoYR2V0TW9kZWxCcmVha2Rvd25SZXF1ZXN0EhIKCnByb2plY3RfaWQYASABKAkSLAoKdGltZV9yYW5nZRgCIAEoCzIYLmNhbmRlbGEudHlwZXMuVGltZVJhbmdlIkMKGUdldE1vZGVsQnJlYWtkb3duUmVzcG9uc2USJgoGbW9kZWxzGAEgAygLMhYuY2FuZGVsYS52MS5Nb2RlbFVzYWdlIpgBCgpNb2RlbFVzYWdlEg0KBW1vZGVsGAEgASgJEhAKCHByb3ZpZGVyGAIgASgJEhIKCmNhbGxfY291bnQYAyABKAMSFAoMaW5wdXRfdG9rZW5zGAQgASgDEhUKDW91dHB1dF90b2tlbnMYBSABKAMSEAoIY29zdF91c2QYBiABKAESFgoOYXZnX2xhdGVuY3lfbXMYByABKAEibwocR2V0TGF0ZW5jeVBlcmNlbnRpbGVzUmVxdWVzdBISCgpwcm9qZWN0X2lkGAEgASgJEiwKCnRpbWVfcmFuZ2UYAiABKAsyGC5jYW5kZWxhLnR5cGVzLlRpbWVSYW5nZRINCgVtb2RlbBgDIAEoCSKXAQodR2V0TGF0ZW5jeVBlcmNlbnRpbGVzUmVzcG9uc2USDgoGcDUwX21zGAEgASgBEg4KBnA5MF9tcxgCIAEoARIOCgZwOTVfbXMYAyABKAESDgoGcDk5X21zGAQgASgBEjYKEWxhdGVuY3lfb3Zlcl90aW1lGAogAygLMhsuY2FuZGVsYS52MS5UaW1lU2VyaWVzUG9pbnQiVQoRR2V0TXlVc2FnZVJlcXVlc3QSEgoKcHJvamVjdF9pZBgBIAEoCRIsCgp0aW1lX3JhbmdlGAIgASgLMhguY2FuZGVsYS50eXBlcy5UaW1lUmFuZ2UitQIKEkdldE15VXNhZ2VSZXNwb25zZRITCgt0b3RhbF9jYWxscxgBIAEoAxIaChJ0b3RhbF9pbnB1dF90b2tlbnMYAiABKAMSGwoTdG90YWxfb3V0cHV0X3Rva2VucxgDIAEoAxIWCg50b3RhbF9jb3N0X3VzZBgEIAEoARIWCg5hdmdfbGF0ZW5jeV9tcxgFIAEoARImCgZtb2RlbHMYCiADKAsyFi5jYW5kZWxhLnYxLk1vZGVsVXNhZ2USKQoGYnVkZ2V0GBQgASgLMhkuY2FuZGVsYS50eXBlcy5Vc2VyQnVkZ2V0EhsKE3RvdGFsX3JlbWFpbmluZ191c2QYFSABKAESMQoNYWN0aXZlX2dyYW50cxgWIAMoCzIaLmNhbmRlbGEudHlwZXMuQnVkZ2V0R3JhbnQibAoZR2V0VGVhbUxlYWRlcmJvYXJkUmVxdWVzdBISCgpwcm9qZWN0X2lkGAEgASgJEiwKCnRpbWVfcmFuZ2UYAiABKAsyGC5jYW5kZWxhLnR5cGVzLlRpbWVSYW5nZRINCgVsaW1pdBgDIAEoBSJCChpHZXRUZWFtTGVhZGVyYm9hcmRSZXNwb25zZRIkCgV1c2VycxgBIAMoCzIVLmNhbmRlbGEudjEuVXNlclVzYWdlIqgBCglVc2VyVXNhZ2USDwoHdXNlcl9pZBgBIAEoCRINCgVlbWFpbBgCIAEoCRIUCgxkaXNwbGF5X25hbWUYAyABKAkSEgoKY2FsbF9jb3VudBgEIAEoAxIUCgx0b3RhbF90b2tlbnMYBSABKAMSEAoIY29zdF91c2QYBiABKAESFgoOYXZnX2xhdGVuY3lfbXMYByABKAESEQoJdG9wX21vZGVsGAggASgJImsKGEdldEpvYkxlYWRlcmJvYXJkUmVxdWVzdBISCgpwcm9qZWN0X2lkGAEgASgJEiwKCnRpbWVfcmFuZ2UYAiABKAsyGC5jYW5kZWxhLnR5cGVzLlRpbWVSYW5nZRINCgVsaW1pdBgDIAEoBSI/ChlHZXRKb2JMZWFkZXJib2FyZFJlc3BvbnNlEiIKBGpvYnMYASADKAsyFC5jYW5kZWxhLnYxLkpvYlVzYWdlIoEBCghKb2JVc2FnZRIOCgZqb2JfaWQYASABKAkSEgoKY2FsbF9jb3VudBgCIAEoAxIUCgx0b3RhbF90b2tlbnMYAyABKAMSEAoIY29zdF91c2QYBCABKAESFgoOYXZnX2xhdGVuY3lfbXMYBSABKAESEQoJdG9wX21vZGVsGAYgASgJMtIEChBEYXNoYm9hcmRTZXJ2aWNlEloKD0dldFVzYWdlU3VtbWFyeRIiLmNhbmRlbGEudjEuR2V0VXNhZ2VTdW1tYXJ5UmVxdWVzdBojLmNhbmRlbGEudjEuR2V0VXNhZ2VTdW1tYXJ5UmVzcG9uc2USYAoRR2V0TW9kZWxCcmVha2Rvd24SJC5jYW5kZWxhLnYxLkdldE1vZGVsQnJlYWtkb3duUmVxdWVzdBolLmNhbmRlbGEudjEuR2V0TW9kZWxCcmVha2Rvd25SZXNwb25zZRJsChVHZXRMYXRlbmN5UGVyY2VudGlsZXMSKC5jYW5kZWxhLnYxLkdldExhdGVuY3lQZXJjZW50aWxlc1JlcXVlc3QaKS5jYW5kZWxhLnYxLkdldExhdGVuY3lQZXJjZW50aWxlc1Jlc3BvbnNlEksKCkdldE15VXNhZ2USHS5jYW5kZWxhLnYxLkdldE15VXNhZ2VSZXF1ZXN0Gh4uY2FuZGVsYS52MS5HZXRNeVVzYWdlUmVzcG9uc2USYwoSR2V0VGVhbUxlYWRlcmJvYXJkEiUuY2FuZGVsYS52MS5HZXRUZWFtTGVhZGVyYm9hcmRSZXF1ZXN0GiYuY2FuZGVsYS52MS5HZXRUZWFtTGVhZGVyYm9hcmRSZXNwb25zZRJgChFHZXRKb2JMZWFkZXJib2FyZBIkLmNhbmRlbGEudjEuR2V0Sm9iTGVhZGVyYm9hcmRSZXF1ZXN0GiUuY2FuZGVsYS52MS5HZXRKb2JMZWFkZXJib2FyZFJlc3BvbnNlQqoBCg5jb20uY2FuZGVsYS52MUIVRGFzaGJvYXJkU2VydmljZVByb3RvUAFaOGdpdGh1Yi5jb20vY2FuZGVsYWhxL2NhbmRlbGEvZ2VuL2dvL2NhbmRlbGEvdjE7Y2FuZGVsYXYxogIDQ1hYqgIKQ2FuZGVsYS5WMcoCCkNhbmRlbGFcVjHiAhZDYW5kZWxhXFYxXEdQQk1ldGFkYXRh6gILQ2FuZGVsYTo6VjFiBnByb3RvMw", [file_candela_types_common, file_candela_types_user]);
+  fileDesc("CiJjYW5kZWxhL3YxL2Rhc2hib2FyZF9zZXJ2aWNlLnByb3RvEgpjYW5kZWxhLnYxIm8KFkdldFVzYWdlU3VtbWFyeVJlcXVlc3QSEgoKcHJvamVjdF9pZBgBIAEoCRIsCgp0aW1lX3JhbmdlGAIgASgLMhguY2FuZGVsYS50eXBlcy5UaW1lUmFuZ2USEwoLZW52aXJvbm1lbnQYAyABKAkixgUKF0dldFVzYWdlU3VtbWFyeVJlc3BvbnNlEhQKDHRvdGFsX3RyYWNlcxgBIAEoAxITCgt0b3RhbF9zcGFucxgCIAEoAxIXCg90b3RhbF9sbG1fY2FsbHMYAyABKAMSGgoSdG90YWxfaW5wdXRfdG9rZW5zGAQgASgDEhsKE3RvdGFsX291dHB1dF90b2tlbnMYBSABKAMSFgoOdG90YWxfY29zdF91c2QYBiABKAESFgoOYXZnX2xhdGVuY3lfbXMYByABKAESEgoKZXJyb3JfcmF0ZRgIIAEoARIfChd0b3RhbF9jYWNoZV9yZWFkX3Rva2VucxgJIAEoAxIjCht0b3RhbF9jYWNoZV9jcmVhdGlvbl90b2tlbnMYCiABKAMSNQoQdHJhY2VzX292ZXJfdGltZRgUIAMoCzIbLmNhbmRlbGEudjEuVGltZVNlcmllc1BvaW50EjMKDmNvc3Rfb3Zlcl90aW1lGBUgAygLMhsuY2FuZGVsYS52MS5UaW1lU2VyaWVzUG9pbnQSNQoQdG9rZW5zX292ZXJfdGltZRgWIAMoCzIbLmNhbmRlbGEudjEuVGltZVNlcmllc1BvaW50EkAKG2NhY2hlX3JlYWRfdG9rZW5zX292ZXJfdGltZRgXIAMoCzIbLmNhbmRlbGEudjEuVGltZVNlcmllc1BvaW50EkQKH2NhY2hlX2NyZWF0aW9uX3Rva2Vuc19vdmVyX3RpbWUYGCADKAsyGy5jYW5kZWxhLnYxLlRpbWVTZXJpZXNQb2ludBI7ChZpbnB1dF90b2tlbnNfb3Zlcl90aW1lGBkgAygLMhsuY2FuZGVsYS52MS5UaW1lU2VyaWVzUG9pbnQSPAoXb3V0cHV0X3Rva2Vuc19vdmVyX3RpbWUYGiADKAsyGy5jYW5kZWxhLnYxLlRpbWVTZXJpZXNQb2ludCIzCg9UaW1lU2VyaWVzUG9pbnQSEQoJdGltZXN0YW1wGAEgASgJEg0KBXZhbHVlGAIgASgBIlwKGEdldE1vZGVsQnJlYWtkb3duUmVxdWVzdBISCgpwcm9qZWN0X2lkGAEgASgJEiwKCnRpbWVfcmFuZ2UYAiABKAsyGC5jYW5kZWxhLnR5cGVzLlRpbWVSYW5nZSJDChlHZXRNb2RlbEJyZWFrZG93blJlc3BvbnNlEiYKBm1vZGVscxgBIAMoCzIWLmNhbmRlbGEudjEuTW9kZWxVc2FnZSLSAQoKTW9kZWxVc2FnZRINCgVtb2RlbBgBIAEoCRIQCghwcm92aWRlchgCIAEoCRISCgpjYWxsX2NvdW50GAMgASgDEhQKDGlucHV0X3Rva2VucxgEIAEoAxIVCg1vdXRwdXRfdG9rZW5zGAUgASgDEhAKCGNvc3RfdXNkGAYgASgBEhYKDmF2Z19sYXRlbmN5X21zGAcgASgBEhkKEWNhY2hlX3JlYWRfdG9rZW5zGAggASgDEh0KFWNhY2hlX2NyZWF0aW9uX3Rva2VucxgJIAEoAyJvChxHZXRMYXRlbmN5UGVyY2VudGlsZXNSZXF1ZXN0EhIKCnByb2plY3RfaWQYASABKAkSLAoKdGltZV9yYW5nZRgCIAEoCzIYLmNhbmRlbGEudHlwZXMuVGltZVJhbmdlEg0KBW1vZGVsGAMgASgJIpcBCh1HZXRMYXRlbmN5UGVyY2VudGlsZXNSZXNwb25zZRIOCgZwNTBfbXMYASABKAESDgoGcDkwX21zGAIgASgBEg4KBnA5NV9tcxgDIAEoARIOCgZwOTlfbXMYBCABKAESNgoRbGF0ZW5jeV9vdmVyX3RpbWUYCiADKAsyGy5jYW5kZWxhLnYxLlRpbWVTZXJpZXNQb2ludCJVChFHZXRNeVVzYWdlUmVxdWVzdBISCgpwcm9qZWN0X2lkGAEgASgJEiwKCnRpbWVfcmFuZ2UYAiABKAsyGC5jYW5kZWxhLnR5cGVzLlRpbWVSYW5nZSL7AgoSR2V0TXlVc2FnZVJlc3BvbnNlEhMKC3RvdGFsX2NhbGxzGAEgASgDEhoKEnRvdGFsX2lucHV0X3Rva2VucxgCIAEoAxIbChN0b3RhbF9vdXRwdXRfdG9rZW5zGAMgASgDEhYKDnRvdGFsX2Nvc3RfdXNkGAQgASgBEhYKDmF2Z19sYXRlbmN5X21zGAUgASgBEh8KF3RvdGFsX2NhY2hlX3JlYWRfdG9rZW5zGAYgASgDEiMKG3RvdGFsX2NhY2hlX2NyZWF0aW9uX3Rva2VucxgHIAEoAxImCgZtb2RlbHMYCiADKAsyFi5jYW5kZWxhLnYxLk1vZGVsVXNhZ2USKQoGYnVkZ2V0GBQgASgLMhkuY2FuZGVsYS50eXBlcy5Vc2VyQnVkZ2V0EhsKE3RvdGFsX3JlbWFpbmluZ191c2QYFSABKAESMQoNYWN0aXZlX2dyYW50cxgWIAMoCzIaLmNhbmRlbGEudHlwZXMuQnVkZ2V0R3JhbnQibAoZR2V0VGVhbUxlYWRlcmJvYXJkUmVxdWVzdBISCgpwcm9qZWN0X2lkGAEgASgJEiwKCnRpbWVfcmFuZ2UYAiABKAsyGC5jYW5kZWxhLnR5cGVzLlRpbWVSYW5nZRINCgVsaW1pdBgDIAEoBSJCChpHZXRUZWFtTGVhZGVyYm9hcmRSZXNwb25zZRIkCgV1c2VycxgBIAMoCzIVLmNhbmRlbGEudjEuVXNlclVzYWdlIqgBCglVc2VyVXNhZ2USDwoHdXNlcl9pZBgBIAEoCRINCgVlbWFpbBgCIAEoCRIUCgxkaXNwbGF5X25hbWUYAyABKAkSEgoKY2FsbF9jb3VudBgEIAEoAxIUCgx0b3RhbF90b2tlbnMYBSABKAMSEAoIY29zdF91c2QYBiABKAESFgoOYXZnX2xhdGVuY3lfbXMYByABKAESEQoJdG9wX21vZGVsGAggASgJImsKGEdldEpvYkxlYWRlcmJvYXJkUmVxdWVzdBISCgpwcm9qZWN0X2lkGAEgASgJEiwKCnRpbWVfcmFuZ2UYAiABKAsyGC5jYW5kZWxhLnR5cGVzLlRpbWVSYW5nZRINCgVsaW1pdBgDIAEoBSI/ChlHZXRKb2JMZWFkZXJib2FyZFJlc3BvbnNlEiIKBGpvYnMYASADKAsyFC5jYW5kZWxhLnYxLkpvYlVzYWdlIoEBCghKb2JVc2FnZRIOCgZqb2JfaWQYASABKAkSEgoKY2FsbF9jb3VudBgCIAEoAxIUCgx0b3RhbF90b2tlbnMYAyABKAMSEAoIY29zdF91c2QYBCABKAESFgoOYXZnX2xhdGVuY3lfbXMYBSABKAESEQoJdG9wX21vZGVsGAYgASgJIogBChdHZXREYXNoYm9hcmREYXRhUmVxdWVzdBISCgpwcm9qZWN0X2lkGAEgASgJEiwKCnRpbWVfcmFuZ2UYAiABKAsyGC5jYW5kZWxhLnR5cGVzLlRpbWVSYW5nZRITCgtlbnZpcm9ubWVudBgDIAEoCRIWCg5pbmNsdWRlX2J1ZGdldBgEIAEoCCLRAgoYR2V0RGFzaGJvYXJkRGF0YVJlc3BvbnNlEjQKB3N1bW1hcnkYASABKAsyIy5jYW5kZWxhLnYxLkdldFVzYWdlU3VtbWFyeVJlc3BvbnNlEiYKBm1vZGVscxgCIAMoCzIWLmNhbmRlbGEudjEuTW9kZWxVc2FnZRJKCg5idWRnZXRfY29udGV4dBgDIAEoCzIyLmNhbmRlbGEudjEuR2V0RGFzaGJvYXJkRGF0YVJlc3BvbnNlLkJ1ZGdldENvbnRleHQaigEKDUJ1ZGdldENvbnRleHQSKQoGYnVkZ2V0GAEgASgLMhkuY2FuZGVsYS50eXBlcy5Vc2VyQnVkZ2V0EhsKE3RvdGFsX3JlbWFpbmluZ191c2QYAiABKAESMQoNYWN0aXZlX2dyYW50cxgDIAMoCzIaLmNhbmRlbGEudHlwZXMuQnVkZ2V0R3JhbnQywAUKEERhc2hib2FyZFNlcnZpY2USXQoQR2V0RGFzaGJvYXJkRGF0YRIjLmNhbmRlbGEudjEuR2V0RGFzaGJvYXJkRGF0YVJlcXVlc3QaJC5jYW5kZWxhLnYxLkdldERhc2hib2FyZERhdGFSZXNwb25zZRJfCg9HZXRVc2FnZVN1bW1hcnkSIi5jYW5kZWxhLnYxLkdldFVzYWdlU3VtbWFyeVJlcXVlc3QaIy5jYW5kZWxhLnYxLkdldFVzYWdlU3VtbWFyeVJlc3BvbnNlIgOIAgESZQoRR2V0TW9kZWxCcmVha2Rvd24SJC5jYW5kZWxhLnYxLkdldE1vZGVsQnJlYWtkb3duUmVxdWVzdBolLmNhbmRlbGEudjEuR2V0TW9kZWxCcmVha2Rvd25SZXNwb25zZSIDiAIBEmwKFUdldExhdGVuY3lQZXJjZW50aWxlcxIoLmNhbmRlbGEudjEuR2V0TGF0ZW5jeVBlcmNlbnRpbGVzUmVxdWVzdBopLmNhbmRlbGEudjEuR2V0TGF0ZW5jeVBlcmNlbnRpbGVzUmVzcG9uc2USUAoKR2V0TXlVc2FnZRIdLmNhbmRlbGEudjEuR2V0TXlVc2FnZVJlcXVlc3QaHi5jYW5kZWxhLnYxLkdldE15VXNhZ2VSZXNwb25zZSIDiAIBEmMKEkdldFRlYW1MZWFkZXJib2FyZBIlLmNhbmRlbGEudjEuR2V0VGVhbUxlYWRlcmJvYXJkUmVxdWVzdBomLmNhbmRlbGEudjEuR2V0VGVhbUxlYWRlcmJvYXJkUmVzcG9uc2USYAoRR2V0Sm9iTGVhZGVyYm9hcmQSJC5jYW5kZWxhLnYxLkdldEpvYkxlYWRlcmJvYXJkUmVxdWVzdBolLmNhbmRlbGEudjEuR2V0Sm9iTGVhZGVyYm9hcmRSZXNwb25zZUKqAQoOY29tLmNhbmRlbGEudjFCFURhc2hib2FyZFNlcnZpY2VQcm90b1ABWjhnaXRodWIuY29tL2NhbmRlbGFocS9jYW5kZWxhL2dlbi9nby9jYW5kZWxhL3YxO2NhbmRlbGF2MaICA0NYWKoCCkNhbmRlbGEuVjHKAgpDYW5kZWxhXFYx4gIWQ2FuZGVsYVxWMVxHUEJNZXRhZGF0YeoCC0NhbmRlbGE6OlYxYgZwcm90bzM", [file_candela_types_common, file_candela_types_user]);
 
 /**
  * @generated from message candela.v1.GetUsageSummaryRequest
@@ -88,6 +88,9 @@ export type GetUsageSummaryResponse = Message<"candela.v1.GetUsageSummaryRespons
   errorRate: number;
 
   /**
+   * Cache metrics — these fields are subsets of total_input_tokens.
+   * Cache hit rate = cache_read_tokens / input_tokens (excludes output tokens).
+   *
    * @generated from field: int64 total_cache_read_tokens = 9;
    */
   totalCacheReadTokens: bigint;
@@ -113,6 +116,26 @@ export type GetUsageSummaryResponse = Message<"candela.v1.GetUsageSummaryRespons
    * @generated from field: repeated candela.v1.TimeSeriesPoint tokens_over_time = 22;
    */
   tokensOverTime: TimeSeriesPoint[];
+
+  /**
+   * @generated from field: repeated candela.v1.TimeSeriesPoint cache_read_tokens_over_time = 23;
+   */
+  cacheReadTokensOverTime: TimeSeriesPoint[];
+
+  /**
+   * @generated from field: repeated candela.v1.TimeSeriesPoint cache_creation_tokens_over_time = 24;
+   */
+  cacheCreationTokensOverTime: TimeSeriesPoint[];
+
+  /**
+   * @generated from field: repeated candela.v1.TimeSeriesPoint input_tokens_over_time = 25;
+   */
+  inputTokensOverTime: TimeSeriesPoint[];
+
+  /**
+   * @generated from field: repeated candela.v1.TimeSeriesPoint output_tokens_over_time = 26;
+   */
+  outputTokensOverTime: TimeSeriesPoint[];
 };
 
 /**
@@ -223,6 +246,19 @@ export type ModelUsage = Message<"candela.v1.ModelUsage"> & {
    * @generated from field: double avg_latency_ms = 7;
    */
   avgLatencyMs: number;
+
+  /**
+   * Cache metrics per model — subset of input_tokens.
+   * Cache hit rate = cache_read_tokens / input_tokens.
+   *
+   * @generated from field: int64 cache_read_tokens = 8;
+   */
+  cacheReadTokens: bigint;
+
+  /**
+   * @generated from field: int64 cache_creation_tokens = 9;
+   */
+  cacheCreationTokens: bigint;
 };
 
 /**
@@ -348,6 +384,18 @@ export type GetMyUsageResponse = Message<"candela.v1.GetMyUsageResponse"> & {
    * @generated from field: double avg_latency_ms = 5;
    */
   avgLatencyMs: number;
+
+  /**
+   * Cache metrics — subset of total_input_tokens.
+   *
+   * @generated from field: int64 total_cache_read_tokens = 6;
+   */
+  totalCacheReadTokens: bigint;
+
+  /**
+   * @generated from field: int64 total_cache_creation_tokens = 7;
+   */
+  totalCacheCreationTokens: bigint;
 
   /**
    * Per-model breakdown for this user
@@ -570,6 +618,102 @@ export const JobUsageSchema: GenMessage<JobUsage> = /*@__PURE__*/
   messageDesc(file_candela_v1_dashboard_service, 15);
 
 /**
+ * @generated from message candela.v1.GetDashboardDataRequest
+ */
+export type GetDashboardDataRequest = Message<"candela.v1.GetDashboardDataRequest"> & {
+  /**
+   * @generated from field: string project_id = 1;
+   */
+  projectId: string;
+
+  /**
+   * @generated from field: candela.types.TimeRange time_range = 2;
+   */
+  timeRange?: TimeRange | undefined;
+
+  /**
+   * @generated from field: string environment = 3;
+   */
+  environment: string;
+
+  /**
+   * If true, includes per-user budget and grant context (requires auth).
+   * When false or unauthenticated, the budget/grant fields are omitted.
+   *
+   * @generated from field: bool include_budget = 4;
+   */
+  includeBudget: boolean;
+};
+
+/**
+ * Describes the message candela.v1.GetDashboardDataRequest.
+ * Use `create(GetDashboardDataRequestSchema)` to create a new message.
+ */
+export const GetDashboardDataRequestSchema: GenMessage<GetDashboardDataRequest> = /*@__PURE__*/
+  messageDesc(file_candela_v1_dashboard_service, 16);
+
+/**
+ * @generated from message candela.v1.GetDashboardDataResponse
+ */
+export type GetDashboardDataResponse = Message<"candela.v1.GetDashboardDataResponse"> & {
+  /**
+   * Consolidated usage summary and time series.
+   *
+   * @generated from field: candela.v1.GetUsageSummaryResponse summary = 1;
+   */
+  summary?: GetUsageSummaryResponse | undefined;
+
+  /**
+   * Per-model breakdown.
+   *
+   * @generated from field: repeated candela.v1.ModelUsage models = 2;
+   */
+  models: ModelUsage[];
+
+  /**
+   * @generated from field: candela.v1.GetDashboardDataResponse.BudgetContext budget_context = 3;
+   */
+  budgetContext?: GetDashboardDataResponse_BudgetContext | undefined;
+};
+
+/**
+ * Describes the message candela.v1.GetDashboardDataResponse.
+ * Use `create(GetDashboardDataResponseSchema)` to create a new message.
+ */
+export const GetDashboardDataResponseSchema: GenMessage<GetDashboardDataResponse> = /*@__PURE__*/
+  messageDesc(file_candela_v1_dashboard_service, 17);
+
+/**
+ * Per-user budget context (populated when include_budget=true + auth).
+ * Absent when budget was not requested or user is unauthenticated.
+ *
+ * @generated from message candela.v1.GetDashboardDataResponse.BudgetContext
+ */
+export type GetDashboardDataResponse_BudgetContext = Message<"candela.v1.GetDashboardDataResponse.BudgetContext"> & {
+  /**
+   * @generated from field: candela.types.UserBudget budget = 1;
+   */
+  budget?: UserBudget | undefined;
+
+  /**
+   * @generated from field: double total_remaining_usd = 2;
+   */
+  totalRemainingUsd: number;
+
+  /**
+   * @generated from field: repeated candela.types.BudgetGrant active_grants = 3;
+   */
+  activeGrants: BudgetGrant[];
+};
+
+/**
+ * Describes the message candela.v1.GetDashboardDataResponse.BudgetContext.
+ * Use `create(GetDashboardDataResponse_BudgetContextSchema)` to create a new message.
+ */
+export const GetDashboardDataResponse_BudgetContextSchema: GenMessage<GetDashboardDataResponse_BudgetContext> = /*@__PURE__*/
+  messageDesc(file_candela_v1_dashboard_service, 17, 0);
+
+/**
  * DashboardService provides aggregated metrics and usage data.
  * Exposed via ConnectRPC for the web UI dashboards.
  *
@@ -577,9 +721,23 @@ export const JobUsageSchema: GenMessage<JobUsage> = /*@__PURE__*/
  */
 export const DashboardService: GenService<{
   /**
-   * GetUsageSummary returns aggregated token usage, cost, and request counts.
+   * GetDashboardData returns a consolidated dashboard view including usage
+   * summary, per-model breakdown, and (if authenticated) per-user budget
+   * context. Replaces the concurrent fan-out of GetUsageSummary +
+   * GetModelBreakdown + GetMyUsage with a single round-trip.
+   *
+   * @generated from rpc candela.v1.DashboardService.GetDashboardData
+   */
+  getDashboardData: {
+    methodKind: "unary";
+    input: typeof GetDashboardDataRequestSchema;
+    output: typeof GetDashboardDataResponseSchema;
+  },
+  /**
+   * Deprecated: use GetDashboardData instead.
    *
    * @generated from rpc candela.v1.DashboardService.GetUsageSummary
+   * @deprecated
    */
   getUsageSummary: {
     methodKind: "unary";
@@ -587,9 +745,10 @@ export const DashboardService: GenService<{
     output: typeof GetUsageSummaryResponseSchema;
   },
   /**
-   * GetModelBreakdown returns usage broken down by model.
+   * Deprecated: use GetDashboardData instead.
    *
    * @generated from rpc candela.v1.DashboardService.GetModelBreakdown
+   * @deprecated
    */
   getModelBreakdown: {
     methodKind: "unary";
@@ -607,10 +766,11 @@ export const DashboardService: GenService<{
     output: typeof GetLatencyPercentilesResponseSchema;
   },
   /**
-   * GetMyUsage returns the calling user's personal usage summary (BigQuery).
+   * Deprecated: use GetDashboardData with include_budget=true instead.
    * For real-time budget/grant progress, see UserService.GetMyBudget.
    *
    * @generated from rpc candela.v1.DashboardService.GetMyUsage
+   * @deprecated
    */
   getMyUsage: {
     methodKind: "unary";

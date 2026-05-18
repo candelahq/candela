@@ -280,6 +280,11 @@ type ModelUsage struct {
 	OutputTokens int64
 	CostUSD      float64
 	AvgLatencyMs float64
+
+	// Cache token aggregates per model — raw counts from provider APIs.
+	// Populated by CombinedUsageReader; zero when fetched via GetModelBreakdown.
+	CacheReadTokens     int64
+	CacheCreationTokens int64
 }
 
 type JobUsageSummary struct {
@@ -334,6 +339,18 @@ type SpanReader interface {
 
 	// Close releases any resources held by the reader.
 	Close() error
+}
+
+// CombinedUsageReader is an optional interface that storage backends can
+// implement to fetch a usage summary and per-model breakdown in a single
+// query instead of two separate queries. This is particularly beneficial
+// for columnar analytics engines (BigQuery, Databricks, Athena) where each
+// query job has fixed overhead.
+//
+// Backends that do not implement this interface will fall back to calling
+// GetUsageSummary + GetModelBreakdown concurrently.
+type CombinedUsageReader interface {
+	GetUsageWithModelBreakdown(ctx context.Context, q UsageQuery) (*UsageSummary, []ModelUsage, error)
 }
 
 // TraceStore combines read and write capabilities.

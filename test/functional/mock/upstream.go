@@ -81,6 +81,13 @@ func serveOpenAI(w http.ResponseWriter, r *http.Request) {
 		req.Model = "gpt-4o"
 	}
 
+	// Echo whether the internal header leaked.
+	if r.Header.Get("X-Candela-Caching") != "" {
+		w.Header().Set("X-Mock-Candela-Header-Leaked", "true")
+	} else {
+		w.Header().Set("X-Mock-Candela-Header-Leaked", "false")
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{
 		"id":      "chatcmpl-mock123",
@@ -109,6 +116,55 @@ func serveOpenAI(w http.ResponseWriter, r *http.Request) {
 }
 
 func serveAnthropic(w http.ResponseWriter, r *http.Request) {
+	// Decode request body to inspect cache_control injection.
+	var rawBody map[string]any
+	_ = json.NewDecoder(r.Body).Decode(&rawBody)
+
+	// Check if any system content block has cache_control.
+	hasCacheControl := false
+	if sys, ok := rawBody["system"]; ok {
+		if blocks, ok := sys.([]interface{}); ok {
+			for _, b := range blocks {
+				if block, ok := b.(map[string]interface{}); ok {
+					if _, ok := block["cache_control"]; ok {
+						hasCacheControl = true
+					}
+				}
+			}
+		}
+	}
+
+	// Check if any message content has cache_control (last user message).
+	if msgs, ok := rawBody["messages"].([]interface{}); ok {
+		for _, m := range msgs {
+			if msg, ok := m.(map[string]interface{}); ok {
+				if content, ok := msg["content"].([]interface{}); ok {
+					for _, c := range content {
+						if block, ok := c.(map[string]interface{}); ok {
+							if _, ok := block["cache_control"]; ok {
+								hasCacheControl = true
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
+	// Echo what the mock received for test assertions.
+	if hasCacheControl {
+		w.Header().Set("X-Mock-Cache-Control-Present", "true")
+	} else {
+		w.Header().Set("X-Mock-Cache-Control-Present", "false")
+	}
+
+	// Echo whether the internal header leaked.
+	if r.Header.Get("X-Candela-Caching") != "" {
+		w.Header().Set("X-Mock-Candela-Header-Leaked", "true")
+	} else {
+		w.Header().Set("X-Mock-Candela-Header-Leaked", "false")
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{
 		"id":   "msg_mock123",

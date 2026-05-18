@@ -487,6 +487,9 @@ func (h *DashboardHandler) GetDashboardData(
 	resp := &v1.GetDashboardDataResponse{}
 
 	if summary != nil {
+		// NOTE: Time series fields (TracesOverTime, CostOverTime, etc.) are
+		// defined in the proto but not yet returned by the storage layer.
+		// They will be populated once the time-bucketed query is implemented.
 		resp.Summary = &v1.GetUsageSummaryResponse{
 			TotalTraces:              summary.TotalTraces,
 			TotalSpans:               summary.TotalSpans,
@@ -521,21 +524,42 @@ func (h *DashboardHandler) GetDashboardData(
 		if authUser != nil && h.users != nil {
 			userID, err := resolveUserID(ctx, h.users, authUser.Email)
 			if err == nil {
-				budget, err := h.users.GetBudget(ctx, userID)
-				if err == nil && budget != nil {
-					remaining := budget.LimitUSD - budget.SpentUSD
+				// Fetch budget and grants concurrently — they are independent
+				// Firestore reads and the BQ scan above is the real bottleneck.
+				type budgetResult struct {
+					v   *storage.BudgetRecord
+					err error
+				}
+				type grantsResult struct {
+					v   []*storage.GrantRecord
+					err error
+				}
+				budgetCh := make(chan budgetResult, 1)
+				grantsCh := make(chan grantsResult, 1)
+				go func() {
+					v, err := h.users.GetBudget(ctx, userID)
+					budgetCh <- budgetResult{v, err}
+				}()
+				go func() {
+					v, err := h.users.ListGrants(ctx, userID, true)
+					grantsCh <- grantsResult{v, err}
+				}()
+
+				br := <-budgetCh
+				gr := <-grantsCh
+
+				if br.err == nil && br.v != nil {
+					remaining := br.v.LimitUSD - br.v.SpentUSD
 					bc := &v1.GetDashboardDataResponse_BudgetContext{
 						Budget: &types.UserBudget{
-							LimitUsd: budget.LimitUSD,
-							SpentUsd: budget.SpentUSD,
+							LimitUsd: br.v.LimitUSD,
+							SpentUsd: br.v.SpentUSD,
 						},
 						TotalRemainingUsd: remaining,
 					}
 
-					// Add active grant balances.
-					grants, gErr := h.users.ListGrants(ctx, userID, true)
-					if gErr == nil {
-						for _, g := range grants {
+					if gr.err == nil {
+						for _, g := range gr.v {
 							bc.ActiveGrants = append(bc.ActiveGrants, &types.BudgetGrant{
 								Id:        g.ID,
 								AmountUsd: g.AmountUSD,

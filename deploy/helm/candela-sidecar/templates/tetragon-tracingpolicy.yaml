@@ -1,0 +1,31 @@
+{{- if .Values.enforcement.tetragon.enabled }}
+# Generated from providers[] in values.yaml — DO NOT EDIT MANUALLY.
+# This policy enforces kernel-level process auditing: any process
+# (other than the sidecar itself) attempting TCP connect to port 443
+# on LLM provider IPs will trigger the configured action.
+apiVersion: cilium.io/v1alpha1
+kind: TracingPolicy
+metadata:
+  name: {{ include "candela-sidecar.fullname" . }}-llm-enforcement
+  labels:
+    {{- include "candela-sidecar.labels" . | nindent 4 }}
+spec:
+  kprobes:
+    - call: tcp_connect
+      syscall: false
+      args:
+        - index: 0
+          type: sock
+      selectors:
+        - matchArgs:
+            - index: 0
+              operator: DPort
+              values:
+                - "443"
+          matchBinaries:
+            - operator: NotIn
+              values:
+                - {{ .Values.enforcement.tetragon.sidecarBinary | quote }}
+          matchActions:
+            - action: {{ .Values.enforcement.tetragon.action }}
+{{- end }}

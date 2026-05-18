@@ -15,6 +15,7 @@
 //	SPAN_FORMAT        — "proto" (default) or "json" for Pub/Sub messages
 //	OTLP_ENDPOINT      — OTLP/HTTP endpoint for span export (optional)
 //	OTLP_HEADERS       — comma-separated key=value OTLP auth headers
+//	TRANSPARENT_PORT   — port for transparent proxy listener (optional, e.g. 15001)
 //	CORS_ORIGINS       — comma-separated allowed origins (default: *)
 package main
 
@@ -37,6 +38,7 @@ import (
 	"github.com/candelahq/candela/pkg/storage"
 	otlpexporter "github.com/candelahq/candela/pkg/storage/otlpexporter"
 	pubsubstore "github.com/candelahq/candela/pkg/storage/pubsub"
+	"github.com/candelahq/candela/pkg/transparent"
 )
 
 func main() {
@@ -56,6 +58,7 @@ func main() {
 	otlpEndpoint := os.Getenv("OTLP_ENDPOINT")
 	otlpHeaders := os.Getenv("OTLP_HEADERS")
 	corsOrigins := envOr("CORS_ORIGINS", "*")
+	transparentPort := os.Getenv("TRANSPARENT_PORT")
 
 	slog.Info("🕯️ candela-sidecar starting",
 		"port", port,
@@ -229,6 +232,24 @@ func main() {
 			os.Exit(1)
 		}
 	}()
+
+	// ── Transparent proxy listener (optional) ──
+	if transparentPort != "" {
+		sniMap := proxy.BuildSNIMap(activeProviders)
+		transListener := transparent.NewListener(transparent.Config{
+			ListenAddr: ":" + transparentPort,
+			SNIMap:     sniMap,
+			ProxyAddr:  "127.0.0.1:" + port,
+		})
+		go func() {
+			if err := transListener.ListenAndServe(ctx); err != nil && err != context.Canceled {
+				slog.Error("transparent proxy error", "error", err)
+			}
+		}()
+		slog.Info("🔍 transparent proxy enabled",
+			"port", transparentPort,
+			"sni_hosts", sniMap.Hosts())
+	}
 
 	<-ctx.Done()
 	slog.Info("shutting down...")

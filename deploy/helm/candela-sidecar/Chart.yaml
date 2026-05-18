@@ -1,0 +1,17 @@
+apiVersion: v2
+name: candela-sidecar
+description: Candela LLM proxy sidecar with transparent interception and eBPF enforcement
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+keywords:
+  - llm
+  - proxy
+  - observability
+  - ebpf
+  - transparent-proxy
+home: https://github.com/candelahq/candela
+sources:
+  - https://github.com/candelahq/candela
+maintainers:
+  - name: candelahq

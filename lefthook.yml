@@ -6,6 +6,7 @@ pre-commit:
       run: "grep -rn '[[:blank:]]$' {staged_files} && exit 1 || exit 0"
     check-yaml:
       glob: "*.{yaml,yml}"
+      exclude: "deploy/helm/**/templates/*"
       run: "for f in {staged_files}; do yq '.' \"$f\" > /dev/null || exit 1; done"
     detect-private-key:
       glob: "*"

@@ -92,20 +92,78 @@ HTTP 400
 jsonpath "$.error" == "invalid JSON"
 
 
-# ── X-Candela-Caching header is stripped from proxy requests ─────────────────
-# When sending a request with the override header to any provider,
-# the header must NOT be forwarded upstream (verified via mock upstream).
+# ── CACHE-07: Default (auto) → cache_control injected ────────────────────────
+# With no X-Candela-Caching header, the default mode (auto) should inject
+# cache_control blocks into the translated Anthropic request.
 POST {{CANDELA_URL}}/proxy/anthropic/v1/chat/completions
+Authorization: Bearer test-gcp-token
+Content-Type: application/json
+{
+  "model": "claude-sonnet-4-20250514",
+  "messages": [
+    {"role": "system", "content": "You are a helpful assistant."},
+    {"role": "user", "content": "Hello"}
+  ]
+}
+
+HTTP 200
+[Asserts]
+header "X-Mock-Cache-Control-Present" == "true"
+header "X-Mock-Candela-Header-Leaked" == "false"
+
+
+# ── CACHE-08: X-Candela-Caching: off → no cache_control injected ─────────────
+# Per-request override should suppress cache_control even though default is auto.
+POST {{CANDELA_URL}}/proxy/anthropic/v1/chat/completions
+Authorization: Bearer test-gcp-token
 Content-Type: application/json
 X-Candela-Caching: off
 {
   "model": "claude-sonnet-4-20250514",
-  "messages": [{"role": "user", "content": "hello"}]
+  "messages": [
+    {"role": "system", "content": "You are a helpful assistant."},
+    {"role": "user", "content": "Hello"}
+  ]
 }
 
-# We expect either 200 (mock) or 502 (no upstream) — but the request
-# should be accepted and header should not cause a 400 or 500.
-HTTP *
+HTTP 200
 [Asserts]
-status >= 200
-status <= 502
+header "X-Mock-Cache-Control-Present" == "false"
+header "X-Mock-Candela-Header-Leaked" == "false"
+
+
+# ── CACHE-09: X-Candela-Caching: auto → cache_control injected ───────────────
+# Explicit auto should behave the same as default.
+POST {{CANDELA_URL}}/proxy/anthropic/v1/chat/completions
+Authorization: Bearer test-gcp-token
+Content-Type: application/json
+X-Candela-Caching: auto
+{
+  "model": "claude-sonnet-4-20250514",
+  "messages": [
+    {"role": "system", "content": "You are a helpful assistant."},
+    {"role": "user", "content": "Hello"}
+  ]
+}
+
+HTTP 200
+[Asserts]
+header "X-Mock-Cache-Control-Present" == "true"
+header "X-Mock-Candela-Header-Leaked" == "false"
+
+
+# ── CACHE-10: X-Candela-Caching header never leaks to non-Anthropic providers ─
+# Even for providers without a FormatTranslator, the header must be stripped.
+POST {{CANDELA_URL}}/proxy/openai/v1/chat/completions
+Authorization: Bearer sk-test-key
+Content-Type: application/json
+X-Candela-Caching: auto
+{
+  "model": "gpt-4o",
+  "messages": [{"role": "user", "content": "Hello"}]
+}
+
+HTTP 200
+[Asserts]
+header "X-Mock-Candela-Header-Leaked" == "false"
+

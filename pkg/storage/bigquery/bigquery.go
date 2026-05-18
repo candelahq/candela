@@ -767,6 +767,146 @@ func (s *Store) GetModelBreakdown(ctx context.Context, uq storage.UsageQuery) ([
 	return models, nil
 }
 
+// combinedUsageSQL is the GROUPING SETS query used by GetUsageWithModelBreakdown.
+// Extracted as a const for reviewability. The single %s placeholder is the
+// fully-qualified table name injected via quoteTable().
+const combinedUsageSQL = `
+	SELECT
+		gen_ai_model AS model,
+		gen_ai_provider AS provider,
+		COUNT(DISTINCT trace_id) AS total_traces,
+		COUNT(*) AS total_spans,
+		COUNTIF(kind = @llmKind) AS total_llm_calls,
+		COALESCE(SUM(gen_ai_input_tokens), 0) AS total_input_tokens,
+		COALESCE(SUM(gen_ai_output_tokens), 0) AS total_output_tokens,
+		COALESCE(SUM(gen_ai_total_tokens), 0) AS total_tokens,
+		COALESCE(SUM(gen_ai_cost_usd), 0) AS total_cost_usd,
+		COALESCE(
+			AVG(CASE WHEN parent_span_id = '' THEN duration_ns ELSE NULL END),
+			AVG(CASE WHEN kind = @llmKind THEN duration_ns ELSE NULL END),
+			0
+		) AS avg_duration_ns,
+		CASE WHEN COUNT(DISTINCT trace_id) > 0
+			THEN CAST(COUNT(DISTINCT CASE WHEN status = 2 THEN trace_id ELSE NULL END) AS FLOAT64) / COUNT(DISTINCT trace_id)
+			ELSE 0 END AS error_rate,
+		COALESCE(SUM(gen_ai_cache_read_tokens), 0) AS total_cache_read_tokens,
+		COALESCE(SUM(gen_ai_cache_creation_tokens), 0) AS total_cache_creation_tokens,
+		GROUPING(gen_ai_model) AS is_total
+	FROM %s
+	WHERE (@projectID = '' OR project_id = @projectID)
+	  AND start_time >= @startTime
+	  AND start_time <= @endTime
+	  AND (@userID = '' OR user_id = @userID)
+	  AND (@tenantID = '' OR tenant_id = @tenantID)
+	GROUP BY GROUPING SETS (
+		(gen_ai_model, gen_ai_provider),
+		()
+	)
+	ORDER BY is_total DESC, total_cost_usd DESC
+`
+
+// GetUsageWithModelBreakdown fetches the usage summary and per-model breakdown
+// in a single BigQuery scan using GROUPING SETS. The overall summary is the row
+// where model IS NULL (the grand-total grouping set). Per-model rows have
+// model != NULL. This halves the BQ query count vs. running GetUsageSummary +
+// GetModelBreakdown separately.
+//
+// Implements [storage.CombinedUsageReader].
+func (s *Store) GetUsageWithModelBreakdown(ctx context.Context, uq storage.UsageQuery) (*storage.UsageSummary, []storage.ModelUsage, error) {
+	query := fmt.Sprintf(combinedUsageSQL, quoteTable(s.tableID))
+
+	q := s.client.Query(query)
+	q.Parameters = []bigquery.QueryParameter{
+		{Name: "projectID", Value: uq.ProjectID},
+		{Name: "startTime", Value: uq.StartTime},
+		{Name: "endTime", Value: uq.EndTime},
+		{Name: "llmKind", Value: int(storage.SpanKindLLM)},
+		{Name: "userID", Value: uq.UserID},
+		{Name: "tenantID", Value: uq.TenantID},
+	}
+
+	it, err := q.Read(ctx)
+	if err != nil {
+		return nil, nil, fmt.Errorf("querying combined usage: %w", err)
+	}
+
+	var summary *storage.UsageSummary
+	var models []storage.ModelUsage
+
+	for {
+		var row struct {
+			Model                    bigquery.NullString `bigquery:"model"`
+			Provider                 bigquery.NullString `bigquery:"provider"`
+			TotalTraces              int64               `bigquery:"total_traces"`
+			TotalSpans               int64               `bigquery:"total_spans"`
+			TotalLLMCalls            int64               `bigquery:"total_llm_calls"`
+			TotalInputTokens         int64               `bigquery:"total_input_tokens"`
+			TotalOutputTokens        int64               `bigquery:"total_output_tokens"`
+			TotalTokens              int64               `bigquery:"total_tokens"`
+			TotalCostUSD             float64             `bigquery:"total_cost_usd"`
+			AvgDurationNs            float64             `bigquery:"avg_duration_ns"`
+			ErrorRate                float64             `bigquery:"error_rate"`
+			TotalCacheReadTokens     int64               `bigquery:"total_cache_read_tokens"`
+			TotalCacheCreationTokens int64               `bigquery:"total_cache_creation_tokens"`
+			IsTotal                  int64               `bigquery:"is_total"`
+		}
+		err := it.Next(&row)
+		if err == iterator.Done {
+			break
+		}
+		if err != nil {
+			return nil, nil, fmt.Errorf("iterating combined usage: %w", err)
+		}
+
+		if row.IsTotal == 1 {
+			// Grand-total row → summary.
+			summary = &storage.UsageSummary{
+				TotalTraces:              row.TotalTraces,
+				TotalSpans:               row.TotalSpans,
+				TotalLLMCalls:            row.TotalLLMCalls,
+				TotalInputTokens:         row.TotalInputTokens,
+				TotalOutputTokens:        row.TotalOutputTokens,
+				TotalCostUSD:             row.TotalCostUSD,
+				AvgLatencyMs:             row.AvgDurationNs / 1e6,
+				ErrorRate:                row.ErrorRate,
+				TotalCacheReadTokens:     row.TotalCacheReadTokens,
+				TotalCacheCreationTokens: row.TotalCacheCreationTokens,
+			}
+		} else {
+			// Per-model row → model breakdown.
+			model := ""
+			if row.Model.Valid {
+				model = row.Model.StringVal
+			}
+			if model == "" {
+				continue // Skip rows with empty model (non-LLM spans).
+			}
+			provider := ""
+			if row.Provider.Valid {
+				provider = row.Provider.StringVal
+			}
+			models = append(models, storage.ModelUsage{
+				Model:               model,
+				Provider:            provider,
+				CallCount:           row.TotalLLMCalls,
+				InputTokens:         row.TotalInputTokens,
+				OutputTokens:        row.TotalOutputTokens,
+				CostUSD:             row.TotalCostUSD,
+				AvgLatencyMs:        row.AvgDurationNs / 1e6,
+				CacheReadTokens:     row.TotalCacheReadTokens,
+				CacheCreationTokens: row.TotalCacheCreationTokens,
+			})
+		}
+	}
+
+	// If no rows at all, return an empty summary.
+	if summary == nil {
+		summary = &storage.UsageSummary{}
+	}
+
+	return summary, models, nil
+}
+
 // GetUserLeaderboard returns per-user usage aggregations ranked by cost.
 func (s *Store) GetUserLeaderboard(ctx context.Context, uq storage.UsageQuery, limit int) ([]storage.UserUsageSummary, error) {
 	if limit <= 0 {

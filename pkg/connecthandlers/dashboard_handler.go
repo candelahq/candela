@@ -172,53 +172,63 @@ func (h *DashboardHandler) GetMyUsage(
 		q.EndTime = time.Now()
 	}
 
-	// ── BigQuery: usage summary + model breakdown (truly concurrent) ─────────
-	// Both queries hit BigQuery independently (~800ms each). Run them in
-	// separate goroutines so total wait is max(summary, breakdown) ≈ 800ms
-	// instead of sum ≈ 1600ms.
-	type summaryResult struct {
-		v   *storage.UsageSummary
-		err error
-	}
-	type modelsResult struct {
-		v   []storage.ModelUsage
-		err error
-	}
-	summaryCh := make(chan summaryResult, 1)
-	modelsCh := make(chan modelsResult, 1)
-	go func() {
-		v, err := h.store.GetUsageSummary(ctx, q)
-		summaryCh <- summaryResult{v, err}
-	}()
-	go func() {
-		v, err := h.store.GetModelBreakdown(ctx, q)
-		modelsCh <- modelsResult{v, err}
-	}()
-	sr := <-summaryCh
-	mr := <-modelsCh
-	if sr.err != nil {
-		return nil, internalError("failed to get usage summary", sr.err)
-	}
-	if mr.err != nil {
-		return nil, internalError("failed to get model breakdown", mr.err)
-	}
-	type bqResult struct {
-		summary *storage.UsageSummary
-		models  []storage.ModelUsage
-	}
-	bq := bqResult{summary: sr.v, models: mr.v}
+	// ── Storage query: usage summary + model breakdown ──────────────────────
+	// If the store implements CombinedUsageReader (BigQuery), fetch both in a
+	// single scan. Otherwise fall back to two concurrent reads.
+	var summary *storage.UsageSummary
+	var models []storage.ModelUsage
 
-	// Build response — token/cost figures are always from BigQuery.
+	if combined, ok := h.store.(storage.CombinedUsageReader); ok {
+		// Single BQ query via GROUP BY GROUPING SETS — halves BQ cost for this RPC.
+		s, m, err := combined.GetUsageWithModelBreakdown(ctx, q)
+		if err != nil {
+			return nil, internalError("failed to get combined usage", err)
+		}
+		summary = s
+		models = m
+	} else {
+		// Fallback: two concurrent reads for non-BigQuery backends.
+		type summaryResult struct {
+			v   *storage.UsageSummary
+			err error
+		}
+		type modelsResult struct {
+			v   []storage.ModelUsage
+			err error
+		}
+		summaryCh := make(chan summaryResult, 1)
+		modelsCh := make(chan modelsResult, 1)
+		go func() {
+			v, err := h.store.GetUsageSummary(ctx, q)
+			summaryCh <- summaryResult{v, err}
+		}()
+		go func() {
+			v, err := h.store.GetModelBreakdown(ctx, q)
+			modelsCh <- modelsResult{v, err}
+		}()
+		sr := <-summaryCh
+		mr := <-modelsCh
+		if sr.err != nil {
+			return nil, internalError("failed to get usage summary", sr.err)
+		}
+		if mr.err != nil {
+			return nil, internalError("failed to get model breakdown", mr.err)
+		}
+		summary = sr.v
+		models = mr.v
+	}
+
+	// Build response — token/cost figures are always from the storage backend.
 	// Budget progress bars and grant remaining: call UserService.GetMyBudget.
 	resp := &v1.GetMyUsageResponse{}
-	if bq.summary != nil {
-		resp.TotalCalls = bq.summary.TotalLLMCalls
-		resp.TotalInputTokens = bq.summary.TotalInputTokens
-		resp.TotalOutputTokens = bq.summary.TotalOutputTokens
-		resp.TotalCostUsd = bq.summary.TotalCostUSD
-		resp.AvgLatencyMs = bq.summary.AvgLatencyMs
+	if summary != nil {
+		resp.TotalCalls = summary.TotalLLMCalls
+		resp.TotalInputTokens = summary.TotalInputTokens
+		resp.TotalOutputTokens = summary.TotalOutputTokens
+		resp.TotalCostUsd = summary.TotalCostUSD
+		resp.AvgLatencyMs = summary.AvgLatencyMs
 	}
-	for _, m := range bq.models {
+	for _, m := range models {
 		resp.Models = append(resp.Models, &v1.ModelUsage{
 			Model:        m.Model,
 			Provider:     m.Provider,

@@ -83,23 +83,29 @@ func (x *GetUsageSummaryRequest) GetEnvironment() string {
 }
 
 type GetUsageSummaryResponse struct {
-	state                    protoimpl.MessageState `protogen:"open.v1"`
-	TotalTraces              int64                  `protobuf:"varint,1,opt,name=total_traces,json=totalTraces,proto3" json:"total_traces,omitempty"`
-	TotalSpans               int64                  `protobuf:"varint,2,opt,name=total_spans,json=totalSpans,proto3" json:"total_spans,omitempty"`
-	TotalLlmCalls            int64                  `protobuf:"varint,3,opt,name=total_llm_calls,json=totalLlmCalls,proto3" json:"total_llm_calls,omitempty"`
-	TotalInputTokens         int64                  `protobuf:"varint,4,opt,name=total_input_tokens,json=totalInputTokens,proto3" json:"total_input_tokens,omitempty"`
-	TotalOutputTokens        int64                  `protobuf:"varint,5,opt,name=total_output_tokens,json=totalOutputTokens,proto3" json:"total_output_tokens,omitempty"`
-	TotalCostUsd             float64                `protobuf:"fixed64,6,opt,name=total_cost_usd,json=totalCostUsd,proto3" json:"total_cost_usd,omitempty"`
-	AvgLatencyMs             float64                `protobuf:"fixed64,7,opt,name=avg_latency_ms,json=avgLatencyMs,proto3" json:"avg_latency_ms,omitempty"`
-	ErrorRate                float64                `protobuf:"fixed64,8,opt,name=error_rate,json=errorRate,proto3" json:"error_rate,omitempty"`
-	TotalCacheReadTokens     int64                  `protobuf:"varint,9,opt,name=total_cache_read_tokens,json=totalCacheReadTokens,proto3" json:"total_cache_read_tokens,omitempty"`
-	TotalCacheCreationTokens int64                  `protobuf:"varint,10,opt,name=total_cache_creation_tokens,json=totalCacheCreationTokens,proto3" json:"total_cache_creation_tokens,omitempty"`
+	state             protoimpl.MessageState `protogen:"open.v1"`
+	TotalTraces       int64                  `protobuf:"varint,1,opt,name=total_traces,json=totalTraces,proto3" json:"total_traces,omitempty"`
+	TotalSpans        int64                  `protobuf:"varint,2,opt,name=total_spans,json=totalSpans,proto3" json:"total_spans,omitempty"`
+	TotalLlmCalls     int64                  `protobuf:"varint,3,opt,name=total_llm_calls,json=totalLlmCalls,proto3" json:"total_llm_calls,omitempty"`
+	TotalInputTokens  int64                  `protobuf:"varint,4,opt,name=total_input_tokens,json=totalInputTokens,proto3" json:"total_input_tokens,omitempty"`
+	TotalOutputTokens int64                  `protobuf:"varint,5,opt,name=total_output_tokens,json=totalOutputTokens,proto3" json:"total_output_tokens,omitempty"`
+	TotalCostUsd      float64                `protobuf:"fixed64,6,opt,name=total_cost_usd,json=totalCostUsd,proto3" json:"total_cost_usd,omitempty"`
+	AvgLatencyMs      float64                `protobuf:"fixed64,7,opt,name=avg_latency_ms,json=avgLatencyMs,proto3" json:"avg_latency_ms,omitempty"`
+	ErrorRate         float64                `protobuf:"fixed64,8,opt,name=error_rate,json=errorRate,proto3" json:"error_rate,omitempty"`
+	// Cache metrics — these fields are subsets of total_input_tokens.
+	// Cache hit rate = cache_read_tokens / input_tokens (excludes output tokens).
+	TotalCacheReadTokens     int64 `protobuf:"varint,9,opt,name=total_cache_read_tokens,json=totalCacheReadTokens,proto3" json:"total_cache_read_tokens,omitempty"`
+	TotalCacheCreationTokens int64 `protobuf:"varint,10,opt,name=total_cache_creation_tokens,json=totalCacheCreationTokens,proto3" json:"total_cache_creation_tokens,omitempty"`
 	// Time series for charts
-	TracesOverTime []*TimeSeriesPoint `protobuf:"bytes,20,rep,name=traces_over_time,json=tracesOverTime,proto3" json:"traces_over_time,omitempty"`
-	CostOverTime   []*TimeSeriesPoint `protobuf:"bytes,21,rep,name=cost_over_time,json=costOverTime,proto3" json:"cost_over_time,omitempty"`
-	TokensOverTime []*TimeSeriesPoint `protobuf:"bytes,22,rep,name=tokens_over_time,json=tokensOverTime,proto3" json:"tokens_over_time,omitempty"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	TracesOverTime              []*TimeSeriesPoint `protobuf:"bytes,20,rep,name=traces_over_time,json=tracesOverTime,proto3" json:"traces_over_time,omitempty"`
+	CostOverTime                []*TimeSeriesPoint `protobuf:"bytes,21,rep,name=cost_over_time,json=costOverTime,proto3" json:"cost_over_time,omitempty"`
+	TokensOverTime              []*TimeSeriesPoint `protobuf:"bytes,22,rep,name=tokens_over_time,json=tokensOverTime,proto3" json:"tokens_over_time,omitempty"`
+	CacheReadTokensOverTime     []*TimeSeriesPoint `protobuf:"bytes,23,rep,name=cache_read_tokens_over_time,json=cacheReadTokensOverTime,proto3" json:"cache_read_tokens_over_time,omitempty"`
+	CacheCreationTokensOverTime []*TimeSeriesPoint `protobuf:"bytes,24,rep,name=cache_creation_tokens_over_time,json=cacheCreationTokensOverTime,proto3" json:"cache_creation_tokens_over_time,omitempty"`
+	InputTokensOverTime         []*TimeSeriesPoint `protobuf:"bytes,25,rep,name=input_tokens_over_time,json=inputTokensOverTime,proto3" json:"input_tokens_over_time,omitempty"`
+	OutputTokensOverTime        []*TimeSeriesPoint `protobuf:"bytes,26,rep,name=output_tokens_over_time,json=outputTokensOverTime,proto3" json:"output_tokens_over_time,omitempty"`
+	unknownFields               protoimpl.UnknownFields
+	sizeCache                   protoimpl.SizeCache
 }
 
 func (x *GetUsageSummaryResponse) Reset() {
@@ -219,6 +225,34 @@ func (x *GetUsageSummaryResponse) GetCostOverTime() []*TimeSeriesPoint {
 func (x *GetUsageSummaryResponse) GetTokensOverTime() []*TimeSeriesPoint {
 	if x != nil {
 		return x.TokensOverTime
+	}
+	return nil
+}
+
+func (x *GetUsageSummaryResponse) GetCacheReadTokensOverTime() []*TimeSeriesPoint {
+	if x != nil {
+		return x.CacheReadTokensOverTime
+	}
+	return nil
+}
+
+func (x *GetUsageSummaryResponse) GetCacheCreationTokensOverTime() []*TimeSeriesPoint {
+	if x != nil {
+		return x.CacheCreationTokensOverTime
+	}
+	return nil
+}
+
+func (x *GetUsageSummaryResponse) GetInputTokensOverTime() []*TimeSeriesPoint {
+	if x != nil {
+		return x.InputTokensOverTime
+	}
+	return nil
+}
+
+func (x *GetUsageSummaryResponse) GetOutputTokensOverTime() []*TimeSeriesPoint {
+	if x != nil {
+		return x.OutputTokensOverTime
 	}
 	return nil
 }
@@ -372,16 +406,20 @@ func (x *GetModelBreakdownResponse) GetModels() []*ModelUsage {
 }
 
 type ModelUsage struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Model         string                 `protobuf:"bytes,1,opt,name=model,proto3" json:"model,omitempty"`
-	Provider      string                 `protobuf:"bytes,2,opt,name=provider,proto3" json:"provider,omitempty"`
-	CallCount     int64                  `protobuf:"varint,3,opt,name=call_count,json=callCount,proto3" json:"call_count,omitempty"`
-	InputTokens   int64                  `protobuf:"varint,4,opt,name=input_tokens,json=inputTokens,proto3" json:"input_tokens,omitempty"`
-	OutputTokens  int64                  `protobuf:"varint,5,opt,name=output_tokens,json=outputTokens,proto3" json:"output_tokens,omitempty"`
-	CostUsd       float64                `protobuf:"fixed64,6,opt,name=cost_usd,json=costUsd,proto3" json:"cost_usd,omitempty"`
-	AvgLatencyMs  float64                `protobuf:"fixed64,7,opt,name=avg_latency_ms,json=avgLatencyMs,proto3" json:"avg_latency_ms,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state        protoimpl.MessageState `protogen:"open.v1"`
+	Model        string                 `protobuf:"bytes,1,opt,name=model,proto3" json:"model,omitempty"`
+	Provider     string                 `protobuf:"bytes,2,opt,name=provider,proto3" json:"provider,omitempty"`
+	CallCount    int64                  `protobuf:"varint,3,opt,name=call_count,json=callCount,proto3" json:"call_count,omitempty"`
+	InputTokens  int64                  `protobuf:"varint,4,opt,name=input_tokens,json=inputTokens,proto3" json:"input_tokens,omitempty"`
+	OutputTokens int64                  `protobuf:"varint,5,opt,name=output_tokens,json=outputTokens,proto3" json:"output_tokens,omitempty"`
+	CostUsd      float64                `protobuf:"fixed64,6,opt,name=cost_usd,json=costUsd,proto3" json:"cost_usd,omitempty"`
+	AvgLatencyMs float64                `protobuf:"fixed64,7,opt,name=avg_latency_ms,json=avgLatencyMs,proto3" json:"avg_latency_ms,omitempty"`
+	// Cache metrics per model — subset of input_tokens.
+	// Cache hit rate = cache_read_tokens / input_tokens.
+	CacheReadTokens     int64 `protobuf:"varint,8,opt,name=cache_read_tokens,json=cacheReadTokens,proto3" json:"cache_read_tokens,omitempty"`
+	CacheCreationTokens int64 `protobuf:"varint,9,opt,name=cache_creation_tokens,json=cacheCreationTokens,proto3" json:"cache_creation_tokens,omitempty"`
+	unknownFields       protoimpl.UnknownFields
+	sizeCache           protoimpl.SizeCache
 }
 
 func (x *ModelUsage) Reset() {
@@ -459,6 +497,20 @@ func (x *ModelUsage) GetCostUsd() float64 {
 func (x *ModelUsage) GetAvgLatencyMs() float64 {
 	if x != nil {
 		return x.AvgLatencyMs
+	}
+	return 0
+}
+
+func (x *ModelUsage) GetCacheReadTokens() int64 {
+	if x != nil {
+		return x.CacheReadTokens
+	}
+	return 0
+}
+
+func (x *ModelUsage) GetCacheCreationTokens() int64 {
+	if x != nil {
+		return x.CacheCreationTokens
 	}
 	return 0
 }
@@ -658,6 +710,9 @@ type GetMyUsageResponse struct {
 	TotalOutputTokens int64                  `protobuf:"varint,3,opt,name=total_output_tokens,json=totalOutputTokens,proto3" json:"total_output_tokens,omitempty"`
 	TotalCostUsd      float64                `protobuf:"fixed64,4,opt,name=total_cost_usd,json=totalCostUsd,proto3" json:"total_cost_usd,omitempty"`
 	AvgLatencyMs      float64                `protobuf:"fixed64,5,opt,name=avg_latency_ms,json=avgLatencyMs,proto3" json:"avg_latency_ms,omitempty"`
+	// Cache metrics — subset of total_input_tokens.
+	TotalCacheReadTokens     int64 `protobuf:"varint,6,opt,name=total_cache_read_tokens,json=totalCacheReadTokens,proto3" json:"total_cache_read_tokens,omitempty"`
+	TotalCacheCreationTokens int64 `protobuf:"varint,7,opt,name=total_cache_creation_tokens,json=totalCacheCreationTokens,proto3" json:"total_cache_creation_tokens,omitempty"`
 	// Per-model breakdown for this user
 	Models []*ModelUsage `protobuf:"bytes,10,rep,name=models,proto3" json:"models,omitempty"`
 	// Budget context
@@ -730,6 +785,20 @@ func (x *GetMyUsageResponse) GetTotalCostUsd() float64 {
 func (x *GetMyUsageResponse) GetAvgLatencyMs() float64 {
 	if x != nil {
 		return x.AvgLatencyMs
+	}
+	return 0
+}
+
+func (x *GetMyUsageResponse) GetTotalCacheReadTokens() int64 {
+	if x != nil {
+		return x.TotalCacheReadTokens
+	}
+	return 0
+}
+
+func (x *GetMyUsageResponse) GetTotalCacheCreationTokens() int64 {
+	if x != nil {
+		return x.TotalCacheCreationTokens
 	}
 	return 0
 }
@@ -1154,6 +1223,285 @@ func (x *JobUsage) GetTopModel() string {
 	return ""
 }
 
+type GetDashboardDataRequest struct {
+	state       protoimpl.MessageState `protogen:"open.v1"`
+	ProjectId   string                 `protobuf:"bytes,1,opt,name=project_id,json=projectId,proto3" json:"project_id,omitempty"`
+	TimeRange   *types.TimeRange       `protobuf:"bytes,2,opt,name=time_range,json=timeRange,proto3" json:"time_range,omitempty"`
+	Environment string                 `protobuf:"bytes,3,opt,name=environment,proto3" json:"environment,omitempty"`
+	// If true, includes per-user budget and grant context (requires auth).
+	// When false or unauthenticated, the budget/grant fields are omitted.
+	IncludeBudget bool `protobuf:"varint,4,opt,name=include_budget,json=includeBudget,proto3" json:"include_budget,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetDashboardDataRequest) Reset() {
+	*x = GetDashboardDataRequest{}
+	mi := &file_candela_v1_dashboard_service_proto_msgTypes[16]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetDashboardDataRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetDashboardDataRequest) ProtoMessage() {}
+
+func (x *GetDashboardDataRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_candela_v1_dashboard_service_proto_msgTypes[16]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetDashboardDataRequest.ProtoReflect.Descriptor instead.
+func (*GetDashboardDataRequest) Descriptor() ([]byte, []int) {
+	return file_candela_v1_dashboard_service_proto_rawDescGZIP(), []int{16}
+}
+
+func (x *GetDashboardDataRequest) GetProjectId() string {
+	if x != nil {
+		return x.ProjectId
+	}
+	return ""
+}
+
+func (x *GetDashboardDataRequest) GetTimeRange() *types.TimeRange {
+	if x != nil {
+		return x.TimeRange
+	}
+	return nil
+}
+
+func (x *GetDashboardDataRequest) GetEnvironment() string {
+	if x != nil {
+		return x.Environment
+	}
+	return ""
+}
+
+func (x *GetDashboardDataRequest) GetIncludeBudget() bool {
+	if x != nil {
+		return x.IncludeBudget
+	}
+	return false
+}
+
+type GetDashboardDataResponse struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// ── Aggregate summary ──
+	TotalTraces       int64   `protobuf:"varint,1,opt,name=total_traces,json=totalTraces,proto3" json:"total_traces,omitempty"`
+	TotalSpans        int64   `protobuf:"varint,2,opt,name=total_spans,json=totalSpans,proto3" json:"total_spans,omitempty"`
+	TotalLlmCalls     int64   `protobuf:"varint,3,opt,name=total_llm_calls,json=totalLlmCalls,proto3" json:"total_llm_calls,omitempty"`
+	TotalInputTokens  int64   `protobuf:"varint,4,opt,name=total_input_tokens,json=totalInputTokens,proto3" json:"total_input_tokens,omitempty"`
+	TotalOutputTokens int64   `protobuf:"varint,5,opt,name=total_output_tokens,json=totalOutputTokens,proto3" json:"total_output_tokens,omitempty"`
+	TotalCostUsd      float64 `protobuf:"fixed64,6,opt,name=total_cost_usd,json=totalCostUsd,proto3" json:"total_cost_usd,omitempty"`
+	AvgLatencyMs      float64 `protobuf:"fixed64,7,opt,name=avg_latency_ms,json=avgLatencyMs,proto3" json:"avg_latency_ms,omitempty"`
+	ErrorRate         float64 `protobuf:"fixed64,8,opt,name=error_rate,json=errorRate,proto3" json:"error_rate,omitempty"`
+	// Cache metrics — subsets of total_input_tokens.
+	TotalCacheReadTokens     int64 `protobuf:"varint,9,opt,name=total_cache_read_tokens,json=totalCacheReadTokens,proto3" json:"total_cache_read_tokens,omitempty"`
+	TotalCacheCreationTokens int64 `protobuf:"varint,10,opt,name=total_cache_creation_tokens,json=totalCacheCreationTokens,proto3" json:"total_cache_creation_tokens,omitempty"`
+	// ── Time series for charts ──
+	TracesOverTime              []*TimeSeriesPoint `protobuf:"bytes,20,rep,name=traces_over_time,json=tracesOverTime,proto3" json:"traces_over_time,omitempty"`
+	CostOverTime                []*TimeSeriesPoint `protobuf:"bytes,21,rep,name=cost_over_time,json=costOverTime,proto3" json:"cost_over_time,omitempty"`
+	TokensOverTime              []*TimeSeriesPoint `protobuf:"bytes,22,rep,name=tokens_over_time,json=tokensOverTime,proto3" json:"tokens_over_time,omitempty"`
+	CacheReadTokensOverTime     []*TimeSeriesPoint `protobuf:"bytes,23,rep,name=cache_read_tokens_over_time,json=cacheReadTokensOverTime,proto3" json:"cache_read_tokens_over_time,omitempty"`
+	CacheCreationTokensOverTime []*TimeSeriesPoint `protobuf:"bytes,24,rep,name=cache_creation_tokens_over_time,json=cacheCreationTokensOverTime,proto3" json:"cache_creation_tokens_over_time,omitempty"`
+	InputTokensOverTime         []*TimeSeriesPoint `protobuf:"bytes,25,rep,name=input_tokens_over_time,json=inputTokensOverTime,proto3" json:"input_tokens_over_time,omitempty"`
+	OutputTokensOverTime        []*TimeSeriesPoint `protobuf:"bytes,26,rep,name=output_tokens_over_time,json=outputTokensOverTime,proto3" json:"output_tokens_over_time,omitempty"`
+	// ── Per-model breakdown ──
+	Models []*ModelUsage `protobuf:"bytes,30,rep,name=models,proto3" json:"models,omitempty"`
+	// ── Per-user budget context (populated when include_budget=true + auth) ──
+	Budget            *types.UserBudget    `protobuf:"bytes,40,opt,name=budget,proto3" json:"budget,omitempty"`
+	TotalRemainingUsd float64              `protobuf:"fixed64,41,opt,name=total_remaining_usd,json=totalRemainingUsd,proto3" json:"total_remaining_usd,omitempty"`
+	ActiveGrants      []*types.BudgetGrant `protobuf:"bytes,42,rep,name=active_grants,json=activeGrants,proto3" json:"active_grants,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
+}
+
+func (x *GetDashboardDataResponse) Reset() {
+	*x = GetDashboardDataResponse{}
+	mi := &file_candela_v1_dashboard_service_proto_msgTypes[17]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetDashboardDataResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetDashboardDataResponse) ProtoMessage() {}
+
+func (x *GetDashboardDataResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_candela_v1_dashboard_service_proto_msgTypes[17]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetDashboardDataResponse.ProtoReflect.Descriptor instead.
+func (*GetDashboardDataResponse) Descriptor() ([]byte, []int) {
+	return file_candela_v1_dashboard_service_proto_rawDescGZIP(), []int{17}
+}
+
+func (x *GetDashboardDataResponse) GetTotalTraces() int64 {
+	if x != nil {
+		return x.TotalTraces
+	}
+	return 0
+}
+
+func (x *GetDashboardDataResponse) GetTotalSpans() int64 {
+	if x != nil {
+		return x.TotalSpans
+	}
+	return 0
+}
+
+func (x *GetDashboardDataResponse) GetTotalLlmCalls() int64 {
+	if x != nil {
+		return x.TotalLlmCalls
+	}
+	return 0
+}
+
+func (x *GetDashboardDataResponse) GetTotalInputTokens() int64 {
+	if x != nil {
+		return x.TotalInputTokens
+	}
+	return 0
+}
+
+func (x *GetDashboardDataResponse) GetTotalOutputTokens() int64 {
+	if x != nil {
+		return x.TotalOutputTokens
+	}
+	return 0
+}
+
+func (x *GetDashboardDataResponse) GetTotalCostUsd() float64 {
+	if x != nil {
+		return x.TotalCostUsd
+	}
+	return 0
+}
+
+func (x *GetDashboardDataResponse) GetAvgLatencyMs() float64 {
+	if x != nil {
+		return x.AvgLatencyMs
+	}
+	return 0
+}
+
+func (x *GetDashboardDataResponse) GetErrorRate() float64 {
+	if x != nil {
+		return x.ErrorRate
+	}
+	return 0
+}
+
+func (x *GetDashboardDataResponse) GetTotalCacheReadTokens() int64 {
+	if x != nil {
+		return x.TotalCacheReadTokens
+	}
+	return 0
+}
+
+func (x *GetDashboardDataResponse) GetTotalCacheCreationTokens() int64 {
+	if x != nil {
+		return x.TotalCacheCreationTokens
+	}
+	return 0
+}
+
+func (x *GetDashboardDataResponse) GetTracesOverTime() []*TimeSeriesPoint {
+	if x != nil {
+		return x.TracesOverTime
+	}
+	return nil
+}
+
+func (x *GetDashboardDataResponse) GetCostOverTime() []*TimeSeriesPoint {
+	if x != nil {
+		return x.CostOverTime
+	}
+	return nil
+}
+
+func (x *GetDashboardDataResponse) GetTokensOverTime() []*TimeSeriesPoint {
+	if x != nil {
+		return x.TokensOverTime
+	}
+	return nil
+}
+
+func (x *GetDashboardDataResponse) GetCacheReadTokensOverTime() []*TimeSeriesPoint {
+	if x != nil {
+		return x.CacheReadTokensOverTime
+	}
+	return nil
+}
+
+func (x *GetDashboardDataResponse) GetCacheCreationTokensOverTime() []*TimeSeriesPoint {
+	if x != nil {
+		return x.CacheCreationTokensOverTime
+	}
+	return nil
+}
+
+func (x *GetDashboardDataResponse) GetInputTokensOverTime() []*TimeSeriesPoint {
+	if x != nil {
+		return x.InputTokensOverTime
+	}
+	return nil
+}
+
+func (x *GetDashboardDataResponse) GetOutputTokensOverTime() []*TimeSeriesPoint {
+	if x != nil {
+		return x.OutputTokensOverTime
+	}
+	return nil
+}
+
+func (x *GetDashboardDataResponse) GetModels() []*ModelUsage {
+	if x != nil {
+		return x.Models
+	}
+	return nil
+}
+
+func (x *GetDashboardDataResponse) GetBudget() *types.UserBudget {
+	if x != nil {
+		return x.Budget
+	}
+	return nil
+}
+
+func (x *GetDashboardDataResponse) GetTotalRemainingUsd() float64 {
+	if x != nil {
+		return x.TotalRemainingUsd
+	}
+	return 0
+}
+
+func (x *GetDashboardDataResponse) GetActiveGrants() []*types.BudgetGrant {
+	if x != nil {
+		return x.ActiveGrants
+	}
+	return nil
+}
+
 var File_candela_v1_dashboard_service_proto protoreflect.FileDescriptor
 
 const file_candela_v1_dashboard_service_proto_rawDesc = "" +
@@ -1165,7 +1513,7 @@ const file_candela_v1_dashboard_service_proto_rawDesc = "" +
 	"project_id\x18\x01 \x01(\tR\tprojectId\x127\n" +
 	"\n" +
 	"time_range\x18\x02 \x01(\v2\x18.candela.types.TimeRangeR\ttimeRange\x12 \n" +
-	"\venvironment\x18\x03 \x01(\tR\venvironment\"\x95\x05\n" +
+	"\venvironment\x18\x03 \x01(\tR\venvironment\"\xf9\a\n" +
 	"\x17GetUsageSummaryResponse\x12!\n" +
 	"\ftotal_traces\x18\x01 \x01(\x03R\vtotalTraces\x12\x1f\n" +
 	"\vtotal_spans\x18\x02 \x01(\x03R\n" +
@@ -1182,7 +1530,11 @@ const file_candela_v1_dashboard_service_proto_rawDesc = "" +
 	" \x01(\x03R\x18totalCacheCreationTokens\x12E\n" +
 	"\x10traces_over_time\x18\x14 \x03(\v2\x1b.candela.v1.TimeSeriesPointR\x0etracesOverTime\x12A\n" +
 	"\x0ecost_over_time\x18\x15 \x03(\v2\x1b.candela.v1.TimeSeriesPointR\fcostOverTime\x12E\n" +
-	"\x10tokens_over_time\x18\x16 \x03(\v2\x1b.candela.v1.TimeSeriesPointR\x0etokensOverTime\"E\n" +
+	"\x10tokens_over_time\x18\x16 \x03(\v2\x1b.candela.v1.TimeSeriesPointR\x0etokensOverTime\x12Y\n" +
+	"\x1bcache_read_tokens_over_time\x18\x17 \x03(\v2\x1b.candela.v1.TimeSeriesPointR\x17cacheReadTokensOverTime\x12a\n" +
+	"\x1fcache_creation_tokens_over_time\x18\x18 \x03(\v2\x1b.candela.v1.TimeSeriesPointR\x1bcacheCreationTokensOverTime\x12P\n" +
+	"\x16input_tokens_over_time\x18\x19 \x03(\v2\x1b.candela.v1.TimeSeriesPointR\x13inputTokensOverTime\x12R\n" +
+	"\x17output_tokens_over_time\x18\x1a \x03(\v2\x1b.candela.v1.TimeSeriesPointR\x14outputTokensOverTime\"E\n" +
 	"\x0fTimeSeriesPoint\x12\x1c\n" +
 	"\ttimestamp\x18\x01 \x01(\tR\ttimestamp\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\x01R\x05value\"r\n" +
@@ -1192,7 +1544,7 @@ const file_candela_v1_dashboard_service_proto_rawDesc = "" +
 	"\n" +
 	"time_range\x18\x02 \x01(\v2\x18.candela.types.TimeRangeR\ttimeRange\"K\n" +
 	"\x19GetModelBreakdownResponse\x12.\n" +
-	"\x06models\x18\x01 \x03(\v2\x16.candela.v1.ModelUsageR\x06models\"\xe6\x01\n" +
+	"\x06models\x18\x01 \x03(\v2\x16.candela.v1.ModelUsageR\x06models\"\xc6\x02\n" +
 	"\n" +
 	"ModelUsage\x12\x14\n" +
 	"\x05model\x18\x01 \x01(\tR\x05model\x12\x1a\n" +
@@ -1202,7 +1554,9 @@ const file_candela_v1_dashboard_service_proto_rawDesc = "" +
 	"\finput_tokens\x18\x04 \x01(\x03R\vinputTokens\x12#\n" +
 	"\routput_tokens\x18\x05 \x01(\x03R\foutputTokens\x12\x19\n" +
 	"\bcost_usd\x18\x06 \x01(\x01R\acostUsd\x12$\n" +
-	"\x0eavg_latency_ms\x18\a \x01(\x01R\favgLatencyMs\"\x8c\x01\n" +
+	"\x0eavg_latency_ms\x18\a \x01(\x01R\favgLatencyMs\x12*\n" +
+	"\x11cache_read_tokens\x18\b \x01(\x03R\x0fcacheReadTokens\x122\n" +
+	"\x15cache_creation_tokens\x18\t \x01(\x03R\x13cacheCreationTokens\"\x8c\x01\n" +
 	"\x1cGetLatencyPercentilesRequest\x12\x1d\n" +
 	"\n" +
 	"project_id\x18\x01 \x01(\tR\tprojectId\x127\n" +
@@ -1220,14 +1574,16 @@ const file_candela_v1_dashboard_service_proto_rawDesc = "" +
 	"\n" +
 	"project_id\x18\x01 \x01(\tR\tprojectId\x127\n" +
 	"\n" +
-	"time_range\x18\x02 \x01(\v2\x18.candela.types.TimeRangeR\ttimeRange\"\xb3\x03\n" +
+	"time_range\x18\x02 \x01(\v2\x18.candela.types.TimeRangeR\ttimeRange\"\xa9\x04\n" +
 	"\x12GetMyUsageResponse\x12\x1f\n" +
 	"\vtotal_calls\x18\x01 \x01(\x03R\n" +
 	"totalCalls\x12,\n" +
 	"\x12total_input_tokens\x18\x02 \x01(\x03R\x10totalInputTokens\x12.\n" +
 	"\x13total_output_tokens\x18\x03 \x01(\x03R\x11totalOutputTokens\x12$\n" +
 	"\x0etotal_cost_usd\x18\x04 \x01(\x01R\ftotalCostUsd\x12$\n" +
-	"\x0eavg_latency_ms\x18\x05 \x01(\x01R\favgLatencyMs\x12.\n" +
+	"\x0eavg_latency_ms\x18\x05 \x01(\x01R\favgLatencyMs\x125\n" +
+	"\x17total_cache_read_tokens\x18\x06 \x01(\x03R\x14totalCacheReadTokens\x12=\n" +
+	"\x1btotal_cache_creation_tokens\x18\a \x01(\x03R\x18totalCacheCreationTokens\x12.\n" +
 	"\x06models\x18\n" +
 	" \x03(\v2\x16.candela.v1.ModelUsageR\x06models\x121\n" +
 	"\x06budget\x18\x14 \x01(\v2\x19.candela.types.UserBudgetR\x06budget\x12.\n" +
@@ -1266,13 +1622,46 @@ const file_candela_v1_dashboard_service_proto_rawDesc = "" +
 	"\ftotal_tokens\x18\x03 \x01(\x03R\vtotalTokens\x12\x19\n" +
 	"\bcost_usd\x18\x04 \x01(\x01R\acostUsd\x12$\n" +
 	"\x0eavg_latency_ms\x18\x05 \x01(\x01R\favgLatencyMs\x12\x1b\n" +
-	"\ttop_model\x18\x06 \x01(\tR\btopModel2\xd2\x04\n" +
-	"\x10DashboardService\x12Z\n" +
-	"\x0fGetUsageSummary\x12\".candela.v1.GetUsageSummaryRequest\x1a#.candela.v1.GetUsageSummaryResponse\x12`\n" +
-	"\x11GetModelBreakdown\x12$.candela.v1.GetModelBreakdownRequest\x1a%.candela.v1.GetModelBreakdownResponse\x12l\n" +
-	"\x15GetLatencyPercentiles\x12(.candela.v1.GetLatencyPercentilesRequest\x1a).candela.v1.GetLatencyPercentilesResponse\x12K\n" +
+	"\ttop_model\x18\x06 \x01(\tR\btopModel\"\xba\x01\n" +
+	"\x17GetDashboardDataRequest\x12\x1d\n" +
 	"\n" +
-	"GetMyUsage\x12\x1d.candela.v1.GetMyUsageRequest\x1a\x1e.candela.v1.GetMyUsageResponse\x12c\n" +
+	"project_id\x18\x01 \x01(\tR\tprojectId\x127\n" +
+	"\n" +
+	"time_range\x18\x02 \x01(\v2\x18.candela.types.TimeRangeR\ttimeRange\x12 \n" +
+	"\venvironment\x18\x03 \x01(\tR\venvironment\x12%\n" +
+	"\x0einclude_budget\x18\x04 \x01(\bR\rincludeBudget\"\xce\t\n" +
+	"\x18GetDashboardDataResponse\x12!\n" +
+	"\ftotal_traces\x18\x01 \x01(\x03R\vtotalTraces\x12\x1f\n" +
+	"\vtotal_spans\x18\x02 \x01(\x03R\n" +
+	"totalSpans\x12&\n" +
+	"\x0ftotal_llm_calls\x18\x03 \x01(\x03R\rtotalLlmCalls\x12,\n" +
+	"\x12total_input_tokens\x18\x04 \x01(\x03R\x10totalInputTokens\x12.\n" +
+	"\x13total_output_tokens\x18\x05 \x01(\x03R\x11totalOutputTokens\x12$\n" +
+	"\x0etotal_cost_usd\x18\x06 \x01(\x01R\ftotalCostUsd\x12$\n" +
+	"\x0eavg_latency_ms\x18\a \x01(\x01R\favgLatencyMs\x12\x1d\n" +
+	"\n" +
+	"error_rate\x18\b \x01(\x01R\terrorRate\x125\n" +
+	"\x17total_cache_read_tokens\x18\t \x01(\x03R\x14totalCacheReadTokens\x12=\n" +
+	"\x1btotal_cache_creation_tokens\x18\n" +
+	" \x01(\x03R\x18totalCacheCreationTokens\x12E\n" +
+	"\x10traces_over_time\x18\x14 \x03(\v2\x1b.candela.v1.TimeSeriesPointR\x0etracesOverTime\x12A\n" +
+	"\x0ecost_over_time\x18\x15 \x03(\v2\x1b.candela.v1.TimeSeriesPointR\fcostOverTime\x12E\n" +
+	"\x10tokens_over_time\x18\x16 \x03(\v2\x1b.candela.v1.TimeSeriesPointR\x0etokensOverTime\x12Y\n" +
+	"\x1bcache_read_tokens_over_time\x18\x17 \x03(\v2\x1b.candela.v1.TimeSeriesPointR\x17cacheReadTokensOverTime\x12a\n" +
+	"\x1fcache_creation_tokens_over_time\x18\x18 \x03(\v2\x1b.candela.v1.TimeSeriesPointR\x1bcacheCreationTokensOverTime\x12P\n" +
+	"\x16input_tokens_over_time\x18\x19 \x03(\v2\x1b.candela.v1.TimeSeriesPointR\x13inputTokensOverTime\x12R\n" +
+	"\x17output_tokens_over_time\x18\x1a \x03(\v2\x1b.candela.v1.TimeSeriesPointR\x14outputTokensOverTime\x12.\n" +
+	"\x06models\x18\x1e \x03(\v2\x16.candela.v1.ModelUsageR\x06models\x121\n" +
+	"\x06budget\x18( \x01(\v2\x19.candela.types.UserBudgetR\x06budget\x12.\n" +
+	"\x13total_remaining_usd\x18) \x01(\x01R\x11totalRemainingUsd\x12?\n" +
+	"\ractive_grants\x18* \x03(\v2\x1a.candela.types.BudgetGrantR\factiveGrants2\xc0\x05\n" +
+	"\x10DashboardService\x12]\n" +
+	"\x10GetDashboardData\x12#.candela.v1.GetDashboardDataRequest\x1a$.candela.v1.GetDashboardDataResponse\x12_\n" +
+	"\x0fGetUsageSummary\x12\".candela.v1.GetUsageSummaryRequest\x1a#.candela.v1.GetUsageSummaryResponse\"\x03\x88\x02\x01\x12e\n" +
+	"\x11GetModelBreakdown\x12$.candela.v1.GetModelBreakdownRequest\x1a%.candela.v1.GetModelBreakdownResponse\"\x03\x88\x02\x01\x12l\n" +
+	"\x15GetLatencyPercentiles\x12(.candela.v1.GetLatencyPercentilesRequest\x1a).candela.v1.GetLatencyPercentilesResponse\x12P\n" +
+	"\n" +
+	"GetMyUsage\x12\x1d.candela.v1.GetMyUsageRequest\x1a\x1e.candela.v1.GetMyUsageResponse\"\x03\x88\x02\x01\x12c\n" +
 	"\x12GetTeamLeaderboard\x12%.candela.v1.GetTeamLeaderboardRequest\x1a&.candela.v1.GetTeamLeaderboardResponse\x12`\n" +
 	"\x11GetJobLeaderboard\x12$.candela.v1.GetJobLeaderboardRequest\x1a%.candela.v1.GetJobLeaderboardResponseB\xaa\x01\n" +
 	"\x0ecom.candela.v1B\x15DashboardServiceProtoP\x01Z8github.com/candelahq/candela/gen/go/candela/v1;candelav1\xa2\x02\x03CXX\xaa\x02\n" +
@@ -1291,7 +1680,7 @@ func file_candela_v1_dashboard_service_proto_rawDescGZIP() []byte {
 	return file_candela_v1_dashboard_service_proto_rawDescData
 }
 
-var file_candela_v1_dashboard_service_proto_msgTypes = make([]protoimpl.MessageInfo, 16)
+var file_candela_v1_dashboard_service_proto_msgTypes = make([]protoimpl.MessageInfo, 18)
 var file_candela_v1_dashboard_service_proto_goTypes = []any{
 	(*GetUsageSummaryRequest)(nil),        // 0: candela.v1.GetUsageSummaryRequest
 	(*GetUsageSummaryResponse)(nil),       // 1: candela.v1.GetUsageSummaryResponse
@@ -1309,44 +1698,63 @@ var file_candela_v1_dashboard_service_proto_goTypes = []any{
 	(*GetJobLeaderboardRequest)(nil),      // 13: candela.v1.GetJobLeaderboardRequest
 	(*GetJobLeaderboardResponse)(nil),     // 14: candela.v1.GetJobLeaderboardResponse
 	(*JobUsage)(nil),                      // 15: candela.v1.JobUsage
-	(*types.TimeRange)(nil),               // 16: candela.types.TimeRange
-	(*types.UserBudget)(nil),              // 17: candela.types.UserBudget
-	(*types.BudgetGrant)(nil),             // 18: candela.types.BudgetGrant
+	(*GetDashboardDataRequest)(nil),       // 16: candela.v1.GetDashboardDataRequest
+	(*GetDashboardDataResponse)(nil),      // 17: candela.v1.GetDashboardDataResponse
+	(*types.TimeRange)(nil),               // 18: candela.types.TimeRange
+	(*types.UserBudget)(nil),              // 19: candela.types.UserBudget
+	(*types.BudgetGrant)(nil),             // 20: candela.types.BudgetGrant
 }
 var file_candela_v1_dashboard_service_proto_depIdxs = []int32{
-	16, // 0: candela.v1.GetUsageSummaryRequest.time_range:type_name -> candela.types.TimeRange
+	18, // 0: candela.v1.GetUsageSummaryRequest.time_range:type_name -> candela.types.TimeRange
 	2,  // 1: candela.v1.GetUsageSummaryResponse.traces_over_time:type_name -> candela.v1.TimeSeriesPoint
 	2,  // 2: candela.v1.GetUsageSummaryResponse.cost_over_time:type_name -> candela.v1.TimeSeriesPoint
 	2,  // 3: candela.v1.GetUsageSummaryResponse.tokens_over_time:type_name -> candela.v1.TimeSeriesPoint
-	16, // 4: candela.v1.GetModelBreakdownRequest.time_range:type_name -> candela.types.TimeRange
-	5,  // 5: candela.v1.GetModelBreakdownResponse.models:type_name -> candela.v1.ModelUsage
-	16, // 6: candela.v1.GetLatencyPercentilesRequest.time_range:type_name -> candela.types.TimeRange
-	2,  // 7: candela.v1.GetLatencyPercentilesResponse.latency_over_time:type_name -> candela.v1.TimeSeriesPoint
-	16, // 8: candela.v1.GetMyUsageRequest.time_range:type_name -> candela.types.TimeRange
-	5,  // 9: candela.v1.GetMyUsageResponse.models:type_name -> candela.v1.ModelUsage
-	17, // 10: candela.v1.GetMyUsageResponse.budget:type_name -> candela.types.UserBudget
-	18, // 11: candela.v1.GetMyUsageResponse.active_grants:type_name -> candela.types.BudgetGrant
-	16, // 12: candela.v1.GetTeamLeaderboardRequest.time_range:type_name -> candela.types.TimeRange
-	12, // 13: candela.v1.GetTeamLeaderboardResponse.users:type_name -> candela.v1.UserUsage
-	16, // 14: candela.v1.GetJobLeaderboardRequest.time_range:type_name -> candela.types.TimeRange
-	15, // 15: candela.v1.GetJobLeaderboardResponse.jobs:type_name -> candela.v1.JobUsage
-	0,  // 16: candela.v1.DashboardService.GetUsageSummary:input_type -> candela.v1.GetUsageSummaryRequest
-	3,  // 17: candela.v1.DashboardService.GetModelBreakdown:input_type -> candela.v1.GetModelBreakdownRequest
-	6,  // 18: candela.v1.DashboardService.GetLatencyPercentiles:input_type -> candela.v1.GetLatencyPercentilesRequest
-	8,  // 19: candela.v1.DashboardService.GetMyUsage:input_type -> candela.v1.GetMyUsageRequest
-	10, // 20: candela.v1.DashboardService.GetTeamLeaderboard:input_type -> candela.v1.GetTeamLeaderboardRequest
-	13, // 21: candela.v1.DashboardService.GetJobLeaderboard:input_type -> candela.v1.GetJobLeaderboardRequest
-	1,  // 22: candela.v1.DashboardService.GetUsageSummary:output_type -> candela.v1.GetUsageSummaryResponse
-	4,  // 23: candela.v1.DashboardService.GetModelBreakdown:output_type -> candela.v1.GetModelBreakdownResponse
-	7,  // 24: candela.v1.DashboardService.GetLatencyPercentiles:output_type -> candela.v1.GetLatencyPercentilesResponse
-	9,  // 25: candela.v1.DashboardService.GetMyUsage:output_type -> candela.v1.GetMyUsageResponse
-	11, // 26: candela.v1.DashboardService.GetTeamLeaderboard:output_type -> candela.v1.GetTeamLeaderboardResponse
-	14, // 27: candela.v1.DashboardService.GetJobLeaderboard:output_type -> candela.v1.GetJobLeaderboardResponse
-	22, // [22:28] is the sub-list for method output_type
-	16, // [16:22] is the sub-list for method input_type
-	16, // [16:16] is the sub-list for extension type_name
-	16, // [16:16] is the sub-list for extension extendee
-	0,  // [0:16] is the sub-list for field type_name
+	2,  // 4: candela.v1.GetUsageSummaryResponse.cache_read_tokens_over_time:type_name -> candela.v1.TimeSeriesPoint
+	2,  // 5: candela.v1.GetUsageSummaryResponse.cache_creation_tokens_over_time:type_name -> candela.v1.TimeSeriesPoint
+	2,  // 6: candela.v1.GetUsageSummaryResponse.input_tokens_over_time:type_name -> candela.v1.TimeSeriesPoint
+	2,  // 7: candela.v1.GetUsageSummaryResponse.output_tokens_over_time:type_name -> candela.v1.TimeSeriesPoint
+	18, // 8: candela.v1.GetModelBreakdownRequest.time_range:type_name -> candela.types.TimeRange
+	5,  // 9: candela.v1.GetModelBreakdownResponse.models:type_name -> candela.v1.ModelUsage
+	18, // 10: candela.v1.GetLatencyPercentilesRequest.time_range:type_name -> candela.types.TimeRange
+	2,  // 11: candela.v1.GetLatencyPercentilesResponse.latency_over_time:type_name -> candela.v1.TimeSeriesPoint
+	18, // 12: candela.v1.GetMyUsageRequest.time_range:type_name -> candela.types.TimeRange
+	5,  // 13: candela.v1.GetMyUsageResponse.models:type_name -> candela.v1.ModelUsage
+	19, // 14: candela.v1.GetMyUsageResponse.budget:type_name -> candela.types.UserBudget
+	20, // 15: candela.v1.GetMyUsageResponse.active_grants:type_name -> candela.types.BudgetGrant
+	18, // 16: candela.v1.GetTeamLeaderboardRequest.time_range:type_name -> candela.types.TimeRange
+	12, // 17: candela.v1.GetTeamLeaderboardResponse.users:type_name -> candela.v1.UserUsage
+	18, // 18: candela.v1.GetJobLeaderboardRequest.time_range:type_name -> candela.types.TimeRange
+	15, // 19: candela.v1.GetJobLeaderboardResponse.jobs:type_name -> candela.v1.JobUsage
+	18, // 20: candela.v1.GetDashboardDataRequest.time_range:type_name -> candela.types.TimeRange
+	2,  // 21: candela.v1.GetDashboardDataResponse.traces_over_time:type_name -> candela.v1.TimeSeriesPoint
+	2,  // 22: candela.v1.GetDashboardDataResponse.cost_over_time:type_name -> candela.v1.TimeSeriesPoint
+	2,  // 23: candela.v1.GetDashboardDataResponse.tokens_over_time:type_name -> candela.v1.TimeSeriesPoint
+	2,  // 24: candela.v1.GetDashboardDataResponse.cache_read_tokens_over_time:type_name -> candela.v1.TimeSeriesPoint
+	2,  // 25: candela.v1.GetDashboardDataResponse.cache_creation_tokens_over_time:type_name -> candela.v1.TimeSeriesPoint
+	2,  // 26: candela.v1.GetDashboardDataResponse.input_tokens_over_time:type_name -> candela.v1.TimeSeriesPoint
+	2,  // 27: candela.v1.GetDashboardDataResponse.output_tokens_over_time:type_name -> candela.v1.TimeSeriesPoint
+	5,  // 28: candela.v1.GetDashboardDataResponse.models:type_name -> candela.v1.ModelUsage
+	19, // 29: candela.v1.GetDashboardDataResponse.budget:type_name -> candela.types.UserBudget
+	20, // 30: candela.v1.GetDashboardDataResponse.active_grants:type_name -> candela.types.BudgetGrant
+	16, // 31: candela.v1.DashboardService.GetDashboardData:input_type -> candela.v1.GetDashboardDataRequest
+	0,  // 32: candela.v1.DashboardService.GetUsageSummary:input_type -> candela.v1.GetUsageSummaryRequest
+	3,  // 33: candela.v1.DashboardService.GetModelBreakdown:input_type -> candela.v1.GetModelBreakdownRequest
+	6,  // 34: candela.v1.DashboardService.GetLatencyPercentiles:input_type -> candela.v1.GetLatencyPercentilesRequest
+	8,  // 35: candela.v1.DashboardService.GetMyUsage:input_type -> candela.v1.GetMyUsageRequest
+	10, // 36: candela.v1.DashboardService.GetTeamLeaderboard:input_type -> candela.v1.GetTeamLeaderboardRequest
+	13, // 37: candela.v1.DashboardService.GetJobLeaderboard:input_type -> candela.v1.GetJobLeaderboardRequest
+	17, // 38: candela.v1.DashboardService.GetDashboardData:output_type -> candela.v1.GetDashboardDataResponse
+	1,  // 39: candela.v1.DashboardService.GetUsageSummary:output_type -> candela.v1.GetUsageSummaryResponse
+	4,  // 40: candela.v1.DashboardService.GetModelBreakdown:output_type -> candela.v1.GetModelBreakdownResponse
+	7,  // 41: candela.v1.DashboardService.GetLatencyPercentiles:output_type -> candela.v1.GetLatencyPercentilesResponse
+	9,  // 42: candela.v1.DashboardService.GetMyUsage:output_type -> candela.v1.GetMyUsageResponse
+	11, // 43: candela.v1.DashboardService.GetTeamLeaderboard:output_type -> candela.v1.GetTeamLeaderboardResponse
+	14, // 44: candela.v1.DashboardService.GetJobLeaderboard:output_type -> candela.v1.GetJobLeaderboardResponse
+	38, // [38:45] is the sub-list for method output_type
+	31, // [31:38] is the sub-list for method input_type
+	31, // [31:31] is the sub-list for extension type_name
+	31, // [31:31] is the sub-list for extension extendee
+	0,  // [0:31] is the sub-list for field type_name
 }
 
 func init() { file_candela_v1_dashboard_service_proto_init() }
@@ -1360,7 +1768,7 @@ func file_candela_v1_dashboard_service_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_candela_v1_dashboard_service_proto_rawDesc), len(file_candela_v1_dashboard_service_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   16,
+			NumMessages:   18,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

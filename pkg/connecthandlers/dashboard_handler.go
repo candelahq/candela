@@ -12,6 +12,7 @@ import (
 	v1 "github.com/candelahq/candela/gen/go/candela/v1"
 	"github.com/candelahq/candela/pkg/auth"
 	"github.com/candelahq/candela/pkg/storage"
+	"golang.org/x/sync/errgroup"
 )
 
 // DashboardHandler implements the DashboardService ConnectRPC handler.
@@ -409,4 +410,138 @@ func (h *DashboardHandler) GetJobLeaderboard(ctx context.Context, req *connect.R
 		pbJobs = append(pbJobs, &v1.JobUsage{JobId: j.JobID, CallCount: j.CallCount, TotalTokens: j.TotalTokens, CostUsd: j.CostUSD, AvgLatencyMs: j.AvgLatencyMs, TopModel: j.TopModel})
 	}
 	return connect.NewResponse(&v1.GetJobLeaderboardResponse{Jobs: pbJobs}), nil
+}
+
+// GetDashboardData returns a consolidated dashboard view: usage summary,
+// per-model breakdown, and (optionally) per-user budget context — all in a
+// single RPC. This replaces the client-side fan-out of GetUsageSummary +
+// GetModelBreakdown + GetMyUsage.
+func (h *DashboardHandler) GetDashboardData(
+	ctx context.Context,
+	req *connect.Request[v1.GetDashboardDataRequest],
+) (*connect.Response[v1.GetDashboardDataResponse], error) {
+	msg := req.Msg
+
+	// ── Build query ─────────────────────────────────────────────────────────
+	q := storage.UsageQuery{
+		ProjectID:   msg.ProjectId,
+		Environment: msg.Environment,
+		UserID:      scopeUserID(ctx, h.users),
+	}
+	if msg.TimeRange != nil {
+		if msg.TimeRange.Start != nil {
+			q.StartTime = msg.TimeRange.Start.AsTime()
+		}
+		if msg.TimeRange.End != nil {
+			q.EndTime = msg.TimeRange.End.AsTime()
+		}
+	}
+	if q.StartTime.IsZero() {
+		q.StartTime = time.Now().Add(-24 * time.Hour)
+	}
+	if q.EndTime.IsZero() {
+		q.EndTime = time.Now()
+	}
+
+	// ── Storage: usage summary + model breakdown ────────────────────────────
+	// If the store implements CombinedUsageReader (BigQuery), fetch both in a
+	// single scan. Otherwise fall back to two concurrent reads.
+	var summary *storage.UsageSummary
+	var models []storage.ModelUsage
+
+	if combined, ok := h.store.(storage.CombinedUsageReader); ok {
+		s, m, err := combined.GetUsageWithModelBreakdown(ctx, q)
+		if err != nil {
+			return nil, internalError("failed to get combined usage", err)
+		}
+		summary = s
+		models = m
+	} else {
+		g, gCtx := errgroup.WithContext(ctx)
+		g.Go(func() error {
+			v, err := h.store.GetUsageSummary(gCtx, q)
+			if err != nil {
+				return fmt.Errorf("usage summary: %w", err)
+			}
+			summary = v
+			return nil
+		})
+		g.Go(func() error {
+			v, err := h.store.GetModelBreakdown(gCtx, q)
+			if err != nil {
+				return fmt.Errorf("model breakdown: %w", err)
+			}
+			models = v
+			return nil
+		})
+		if err := g.Wait(); err != nil {
+			return nil, internalError("failed to get dashboard data", err)
+		}
+	}
+
+	// ── Build response ──────────────────────────────────────────────────────
+	resp := &v1.GetDashboardDataResponse{}
+	if summary != nil {
+		resp.TotalTraces = summary.TotalTraces
+		resp.TotalSpans = summary.TotalSpans
+		resp.TotalLlmCalls = summary.TotalLLMCalls
+		resp.TotalInputTokens = summary.TotalInputTokens
+		resp.TotalOutputTokens = summary.TotalOutputTokens
+		resp.TotalCostUsd = summary.TotalCostUSD
+		resp.AvgLatencyMs = summary.AvgLatencyMs
+		resp.ErrorRate = summary.ErrorRate
+		resp.TotalCacheReadTokens = summary.TotalCacheReadTokens
+		resp.TotalCacheCreationTokens = summary.TotalCacheCreationTokens
+	}
+	for _, m := range models {
+		resp.Models = append(resp.Models, &v1.ModelUsage{
+			Model:               m.Model,
+			Provider:            m.Provider,
+			CallCount:           m.CallCount,
+			InputTokens:         m.InputTokens,
+			OutputTokens:        m.OutputTokens,
+			CostUsd:             m.CostUSD,
+			AvgLatencyMs:        m.AvgLatencyMs,
+			CacheReadTokens:     m.CacheReadTokens,
+			CacheCreationTokens: m.CacheCreationTokens,
+		})
+	}
+
+	// ── Optional: budget + grants (requires auth) ───────────────────────────
+	if msg.IncludeBudget && h.users != nil {
+		authUser := auth.FromContext(ctx)
+		if authUser != nil {
+			userID, err := resolveUserID(ctx, h.users, authUser.Email)
+			if err != nil {
+				if !errors.Is(err, storage.ErrNotFound) {
+					slog.Warn("GetDashboardData: failed to resolve user for budget", "error", err)
+				}
+				// Non-fatal: return data without budget context.
+			} else {
+				budget, err := h.users.GetBudget(ctx, userID)
+				if err != nil {
+					slog.Warn("GetDashboardData: failed to get budget", "error", err)
+				} else {
+					resp.Budget = budgetToProto(budget)
+				}
+
+				grants, err := h.users.ListGrants(ctx, userID, true)
+				if err != nil {
+					slog.Warn("GetDashboardData: failed to list grants", "error", err)
+				} else {
+					for _, g := range grants {
+						resp.ActiveGrants = append(resp.ActiveGrants, grantToProto(g))
+					}
+				}
+
+				// Compute total remaining across budget + grants.
+				check, err := h.users.CheckBudget(ctx, userID, 0)
+				if err == nil && check != nil {
+					resp.TotalRemainingUsd = check.RemainingUSD
+				}
+			}
+		}
+	}
+
+	return connect.NewResponse(resp), nil
 }

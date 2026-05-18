@@ -102,7 +102,7 @@ func TestGetMyUsage_CombinedReaderBranch(t *testing.T) {
 
 	client := startDashboardServer(t, store)
 
-	resp, err := client.GetMyUsage(context.Background(), connect.NewRequest(&v1.GetMyUsageRequest{}))
+	resp, err := client.GetMyUsage(context.Background(), connect.NewRequest(&v1.GetMyUsageRequest{})) //nolint:staticcheck
 	if err != nil {
 		t.Fatalf("GetMyUsage failed: %v", err)
 	}
@@ -141,7 +141,7 @@ func TestGetMyUsage_FallbackBranch(t *testing.T) {
 
 	client := startDashboardServer(t, store)
 
-	resp, err := client.GetMyUsage(context.Background(), connect.NewRequest(&v1.GetMyUsageRequest{}))
+	resp, err := client.GetMyUsage(context.Background(), connect.NewRequest(&v1.GetMyUsageRequest{})) //nolint:staticcheck
 	if err != nil {
 		t.Fatalf("GetMyUsage fallback failed: %v", err)
 	}

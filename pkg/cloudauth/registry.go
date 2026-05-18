@@ -35,13 +35,6 @@ func Get(name string) (Provider, error) {
 	return p, nil
 }
 
-// Default returns the default provider. Currently always GCP.
-// In the future this will auto-detect based on config or environment.
-func Default() Provider {
-	p, _ := Get("gcp")
-	return p
-}
-
 // Names returns the names of all registered providers.
 func Names() []string {
 	registryMu.RLock()

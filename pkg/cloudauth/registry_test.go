@@ -21,16 +21,6 @@ func TestRegistry_Get_Unknown(t *testing.T) {
 	}
 }
 
-func TestRegistry_Default(t *testing.T) {
-	p := Default()
-	if p == nil {
-		t.Fatal("Default() returned nil")
-	}
-	if p.Name() != "gcp" {
-		t.Errorf("Default().Name() = %q, want %q", p.Name(), "gcp")
-	}
-}
-
 func TestRegistry_Names(t *testing.T) {
 	names := Names()
 	if len(names) == 0 {

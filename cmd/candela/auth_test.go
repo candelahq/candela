@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -121,7 +122,7 @@ func TestAdcPath(t *testing.T) {
 	if !filepath.IsAbs(path) {
 		t.Errorf("adcPath returned relative path: %s", path)
 	}
-	if !contains(path, "application_default_credentials.json") {
+	if !strings.Contains(path, "application_default_credentials.json") {
 		t.Errorf("adcPath missing expected filename: %s", path)
 	}
 }
@@ -153,17 +154,4 @@ func TestHandleAuth_Help(t *testing.T) {
 	// Just verify handleAuth doesn't panic with empty args.
 	// It writes to stderr but shouldn't crash.
 	handleAuth(nil)
-}
-
-func contains(s, substr string) bool {
-	return len(s) >= len(substr) && (s == substr || len(s) > 0 && containsHelper(s, substr))
-}
-
-func containsHelper(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
-	}
-	return false
 }

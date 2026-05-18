@@ -45,7 +45,19 @@ var oauthConfig = &oauth2.Config{
 }
 
 // adcPath returns the standard Application Default Credentials file path.
+// Supports CLOUDSDK_CONFIG override, Windows (APPDATA), and Unix (~/.config).
 func adcPath() (string, error) {
+	// Respect CLOUDSDK_CONFIG if set (same as gcloud).
+	if p := os.Getenv("CLOUDSDK_CONFIG"); p != "" {
+		return filepath.Join(p, "application_default_credentials.json"), nil
+	}
+	if runtime.GOOS == "windows" {
+		appData := os.Getenv("APPDATA")
+		if appData == "" {
+			return "", fmt.Errorf("APPDATA environment variable not set")
+		}
+		return filepath.Join(appData, "gcloud", "application_default_credentials.json"), nil
+	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", fmt.Errorf("cannot determine home directory: %w", err)
@@ -140,7 +152,7 @@ func cmdAuthLogin() {
 		resultCh <- authResult{code: code}
 	})
 
-	server := &http.Server{Handler: mux}
+	server := &http.Server{Handler: mux, ReadHeaderTimeout: 10 * time.Second}
 	go func() { _ = server.Serve(listener) }()
 	defer func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
@@ -286,6 +298,10 @@ func writeADC(token *oauth2.Token) error {
 	if err := os.WriteFile(tmpPath, data, 0o600); err != nil {
 		return fmt.Errorf("failed to write credentials: %w", err)
 	}
+	// On Windows, os.Rename fails if the destination exists.
+	if runtime.GOOS == "windows" {
+		_ = os.Remove(path)
+	}
 	if err := os.Rename(tmpPath, path); err != nil {
 		_ = os.Remove(tmpPath)
 		return fmt.Errorf("failed to save credentials: %w", err)
@@ -321,7 +337,10 @@ func refreshFromADC(creds *adcCredentials) (*oauth2.Token, error) {
 		Endpoint:     google.Endpoint,
 	}
 
-	tokenSource := cfg.TokenSource(context.Background(), &oauth2.Token{
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	tokenSource := cfg.TokenSource(ctx, &oauth2.Token{
 		RefreshToken: creds.RefreshToken,
 	})
 
@@ -383,7 +402,7 @@ func openBrowser(url string) error {
 	case "linux":
 		return exec.Command("xdg-open", url).Start()
 	case "windows":
-		return exec.Command("cmd", "/c", "start", url).Start()
+		return exec.Command("cmd", "/c", "start", "", url).Start()
 	default:
 		return fmt.Errorf("unsupported platform %s", runtime.GOOS)
 	}

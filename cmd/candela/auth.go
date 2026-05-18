@@ -93,37 +93,18 @@ Usage:
 	}
 }
 
-// cmdAuthLogin performs the OAuth2 authorization code flow via browser.
-func cmdAuthLogin() {
-	// Start a temporary HTTP server on a random port.
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		_, _ = fmt.Fprintf(os.Stderr, "error: failed to start local server: %v\n", err)
-		os.Exit(1)
-	}
-	port := listener.Addr().(*net.TCPAddr).Port
-	redirectURL := fmt.Sprintf("http://127.0.0.1:%d/callback", port)
-	oauthConfig.RedirectURL = redirectURL
+// authResult carries the outcome of the OAuth callback.
+type authResult struct {
+	code string
+	err  error
+}
 
-	// Generate a random state parameter for CSRF protection.
-	stateBytes := make([]byte, 16)
-	if _, err := rand.Read(stateBytes); err != nil {
-		_, _ = fmt.Fprintf(os.Stderr, "error: failed to generate random state: %v\n", err)
-		os.Exit(1)
-	}
-	state := base64.URLEncoding.EncodeToString(stateBytes)
-
-	// Channel to receive the auth result.
-	type authResult struct {
-		code string
-		err  error
-	}
-	resultCh := make(chan authResult, 1)
-
-	// Set up the callback handler.
-	mux := http.NewServeMux()
-	mux.HandleFunc("/callback", func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Query().Get("state") != state {
+// newCallbackHandler returns an http.HandlerFunc that validates the OAuth2
+// callback parameters (state, error, code) and sends the result to resultCh.
+// This is extracted from cmdAuthLogin so it can be tested directly.
+func newCallbackHandler(expectedState string, resultCh chan<- authResult) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("state") != expectedState {
 			http.Error(w, "Invalid state parameter", http.StatusBadRequest)
 			resultCh <- authResult{err: fmt.Errorf("state mismatch")}
 			return
@@ -150,7 +131,35 @@ func cmdAuthLogin() {
 <p>You can close this tab and return to your terminal.</p>
 </body></html>`)
 		resultCh <- authResult{code: code}
-	})
+	}
+}
+
+// cmdAuthLogin performs the OAuth2 authorization code flow via browser.
+func cmdAuthLogin() {
+	// Start a temporary HTTP server on a random port.
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		_, _ = fmt.Fprintf(os.Stderr, "error: failed to start local server: %v\n", err)
+		os.Exit(1)
+	}
+	port := listener.Addr().(*net.TCPAddr).Port
+	redirectURL := fmt.Sprintf("http://127.0.0.1:%d/callback", port)
+	oauthConfig.RedirectURL = redirectURL
+
+	// Generate a random state parameter for CSRF protection.
+	stateBytes := make([]byte, 16)
+	if _, err := rand.Read(stateBytes); err != nil {
+		_, _ = fmt.Fprintf(os.Stderr, "error: failed to generate random state: %v\n", err)
+		os.Exit(1)
+	}
+	state := base64.URLEncoding.EncodeToString(stateBytes)
+
+	// Channel to receive the auth result.
+	resultCh := make(chan authResult, 1)
+
+	// Set up the callback handler using the shared, testable handler.
+	mux := http.NewServeMux()
+	mux.HandleFunc("/callback", newCallbackHandler(state, resultCh))
 
 	server := &http.Server{Handler: mux, ReadHeaderTimeout: 10 * time.Second}
 	go func() { _ = server.Serve(listener) }()

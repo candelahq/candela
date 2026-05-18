@@ -130,6 +130,8 @@ func main() {
 		cmdStop()
 	case "status":
 		cmdStatus()
+	case "auth":
+		handleAuth(os.Args[2:])
 	case "version":
 		fmt.Printf("candela %s\n", version)
 	default:
@@ -141,6 +143,9 @@ Usage:
   candela stop           Stop the background proxy
   candela status         Show proxy status
   candela run [flags]    Run in foreground
+  candela auth login     Login via browser (Google OAuth)
+  candela auth status    Show credential status
+  candela auth token     Print a fresh access token
   candela version        Print version
 
 Run flags:
@@ -438,7 +443,7 @@ func runForeground() {
 			slog.Debug("idtoken.NewTokenSource unavailable (user credentials fallback)", "reason", err)
 			ts2, err2 := google.DefaultTokenSource(ctx, "openid", "email")
 			if err2 != nil {
-				slog.Error("failed to get credentials — run 'gcloud auth application-default login' first",
+				slog.Error("failed to get credentials — run 'candela auth login' first",
 					"error", err2)
 				os.Exit(1)
 			}
@@ -933,7 +938,7 @@ func buildCloudProxy(cfg Config, submitter *processor.SpanProcessor) (*proxy.Pro
 	tokenSource, adcErr := google.DefaultTokenSource(context.Background(),
 		"https://www.googleapis.com/auth/cloud-platform")
 	if adcErr != nil {
-		slog.Error("failed to get Google ADC — run 'gcloud auth application-default login'", "error", adcErr)
+		slog.Error("failed to get Google ADC — run 'candela auth login'", "error", adcErr)
 		return nil, nil
 	}
 

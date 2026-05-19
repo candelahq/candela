@@ -715,6 +715,7 @@ func runForeground() {
 	}
 	// Wire the cloud proxy into the config API for runtime caching control.
 	configAPI.cloudProxy = cloudProxy
+	configAPI.calc = cloudCalc
 	// Create a calc for pricing-based model filtering.
 	// Uses the same defaults as the cloud proxy's embedded calc.
 	if len(cloudModels) > 0 {
@@ -1014,6 +1015,13 @@ func buildCloudProxy(cfg Config, submitter *processor.SpanProcessor) (*proxy.Pro
 			// API key via x-api-key or Authorization header. No ADC, no Vertex AI.
 			p.UpstreamURL = "https://api.anthropic.com"
 			// Client manages auth, not ADC.
+		case "gemini-direct":
+			// Native Google Generative Language API passthrough — client provides
+			// its own API key via ?key= parameter. No ADC, no Vertex AI.
+			// Mirrors anthropic-direct for API-key-authenticated Gemini access.
+			p.Name = "google"
+			p.UpstreamURL = "https://generativelanguage.googleapis.com"
+			p.TokenSource = nil // Client manages auth via API key, not ADC.
 		case "anthropic-vertex":
 			// Native Anthropic Messages API routed via Vertex AI rawPredict.
 			// Candela injects GCP ADC auth — no client API key needed.

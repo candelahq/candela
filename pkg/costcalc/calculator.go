@@ -212,6 +212,16 @@ func (c *Calculator) SetCacheDiscount(provider string, cfg CacheDiscountConfig) 
 	c.cacheDiscounts[strings.ToLower(provider)] = cfg
 }
 
+// GetCacheDiscount returns the runtime-overridden cache discount config for a
+// canonical provider, if one has been set via SetCacheDiscount. Returns false
+// if only the default (model-aware) logic is active.
+func (c *Calculator) GetCacheDiscount(provider string) (CacheDiscountConfig, bool) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	cfg, ok := c.cacheDiscounts[strings.ToLower(provider)]
+	return cfg, ok
+}
+
 // NormalizeCachedInput returns cost-equivalent input tokens by applying
 // provider-specific and model-specific cache discounts to raw token counts.
 //
@@ -424,8 +434,13 @@ func (c *Calculator) key(provider, model string) string {
 func (c *Calculator) loadDefaults() {
 	defaults := []ModelPricing{
 		// ── Google Gemini ─────────────────────────────────────────
-		// Gemini 3.1 (latest)
+		// Gemini 3.1 (latest, May 2026)
 		{Provider: "google", Model: "gemini-3.1-pro", InputPerMillion: 2.00, OutputPerMillion: 12.00},
+		{Provider: "google", Model: "gemini-3.1-flash", InputPerMillion: 0.50, OutputPerMillion: 3.00},
+		{Provider: "google", Model: "gemini-3.1-flash-lite", InputPerMillion: 0.25, OutputPerMillion: 1.50},
+		// Gemini 3.0 (Preview)
+		{Provider: "google", Model: "gemini-3.0-pro", InputPerMillion: 2.00, OutputPerMillion: 12.00},
+		{Provider: "google", Model: "gemini-3.0-flash", InputPerMillion: 0.50, OutputPerMillion: 3.00},
 		// Gemini 2.5
 		{Provider: "google", Model: "gemini-2.5-pro", InputPerMillion: 1.25, OutputPerMillion: 10.00,
 			InputPerMillionHigh: 2.50, OutputPerMillionHigh: 15.00, TierThresholdTokens: 200_000},

@@ -266,10 +266,16 @@ func (p *googleParser) ParseResponse(body []byte) (content string, inputTokens, 
 	if candidates, ok := resp["candidates"].([]interface{}); ok && len(candidates) > 0 {
 		if c, ok := candidates[0].(map[string]interface{}); ok {
 			if cont, ok := c["content"].(map[string]interface{}); ok {
-				if parts, ok := cont["parts"].([]interface{}); ok && len(parts) > 0 {
-					if part, ok := parts[0].(map[string]interface{}); ok {
-						content, _ = part["text"].(string)
+				if parts, ok := cont["parts"].([]interface{}); ok {
+					var b strings.Builder
+					for _, p := range parts {
+						if part, ok := p.(map[string]interface{}); ok {
+							if text, ok := part["text"].(string); ok {
+								b.WriteString(text)
+							}
+						}
 					}
+					content = b.String()
 				}
 			}
 		}
@@ -304,10 +310,12 @@ func (p *googleParser) ParseStreamingResponse(data []byte) (content string, inpu
 			if candidates, ok := chunk["candidates"].([]interface{}); ok && len(candidates) > 0 {
 				if c, ok := candidates[0].(map[string]interface{}); ok {
 					if cont, ok := c["content"].(map[string]interface{}); ok {
-						if parts, ok := cont["parts"].([]interface{}); ok && len(parts) > 0 {
-							if part, ok := parts[0].(map[string]interface{}); ok {
-								if text, ok := part["text"].(string); ok {
-									contentBuilder.WriteString(text)
+						if parts, ok := cont["parts"].([]interface{}); ok {
+							for _, p := range parts {
+								if part, ok := p.(map[string]interface{}); ok {
+									if text, ok := part["text"].(string); ok {
+										contentBuilder.WriteString(text)
+									}
 								}
 							}
 						}
@@ -329,10 +337,12 @@ func (p *googleParser) ParseStreamingResponse(data []byte) (content string, inpu
 			if candidates, ok := chunk["candidates"].([]interface{}); ok && len(candidates) > 0 {
 				if c, ok := candidates[0].(map[string]interface{}); ok {
 					if cont, ok := c["content"].(map[string]interface{}); ok {
-						if parts, ok := cont["parts"].([]interface{}); ok && len(parts) > 0 {
-							if part, ok := parts[0].(map[string]interface{}); ok {
-								if text, ok := part["text"].(string); ok {
-									contentBuilder.WriteString(text)
+						if parts, ok := cont["parts"].([]interface{}); ok {
+							for _, p := range parts {
+								if part, ok := p.(map[string]interface{}); ok {
+									if text, ok := part["text"].(string); ok {
+										contentBuilder.WriteString(text)
+									}
 								}
 							}
 						}

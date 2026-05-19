@@ -435,7 +435,7 @@ candela auth status
 candela auth token --provider gcp
 ```
 
-> **💡 Tip**: If your config only uses one cloud provider type (e.g., only GCP providers), `--provider` is auto-inferred and can be omitted.
+> **💡 Tip**: If `--provider` is omitted, `candela auth login` infers the provider from your config. If multiple cloud providers are configured, it prompts you interactively. After login, the provider is auto-saved to your config file, and if the proxy is running, you'll be prompted to restart it.
 
 GCP credentials are stored in ADC-compatible format at `~/.config/gcloud/application_default_credentials.json`.
 AWS credentials use the standard AWS credential chain (`~/.aws/credentials`, env vars, SSO, or instance roles).
@@ -650,7 +650,9 @@ To use Claude models via Vertex AI, follow these steps:
 
 ### 1. GCP Project Setup
 ```bash
-# Install gcloud CLI if needed
+# gcloud CLI is optional — only needed for project creation/API enablement.
+# Authentication uses `candela auth login` (no gcloud required).
+# To install gcloud (if not already installed):
 curl https://sdk.cloud.google.com | bash
 
 # Create a new project (or use existing)
@@ -799,12 +801,13 @@ CANDELA_CONFIG=test-config.yaml go run ./cmd/candela-server
 #### Anthropic/Vertex AI Errors
 ```bash
 # Verify ADC is working
+candela auth status
 candela auth token
 
-# Check project/region settings
+# Check project/region settings (requires gcloud)
 gcloud config list
 
-# Test Vertex AI access
+# Test Vertex AI access (requires gcloud)
 gcloud ai models list --region=us-east5
 ```
 

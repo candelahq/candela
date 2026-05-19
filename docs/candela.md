@@ -60,7 +60,8 @@ vertex_ai:
 
 **Prerequisites**:
 ```bash
-gcloud auth application-default login
+candela auth login          # opens browser — native OAuth2 (recommended)
+# Or: gcloud auth application-default login   (also works)
 # Ensure Vertex AI API is enabled in your project
 ```
 
@@ -204,8 +205,9 @@ state_db_path: ~/.candela/state.db     # runtime state persistence
 **Solo + Cloud** and **Team Mode** both use **Application Default Credentials**:
 
 ```bash
-# Set up ADC (one-time)
-gcloud auth application-default login
+# Set up ADC (one-time) — pick one:
+candela auth login                      # native OAuth2 (recommended)
+gcloud auth application-default login   # also works if gcloud is installed
 ```
 
 ---
@@ -352,7 +354,7 @@ curl http://localhost:1234/v1/chat/completions \
 |---------|-------|-----|
 | "model not found locally and no remote server configured" | Solo Mode + unknown model | Add `providers` for cloud models, or use a local model |
 | "vertex_ai.project is required" | `providers` set but no project | Add `vertex_ai.project` to `config.yaml` |
-| "failed to get Google ADC" | ADC not configured | Run `gcloud auth application-default login` |
+| "failed to get Google ADC" | ADC not configured | Run `candela auth login` (or `gcloud auth application-default login`) |
 | "audience is required when remote is set" | Missing `audience` | Add IAP `audience` to `config.yaml` |
 | Traces card shows "Traces not available" | Team Mode (traces go to cloud) | Expected — check the cloud dashboard |
 | No models in `/v1/models` | Runtime not started | Start Ollama: `ollama serve` |

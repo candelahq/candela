@@ -101,7 +101,7 @@ The Next.js UI reads these at **build time** (prefixed with `NEXT_PUBLIC_`) and 
 
 | Variable | Description |
 |----------|-------------|
-| `GOOGLE_APPLICATION_CREDENTIALS` | Path to GCP service account key (alternative to `gcloud auth application-default login`) |
+| `GOOGLE_APPLICATION_CREDENTIALS` | Path to GCP service account key (alternative to `candela auth login` or `gcloud auth application-default login`) |
 | `GOOGLE_CLOUD_PROJECT` | Fallback GCP project if not set in `~/.config/candela/config.yaml` |
 
 ---

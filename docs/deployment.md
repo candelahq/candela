@@ -58,7 +58,7 @@ flowchart TD
 |---|---|---|
 | Firebase ID Token | Browser UI | Firebase JS SDK |
 | Google ID Token | Service accounts | `idtoken.NewTokenSource()` |
-| OAuth2 Access Token | candela (user ADC) | `gcloud auth application-default login` |
+| OAuth2 Access Token | candela (user ADC) | `candela auth login` (or `gcloud auth application-default login`) |
 
 ## Container Layout
 

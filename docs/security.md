@@ -31,10 +31,10 @@ The middleware (`pkg/auth/firebase.go`) tries three strategies in sequence. The 
 |---|----------|--------|-------------|-------------------|
 | 1 | **Firebase ID Token** | Browser UI | Firebase JS SDK (`onAuthStateChanged`) | `fbAuth.VerifyIDToken()` |
 | 2 | **Google ID Token** | Service accounts, `candela` with `idtoken` | `idtoken.NewTokenSource(audience)` | `idtoken.Validate(token, audience)` |
-| 3 | **OAuth2 Access Token** | `candela` with user ADC | `gcloud auth application-default login` | `googleapis.com/oauth2/v3/userinfo` |
+| 3 | **OAuth2 Access Token** | `candela` with user ADC | `candela auth login` (or `gcloud auth application-default login`) | `googleapis.com/oauth2/v3/userinfo` |
 
 > [!NOTE]
-> Strategy 3 makes an HTTP call to Google's userinfo endpoint on every request. This adds ~50ms latency but is the only way to validate user-scoped Application Default Credentials (ADC) that `candela` uses when `gcloud auth application-default login` provides an access token rather than an ID token.
+> Strategy 3 makes an HTTP call to Google's userinfo endpoint on every request. This adds ~50ms latency but is the only way to validate user-scoped Application Default Credentials (ADC) that `candela` uses when `candela auth login` (or `gcloud auth application-default login`) provides an access token rather than an ID token.
 
 ### Auth Bypass
 
@@ -175,7 +175,8 @@ No authentication needed. All requests to `:1234` and `:8181` are unauthenticate
 ### Solo + Cloud Mode
 Uses **Application Default Credentials (ADC)** to call Vertex AI directly:
 ```bash
-gcloud auth application-default login
+candela auth login                      # native OAuth2 (recommended)
+# Or: gcloud auth application-default login
 ```
 No server-side auth needed — ADC tokens are used for upstream cloud calls only.
 
@@ -259,12 +260,12 @@ See [docs/user-management.md](user-management.md) for the full validation rule r
 
 ---
 
-## 🐝 eBPF Enforcement & Transparent Proxy *(coming soon)*
+## 🐝 eBPF Enforcement & Transparent Proxy
 
 > [!NOTE]
-> This feature is in active design. See the internal project board for tracking.
+> The transparent proxy with SNI-based routing is production-ready (phases 0–4 shipped).
 
-Candela will add kernel-level enforcement to guarantee that **all LLM API traffic flows through the proxy** — making observability and budget controls impossible to bypass, even by misconfigured or malicious workloads.
+Candela provides kernel-level enforcement to guarantee that **all LLM API traffic flows through the proxy** — making observability and budget controls impossible to bypass, even by misconfigured or malicious workloads.
 
 ### Architecture
 
@@ -316,13 +317,13 @@ enforcement:
 
 ### Phased Rollout
 
-| Phase | Milestone |
-|-------|-----------|
-| 0 | Config schema design (`candela-policy.yaml`) |
-| 1 | Extend `Provider` struct with host/intercept fields |
-| 2 | Config file loading in `candela-sidecar` |
-| 3 | Helm chart with enforcement templates |
-| 4 | Transparent listener (Go — SNI routing) |
-| 5 | Transparent listener (Rust — `rustls`) |
-| 6 | Tetragon + Hubble observability integration |
+| Phase | Milestone | Status |
+|-------|-----------|--------|
+| 0 | Config schema design (`candela-policy.yaml`) | ✅ Shipped |
+| 1 | Extend `Provider` struct with host/intercept fields | ✅ Shipped |
+| 2 | Config file loading in `candela-sidecar` | ✅ Shipped |
+| 3 | Helm chart with enforcement templates | ✅ Shipped |
+| 4 | Transparent listener (Go — SNI routing) | ✅ Shipped |
+| 5 | Transparent listener (Rust — `rustls`) | 🚧 In Progress |
+| 6 | Tetragon + Hubble observability integration | 📋 Planned |
 

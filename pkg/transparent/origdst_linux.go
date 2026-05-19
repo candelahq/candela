@@ -35,34 +35,42 @@ const IP6T_SO_ORIGINAL_DST = 80
 //
 // Returns the original destination as "host:port".
 func GetOriginalDst(conn *net.TCPConn) (string, error) {
-	// Get the underlying file descriptor.
-	// Note: File() puts the socket into blocking mode; we restore non-blocking
-	// after extracting the FD.
-	f, err := conn.File()
+	// Use SyscallConn to access the file descriptor without duplicating it
+	// or switching to blocking mode (unlike conn.File()).
+	rawConn, err := conn.SyscallConn()
 	if err != nil {
-		return "", fmt.Errorf("get fd: %w", err)
-	}
-	defer func() { _ = f.Close() }()
-	fd := int(f.Fd())
-
-	// Restore non-blocking mode since File() sets it to blocking.
-	if err := syscall.SetNonblock(fd, true); err != nil {
-		return "", fmt.Errorf("set nonblock: %w", err)
+		return "", fmt.Errorf("get raw conn: %w", err)
 	}
 
-	// Try IPv4 first.
-	addr4, err := getOriginalDst4(fd)
-	if err == nil {
-		return addr4, nil
-	}
+	var (
+		result string
+		opErr  error
+	)
 
-	// Fall back to IPv6.
-	addr6, err := getOriginalDst6(fd)
-	if err == nil {
-		return addr6, nil
-	}
+	ctrlErr := rawConn.Control(func(fd uintptr) {
+		// Try IPv4 first.
+		addr4, err := getOriginalDst4(int(fd))
+		if err == nil {
+			result = addr4
+			return
+		}
 
-	return "", fmt.Errorf("getsockopt SO_ORIGINAL_DST failed (ipv4 and ipv6)")
+		// Fall back to IPv6.
+		addr6, err := getOriginalDst6(int(fd))
+		if err == nil {
+			result = addr6
+			return
+		}
+
+		opErr = fmt.Errorf("getsockopt SO_ORIGINAL_DST failed (ipv4 and ipv6)")
+	})
+	if ctrlErr != nil {
+		return "", fmt.Errorf("raw conn control: %w", ctrlErr)
+	}
+	if opErr != nil {
+		return "", opErr
+	}
+	return result, nil
 }
 
 // getOriginalDst4 retrieves the IPv4 original destination.

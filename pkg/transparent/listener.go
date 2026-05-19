@@ -13,6 +13,19 @@ import (
 	"github.com/candelahq/candela/pkg/proxy"
 )
 
+// peekBufPool reuses 16KB buffers for TLS ClientHello peeking,
+// avoiding per-connection allocations under high concurrency.
+var peekBufPool = sync.Pool{
+	New: func() any {
+		buf := make([]byte, 16384)
+		return &buf
+	},
+}
+
+// upstreamDialTimeout is the maximum time to wait for an upstream TCP
+// connection. Prevents goroutine leaks against unresponsive destinations.
+const upstreamDialTimeout = 10 * time.Second
+
 // Listener accepts connections on a port that receives iptables-redirected
 // traffic (typically port 15001). For each connection it:
 //
@@ -194,7 +207,9 @@ func (l *Listener) handleConn(conn net.Conn) {
 	// The peeked bytes are replayed to the upstream connection.
 	// 16KB is sufficient for TLS 1.3 ClientHello with ECH + GREASE extensions.
 	_ = conn.SetReadDeadline(time.Now().Add(5 * time.Second))
-	peekBuf := make([]byte, 16384)
+	peekBufPtr := peekBufPool.Get().(*[]byte)
+	defer peekBufPool.Put(peekBufPtr)
+	peekBuf := *peekBufPtr
 	n, err := conn.Read(peekBuf)
 	_ = conn.SetReadDeadline(time.Time{}) // clear deadline for tunnel phase
 	if err != nil {
@@ -252,7 +267,7 @@ func (l *Listener) tunnelPassthrough(clientConn net.Conn, peeked []byte) {
 		return
 	}
 
-	upstream, err := net.Dial("tcp", origDst)
+	upstream, err := (&net.Dialer{Timeout: upstreamDialTimeout}).Dial("tcp", origDst)
 	if err != nil {
 		slog.Warn("transparent: passthrough dial failed",
 			"dest", origDst, "error", err)
@@ -282,7 +297,7 @@ func (l *Listener) tunnelToOrigDest(clientConn net.Conn, peeked []byte, sni stri
 		return
 	}
 
-	upstream, err := net.Dial("tcp", origDst)
+	upstream, err := (&net.Dialer{Timeout: upstreamDialTimeout}).Dial("tcp", origDst)
 	if err != nil {
 		slog.Warn("transparent: failed to connect to upstream",
 			"sni", sni, "dest", origDst, "error", err)

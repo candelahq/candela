@@ -29,12 +29,13 @@ type ProviderParser interface {
 
 // parserRegistry maps provider names to their parsers.
 var parserRegistry = map[string]ProviderParser{
-	"openai":           &openaiParser{},
-	"gemini-oai":       &openaiParser{}, // Gemini OpenAI-compat returns standard OpenAI format.
-	"anthropic":        &anthropicParser{},
-	"anthropic-direct": &anthropicParser{}, // Same wire format, just no Vertex AI translation.
-	"anthropic-vertex": &anthropicParser{}, // Native Anthropic format routed via Vertex AI.
-	"google":           &googleParser{},
+	"openai":            &openaiParser{},
+	"gemini-oai":        &openaiParser{}, // Gemini OpenAI-compat returns standard OpenAI format.
+	"anthropic":         &anthropicParser{},
+	"anthropic-direct":  &anthropicParser{}, // Same wire format, just no Vertex AI translation.
+	"anthropic-vertex":  &anthropicParser{}, // Native Anthropic format routed via Vertex AI.
+	"anthropic-bedrock": &anthropicParser{}, // Same wire format, routed via AWS Bedrock + SigV4.
+	"google":            &googleParser{},
 }
 
 // getParser returns the parser for a provider, or a no-op fallback.
@@ -388,7 +389,7 @@ func extractModelFromResponse(provider string, body []byte) string {
 		if m, ok := resp["model"].(string); ok && m != "" {
 			return m
 		}
-	case "anthropic", "anthropic-direct", "anthropic-vertex":
+	case "anthropic", "anthropic-direct", "anthropic-vertex", "anthropic-bedrock":
 		if m, ok := resp["model"].(string); ok && m != "" {
 			return m
 		}
@@ -460,7 +461,7 @@ func extractCacheTokens(provider string, body []byte) CacheTokens {
 	}
 
 	switch provider {
-	case "anthropic", "anthropic-direct", "anthropic-vertex":
+	case "anthropic", "anthropic-direct", "anthropic-vertex", "anthropic-bedrock":
 		if usage, ok := resp["usage"].(map[string]interface{}); ok {
 			return CacheTokens{
 				CacheReadTokens:     toInt64(usage["cache_read_input_tokens"]),
@@ -493,7 +494,7 @@ func extractCacheTokens(provider string, body []byte) CacheTokens {
 // extractStreamingCacheTokens extracts raw cache token counts from SSE stream data.
 func extractStreamingCacheTokens(provider string, data []byte) CacheTokens {
 	switch provider {
-	case "anthropic", "anthropic-direct", "anthropic-vertex":
+	case "anthropic", "anthropic-direct", "anthropic-vertex", "anthropic-bedrock":
 		return extractAnthropicStreamingCache(data)
 
 	case "openai", "gemini-oai":
@@ -638,7 +639,7 @@ func injectStreamUsageOption(provider string, body []byte) []byte {
 // relevant traffic, avoiding unnecessary overhead for other providers.
 func isAnthropicProvider(provider string) bool {
 	switch provider {
-	case "anthropic", "anthropic-direct", "anthropic-vertex":
+	case "anthropic", "anthropic-direct", "anthropic-vertex", "anthropic-bedrock":
 		return true
 	default:
 		return strings.HasPrefix(provider, "anthropic-")

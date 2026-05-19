@@ -37,6 +37,7 @@ import (
 	"time"
 
 	"github.com/candelahq/candela/gen/go/candela/v1/candelav1connect"
+	"github.com/candelahq/candela/pkg/cloudauth"
 	"github.com/candelahq/candela/pkg/costcalc"
 	"github.com/candelahq/candela/pkg/processor"
 	"github.com/candelahq/candela/pkg/proxy"
@@ -79,6 +80,7 @@ type Config struct {
 	// Direct cloud providers (solo mode — call Gemini/Claude without a server).
 	Providers []LocalProvider `yaml:"providers"`
 	VertexAI  VertexAIConfig  `yaml:"vertex_ai"`
+	AWS       AWSConfig       `yaml:"aws"`
 }
 
 // LocalProvider configures a direct cloud provider for solo mode.
@@ -93,6 +95,12 @@ type VertexAIConfig struct {
 	Region      string `yaml:"region"`       // GCP region (default: us-central1)
 	CachingMode string `yaml:"caching_mode"` // off|auto|system-only (default: auto)
 	CacheTTL    string `yaml:"cache_ttl"`    // 5m|1h (default: 5m)
+}
+
+// AWSConfig holds AWS settings for Bedrock cloud providers.
+type AWSConfig struct {
+	Region  string `yaml:"region"`  // AWS region (default: us-east-1)
+	Profile string `yaml:"profile"` // AWS CLI profile (default: "default")
 }
 
 // version is set at build time via ldflags.
@@ -143,10 +151,11 @@ Usage:
   candela stop           Stop the background proxy
   candela status         Show proxy status
   candela run [flags]    Run in foreground
-  candela auth login     Login via browser (Google OAuth)
-  candela auth status    Show credential status
-  candela auth token     Print a fresh access token
-  candela version        Print version
+  candela auth login --provider gcp   Login to GCP via browser
+  candela auth login --provider aws   Login to AWS
+  candela auth status                 Show credential status
+  candela auth token --provider gcp   Print a fresh access token
+  candela version                     Print version
 
 Run flags:
   --config <path>        Config file (default: ~/.config/candela/config.yaml)
@@ -916,30 +925,61 @@ func buildCloudProxy(cfg Config, submitter *processor.SpanProcessor) (*proxy.Pro
 		region = "us-central1"
 	}
 
-	// Resolve GCP project: config > gcloud fallback.
-	project := cfg.VertexAI.Project
-	if project == "" {
-		// Try gcloud config as fallback.
-		gcloudCtx, gcloudCancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer gcloudCancel()
-		if out, err := exec.CommandContext(gcloudCtx, "gcloud", "config", "get", "project").Output(); err == nil {
-			project = strings.TrimSpace(string(out))
-			if project != "" {
-				slog.Warn("vertex_ai.project not set in config, using gcloud default", "project", project)
-			}
+	// Check if any provider needs GCP credentials.
+	needsGCP := false
+	needsAWS := false
+	for _, lp := range cfg.Providers {
+		switch lp.Name {
+		case "google", "gemini", "anthropic", "anthropic-vertex":
+			needsGCP = true
+		case "anthropic-bedrock":
+			needsAWS = true
 		}
 	}
-	if project == "" {
-		slog.Error("vertex_ai.project is required for direct cloud providers — set it in ~/.config/candela/config.yaml")
-		return nil, nil
+
+	// Resolve GCP project and ADC only if needed.
+	var project string
+	var tokenSource oauth2.TokenSource
+	if needsGCP {
+		project = cfg.VertexAI.Project
+		if project == "" {
+			// Try gcloud config as fallback.
+			gcloudCtx, gcloudCancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer gcloudCancel()
+			if out, err := exec.CommandContext(gcloudCtx, "gcloud", "config", "get", "project").Output(); err == nil {
+				project = strings.TrimSpace(string(out))
+				if project != "" {
+					slog.Warn("vertex_ai.project not set in config, using gcloud default", "project", project)
+				}
+			}
+		}
+		if project == "" {
+			slog.Error("vertex_ai.project is required for GCP providers — set it in ~/.config/candela/config.yaml")
+			return nil, nil
+		}
+
+		// Get GCP ADC token source.
+		var adcErr error
+		tokenSource, adcErr = google.DefaultTokenSource(context.Background(),
+			"https://www.googleapis.com/auth/cloud-platform")
+		if adcErr != nil {
+			slog.Error("failed to get GCP credentials — run 'candela auth login'", "error", adcErr)
+			return nil, nil
+		}
 	}
 
-	// Get ADC token source.
-	tokenSource, adcErr := google.DefaultTokenSource(context.Background(),
-		"https://www.googleapis.com/auth/cloud-platform")
-	if adcErr != nil {
-		slog.Error("failed to get Google ADC — run 'candela auth login'", "error", adcErr)
-		return nil, nil
+	// Resolve AWS credentials if needed.
+	var awsProvider *cloudauth.AWSProvider
+	if needsAWS {
+		awsRegion := cfg.AWS.Region
+		if awsRegion == "" {
+			awsRegion = "us-east-1"
+		}
+		awsProvider = cloudauth.NewAWSProvider(awsRegion, cfg.AWS.Profile)
+		if !awsProvider.IsConfigured() {
+			slog.Error("AWS credentials not found — run 'candela auth login --provider aws'")
+			return nil, nil
+		}
 	}
 
 	// Build providers from config.
@@ -947,14 +987,16 @@ func buildCloudProxy(cfg Config, submitter *processor.SpanProcessor) (*proxy.Pro
 	cloudModels := make(map[string]string)
 
 	for _, lp := range cfg.Providers {
-		p := proxy.Provider{Name: lp.Name, TokenSource: tokenSource}
+		p := proxy.Provider{Name: lp.Name}
 
 		switch lp.Name {
 		case "google", "gemini":
 			p.Name = "gemini-oai"
 			p.UpstreamURL = "https://generativelanguage.googleapis.com/v1beta/openai"
+			p.TokenSource = tokenSource
 		case "anthropic":
 			p.UpstreamURL = fmt.Sprintf("https://%s-aiplatform.googleapis.com", region)
+			p.TokenSource = tokenSource
 			ft := &proxy.AnthropicFormatTranslator{}
 			if cfg.VertexAI.CachingMode != "" {
 				ft.SetCachingMode(proxy.ParseCachingMode(cfg.VertexAI.CachingMode))
@@ -970,18 +1012,37 @@ func buildCloudProxy(cfg Config, submitter *processor.SpanProcessor) (*proxy.Pro
 		case "anthropic-direct":
 			// Native Anthropic Messages API passthrough — client provides its own
 			// API key via x-api-key or Authorization header. No ADC, no Vertex AI.
-			// This is the Claude Code LLM gateway mode.
 			p.UpstreamURL = "https://api.anthropic.com"
-			p.TokenSource = nil // Client manages auth, not ADC.
+			// Client manages auth, not ADC.
 		case "anthropic-vertex":
 			// Native Anthropic Messages API routed via Vertex AI rawPredict.
 			// Candela injects GCP ADC auth — no client API key needed.
-			// For Claude Code: ANTHROPIC_BASE_URL=http://localhost:8181/proxy/anthropic-vertex
 			p.UpstreamURL = fmt.Sprintf("https://%s-aiplatform.googleapis.com", region)
+			p.TokenSource = tokenSource
 			p.PathRewriter = &proxy.VertexAIPathRewriter{
 				ProjectID: project,
 				Region:    region,
 			}
+		case "anthropic-bedrock":
+			// Anthropic Claude via AWS Bedrock — uses SigV4 request signing.
+			// Candela handles AWS auth — no client API key needed.
+			// For Claude Code: ANTHROPIC_BASE_URL=http://localhost:8181/proxy/anthropic-bedrock
+			awsRegion := cfg.AWS.Region
+			if awsRegion == "" {
+				awsRegion = "us-east-1"
+			}
+			p.UpstreamURL = fmt.Sprintf("https://bedrock-runtime.%s.amazonaws.com", awsRegion)
+			awsCfg, awsErr := awsProvider.AWSConfig(context.Background())
+			if awsErr != nil {
+				slog.Error("failed to load AWS config for Bedrock", "error", awsErr)
+				continue
+			}
+			p.RequestSigner = &proxy.SigV4Signer{
+				Region:      awsRegion,
+				Service:     "bedrock",
+				Credentials: awsCfg.Credentials,
+			}
+			p.PathRewriter = &proxy.BedrockPathRewriter{}
 		default:
 			slog.Warn("unknown provider — skipping", "name", lp.Name)
 			continue

@@ -23,16 +23,19 @@ func TestConfigAPI_GetConfig_NilProxy(t *testing.T) {
 		t.Fatalf("status = %d, want 200", w.Code)
 	}
 
-	var resp struct {
-		Caching struct {
-			Anthropic string `json:"anthropic"`
-		} `json:"caching"`
-	}
+	var resp cachingConfigResponse
 	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
 		t.Fatalf("decode error: %v", err)
 	}
 	if resp.Caching.Anthropic != "off" {
 		t.Errorf("caching.anthropic = %q, want 'off' when cloudProxy is nil", resp.Caching.Anthropic)
+	}
+	// Verify Gemini section is always present.
+	if resp.Caching.Gemini.Mode != "implicit" {
+		t.Errorf("caching.gemini.mode = %q, want 'implicit'", resp.Caching.Gemini.Mode)
+	}
+	if resp.Caching.Gemini.Info == "" {
+		t.Error("caching.gemini.info should not be empty")
 	}
 }
 
@@ -54,17 +57,17 @@ func TestConfigAPI_GetConfig_WithProxy(t *testing.T) {
 		t.Fatalf("status = %d, want 200", w.Code)
 	}
 
-	var resp struct {
-		Caching struct {
-			Anthropic string `json:"anthropic"`
-		} `json:"caching"`
-	}
+	var resp cachingConfigResponse
 	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
 		t.Fatalf("decode error: %v", err)
 	}
 	// Proxy with no providers returns "off".
 	if resp.Caching.Anthropic != "off" {
 		t.Errorf("caching.anthropic = %q, want 'off'", resp.Caching.Anthropic)
+	}
+	// Gemini is always implicit.
+	if resp.Caching.Gemini.Mode != "implicit" {
+		t.Errorf("caching.gemini.mode = %q, want 'implicit'", resp.Caching.Gemini.Mode)
 	}
 }
 
@@ -116,11 +119,7 @@ func TestConfigAPI_SetCaching_ValidModes(t *testing.T) {
 				t.Fatalf("status = %d, want 200", w.Code)
 			}
 
-			var resp struct {
-				Caching struct {
-					Anthropic string `json:"anthropic"`
-				} `json:"caching"`
-			}
+			var resp cachingConfigResponse
 			if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
 				t.Fatalf("decode error: %v", err)
 			}
@@ -131,6 +130,11 @@ func TestConfigAPI_SetCaching_ValidModes(t *testing.T) {
 			// Verify the mode actually propagated to the translator.
 			if got := ft.GetCachingMode(); string(got) != tt.expected {
 				t.Errorf("translator mode = %q, want %q", got, tt.expected)
+			}
+
+			// Verify Gemini section is always present in response.
+			if resp.Caching.Gemini.Mode != "implicit" {
+				t.Errorf("caching.gemini.mode = %q, want 'implicit'", resp.Caching.Gemini.Mode)
 			}
 		})
 	}

@@ -84,7 +84,7 @@ func getOriginalDst4(fd int) (string, error) {
 	}
 
 	ip := net.IPv4(addr.Addr[0], addr.Addr[1], addr.Addr[2], addr.Addr[3])
-	port := int(addr.Port[0])<<8 | int(addr.Port[1])
+	port := ntohs(addr.Port)
 	return fmt.Sprintf("%s:%d", ip.String(), port), nil
 }
 
@@ -107,6 +107,11 @@ func getOriginalDst6(fd int) (string, error) {
 	}
 
 	ip := net.IP(addr.Addr[:])
-	port := int(addr.Port[0])<<8 | int(addr.Port[1])
+	port := ntohs(addr.Port)
 	return fmt.Sprintf("[%s]:%d", ip.String(), port), nil
+}
+
+// ntohs converts a uint16 from network byte order (big-endian) to host byte order.
+func ntohs(n uint16) int {
+	return int(n>>8) | int(n&0xff)<<8
 }

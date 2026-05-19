@@ -27,8 +27,7 @@ services:
   sidecar:
     build:
       context: ../..
-      dockerfile: Dockerfile
-      target: sidecar
+      dockerfile: Dockerfile.sidecar
     environment:
       - TRANSPARENT_PORT=15001
       - PROVIDERS=openai=http://upstream:443

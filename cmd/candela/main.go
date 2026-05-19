@@ -151,10 +151,11 @@ Usage:
   candela stop           Stop the background proxy
   candela status         Show proxy status
   candela run [flags]    Run in foreground
-  candela auth login     Login via browser
-  candela auth status    Show credential status
-  candela auth token     Print a fresh access token
-  candela version        Print version
+  candela auth login --provider gcp   Login to GCP via browser
+  candela auth login --provider aws   Login to AWS
+  candela auth status                 Show credential status
+  candela auth token --provider gcp   Print a fresh access token
+  candela version                     Print version
 
 Run flags:
   --config <path>        Config file (default: ~/.config/candela/config.yaml)

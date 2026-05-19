@@ -212,6 +212,16 @@ func (c *Calculator) SetCacheDiscount(provider string, cfg CacheDiscountConfig) 
 	c.cacheDiscounts[strings.ToLower(provider)] = cfg
 }
 
+// GetCacheDiscount returns the runtime-overridden cache discount config for a
+// canonical provider, if one has been set via SetCacheDiscount. Returns false
+// if only the default (model-aware) logic is active.
+func (c *Calculator) GetCacheDiscount(provider string) (CacheDiscountConfig, bool) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	cfg, ok := c.cacheDiscounts[strings.ToLower(provider)]
+	return cfg, ok
+}
+
 // NormalizeCachedInput returns cost-equivalent input tokens by applying
 // provider-specific and model-specific cache discounts to raw token counts.
 //

@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net/http"
 
@@ -149,12 +150,19 @@ func (a *localAPI) buildCachingConfig() cachingProviders {
 		cacheTTL = string(a.cloudProxy.GetCacheTTL())
 	}
 
+	discountStr := "90% (2.5+/3.x), 75% (2.0)"
+	if a.calc != nil {
+		if dc, ok := a.calc.GetCacheDiscount("google"); ok {
+			discountStr = fmt.Sprintf("%.0f%% (runtime override)", dc.ReadDiscount*100)
+		}
+	}
+
 	return cachingProviders{
 		Anthropic: cachingMode,
 		CacheTTL:  cacheTTL,
 		Gemini: geminiCaching{
 			Mode:          "implicit",
-			CacheDiscount: "90% (2.5+/3.x), 75% (2.0)",
+			CacheDiscount: discountStr,
 			Info:          "Gemini caching is automatic. Repeated prefixes are cached server-side with no client-side injection needed.",
 		},
 	}
@@ -210,16 +218,16 @@ func (a *localAPI) handleSetCaching(w http.ResponseWriter, r *http.Request) {
 	// custom rates if they have negotiated pricing.
 	if req.GeminiCacheDiscount != nil && a.calc != nil {
 		disc := *req.GeminiCacheDiscount
-		if disc >= 0 && disc <= 1.0 {
-			a.calc.SetCacheDiscount("google", costcalc.CacheDiscountConfig{
-				ReadDiscount:       disc,
-				CreateMultiplier:   1.0,
-				InputIncludesCache: true,
-			})
-			slog.Info("Gemini cache discount updated at runtime", "discount", disc)
-		} else {
-			slog.Warn("ignoring invalid gemini_cache_discount", "value", disc)
+		if disc < 0 || disc > 1.0 {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "gemini_cache_discount must be between 0.0 and 1.0"})
+			return
 		}
+		a.calc.SetCacheDiscount("google", costcalc.CacheDiscountConfig{
+			ReadDiscount:       disc,
+			CreateMultiplier:   1.0,
+			InputIncludesCache: true,
+		})
+		slog.Info("Gemini cache discount updated at runtime", "discount", disc)
 	}
 
 	writeJSON(w, http.StatusOK, cachingConfigResponse{

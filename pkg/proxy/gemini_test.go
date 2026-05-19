@@ -476,9 +476,8 @@ func TestGeminiParser_MultiPartResponse(t *testing.T) {
 	parser := &googleParser{}
 	content, _, _ := parser.ParseResponse(body)
 
-	// NOTE: The current googleParser only extracts the first text part.
-	// Multi-part concatenation could be a future enhancement.
-	if content != "Part 1. " {
-		t.Errorf("content = %q, want %q (first text part only)", content, "Part 1. ")
+	// googleParser concatenates all text parts from multi-part responses.
+	if content != "Part 1. Part 2." {
+		t.Errorf("content = %q, want %q (concatenated parts)", content, "Part 1. Part 2.")
 	}
 }

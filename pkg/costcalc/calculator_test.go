@@ -99,6 +99,51 @@ func TestCalculate(t *testing.T) {
 			wantMax:      0.009,
 		},
 		{
+			name:         "Gemini 3.1 Pro",
+			provider:     "google",
+			model:        "gemini-3.1-pro",
+			inputTokens:  1000,
+			outputTokens: 500,
+			wantMin:      0.007, // 1K×$2.00/M + 500×$12.00/M = $0.002 + $0.006 = $0.008
+			wantMax:      0.009,
+		},
+		{
+			name:         "Gemini 3.1 Flash",
+			provider:     "google",
+			model:        "gemini-3.1-flash",
+			inputTokens:  10000,
+			outputTokens: 2000,
+			wantMin:      0.010, // 10K×$0.50/M + 2K×$3.00/M = $0.005 + $0.006 = $0.011
+			wantMax:      0.012,
+		},
+		{
+			name:         "Gemini 3.1 Flash-Lite",
+			provider:     "google",
+			model:        "gemini-3.1-flash-lite",
+			inputTokens:  10000,
+			outputTokens: 2000,
+			wantMin:      0.005, // 10K×$0.25/M + 2K×$1.50/M = $0.0025 + $0.003 = $0.0055
+			wantMax:      0.006,
+		},
+		{
+			name:         "Gemini 3.0 Flash Preview",
+			provider:     "google",
+			model:        "gemini-3.0-flash",
+			inputTokens:  10000,
+			outputTokens: 2000,
+			wantMin:      0.010,
+			wantMax:      0.012,
+		},
+		{
+			name:         "Gemini 3.0 Pro Preview",
+			provider:     "google",
+			model:        "gemini-3.0-pro",
+			inputTokens:  1000,
+			outputTokens: 500,
+			wantMin:      0.007,
+			wantMax:      0.009,
+		},
+		{
 			name:         "Provider-agnostic fallback",
 			provider:     "gemini-oai",
 			model:        "gemini-2.5-pro",

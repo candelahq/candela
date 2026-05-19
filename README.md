@@ -46,6 +46,7 @@ For deep observability into agent frameworks (**ADK**, **LangChain**, **CrewAI**
 - **🐳 Production Sidecar**: Minimal `candela-sidecar` binary (<5MB) for container environments — Pub/Sub + OTLP span export with ADC auth.
 - **🔗 W3C Trace Context**: Full `Traceparent` / `Tracestate` propagation for unified trace trees across ADK agents and LLM calls.
 - **📦 Enrichment SDKs**: Lightweight wrappers for **Python**, **TypeScript**, **Go**, **Kotlin**, and **Rust** — propagate tenant and job metadata via W3C Baggage for multitenant cost attribution.
+- **🛡️ eBPF Enforcement**: Kernel-level security ensures all LLM API calls are captured by the proxy — supports transparent iptables redirection with SNI-based routing or Tetragon-based process enforcement for unauthorized egress. [Docs →](https://candelahq.com/governance/ebpf-enforcement/)
 
 ---
 

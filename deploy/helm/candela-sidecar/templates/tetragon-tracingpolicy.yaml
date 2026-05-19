@@ -1,0 +1,44 @@
+{{- if .Values.enforcement.tetragon.enabled }}
+{{- if .Values.transparent.enabled }}
+{{- fail "ERROR: enforcement.tetragon.enabled and transparent.enabled cannot both be true. Tetragon's kprobe fires at the syscall level BEFORE iptables REDIRECT, which means the application process will be SIGKILLed before the transparent proxy can intercept the connection. Use one or the other:\n  - transparent.enabled=true: SNI-based interception via iptables redirect (recommended)\n  - enforcement.tetragon.enabled=true: hard kill on unauthorized port 443 (no proxy needed)" }}
+{{- end }}
+# Generated from providers[] in values.yaml — DO NOT EDIT MANUALLY.
+# This policy enforces kernel-level process termination: any process
+# (other than the sidecar itself) attempting TCP connect to port 443
+# will trigger the configured action (default: Sigkill).
+#
+# WARNING: This policy is INCOMPATIBLE with transparent proxy mode.
+# When transparent.enabled=true, iptables REDIRECT must be used instead.
+# Tetragon kprobes fire at the syscall level BEFORE iptables NAT, so
+# enabling both will cause application processes to be killed before
+# the transparent proxy can intercept their connections.
+#
+# Use this policy for "hard enforcement" scenarios where ALL outbound
+# :443 traffic must go through the Candela proxy (configured via
+# environment variables, not iptables redirect).
+apiVersion: cilium.io/v1alpha1
+kind: TracingPolicy
+metadata:
+  name: {{ include "candela-sidecar.fullname" . }}-llm-enforcement
+  labels:
+    {{- include "candela-sidecar.labels" . | nindent 4 }}
+spec:
+  kprobes:
+    - call: tcp_connect
+      syscall: false
+      args:
+        - index: 0
+          type: sock
+      selectors:
+        - matchArgs:
+            - index: 0
+              operator: DPort
+              values:
+                - "443"
+          matchBinaries:
+            - operator: NotIn
+              values:
+                - {{ .Values.enforcement.tetragon.sidecarBinary | quote }}
+          matchActions:
+            - action: {{ .Values.enforcement.tetragon.action }}
+{{- end }}

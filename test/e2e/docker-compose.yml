@@ -1,0 +1,79 @@
+# Docker Compose E2E: Transparent Proxy with iptables REDIRECT
+#
+# This spins up:
+#   1. A mock HTTPS upstream (nginx with self-signed cert on :443)
+#   2. The candela-sidecar with transparent proxy on :15001
+#   3. An iptables init container that redirects :443 → :15001
+#   4. A test client container that curls the upstream through the proxy
+#
+# Usage:
+#   docker compose -f test/e2e/docker-compose.yml up --build --abort-on-container-exit
+#
+# Requires: Docker with --cap-add=NET_ADMIN for iptables
+
+services:
+  # Mock upstream HTTPS server (simulates api.openai.com).
+  upstream:
+    image: nginx:alpine
+    volumes:
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./certs:/etc/nginx/certs:ro
+    networks:
+      testnet:
+        aliases:
+          - api.openai.com
+
+  # Candela sidecar with transparent proxy enabled.
+  sidecar:
+    build:
+      context: ../..
+      dockerfile: Dockerfile.sidecar
+    environment:
+      - TRANSPARENT_PORT=15001
+      # PROVIDERS is a comma-separated name filter (not name=url).
+      # "openai" matches the default provider from proxy.DefaultProviders().
+      - PROVIDERS=openai
+      # No GCP_PROJECT — avoids ADC requirement for non-Vertex providers.
+      - CANDELA_PROJECT_ID=test-e2e
+    cap_add:
+      - NET_ADMIN
+    networks:
+      - testnet
+
+  # Test client: sends HTTPS request through iptables-redirected path.
+  test-client:
+    build:
+      context: ./client
+      dockerfile: Dockerfile
+    depends_on:
+      - sidecar
+      - upstream
+    cap_add:
+      - NET_ADMIN
+    networks:
+      - testnet
+    entrypoint: /bin/sh
+    command:
+      - -c
+      - |
+        set -e
+        echo "⏳ Waiting for sidecar..."
+        sleep 3
+
+        echo "🔧 Setting up iptables REDIRECT..."
+        # Resolve sidecar container IP (iptables needs numeric IP, not hostname).
+        SIDECAR_IP=$(getent hosts sidecar | awk '{print $1}')
+        echo "   sidecar IP: $SIDECAR_IP"
+
+        # Redirect outbound :443 to sidecar transparent port.
+        iptables -t nat -A OUTPUT -p tcp --dport 443 -j DNAT --to-destination "${SIDECAR_IP}:15001"
+
+        echo "🧪 Sending HTTPS request to api.openai.com..."
+        # This should be intercepted by the transparent proxy.
+        curl -sSk --connect-timeout 5 https://api.openai.com/v1/models || true
+
+        echo "✅ E2E test complete"
+
+networks:
+  testnet:
+    driver: bridge

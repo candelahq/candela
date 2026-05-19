@@ -1,0 +1,94 @@
+# Candela Sidecar Helm Values
+# All enforcement resources (FQDNNetworkPolicy, TracingPolicy) are derived
+# from this single source of truth — no manual duplication required.
+
+image:
+  repository: ghcr.io/candelahq/candela-sidecar
+  tag: "latest"
+  pullPolicy: IfNotPresent
+
+# GCP project for Vertex AI + span export.
+gcpProject: ""
+vertexRegion: "us-central1"
+
+# Candela project ID for span tagging.
+candelaProjectId: ""
+
+# Span export sinks.
+pubsub:
+  topic: ""
+  format: "proto"
+otlp:
+  endpoint: ""
+  headers: ""
+
+# ── Provider definitions (single source of truth) ──
+# Each provider entry generates:
+#   1. Proxy route configuration (PROVIDERS env var)
+#   2. FQDNNetworkPolicy egress rules (if enforcement.fqdn.enabled)
+#   3. Tetragon TracingPolicy kprobe rules (if enforcement.tetragon.enabled)
+#   4. SNI map entries for the transparent listener
+providers:
+  - name: openai
+    host: api.openai.com
+    intercept: true
+  - name: anthropic
+    host: api.anthropic.com
+    intercept: true
+  - name: anthropic-vertex
+    hostPattern: "*-aiplatform.googleapis.com"
+    intercept: true
+  - name: google
+    host: generativelanguage.googleapis.com
+    intercept: true
+  - name: gemini-oai
+    host: generativelanguage.googleapis.com
+    intercept: false  # shares host with google
+
+# ── Transparent proxy ──
+transparent:
+  enabled: false
+  port: 15001
+
+# ── iptables init container ──
+iptables:
+  enabled: false
+  # UID of the sidecar process — iptables rules exempt this UID.
+  sidecarUID: 1337
+  # Ports to redirect (outbound).
+  redirectPorts:
+    - 443
+
+# ── eBPF enforcement ──
+enforcement:
+  # Cilium FQDNNetworkPolicy — "soft" egress filtering.
+  fqdn:
+    enabled: false
+    # Labels to match pods that should be subject to the policy.
+    podSelector:
+      matchLabels:
+        candela.io/enforce: "true"
+
+  # Tetragon TracingPolicy — "hard" kernel-level enforcement.
+  tetragon:
+    enabled: false
+    # Action on unauthorized egress: "Sigkill" or "GetUrl" (log only).
+    action: "Sigkill"
+    # Binary name of the sidecar process (exempted from enforcement).
+    sidecarBinary: "candela-sidecar"
+
+# Pod configuration.
+resources:
+  requests:
+    cpu: 50m
+    memory: 64Mi
+  limits:
+    cpu: 500m
+    memory: 256Mi
+
+cors:
+  origins: "*"
+
+serviceAccount:
+  create: true
+  name: ""

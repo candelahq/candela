@@ -1,0 +1,28 @@
+{{- if .Values.enforcement.fqdn.enabled }}
+# Generated from providers[] in values.yaml — DO NOT EDIT MANUALLY.
+# This policy restricts pod egress to only the LLM provider hostnames
+# defined in the unified provider list.
+apiVersion: networking.gke.io/v1alpha1
+kind: FQDNNetworkPolicy
+metadata:
+  name: {{ include "candela-sidecar.fullname" . }}-egress
+  labels:
+    {{- include "candela-sidecar.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- toYaml .Values.enforcement.fqdn.podSelector.matchLabels | nindent 6 }}
+  egress:
+    - to:
+        {{- range .Values.providers }}
+        {{- if .intercept }}
+        - fqdn:
+            name: {{ .hostPattern | default .host | quote }}
+        {{- end }}
+        {{- end }}
+      ports:
+        - protocol: TCP
+          port: 443
+  policyTypes:
+    - Egress
+{{- end }}

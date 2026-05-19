@@ -144,6 +144,9 @@ async fn main() -> anyhow::Result<()> {
             Some(Provider {
                 name: name.to_string(),
                 upstream_url,
+                host: None,
+                host_pattern: None,
+                intercept: None,
                 format_translator: None,
                 path_rewriter: None,
             })

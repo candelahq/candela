@@ -1,0 +1,27 @@
+{{- if .Values.iptables.enabled }}
+# iptables rules for transparent traffic redirection.
+# Injected as an init container to redirect outbound port 443 traffic
+# to the transparent proxy listener.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "candela-sidecar.fullname" . }}-iptables
+  labels:
+    {{- include "candela-sidecar.labels" . | nindent 4 }}
+data:
+  iptables-setup.sh: |
+    #!/bin/sh
+    set -e
+
+    TRANSPARENT_PORT={{ .Values.transparent.port }}
+    SIDECAR_UID={{ .Values.iptables.sidecarUID }}
+
+    # Redirect outbound traffic on configured ports to the transparent listener.
+    # Traffic from the sidecar process itself (identified by UID) is exempted
+    # to prevent redirect loops.
+    {{- range .Values.iptables.redirectPorts }}
+    iptables -t nat -A OUTPUT -p tcp --dport {{ . }} -m owner ! --uid-owner ${SIDECAR_UID} -j REDIRECT --to-port ${TRANSPARENT_PORT}
+    {{- end }}
+
+    echo "iptables rules installed: redirecting ports {{ .Values.iptables.redirectPorts | join "," }} -> ${TRANSPARENT_PORT} (exempt UID ${SIDECAR_UID})"
+{{- end }}

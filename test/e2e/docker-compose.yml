@@ -61,9 +61,12 @@ services:
         sleep 3
 
         echo "🔧 Setting up iptables REDIRECT..."
+        # Resolve sidecar container IP (iptables needs numeric IP, not hostname).
+        SIDECAR_IP=$(getent hosts sidecar | awk '{print $1}')
+        echo "   sidecar IP: $SIDECAR_IP"
+
         # Redirect outbound :443 to sidecar transparent port.
-        # Exempt the sidecar's own traffic (UID 1337) to avoid loops.
-        iptables -t nat -A OUTPUT -p tcp --dport 443 -m owner ! --uid-owner 1337 -j DNAT --to-destination sidecar:15001
+        iptables -t nat -A OUTPUT -p tcp --dport 443 -j DNAT --to-destination "${SIDECAR_IP}:15001"
 
         echo "🧪 Sending HTTPS request to api.openai.com..."
         # This should be intercepted by the transparent proxy.

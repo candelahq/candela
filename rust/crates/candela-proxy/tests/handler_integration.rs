@@ -88,6 +88,9 @@ async fn start_proxy(
         providers: vec![Provider {
             name: "openai".into(),
             upstream_url: upstream_url.to_string(),
+            host: None,
+            host_pattern: None,
+            intercept: None,
             format_translator: None,
             path_rewriter: None,
         }],

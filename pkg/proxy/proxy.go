@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"regexp"
 	"strings"
@@ -74,6 +75,20 @@ type Provider struct {
 	Name        string `yaml:"name"`     // "openai", "google", "anthropic", "gemini-oai", "anthropic-bedrock"
 	UpstreamURL string `yaml:"upstream"` // e.g. "https://api.openai.com"
 
+	// Host is the upstream hostname for SNI matching in transparent proxy mode.
+	// If empty, derived automatically from UpstreamURL.
+	Host string `yaml:"host,omitempty"`
+
+	// HostPattern is a wildcard pattern for SNI matching (e.g. "*.aiplatform.googleapis.com").
+	// When set, takes precedence over Host for wildcard matching.
+	HostPattern string `yaml:"host_pattern,omitempty"`
+
+	// Intercept controls whether the transparent proxy listener intercepts connections
+	// to this provider's host. Providers sharing a host with another (already intercepted)
+	// provider should set this to false to avoid duplicate entries.
+	// Default: true (nil pointer = true).
+	Intercept *bool `yaml:"intercept,omitempty"`
+
 	// FormatTranslator handles format translation (nil = transparent passthrough).
 	FormatTranslator FormatTranslator `yaml:"-"`
 
@@ -91,6 +106,113 @@ type Provider struct {
 	// AnthropicVersion overrides the anthropic_version injected into Vertex AI
 	// rawPredict bodies. Empty = DefaultVertexAnthropicVersion.
 	AnthropicVersion string `yaml:"-"`
+}
+
+// EffectiveHost returns the hostname used for SNI matching.
+// Returns Host if explicitly set, otherwise parses hostname from UpstreamURL.
+func (p Provider) EffectiveHost() string {
+	if p.Host != "" {
+		return p.Host
+	}
+	u, err := url.Parse(p.UpstreamURL)
+	if err != nil {
+		return ""
+	}
+	return u.Hostname()
+}
+
+// ShouldIntercept returns whether the transparent proxy should intercept
+// connections to this provider's host. Defaults to true if Intercept is nil.
+func (p Provider) ShouldIntercept() bool {
+	if p.Intercept != nil {
+		return *p.Intercept
+	}
+	return true
+}
+
+// SNIMap maps TLS SNI hostnames to their corresponding provider names.
+// Used by the transparent proxy listener to route intercepted connections.
+type SNIMap struct {
+	// exact maps exact hostnames (e.g. "api.openai.com") → provider name.
+	exact map[string]string
+	// wildcards maps wildcard suffixes (e.g. ".aiplatform.googleapis.com" or
+	// "-aiplatform.googleapis.com") → provider name.
+	// Stored as the literal suffix after the "*" character.
+	wildcards map[string]string
+}
+
+// BuildSNIMap creates an SNI hostname→provider lookup from a list of providers.
+// Only providers where ShouldIntercept() returns true are included.
+// Duplicate hostnames are deduplicated (first provider wins).
+func BuildSNIMap(providers []Provider) *SNIMap {
+	m := &SNIMap{
+		exact:     make(map[string]string),
+		wildcards: make(map[string]string),
+	}
+	for _, p := range providers {
+		if !p.ShouldIntercept() {
+			continue
+		}
+		// Register wildcard pattern if present.
+		if p.HostPattern != "" {
+			// Store the suffix after "*" (e.g. "*.foo.com" → ".foo.com",
+			// "*-foo.com" → "-foo.com").
+			suffix := strings.TrimPrefix(p.HostPattern, "*")
+			if _, exists := m.wildcards[suffix]; !exists {
+				m.wildcards[suffix] = p.Name
+			}
+			continue
+		}
+		// Register exact hostname.
+		host := p.EffectiveHost()
+		if host == "" {
+			continue
+		}
+		if _, exists := m.exact[host]; !exists {
+			m.exact[host] = p.Name
+		}
+	}
+	return m
+}
+
+// Lookup returns the provider name for the given SNI hostname.
+// Checks exact matches first, then wildcard suffix matches.
+// Returns the provider name and true if found, empty string and false otherwise.
+func (m *SNIMap) Lookup(hostname string) (provider string, ok bool) {
+	if m == nil {
+		return "", false
+	}
+	// Exact match.
+	if name, found := m.exact[hostname]; found {
+		return name, true
+	}
+	// Wildcard suffix match: e.g. "us-central1-aiplatform.googleapis.com"
+	// matches "*-aiplatform.googleapis.com" (suffix "-aiplatform.googleapis.com").
+	// Also supports subdomain wildcards: "sub.example.com" matches
+	// "*.example.com" (suffix ".example.com").
+	for suffix, name := range m.wildcards {
+		if len(hostname) > len(suffix) &&
+			hostname[len(hostname)-len(suffix):] == suffix {
+			return name, true
+		}
+	}
+	return "", false
+}
+
+// Hosts returns all unique hostnames and patterns registered in the map.
+// Useful for generating enforcement resources (FQDNNetworkPolicy, Tetragon).
+func (m *SNIMap) Hosts() []string {
+	if m == nil {
+		return nil
+	}
+	hosts := make([]string, 0, len(m.exact)+len(m.wildcards))
+	for h := range m.exact {
+		hosts = append(hosts, h)
+	}
+	for suffix := range m.wildcards {
+		hosts = append(hosts, "*"+suffix)
+	}
+	return hosts
 }
 
 // Proxy handles LLM API proxying with observability.

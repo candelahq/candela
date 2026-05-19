@@ -230,3 +230,36 @@ jobs:
       - name: License & vulnerability audit
         continue-on-error: true
         run: nix develop . --command bash -c "cd rust && cargo deny check"
+
+  # ── Transparent proxy E2E (Linux + iptables) ────────────────────────────────
+  transparent-proxy-e2e:
+    runs-on: ubuntu-latest
+    # Only run when proxy/transparent/e2e files change.
+    if: >-
+      github.event_name == 'push' ||
+      contains(github.event.pull_request.title, 'transparent') ||
+      contains(github.event.pull_request.title, 'ebpf') ||
+      contains(github.event.pull_request.title, 'proxy')
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Generate self-signed certs
+        run: |
+          chmod +x test/e2e/gen-certs.sh
+          cd test/e2e && ./gen-certs.sh
+
+      - name: Run transparent proxy E2E
+        run: |
+          docker compose -f test/e2e/docker-compose.yml up \
+            --build \
+            --abort-on-container-exit \
+            --exit-code-from test-client
+        timeout-minutes: 5
+
+      - name: Collect logs on failure
+        if: failure()
+        run: docker compose -f test/e2e/docker-compose.yml logs
+
+      - name: Cleanup
+        if: always()
+        run: docker compose -f test/e2e/docker-compose.yml down -v

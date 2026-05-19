@@ -380,7 +380,7 @@ func handleOAuthCallback(expectedState string, resultCh chan<- authResult) http.
 			return
 		}
 
-		w.Header().Set("Content-Type", "text/html")
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		_, _ = fmt.Fprintf(w, `<!DOCTYPE html>
 <html><body style="font-family:system-ui;text-align:center;padding:60px">
 <h2>✅ Authenticated</h2>

@@ -13,6 +13,9 @@
 //	POST /v1/messages                                               → Anthropic messages response
 //	POST /v1/projects/*/locations/*/publishers/anthropic/models/*:rawPredict        → Vertex AI response
 //	POST /v1/projects/*/locations/*/publishers/anthropic/models/*:streamRawPredict  → Vertex AI streaming SSE
+//	POST /v1beta/models/*:generateContent                           → Gemini native response
+//	POST /v1beta/models/*:streamGenerateContent                     → Gemini streaming response
+//	POST /v1beta/openai/v1/chat/completions                         → Gemini OAI-compat (reuses OpenAI handler)
 package main
 
 import (
@@ -65,6 +68,18 @@ func handler(w http.ResponseWriter, r *http.Request) {
 	case strings.Contains(path, "/publishers/anthropic/models/") && strings.HasSuffix(path, ":streamRawPredict"):
 		// Vertex AI streamRawPredict (SSE)
 		serveAnthropicStream(w, r)
+
+	case strings.Contains(path, "/models/") && strings.HasSuffix(path, ":generateContent"):
+		// Gemini native generateContent
+		serveGemini(w, r)
+
+	case strings.Contains(path, "/models/") && strings.HasSuffix(path, ":streamGenerateContent"):
+		// Gemini native streaming
+		serveGeminiStream(w, r)
+
+	case strings.Contains(path, "/openai/") && strings.HasSuffix(path, "/chat/completions"):
+		// Gemini OAI-compat (same response format as OpenAI)
+		serveOpenAI(w, r)
 
 	default:
 		http.Error(w, fmt.Sprintf("unknown mock endpoint: %s", path), http.StatusNotFound)
@@ -209,4 +224,89 @@ func serveAnthropicStream(w http.ResponseWriter, r *http.Request) {
 		flusher.Flush()
 		time.Sleep(5 * time.Millisecond)
 	}
+}
+
+// ── Gemini native handlers ──────────────────────────────────────────────────
+
+func serveGemini(w http.ResponseWriter, r *http.Request) {
+	// Extract model from URL path: /v1beta/models/{model}:generateContent
+	path := r.URL.Path
+	modelVersion := "gemini-2.5-flash-preview-05-20"
+	if idx := strings.LastIndex(path, "/models/"); idx != -1 {
+		suffix := path[idx+len("/models/"):]
+		if colonIdx := strings.Index(suffix, ":"); colonIdx != -1 {
+			modelVersion = suffix[:colonIdx]
+		}
+	}
+
+	// Echo whether the internal header leaked.
+	if r.Header.Get("X-Candela-Caching") != "" {
+		w.Header().Set("X-Mock-Candela-Header-Leaked", "true")
+	} else {
+		w.Header().Set("X-Mock-Candela-Header-Leaked", "false")
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"candidates": []map[string]any{
+			{
+				"content": map[string]any{
+					"parts": []map[string]any{
+						{"text": "Hello from the Gemini mock!"},
+					},
+					"role": "model",
+				},
+				"finishReason": "STOP",
+			},
+		},
+		"modelVersion": modelVersion,
+		"usageMetadata": map[string]any{
+			"promptTokenCount":        42,
+			"candidatesTokenCount":    15,
+			"totalTokenCount":         57,
+			"cachedContentTokenCount": 30,
+			"thoughtsTokenCount":      100,
+		},
+	})
+}
+
+func serveGeminiStream(w http.ResponseWriter, r *http.Request) {
+	// Extract model from URL path.
+	path := r.URL.Path
+	modelVersion := "gemini-2.5-flash-preview-05-20"
+	if idx := strings.LastIndex(path, "/models/"); idx != -1 {
+		suffix := path[idx+len("/models/"):]
+		if colonIdx := strings.Index(suffix, ":"); colonIdx != -1 {
+			modelVersion = suffix[:colonIdx]
+		}
+	}
+
+	// Gemini streaming returns a JSON array.
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode([]map[string]any{
+		{
+			"candidates": []map[string]any{
+				{"content": map[string]any{
+					"parts": []map[string]any{{"text": "Hello from "}},
+					"role":  "model",
+				}},
+			},
+		},
+		{
+			"candidates": []map[string]any{
+				{"content": map[string]any{
+					"parts": []map[string]any{{"text": "the Gemini mock!"}},
+					"role":  "model",
+				}},
+			},
+			"modelVersion": modelVersion,
+			"usageMetadata": map[string]any{
+				"promptTokenCount":        42,
+				"candidatesTokenCount":    15,
+				"totalTokenCount":         57,
+				"cachedContentTokenCount": 30,
+				"thoughtsTokenCount":      100,
+			},
+		},
+	})
 }

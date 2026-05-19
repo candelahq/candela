@@ -93,9 +93,10 @@ type Calculator struct {
 // This ensures that passthrough routes (e.g. anthropic-direct) share pricing
 // with their canonical provider, including config overrides and cache discounts.
 var providerAliases = map[string]string{
-	"anthropic-direct": "anthropic",
-	"anthropic-vertex": "anthropic",
-	"gemini-oai":       "google", // Gemini via OpenAI-compat shares Google cache pricing
+	"anthropic-direct":  "anthropic",
+	"anthropic-vertex":  "anthropic",
+	"anthropic-bedrock": "anthropic",
+	"gemini-oai":        "google", // Gemini via OpenAI-compat shares Google cache pricing
 }
 
 // New creates a Calculator with default pricing for all supported cloud models.

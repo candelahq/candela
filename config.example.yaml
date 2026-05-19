@@ -22,12 +22,19 @@ proxy:
 
   # Vertex AI configuration (required for Anthropic proxy).
   # Set your GCP project and region. Auth is automatic via ADC
-  # (run: gcloud auth application-default login).
+  # (run: candela auth login).
   vertex_ai:
     project_id: "your-gcp-project-id"
     region: "us-east5"      # Vertex AI region (Claude available here)
     prompt_caching: true    # Inject cache_control for Anthropic prompt caching (~10x cost reduction)
     cache_ttl: 5m           # Cache entry lifetime: 5m (default, 1.25x write cost) or 1h (2x write cost, ideal for coding sessions)
+
+  # AWS Bedrock configuration (required for anthropic-bedrock provider).
+  # Auth is automatic via standard AWS credential chain
+  # (run: candela auth login --provider aws).
+  # aws:
+  #   region: us-east-1       # AWS region where Bedrock models are enabled
+  #   profile: default        # AWS CLI profile (optional, uses default chain if omitted)
 
   # Specify which providers to enable. If omitted, all providers are enabled.
   # Valid values: openai, google, anthropic, gemini-oai
@@ -39,6 +46,7 @@ proxy:
   #   /proxy/anthropic/   → Vertex AI (with format translation + ADC auth)
   #   /proxy/anthropic-vertex/ → Vertex AI (native Anthropic Messages API + ADC auth, for Claude Code)
   #   /proxy/anthropic-direct/ → https://api.anthropic.com (native Messages API, client provides key)
+  #   /proxy/anthropic-bedrock/ → AWS Bedrock (native Messages API + SigV4 auth)
   #
   # Editor integration (Zed, OpenCode, etc.):
   #   OpenAI:     Base URL = http://localhost:8181/proxy/openai/v1
@@ -46,6 +54,7 @@ proxy:
   #   Anthropic:  Base URL = http://localhost:8181/proxy/anthropic/v1  (via Vertex AI)
   #   Claude Code / pencil.dev: ANTHROPIC_BASE_URL = http://localhost:8181/proxy/anthropic-direct
   #   Claude Code (Vertex AI): ANTHROPIC_BASE_URL = http://localhost:8181/proxy/anthropic-vertex
+  #   Claude Code (Bedrock):   ANTHROPIC_BASE_URL = http://localhost:8181/proxy/anthropic-bedrock
   #
   # Local models (Ollama/vLLM/LM Studio) are handled by candela-local.
   # See ~/.candela.yaml for local runtime configuration.
@@ -54,6 +63,7 @@ proxy:
     - google
     - anthropic
     - anthropic-vertex
+    # - anthropic-bedrock  # Uncomment to enable AWS Bedrock (requires aws section below)
     - anthropic-direct
     - gemini-oai
 

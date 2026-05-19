@@ -24,6 +24,7 @@ Drop Candela into your existing app by just changing your `base_url`. No instrum
 - **Anthropic (via Vertex AI)**: `http://localhost:8181/proxy/anthropic/`
 - **Anthropic Vertex (native)**: `http://localhost:8181/proxy/anthropic-vertex` _(Claude Code via Vertex AI)_
 - **Anthropic Direct**: `http://localhost:8181/proxy/anthropic-direct` _(client provides API key)_
+- **Anthropic Bedrock**: `http://localhost:8181/proxy/anthropic-bedrock` _(Claude via AWS Bedrock + SigV4)_
 
 > **📍 Port Configuration**: Candela uses port `8181` by default. See [Port Configuration](#-port-configuration) for details.
 
@@ -37,7 +38,7 @@ For deep observability into agent frameworks (**ADK**, **LangChain**, **CrewAI**
 - **🕯️ OTel-Native**: OTLP is our native language. No proprietary SDKs.
 - **💰 Real-time Cost Tracking**: Automatic token extraction and USD calculation for OpenAI, Google, and Anthropic — including Anthropic prompt caching (1.25× write at 5m TTL, 2× write at 1h TTL, 0.1× read).
 - **🔐 Role-Based Access Control**: Admin vs Developer roles with budget enforcement and grant-based spending with reset countdowns.
-- **🔑 Native OAuth2 Auth**: `candela auth login/status/token` — no `gcloud` CLI dependency. Direct browser-based Google OAuth flow.
+- **🔑 Multi-Cloud Auth**: `candela auth login --provider gcp|aws` — native OAuth2 for GCP, SSO/access keys for AWS. No `gcloud` or `aws` CLI dependency.
 - **🗄️ Pluggable Storage**: **DuckDB** for high-performance local/edge; **BigQuery** for serverless production scale (with `GROUPING SETS` combined queries); **SQLite** for lightweight dev.
 - **📡 SSE Streaming Support**: Captures full streaming responses without interfering with user latency.
 - **📦 Single-Binary Edge-Ready**: In-process queuing and processing for low-overhead deployments.
@@ -407,26 +408,36 @@ candela start          Start proxy in background
 candela stop           Stop the background proxy
 candela status         Show proxy status
 candela run [flags]    Run in foreground
-candela auth login     Login via browser (Google OAuth)
+candela auth login     Login via browser
 candela auth status    Show credential status
 candela auth token     Print a fresh access token
 candela version        Print version
 ```
 
-### 🔑 Authentication (no gcloud required)
+### 🔑 Authentication (Multi-Cloud)
+
+Candela supports multiple cloud providers. Use `--provider` to specify which:
 
 ```bash
-# One-time setup — opens browser for Google OAuth
-candela auth login
+# GCP — opens browser for Google OAuth
+candela auth login --provider gcp
 
-# Verify credentials
+# AWS — SSO login or validates access keys
+candela auth login --provider aws
+
+# Show status for all configured providers
 candela auth status
+# ● gcp: ✅ user@example.com (expires in 58 min)
+# ● aws: ✅ arn:aws:iam::123456:user/dev
 
-# Get a token for use in scripts
-candela auth token
+# Get a GCP token for scripts
+candela auth token --provider gcp
 ```
 
-Credentials are stored in `~/.config/candela/adc.json` (ADC-compatible format). The proxy reads and refreshes them automatically — no `gcloud` CLI needed.
+> **💡 Tip**: If your config only uses one cloud provider type (e.g., only GCP providers), `--provider` is auto-inferred and can be omitted.
+
+GCP credentials are stored in ADC-compatible format at `~/.config/gcloud/application_default_credentials.json`.
+AWS credentials use the standard AWS credential chain (`~/.aws/credentials`, env vars, SSO, or instance roles).
 
 ### 🏠 Solo Mode (Zero-Config)
 
@@ -469,7 +480,26 @@ vertex_ai:
 - Local + cloud models merged into `/v1/models`
 - Smart routing: local stays local, cloud goes direct to Vertex AI via ADC
 - All calls (local + cloud) traced to SQLite — full observability
-- Prerequisites: `candela auth login`
+- Prerequisites: `candela auth login --provider gcp`
+
+#### With AWS Bedrock
+
+```yaml
+# ~/.config/candela/config.yaml
+runtime_backend: ollama
+
+providers:
+  - name: anthropic-bedrock
+    models: [anthropic.claude-3-5-sonnet-20241022-v2:0]
+
+aws:
+  region: us-east-1
+  # profile: dev-sso  # Optional: AWS CLI profile
+```
+
+- Claude via AWS Bedrock with SigV4 request signing
+- Prerequisites: `candela auth login --provider aws`
+- **Note**: Use exact Bedrock Model IDs (e.g., `anthropic.claude-3-5-sonnet-20241022-v2:0`)
 
 ### 🌐 Team Mode (Governance + Budgets)
 
@@ -685,6 +715,58 @@ curl -X POST http://localhost:8181/proxy/anthropic/v1/messages \
 
 ---
 
+## ☁️ AWS Setup for Bedrock
+
+To use Claude models via AWS Bedrock:
+
+### 1. AWS Account Setup
+```bash
+# Configure AWS credentials (pick one):
+aws configure                     # Access keys
+aws configure sso                 # SSO profile
+export AWS_ACCESS_KEY_ID=...      # Environment variables
+```
+
+### 2. Enable Bedrock Models
+1. Go to [Amazon Bedrock Console](https://console.aws.amazon.com/bedrock)
+2. Navigate to **Model access** → **Manage model access**
+3. Request access to Anthropic Claude models
+4. Wait for access to be granted (usually immediate)
+
+### 3. Authenticate
+```bash
+candela auth login --provider aws
+
+# Verify
+candela auth status
+```
+
+### 4. Update Config
+```yaml
+# ~/.config/candela/config.yaml
+providers:
+  - name: anthropic-bedrock
+    models:
+      - anthropic.claude-3-5-sonnet-20241022-v2:0
+      - anthropic.claude-3-haiku-20240307-v1:0
+
+aws:
+  region: us-east-1      # Region with Bedrock access
+  # profile: my-profile  # Optional AWS CLI profile
+```
+
+### 5. Test Connection
+```bash
+candela start
+
+# Claude Code with Bedrock
+export ANTHROPIC_BASE_URL=http://localhost:8181/proxy/anthropic-bedrock
+```
+
+> **⚠️ Model IDs**: Use exact Bedrock Model IDs (e.g., `anthropic.claude-3-5-sonnet-20241022-v2:0`), not friendly names like `claude-3-5-sonnet`.
+
+---
+
 ## 🐛 Troubleshooting
 
 ### Common Issues
@@ -716,7 +798,7 @@ CANDELA_CONFIG=test-config.yaml go run ./cmd/candela-server
 #### Anthropic/Vertex AI Errors
 ```bash
 # Verify ADC is working
-gcloud auth application-default print-access-token
+candela auth token
 
 # Check project/region settings
 gcloud config list

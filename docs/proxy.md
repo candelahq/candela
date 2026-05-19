@@ -41,7 +41,7 @@ Zed connects directly to `localhost` — no tunnel needed.
 ### Prerequisites
 
 1. **Candela running locally**: `nix develop -c go run ./cmd/candela-server`
-2. **GCP ADC** (for Anthropic/Claude): `gcloud auth application-default login`
+2. **GCP ADC** (for Anthropic/Claude): `candela auth login` (or `gcloud auth application-default login`)
 
 ### Setup
 
@@ -124,7 +124,7 @@ OPENAI_API_KEY=sk-... open -a Zed
 
 ### Anthropic Prerequisites
 
-1. Run `gcloud auth application-default login`
+1. Run `candela auth login` (or `gcloud auth application-default login`)
 2. Set `vertex_ai.project_id` in `config.yaml` to your GCP project
 3. Enable the Vertex AI API and request Claude model access in Model Garden
 
@@ -145,7 +145,7 @@ to `localhost` — no tunnel needed.
 
 1. **Candela running locally**: `nix develop -c go run ./cmd/candela-server`
 2. **OpenCode installed**: `npm install -g opencode-ai` (or use `npx -y opencode-ai`)
-3. **GCP ADC** (for Anthropic/Claude): `gcloud auth application-default login`
+3. **GCP ADC** (for Anthropic/Claude): `candela auth login` (or `gcloud auth application-default login`)
 
 ### Step 1: Create `opencode.json`
 
@@ -236,7 +236,7 @@ Send a message in the OpenCode TUI. You should see:
 
 ### Anthropic Prerequisites
 
-1. Run `gcloud auth application-default login`
+1. Run `candela auth login` (or `gcloud auth application-default login`)
 2. Set `vertex_ai.project_id` in `config.yaml` to your GCP project
 3. Enable the Vertex AI API and request Claude model access in Model Garden
 
@@ -481,4 +481,4 @@ For translated providers, Candela:
 
 - **OpenAI / Gemini**: The proxy **forwards** your existing `Authorization` header to the upstream provider. It does not store keys.
 - **Anthropic (Vertex AI)**: The proxy **injects** a GCP access token from Application Default Credentials. The token auto-refreshes — no manual token management needed.
-- For Anthropic, ensure your local environment has `GOOGLE_APPLICATION_CREDENTIALS` or you are authenticated via `gcloud auth application-default login`.
+- For Anthropic, ensure your local environment has `GOOGLE_APPLICATION_CREDENTIALS` or you are authenticated via `candela auth login` (or `gcloud auth application-default login`).

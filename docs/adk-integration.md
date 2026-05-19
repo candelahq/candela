@@ -166,7 +166,7 @@ Both `candela-sidecar` and `candela-server` support the same proxy routes. Choos
 |---------|-------|-----|
 | Agent works but no proxy spans | `base_url` not set or wrong port | Verify with `curl http://localhost:8080/healthz` |
 | Proxy spans have separate trace ID | `traceparent` not propagated | Install `opentelemetry-instrumentation-httpx` and set OTel env vars |
-| `401 Unauthorized` from sidecar | Missing ADC credentials | Run `gcloud auth application-default login` |
+| `401 Unauthorized` from sidecar | Missing ADC credentials | Run `candela auth login` (or `gcloud auth application-default login`) |
 | Cost shows $0.00 | Unknown model in pricing table | Check collector logs for `⚠️ missing pricing` |
 | ADK import error for `Gemini` | Old ADK version | Upgrade: `pip install --upgrade google-adk` |
 

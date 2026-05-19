@@ -639,7 +639,11 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 	// forwarded as-is. But Vertex AI rawPredict requires:
 	//   1. `anthropic_version` in the body (Claude Code sends it as a header)
 	//   2. `model` NOT in the body (Vertex AI identifies model from URL path)
-	if provider.FormatTranslator == nil && provider.PathRewriter != nil {
+	// NOTE: Bedrock also has a PathRewriter but doesn't need anthropic_version
+	// or model stripping — Bedrock accepts the model in the URL and ignores
+	// extra body fields. Use RequestSigner to distinguish: Bedrock uses SigV4
+	// signing, Vertex uses Bearer tokens.
+	if provider.FormatTranslator == nil && provider.PathRewriter != nil && provider.RequestSigner == nil {
 		var bodyMap map[string]interface{}
 		if json.Unmarshal(upstreamBody, &bodyMap) == nil && bodyMap != nil {
 			modified := false

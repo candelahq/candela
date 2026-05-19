@@ -1,6 +1,7 @@
 package cloudauth
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -129,6 +130,59 @@ func TestExtractEmail_NoIDToken(t *testing.T) {
 	token := &oauth2.Token{AccessToken: "test"}
 	if got := ExtractEmail(token); got != "unknown" {
 		t.Errorf("ExtractEmail(no id_token) = %q, want %q", got, "unknown")
+	}
+}
+
+func TestExtractEmail_ValidJWT(t *testing.T) {
+	// Build a minimal JWT with an email claim.
+	// JWT = header.payload.signature (we only need payload for ExtractEmail)
+	header := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"RS256","typ":"JWT"}`))
+	payload := base64.RawURLEncoding.EncodeToString([]byte(`{"email":"dev@example.com","sub":"12345"}`))
+	idToken := header + "." + payload + ".fakesig"
+
+	token := &oauth2.Token{AccessToken: "test"}
+	token = token.WithExtra(map[string]interface{}{"id_token": idToken})
+
+	if got := ExtractEmail(token); got != "dev@example.com" {
+		t.Errorf("ExtractEmail(valid JWT) = %q, want %q", got, "dev@example.com")
+	}
+}
+
+func TestExtractEmail_MalformedJWT_NoDots(t *testing.T) {
+	token := &oauth2.Token{AccessToken: "test"}
+	token = token.WithExtra(map[string]interface{}{"id_token": "nodots"})
+
+	if got := ExtractEmail(token); got != "unknown" {
+		t.Errorf("ExtractEmail(no dots) = %q, want %q", got, "unknown")
+	}
+}
+
+func TestExtractEmail_MalformedJWT_BadBase64(t *testing.T) {
+	token := &oauth2.Token{AccessToken: "test"}
+	token = token.WithExtra(map[string]interface{}{"id_token": "header.!!!invalid-base64!!!.sig"})
+
+	if got := ExtractEmail(token); got != "unknown" {
+		t.Errorf("ExtractEmail(bad base64) = %q, want %q", got, "unknown")
+	}
+}
+
+func TestExtractEmail_MalformedJWT_BadJSON(t *testing.T) {
+	payload := base64.RawURLEncoding.EncodeToString([]byte(`not json`))
+	token := &oauth2.Token{AccessToken: "test"}
+	token = token.WithExtra(map[string]interface{}{"id_token": "header." + payload + ".sig"})
+
+	if got := ExtractEmail(token); got != "unknown" {
+		t.Errorf("ExtractEmail(bad JSON) = %q, want %q", got, "unknown")
+	}
+}
+
+func TestExtractEmail_JWT_NoEmailClaim(t *testing.T) {
+	payload := base64.RawURLEncoding.EncodeToString([]byte(`{"sub":"12345","name":"Test User"}`))
+	token := &oauth2.Token{AccessToken: "test"}
+	token = token.WithExtra(map[string]interface{}{"id_token": "header." + payload + ".sig"})
+
+	if got := ExtractEmail(token); got != "unknown" {
+		t.Errorf("ExtractEmail(no email claim) = %q, want %q", got, "unknown")
 	}
 }
 

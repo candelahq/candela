@@ -3,7 +3,9 @@ package transparent_test
 import (
 	"context"
 	"crypto/tls"
+	"encoding/json"
 	"net"
+	"net/http/httptest"
 	"sync"
 	"testing"
 	"time"
@@ -253,4 +255,58 @@ func TestListenerConcurrentRace(t *testing.T) {
 		t.Errorf("total stats (%d intercepted + %d passthrough + %d errors = %d) != %d connections",
 			intercepted, passthrough, errors, total, N)
 	}
+}
+
+func TestStatsServeHTTP(t *testing.T) {
+	// Set up a listener to get a Stats instance with known values.
+	providers := []proxy.Provider{
+		{Name: "test", UpstreamURL: "https://test.example.com"},
+	}
+	sniMap := proxy.BuildSNIMap(providers)
+	listener := transparent.NewListener(transparent.Config{
+		ListenAddr: "127.0.0.1:0",
+		SNIMap:     sniMap,
+		ProxyAddr:  "127.0.0.1:8080",
+	})
+
+	// Hit the stats HTTP handler.
+	rec := httptest.NewRecorder()
+	listener.Stats().ServeHTTP(rec, httptest.NewRequest("GET", "/debug/transparent/stats", nil))
+
+	if rec.Code != 200 {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+
+	ct := rec.Header().Get("Content-Type")
+	if ct != "application/json" {
+		t.Errorf("Content-Type = %q, want application/json", ct)
+	}
+
+	var body map[string]int64
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("invalid JSON: %v — body: %s", err, rec.Body.String())
+	}
+
+	// Fresh listener — all counters should be 0.
+	for _, key := range []string{"intercepted", "passthrough", "errors"} {
+		if body[key] != 0 {
+			t.Errorf("%s = %d, want 0", key, body[key])
+		}
+	}
+}
+
+func TestStatsLogStats(t *testing.T) {
+	// Smoke test: LogStats should not panic on a fresh stats instance.
+	providers := []proxy.Provider{
+		{Name: "test", UpstreamURL: "https://test.example.com"},
+	}
+	sniMap := proxy.BuildSNIMap(providers)
+	listener := transparent.NewListener(transparent.Config{
+		ListenAddr: "127.0.0.1:0",
+		SNIMap:     sniMap,
+		ProxyAddr:  "127.0.0.1:8080",
+	})
+
+	// Should not panic.
+	listener.Stats().LogStats()
 }

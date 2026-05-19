@@ -6,6 +6,7 @@ import (
 	"io"
 	"log/slog"
 	"net"
+	"net/http"
 	"sync"
 	"time"
 
@@ -17,10 +18,13 @@ import (
 //
 //  1. Peeks the TLS ClientHello to extract the SNI hostname.
 //  2. Looks up the SNI in the provider map.
-//  3. If matched: tunnels the connection to the Candela HTTP proxy (MITM TLS
-//     termination is a future phase — for now we do TCP passthrough to the
-//     original destination via the proxy pipeline).
+//  3. If matched: records the interception event and tunnels the TCP
+//     connection to the original destination. (Future phase: MITM TLS
+//     termination will route through the Candela HTTP proxy for
+//     request-level budget enforcement and token counting.)
 //  4. If not matched: tunnels directly to the original destination (passthrough).
+//
+// Upstream resolution priority: SO_ORIGINAL_DST (iptables conntrack) → SNI DNS.
 //
 // This implements SNI-based interception without requiring application
 // configuration changes (no SDK base_url changes needed).
@@ -40,6 +44,8 @@ type Listener struct {
 }
 
 // Stats tracks transparent proxy interception statistics.
+// Stats are safe for concurrent use and can be exposed via HTTP for
+// production monitoring (e.g. /debug/transparent/stats).
 type Stats struct {
 	mu          sync.Mutex
 	Intercepted int64
@@ -52,6 +58,27 @@ func (s *Stats) Snapshot() (intercepted, passthrough, errors int64) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.Intercepted, s.Passthrough, s.Errors
+}
+
+// ServeHTTP exposes stats as JSON for health checks and monitoring.
+// Register with: http.Handle("/debug/transparent/stats", listener.Stats())
+func (s *Stats) ServeHTTP(w http.ResponseWriter, _ *http.Request) {
+	intercepted, passthrough, errors := s.Snapshot()
+	w.Header().Set("Content-Type", "application/json")
+	_, _ = fmt.Fprintf(w, `{"intercepted":%d,"passthrough":%d,"errors":%d}`,
+		intercepted, passthrough, errors)
+}
+
+// LogStats emits the current stats to the structured logger. Call periodically
+// (e.g. every 30s) from the sidecar main loop for production visibility.
+func (s *Stats) LogStats() {
+	intercepted, passthrough, errors := s.Snapshot()
+	slog.Info("transparent proxy stats",
+		"intercepted", intercepted,
+		"passthrough", passthrough,
+		"errors", errors,
+		"total", intercepted+passthrough+errors,
+	)
 }
 
 func (s *Stats) incIntercepted() {
@@ -216,21 +243,49 @@ func (l *Listener) handleConn(conn net.Conn) {
 // tunnelPassthrough tunnels a non-TLS connection to its original destination.
 func (l *Listener) tunnelPassthrough(clientConn net.Conn, peeked []byte) {
 	l.stats.incPassthrough()
-	// In production, we'd use SO_ORIGINAL_DST to find the real destination.
-	// For now, close the connection — non-TLS traffic on port 443 is unusual.
-	_ = clientConn.Close()
+
+	// Try SO_ORIGINAL_DST to find the real destination.
+	origDst := l.resolveOrigDst(clientConn, "")
+	if origDst == "" {
+		// Can't determine destination without SNI or SO_ORIGINAL_DST.
+		slog.Debug("transparent: non-TLS with no original destination, dropping")
+		return
+	}
+
+	upstream, err := net.Dial("tcp", origDst)
+	if err != nil {
+		slog.Warn("transparent: passthrough dial failed",
+			"dest", origDst, "error", err)
+		l.stats.incErrors()
+		return
+	}
+	defer func() { _ = upstream.Close() }()
+
+	// Replay peeked bytes and tunnel.
+	if _, err := upstream.Write(peeked); err != nil {
+		slog.Warn("transparent: passthrough write failed",
+			"dest", origDst, "error", err)
+		l.stats.incErrors()
+		return
+	}
+	tunnel(clientConn, upstream)
 }
 
 // tunnelToOrigDest creates a TCP tunnel between the client and the original
 // destination, replaying the peeked bytes.
 func (l *Listener) tunnelToOrigDest(clientConn net.Conn, peeked []byte, sni string) {
-	// Connect to the original destination using SNI as the hostname.
-	// In production with iptables redirect, we'd use SO_ORIGINAL_DST.
-	// For now, resolve the SNI hostname.
-	upstream, err := net.Dial("tcp", sni+":443")
+	origDst := l.resolveOrigDst(clientConn, sni)
+	if origDst == "" {
+		slog.Warn("transparent: cannot resolve original destination",
+			"sni", sni)
+		l.stats.incErrors()
+		return
+	}
+
+	upstream, err := net.Dial("tcp", origDst)
 	if err != nil {
 		slog.Warn("transparent: failed to connect to upstream",
-			"sni", sni, "error", err)
+			"sni", sni, "dest", origDst, "error", err)
 		l.stats.incErrors()
 		return
 	}
@@ -246,6 +301,28 @@ func (l *Listener) tunnelToOrigDest(clientConn net.Conn, peeked []byte, sni stri
 
 	// Bidirectional tunnel.
 	tunnel(clientConn, upstream)
+}
+
+// resolveOrigDst determines the upstream address for a connection.
+// Priority:
+//  1. SO_ORIGINAL_DST (iptables REDIRECT — Linux only)
+//  2. SNI hostname + port 443 (DNS resolution fallback)
+func (l *Listener) resolveOrigDst(conn net.Conn, sni string) string {
+	// Try SO_ORIGINAL_DST first (works when traffic was iptables-redirected).
+	if tcpConn, ok := conn.(*net.TCPConn); ok {
+		if origDst, err := GetOriginalDst(tcpConn); err == nil {
+			slog.Debug("transparent: resolved via SO_ORIGINAL_DST",
+				"dest", origDst, "sni", sni)
+			return origDst
+		}
+	}
+
+	// Fallback: use SNI hostname.
+	if sni != "" {
+		return sni + ":443"
+	}
+
+	return ""
 }
 
 // tunnel copies data bidirectionally between two connections.

@@ -133,7 +133,13 @@ func parseClientHelloBody(data []byte) (string, error) {
 	}
 
 	// Parse extensions looking for SNI (type 0x0000).
-	extensionData := make([]byte, extensionsLen)
+	// SECURITY: cap allocation to actual available data to prevent OOM from
+	// a malicious ClientHello with an inflated extensionsLen field.
+	allocLen := int(extensionsLen)
+	if allocLen > r.Len() {
+		allocLen = r.Len()
+	}
+	extensionData := make([]byte, allocLen)
 	if _, err := r.Read(extensionData); err != nil {
 		return "", ErrNoSNI
 	}

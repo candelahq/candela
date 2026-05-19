@@ -2,6 +2,35 @@
 
 All notable changes to Candela are documented here, organized by development phase. PRs are merged to `main`.
 
+## v0.3.3 — 2026-05-18
+
+### Consolidated Dashboard RPC (#232)
+- New `GetDashboardData` RPC replaces multiple fragmented endpoints with a single call
+- Nested `BudgetContext` proto carries budget, grant, and cache telemetry in one response
+- Concurrent budget + grants fetch with structured time-series gap handling
+- Full unit and integration test coverage for composed response structure
+
+### 1-Hour Anthropic Cache TTL (#230)
+- Configurable 1-hour TTL for Anthropic prompt caching via atomic header-based overrides
+- Fix 2× multiplier for Anthropic cache creation cost (`cache_write` tokens billed at 2×)
+- Pointer-based partial updates in caching config API to avoid full-replace footguns
+- Hurl functional tests for per-request cache override via `X-Candela-Caching`
+
+### Native OAuth2 Auth — `candela auth` (#227)
+- New `candela auth login`, `candela auth status`, `candela auth token` subcommands
+- Eliminates dependency on `gcloud` CLI for authentication and ADC management
+- Direct OAuth2 token refresh by posting to Google token endpoint (no subprocess)
+- Cross-platform credential handling with OS-specific file permission checks
+- 14 new auth unit tests with production-ready callback handler functions
+
+### BigQuery GROUPING SETS Query (#226)
+- `CombinedUsageReader` uses a single `GROUPING SETS` query to fetch summary + per-model breakdown
+- Halves BigQuery query volume for dashboard telemetry fetches
+- Cache token fields populated in `ModelUsage` for cost attribution
+- SQL consolidated into named constants for readability and testability
+
+---
+
 ## v0.3.2 — 2026-05-16
 
 ### Cache Normalization & Model-Aware Pricing (#205, #206)

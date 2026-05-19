@@ -35,10 +35,10 @@ For deep observability into agent frameworks (**ADK**, **LangChain**, **CrewAI**
 ## ✨ Key Features
 
 - **🕯️ OTel-Native**: OTLP is our native language. No proprietary SDKs.
-- **💰 Real-time Cost Tracking**: Automatic token extraction and USD calculation for OpenAI, Google, and Anthropic.
-- **🔐 Role-Based Access Control**: Admin vs Developer roles with budget enforcement and grant-based spending.
-- **🧪 LLM-as-Judge (Phase 3)**: Automated quality scoring and evaluation rubrics.
-- **🗄️ Pluggable Storage**: **DuckDB** for high-performance local/edge; **BigQuery** for serverless production scale; **SQLite** for lightweight dev.
+- **💰 Real-time Cost Tracking**: Automatic token extraction and USD calculation for OpenAI, Google, and Anthropic — including Anthropic prompt caching (1.25× write at 5m TTL, 2× write at 1h TTL, 0.1× read).
+- **🔐 Role-Based Access Control**: Admin vs Developer roles with budget enforcement and grant-based spending with reset countdowns.
+- **🔑 Native OAuth2 Auth**: `candela auth login/status/token` — no `gcloud` CLI dependency. Direct browser-based Google OAuth flow.
+- **🗄️ Pluggable Storage**: **DuckDB** for high-performance local/edge; **BigQuery** for serverless production scale (with `GROUPING SETS` combined queries); **SQLite** for lightweight dev.
 - **📡 SSE Streaming Support**: Captures full streaming responses without interfering with user latency.
 - **📦 Single-Binary Edge-Ready**: In-process queuing and processing for low-overhead deployments.
 - **🔀 Fan-out Architecture**: CQRS-based design allows writing to multiple sinks simultaneously (e.g., DuckDB + Pub/Sub + OTLP export to Datadog/Tempo/Jaeger).
@@ -400,7 +400,33 @@ The UI communicates with the backend via **ConnectRPC v2** on port `8181`. Pages
 ## 🕹️ candela — Local Development Proxy
 
 `candela` is an auth-injecting proxy + runtime manager for developer machines.
-It operates in three modes:
+It operates in three modes, with the following subcommands:
+
+```
+candela start          Start proxy in background
+candela stop           Stop the background proxy
+candela status         Show proxy status
+candela run [flags]    Run in foreground
+candela auth login     Login via browser (Google OAuth)
+candela auth status    Show credential status
+candela auth token     Print a fresh access token
+candela version        Print version
+```
+
+### 🔑 Authentication (no gcloud required)
+
+```bash
+# One-time setup — opens browser for Google OAuth
+candela auth login
+
+# Verify credentials
+candela auth status
+
+# Get a token for use in scripts
+candela auth token
+```
+
+Credentials are stored in `~/.config/candela/adc.json` (ADC-compatible format). The proxy reads and refreshes them automatically — no `gcloud` CLI needed.
 
 ### 🏠 Solo Mode (Zero-Config)
 
@@ -435,12 +461,15 @@ providers:
 
 vertex_ai:
   project: my-gcp-project
+  prompt_caching: true    # Inject cache_control for Anthropic (~10x cost reduction)
+  cache_ttl: 5m           # 5m (default, 1.25x write cost) or 1h (2x write, ideal for long coding sessions)
+  caching_mode: auto      # off | auto | system-only
 ```
 
 - Local + cloud models merged into `/v1/models`
 - Smart routing: local stays local, cloud goes direct to Vertex AI via ADC
 - All calls (local + cloud) traced to SQLite — full observability
-- Prerequisites: `gcloud auth application-default login`
+- Prerequisites: `candela auth login`
 
 ### 🌐 Team Mode (Governance + Budgets)
 
@@ -455,7 +484,7 @@ audience: "12345678.apps.googleusercontent.com"
 
 - Local + cloud models merged into `/v1/models`
 - Smart routing: local models stay local, cloud models route through Candela server
-- OIDC auth injected automatically via ADC
+- OIDC auth injected automatically (uses credentials from `candela auth login`)
 - Team-wide cost tracking, budget enforcement, and centralized governance
 
 > [!TIP]
@@ -607,11 +636,14 @@ gcloud services enable \
 
 ### 2. Authentication
 ```bash
-# Set up Application Default Credentials
-gcloud auth application-default login
+# Native OAuth2 (recommended — no gcloud CLI needed)
+candela auth login
 
-# Verify your credentials
-gcloud auth list
+# Verify credentials
+candela auth status
+
+# Or using gcloud (also works)
+gcloud auth application-default login
 ```
 
 ### 3. Enable Claude Models

@@ -42,6 +42,18 @@ type CacheDiscountConfig struct {
 	InputIncludesCache bool    `yaml:"input_includes_cache"` // True if rawInput already includes cache tokens (OpenAI/Google), false if they're additive (Anthropic)
 }
 
+// Anthropic cache creation multipliers by TTL tier.
+// See: https://docs.anthropic.com/en/docs/build-with-claude/prompt-caching#pricing
+const (
+	// anthropicDefaultCacheCreateMultiplier is the cache creation rate for
+	// the default 5-minute TTL: 1.25× base input price.
+	anthropicDefaultCacheCreateMultiplier = 1.25
+
+	// anthropicExtendedCacheCreateMultiplier is the cache creation rate for
+	// the extended 1-hour TTL: 2.0× base input price.
+	anthropicExtendedCacheCreateMultiplier = 2.0
+)
+
 // defaultCacheDiscounts defines cache pricing per canonical provider.
 //
 // Token reporting semantics differ by provider:
@@ -49,11 +61,18 @@ type CacheDiscountConfig struct {
 //   - Google:    promptTokenCount includes cachedContentTokenCount (inclusive)
 //   - Anthropic: input_tokens is ONLY fresh tokens; cache_read/creation are additive
 //
+// Anthropic cache creation pricing is TTL-dependent:
+//   - 5-minute TTL (default): 1.25× base input price
+//   - 1-hour TTL (opt-in):    2.0×  base input price
+//
+// The default multiplier here is for 5-minute TTL. Use
+// NormalizeCachedInputWithTTL with extendedTTL=true for 1-hour TTL.
+//
 // See: https://docs.anthropic.com/en/docs/build-with-claude/prompt-caching#tracking-cache-performance
 //
 //	"total_input_tokens = cache_read_input_tokens + cache_creation_input_tokens + input_tokens"
 var defaultCacheDiscounts = map[string]CacheDiscountConfig{
-	"anthropic": {ReadDiscount: 0.1, CreateMultiplier: 1.25, InputIncludesCache: false},
+	"anthropic": {ReadDiscount: 0.1, CreateMultiplier: anthropicDefaultCacheCreateMultiplier, InputIncludesCache: false},
 	"google":    {ReadDiscount: 0.10, CreateMultiplier: 1.0, InputIncludesCache: true}, // Base rate, overridden by model-aware logic
 	"openai":    {ReadDiscount: 0.5, CreateMultiplier: 1.0, InputIncludesCache: true},
 }
@@ -206,7 +225,27 @@ func (c *Calculator) SetCacheDiscount(provider string, cfg CacheDiscountConfig) 
 // (Gemini 2.5+: 90% off, Gemini 2.0: 75% off).
 //
 // Returns rawInput unchanged when both cacheRead and cacheCreate are 0.
+//
+// NOTE: This method assumes the default 5-minute Anthropic cache TTL (1.25×
+// creation rate). For 1-hour TTL (2.0× creation rate), use
+// NormalizeCachedInputWithTTL with extendedTTL=true.
 func (c *Calculator) NormalizeCachedInput(provider, model string, rawInput, cacheRead, cacheCreate int64) int64 {
+	return c.NormalizeCachedInputWithTTL(provider, model, rawInput, cacheRead, cacheCreate, false)
+}
+
+// NormalizeCachedInputWithTTL returns cost-equivalent input tokens, with
+// TTL-aware cache creation pricing for Anthropic.
+//
+// When extendedTTL is true and the provider is Anthropic (including aliases
+// like anthropic-direct, anthropic-vertex), the cache creation multiplier
+// is 2.0× instead of the default 1.25×. This matches Anthropic's pricing
+// for 1-hour cache TTL entries.
+//
+// For non-Anthropic providers, extendedTTL is ignored (they don't have
+// TTL-dependent creation pricing).
+//
+// See: https://docs.anthropic.com/en/docs/build-with-claude/prompt-caching#pricing
+func (c *Calculator) NormalizeCachedInputWithTTL(provider, model string, rawInput, cacheRead, cacheCreate int64, extendedTTL bool) int64 {
 	if cacheRead <= 0 && cacheCreate <= 0 {
 		return rawInput
 	}
@@ -234,8 +273,15 @@ func (c *Calculator) NormalizeCachedInput(provider, model string, rawInput, cach
 		readDiscount = googleCacheReadDiscount(model)
 	}
 
+	// Anthropic 1-hour TTL charges 2.0× for cache creation (vs 1.25× for 5m).
+	// Override the multiplier when the caller signals extended TTL.
+	createMultiplier := cfg.CreateMultiplier
+	if extendedTTL && canonical == "anthropic" {
+		createMultiplier = anthropicExtendedCacheCreateMultiplier
+	}
+
 	cachedReadEq := int64(math.Round(float64(cacheRead) * readDiscount))
-	cachedCreateEq := int64(math.Round(float64(cacheCreate) * cfg.CreateMultiplier))
+	cachedCreateEq := int64(math.Round(float64(cacheCreate) * createMultiplier))
 
 	if cfg.InputIncludesCache {
 		// Inclusive mode (OpenAI, Google): rawInput already contains cache tokens.

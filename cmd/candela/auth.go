@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
+	"syscall"
 
 	"github.com/candelahq/candela/pkg/cloudauth"
 )
@@ -39,6 +41,7 @@ func handleAuth(args []string) {
 		_, _ = fmt.Fprintf(os.Stderr, `candela auth — manage cloud credentials
 
 Usage:
+  candela auth login                      Login (auto-detects or prompts for provider)
   candela auth login --provider gcp       Login to GCP via browser
   candela auth login --provider aws       Login to AWS (SSO or validates keys)
   candela auth status                     Show credential status (all providers)
@@ -46,8 +49,8 @@ Usage:
   candela auth token --provider gcp       Print a fresh GCP access token
   candela auth token --provider aws       Print AWS session info
 
-If --provider is omitted for login/token, it is inferred from your config file.
-If your config has only one cloud provider type, that provider is used automatically.
+If --provider is omitted for login, it is inferred from your config file.
+If no config exists, you'll be prompted to choose.
 
 Available providers: %v
 `, cloudauth.Names())
@@ -58,7 +61,7 @@ Available providers: %v
 }
 
 // resolveProvider determines which cloud auth provider to use.
-// Priority: explicit --provider flag > config file inference > error.
+// Priority: explicit --provider flag > config file inference > interactive prompt.
 func resolveProvider(providerName string) cloudauth.Provider {
 	if providerName != "" {
 		p, err := cloudauth.Get(providerName)
@@ -76,10 +79,8 @@ func resolveProvider(providerName string) cloudauth.Provider {
 
 	switch len(inferred) {
 	case 0:
-		_, _ = fmt.Fprintf(os.Stderr, "error: --provider is required (no cloud providers configured)\n")
-		_, _ = fmt.Fprintf(os.Stderr, "  candela auth login --provider gcp\n")
-		_, _ = fmt.Fprintf(os.Stderr, "  candela auth login --provider aws\n")
-		os.Exit(1)
+		// No providers configured — prompt interactively.
+		return promptForProvider()
 	case 1:
 		p, err := cloudauth.Get(inferred[0])
 		if err != nil {
@@ -88,12 +89,60 @@ func resolveProvider(providerName string) cloudauth.Provider {
 		}
 		return p
 	default:
-		_, _ = fmt.Fprintf(os.Stderr, "error: --provider is required (multiple cloud providers in config: %v)\n", inferred)
-		_, _ = fmt.Fprintf(os.Stderr, "  candela auth login --provider gcp\n")
-		_, _ = fmt.Fprintf(os.Stderr, "  candela auth login --provider aws\n")
+		// Multiple providers — prompt to choose.
+		return promptForProviderFrom(inferred)
+	}
+}
+
+// promptForProvider asks the user to select a cloud provider interactively.
+func promptForProvider() cloudauth.Provider {
+	names := cloudauth.Names()
+	return promptForProviderFrom(names)
+}
+
+// promptForProviderFrom presents a numbered list and reads the user's choice.
+func promptForProviderFrom(names []string) cloudauth.Provider {
+	if len(names) == 0 {
+		_, _ = fmt.Fprintf(os.Stderr, "error: no cloud auth providers available\n")
 		os.Exit(1)
 	}
-	return nil // unreachable
+
+	descriptions := map[string]string{
+		"gcp": "Google Cloud Platform",
+		"aws": "Amazon Web Services",
+	}
+
+	fmt.Println("\nSelect a cloud provider to authenticate:")
+	for i, name := range names {
+		desc := descriptions[name]
+		if desc == "" {
+			desc = name
+		}
+		fmt.Printf("  %d. %s — %s\n", i+1, name, desc)
+	}
+
+	fmt.Printf("\nChoice [1]: ")
+	var input string
+	_, _ = fmt.Scanln(&input)
+
+	// Default to first option.
+	choice := 0
+	if input != "" {
+		var n int
+		if _, err := fmt.Sscanf(input, "%d", &n); err == nil && n >= 1 && n <= len(names) {
+			choice = n - 1
+		} else {
+			_, _ = fmt.Fprintf(os.Stderr, "error: invalid choice %q\n", input)
+			os.Exit(1)
+		}
+	}
+
+	p, err := cloudauth.Get(names[choice])
+	if err != nil {
+		_, _ = fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		os.Exit(1)
+	}
+	return p
 }
 
 // inferAuthProviders reads the config and returns which cloud auth providers
@@ -129,6 +178,67 @@ func cmdAuthLogin(providerName string) {
 		_, _ = fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
 	}
+
+	// Offer to save the provider to config and restart if needed.
+	postLoginSetup(provider.Name())
+}
+
+// postLoginSetup persists the provider to config and restarts the proxy if running.
+func postLoginSetup(providerName string) {
+	changed, err := upsertConfigProvider(providerName)
+	if err != nil {
+		_, _ = fmt.Fprintf(os.Stderr, "warning: could not update config: %v\n", err)
+		return
+	}
+
+	if changed {
+		path := configFilePath()
+		fmt.Printf("\n📝 Added provider to %s\n", path)
+	}
+
+	// Check if the proxy is running and offer to restart.
+	if isProxyRunning() {
+		if changed {
+			fmt.Print("\n🔄 Candela proxy is running. Restart to apply new config? [Y/n] ")
+		} else {
+			fmt.Print("\n🔄 Candela proxy is running. Restart to pick up fresh credentials? [Y/n] ")
+		}
+		var input string
+		_, _ = fmt.Scanln(&input)
+		if input == "" || input == "y" || input == "Y" || input == "yes" {
+			restartProxy()
+		}
+	}
+}
+
+// isProxyRunning checks if the candela background proxy is alive via PID file.
+func isProxyRunning() bool {
+	pidPath := pidFilePath()
+	if pidPath == "" {
+		return false
+	}
+	data, err := os.ReadFile(pidPath)
+	if err != nil {
+		return false
+	}
+	var pid int
+	if _, err := fmt.Sscanf(strings.TrimSpace(string(data)), "%d", &pid); err != nil || pid == 0 {
+		return false
+	}
+	process, err := os.FindProcess(pid)
+	if err != nil {
+		return false
+	}
+	// Signal 0 checks if process exists without sending a signal.
+	return process.Signal(syscall.Signal(0)) == nil
+}
+
+// restartProxy stops the running proxy and starts it again.
+func restartProxy() {
+	fmt.Println("Stopping proxy...")
+	cmdStop()
+	fmt.Println("Starting proxy...")
+	cmdStart()
 }
 
 // cmdAuthStatus displays credential status. If providerName is empty,

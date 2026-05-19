@@ -30,8 +30,10 @@ services:
       dockerfile: Dockerfile.sidecar
     environment:
       - TRANSPARENT_PORT=15001
-      - PROVIDERS=openai=http://upstream:443
-      - GCP_PROJECT=test-e2e
+      # PROVIDERS is a comma-separated name filter (not name=url).
+      # "openai" matches the default provider from proxy.DefaultProviders().
+      - PROVIDERS=openai
+      # No GCP_PROJECT — avoids ADC requirement for non-Vertex providers.
       - CANDELA_PROJECT_ID=test-e2e
     cap_add:
       - NET_ADMIN

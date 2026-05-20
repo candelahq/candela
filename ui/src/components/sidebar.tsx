@@ -19,6 +19,7 @@ const navItems = [
   {
     section: "Manage",
     items: [
+      { href: "/models", label: "Models", icon: "🤖" },
       { href: "/projects", label: "Projects", icon: "📁" },
       { href: "/settings", label: "Settings", icon: "⚙️" },
     ],

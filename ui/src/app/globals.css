@@ -2326,3 +2326,141 @@ tr:hover .model-bar {
   border-radius: 999px;
   transition: width 0.3s ease;
 }
+
+/* ──────────────────────────────────────────
+   Scope Toggle
+   ────────────────────────────────────────── */
+
+.scope-toggle {
+  display: inline-flex;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  border-radius: 100px;
+  padding: 2px;
+  gap: 2px;
+}
+
+.scope-toggle-option {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 12px;
+  font-size: 12px;
+  font-weight: 500;
+  border: none;
+  border-radius: 100px;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+}
+
+.scope-toggle-option:hover {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+}
+
+.scope-toggle-active {
+  background: var(--accent-dim);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.scope-toggle-icon {
+  font-size: 11px;
+}
+
+/* ──────────────────────────────────────────
+   Models Search
+   ────────────────────────────────────────── */
+
+.models-search {
+  margin-bottom: 16px;
+}
+
+.models-search-input {
+  width: 100%;
+  padding: 10px 16px;
+  font-size: 13px;
+  font-family: inherit;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  color: var(--text-primary);
+  outline: none;
+  transition: border-color 0.15s ease;
+}
+
+.models-search-input::placeholder {
+  color: var(--text-muted);
+}
+
+.models-search-input:focus {
+  border-color: var(--accent);
+}
+
+/* ──────────────────────────────────────────
+   Budget Bar
+   ────────────────────────────────────────── */
+
+.budget-bar-container {
+  margin-top: 12px;
+}
+
+.budget-bar-track {
+  height: 8px;
+  background: var(--bg-tertiary);
+  border-radius: 100px;
+  overflow: hidden;
+}
+
+.budget-bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--accent), #f59e0b);
+  border-radius: 100px;
+  transition: width 0.4s ease;
+}
+
+.budget-bar-labels {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+/* ──────────────────────────────────────────
+   User Account Card (Settings)
+   ────────────────────────────────────────── */
+
+.user-account-card {
+  border-left: 3px solid var(--accent);
+}
+
+.user-account-body {
+  display: flex;
+  gap: 20px;
+  align-items: flex-start;
+  margin-top: 12px;
+}
+
+.user-account-avatar {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--accent) 0%, #ff8c00 100%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 20px;
+  font-weight: 700;
+  color: #000;
+  flex-shrink: 0;
+}
+
+.user-account-info {
+  flex: 1;
+  min-width: 0;
+}
+

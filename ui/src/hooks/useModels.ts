@@ -2,24 +2,36 @@
 
 import { useCallback, useMemo, useState } from "react";
 import { useDashboard, type ModelUsageRow } from "@/hooks/useDashboard";
+import { getModelPricing, getCacheEfficiency, type CacheEfficiency } from "@/lib/modelPricing";
 
 // ──────────────────────────────────────────
 // Sort logic
 // ──────────────────────────────────────────
 
-export type ModelSortKey = keyof Pick<
-  ModelUsageRow,
-  "model" | "provider" | "callCount" | "inputTokens" | "outputTokens" | "costUsd" | "avgLatencyMs"
->;
+export type ModelSortKey =
+  | keyof Pick<
+      ModelUsageRow,
+      "model" | "provider" | "callCount" | "inputTokens" | "outputTokens" | "costUsd" | "avgLatencyMs"
+    >
+  | "inputPrice"
+  | "outputPrice";
+
+export interface EnrichedModelRow extends ModelUsageRow {
+  inputPricePerMillion: number | null;
+  outputPricePerMillion: number | null;
+  cacheEfficiency: CacheEfficiency | null;
+}
 
 interface SortState {
   key: ModelSortKey;
   desc: boolean;
 }
 
-function compare(a: ModelUsageRow, b: ModelUsageRow, key: ModelSortKey): number {
-  const va = a[key];
-  const vb = b[key];
+function compare(a: EnrichedModelRow, b: EnrichedModelRow, key: ModelSortKey): number {
+  if (key === "inputPrice") return (a.inputPricePerMillion ?? 0) - (b.inputPricePerMillion ?? 0);
+  if (key === "outputPrice") return (a.outputPricePerMillion ?? 0) - (b.outputPricePerMillion ?? 0);
+  const va = a[key as keyof ModelUsageRow];
+  const vb = b[key as keyof ModelUsageRow];
   if (typeof va === "string" && typeof vb === "string") {
     return va.localeCompare(vb);
   }
@@ -47,8 +59,21 @@ export function useModels(options?: { includeBudget?: boolean }) {
     );
   }, []);
 
+  // Enrich rows with static pricing and cache efficiency
+  const enriched: EnrichedModelRow[] = useMemo(() => {
+    return dashboard.models.map((m) => {
+      const pricing = getModelPricing(m.model);
+      return {
+        ...m,
+        inputPricePerMillion: pricing?.inputPerMillion ?? null,
+        outputPricePerMillion: pricing?.outputPerMillion ?? null,
+        cacheEfficiency: getCacheEfficiency(m.cacheReadTokens, m.inputTokens),
+      };
+    });
+  }, [dashboard.models]);
+
   const filtered = useMemo(() => {
-    let rows = [...dashboard.models];
+    let rows = [...enriched];
     if (search) {
       const q = search.toLowerCase();
       rows = rows.filter(
@@ -62,7 +87,7 @@ export function useModels(options?: { includeBudget?: boolean }) {
       return sort.desc ? -c : c;
     });
     return rows;
-  }, [dashboard.models, sort, search]);
+  }, [enriched, sort, search]);
 
   // Aggregate totals
   const totals = useMemo(() => {

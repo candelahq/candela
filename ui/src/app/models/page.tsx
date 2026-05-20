@@ -1,6 +1,7 @@
 "use client";
 
-import { useModels, type ModelSortKey } from "@/hooks/useModels";
+import { useModels, type ModelSortKey, type EnrichedModelRow } from "@/hooks/useModels";
+import { type CacheEfficiency } from "@/lib/modelPricing";
 import { TimeRangeSelector } from "@/components/TimeRangeSelector";
 import { ScopeToggle } from "@/components/ScopeToggle";
 import { useScope } from "@/components/UserScopeProvider";
@@ -186,11 +187,14 @@ export default function ModelsPage() {
                 <tr>
                   <SortTh label="Model" sortKey="model" {...sort} currentKey={sort.key} onSort={toggleSort} />
                   <SortTh label="Provider" sortKey="provider" {...sort} currentKey={sort.key} onSort={toggleSort} />
+                  <SortTh label="In $/M" sortKey="inputPrice" {...sort} currentKey={sort.key} onSort={toggleSort} align="right" />
+                  <SortTh label="Out $/M" sortKey="outputPrice" {...sort} currentKey={sort.key} onSort={toggleSort} align="right" />
                   <SortTh label="Calls" sortKey="callCount" {...sort} currentKey={sort.key} onSort={toggleSort} align="right" />
                   <SortTh label="Input Tokens" sortKey="inputTokens" {...sort} currentKey={sort.key} onSort={toggleSort} align="right" />
                   <SortTh label="Output Tokens" sortKey="outputTokens" {...sort} currentKey={sort.key} onSort={toggleSort} align="right" />
                   <SortTh label="Cost" sortKey="costUsd" {...sort} currentKey={sort.key} onSort={toggleSort} align="right" />
                   <SortTh label="Avg Latency" sortKey="avgLatencyMs" {...sort} currentKey={sort.key} onSort={toggleSort} align="right" />
+                  <th style={{ textAlign: "center" }}>Cache</th>
                   <th style={{ textAlign: "right" }}>Cost %</th>
                 </tr>
               </thead>
@@ -205,11 +209,24 @@ export default function ModelsPage() {
                       <td>
                         <span className="badge badge-info">{m.provider}</span>
                       </td>
+                      <td style={{ textAlign: "right", fontFamily: "monospace", fontSize: 11, color: "var(--text-secondary)" }}>
+                        {m.inputPricePerMillion != null ? `$${m.inputPricePerMillion.toFixed(3)}` : "—"}
+                      </td>
+                      <td style={{ textAlign: "right", fontFamily: "monospace", fontSize: 11, color: "var(--text-secondary)" }}>
+                        {m.outputPricePerMillion != null ? `$${m.outputPricePerMillion.toFixed(3)}` : "—"}
+                      </td>
                       <td style={{ textAlign: "right" }}>{m.callCount.toLocaleString()}</td>
                       <td style={{ textAlign: "right" }}>{fmtTokens(m.inputTokens)}</td>
                       <td style={{ textAlign: "right" }}>{fmtTokens(m.outputTokens)}</td>
                       <td style={{ textAlign: "right" }}>${m.costUsd.toFixed(4)}</td>
                       <td style={{ textAlign: "right" }}>{m.avgLatencyMs.toFixed(0)}ms</td>
+                      <td style={{ textAlign: "center" }}>
+                        {m.cacheEfficiency ? (
+                          <CacheBadge eff={m.cacheEfficiency} />
+                        ) : (
+                          <span style={{ color: "var(--text-muted)", fontSize: 11 }}>—</span>
+                        )}
+                      </td>
                       <td style={{ textAlign: "right" }}>
                         <div style={{ display: "flex", alignItems: "center", gap: 8, justifyContent: "flex-end" }}>
                           <div style={{ width: 60, height: 4, background: "var(--bg-tertiary)", borderRadius: 2 }}>
@@ -261,5 +278,30 @@ export default function ModelsPage() {
         )}
       </div>
     </>
+  );
+}
+
+// ──────────────────────────────────────────
+// Cache badge inline component
+// ──────────────────────────────────────────
+
+function CacheBadge({ eff }: { eff: CacheEfficiency }) {
+  const color = eff.color;
+  return (
+    <span
+      style={{
+        display: "inline-block",
+        padding: "2px 8px",
+        fontSize: 10,
+        fontWeight: 700,
+        fontFamily: "monospace",
+        color,
+        background: `color-mix(in srgb, ${color} 12%, transparent)`,
+        border: `1px solid color-mix(in srgb, ${color} 30%, transparent)`,
+        borderRadius: 6,
+      }}
+    >
+      {eff.label} {(eff.rate * 100).toFixed(0)}%
+    </span>
   );
 }

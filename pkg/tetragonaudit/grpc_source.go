@@ -104,21 +104,21 @@ type GRPCEventStreamAdapter struct {
 // NewGRPCEventStreamAdapter creates a TetragonEventStream from a gRPC connection.
 // It initiates a server-streaming RPC on the Tetragon FineGuidanceSensors/GetEvents
 // endpoint and returns an adapter that reads raw event bytes.
-func NewGRPCEventStreamAdapter(conn *grpc.ClientConn) *GRPCEventStreamAdapter {
-	// Use a background context — the caller controls cancellation via
-	// StreamEvents' context parameter.
-	ctx := context.Background()
+func NewGRPCEventStreamAdapter(ctx context.Context, conn *grpc.ClientConn) (*GRPCEventStreamAdapter, error) {
 	desc := &grpc.StreamDesc{ServerStreams: true}
 	stream, err := conn.NewStream(ctx, desc, "/tetragon.FineGuidanceSensors/GetEvents")
 	if err != nil {
-		slog.Error("tetragonaudit: failed to create gRPC stream", "error", err)
-		return &GRPCEventStreamAdapter{}
+		return nil, fmt.Errorf("tetragonaudit: failed to create gRPC stream: %w", err)
 	}
 	// Send empty request to initiate streaming.
 	if err := stream.SendMsg([]byte("{}")); err != nil {
-		slog.Error("tetragonaudit: failed to send GetEvents request", "error", err)
+		return nil, fmt.Errorf("tetragonaudit: failed to send GetEvents request: %w", err)
 	}
-	return &GRPCEventStreamAdapter{stream: stream}
+	// Signal that the client is done sending (server-streaming RPC best practice).
+	if err := stream.CloseSend(); err != nil {
+		return nil, fmt.Errorf("tetragonaudit: failed to close send stream: %w", err)
+	}
+	return &GRPCEventStreamAdapter{stream: stream}, nil
 }
 
 // Recv blocks until the next event is available from the gRPC stream.

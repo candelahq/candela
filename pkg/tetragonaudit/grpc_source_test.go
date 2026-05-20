@@ -7,6 +7,9 @@ import (
 	"io"
 	"testing"
 	"time"
+
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 )
 
 // mockStream implements TetragonEventStream for testing.
@@ -196,5 +199,21 @@ func TestGRPCSource_Conn(t *testing.T) {
 
 	if src.Conn() == nil {
 		t.Error("Conn() should not be nil")
+	}
+}
+
+func TestNewGRPCEventStreamAdapter_Error(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // Cancel the context to force NewStream to return an error.
+
+	conn, err := grpc.NewClient("localhost:12345", grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		t.Fatalf("failed to create client: %v", err)
+	}
+	defer func() { _ = conn.Close() }()
+
+	_, err = NewGRPCEventStreamAdapter(ctx, conn)
+	if err == nil {
+		t.Error("expected error when context is canceled, got nil")
 	}
 }

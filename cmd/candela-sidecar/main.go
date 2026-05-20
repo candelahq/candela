@@ -295,7 +295,13 @@ func main() {
 
 			go func() {
 				slog.Info("📋 Tetragon gRPC audit pipeline started", "addr", tetragonGRPCAddr)
-				stream := tetragonaudit.NewGRPCEventStreamAdapter(grpcSrc.Conn())
+				stream, err := tetragonaudit.NewGRPCEventStreamAdapter(ctx, grpcSrc.Conn())
+				if err != nil {
+					if ctx.Err() == nil {
+						slog.Error("Tetragon gRPC audit pipeline error during stream initialization", "error", err)
+					}
+					return
+				}
 				if err := grpcSrc.StreamEvents(ctx, stream, pipeline); err != nil && ctx.Err() == nil {
 					slog.Error("Tetragon gRPC audit pipeline error", "error", err)
 				}

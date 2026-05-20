@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 )
@@ -299,7 +300,7 @@ func (p *Pipeline) normalize(event Event) AuditRecord {
 		record.PolicyName = kp.PolicyName
 
 		// SIGKILL actions are critical security events.
-		if kp.Action == "SIGKILL" || kp.Action == "Sigkill" {
+		if strings.EqualFold(kp.Action, "SIGKILL") {
 			record.Severity = "CRITICAL"
 		}
 
@@ -372,7 +373,7 @@ func EnforcementOnly() EventFilter {
 			return false
 		}
 		action := e.ProcessKprobe.Action
-		return action == "SIGKILL" || action == "Sigkill"
+		return strings.EqualFold(action, "SIGKILL")
 	}
 }
 

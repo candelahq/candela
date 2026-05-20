@@ -573,7 +573,12 @@ All features are accessible via **ConnectRPC** (`RuntimeService`) and the embedd
   - W3C Trace Context for unified ADK ↔ sidecar trace trees
   - Fan-out sink isolation with per-sink timeouts
   - Rust sidecar CORS enforcement from env config
-- **Phase 6: Ecosystem & Polish** 📋 (Agent DAGs, Multi-region, Alerting, Google Workspace Sync)
+  - eBPF enforcement: Tetragon + Cilium + iptables transparent proxy (Phases 0–4 shipped)
+  - Multi-cloud auth: native `candela auth login` for GCP OAuth2 and AWS SSO
+  - Phase A observability hardening: circuit breaker, fuzz tests, runtime coverage
+  - Tetragon gRPC audit pipeline with `MultiSink`, graceful shutdown, and hardened error handling
+  - Expanded model catalog: Gemini 3.5 Flash, Opus 4.7, Sonnet 4.6, Haiku 4.5
+- **Phase 6: Ecosystem & Polish** 📋 (Agent DAGs, Rust SNI listener, Multi-region, Alerting)
 
 ---
 

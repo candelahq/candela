@@ -2464,3 +2464,123 @@ tr:hover .model-bar {
   min-width: 0;
 }
 
+.btn-xs {
+  padding: 3px 8px;
+  font-size: 11px;
+}
+
+/* ──────────────────────────────────────────
+   View Toggle (Waterfall / Graph)
+   ────────────────────────────────────────── */
+
+.view-toggle {
+  display: flex;
+  gap: 2px;
+  background: var(--bg-primary);
+  border-radius: var(--radius-md);
+  padding: 2px;
+  border: 1px solid var(--border-subtle);
+}
+
+.view-toggle-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 12px;
+  font-size: 12px;
+  font-weight: 500;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+}
+
+.view-toggle-btn:hover {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+}
+
+.view-toggle-active {
+  background: var(--accent-dim);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+/* ──────────────────────────────────────────
+   Agent DAG Graph
+   ────────────────────────────────────────── */
+
+.dag-container {
+  flex: 1;
+  overflow: auto;
+  padding: 24px;
+  background:
+    radial-gradient(circle at 50% 50%, rgba(240, 160, 48, 0.03) 0%, transparent 70%),
+    var(--bg-primary);
+  background-size: 100% 100%;
+  min-height: 400px;
+}
+
+.dag-svg {
+  display: block;
+}
+
+/* Edges */
+.dag-edge {
+  stroke: var(--border);
+  stroke-width: 1.5;
+  opacity: 0.5;
+  transition: opacity 0.2s ease, stroke 0.2s ease;
+}
+
+.dag-edges:hover .dag-edge {
+  opacity: 0.3;
+}
+
+/* Nodes */
+.dag-node-group {
+  transition: filter 0.2s ease;
+}
+
+.dag-node-group:hover {
+  filter: brightness(1.15);
+}
+
+.dag-node-group:hover .dag-node-bg {
+  stroke: var(--text-muted);
+}
+
+.dag-node-bg {
+  transition: stroke 0.15s ease, filter 0.15s ease;
+}
+
+.dag-node-glow {
+  animation: dagGlow 2s ease-in-out infinite alternate;
+}
+
+@keyframes dagGlow {
+  from { opacity: 0.4; }
+  to { opacity: 0.8; }
+}
+
+.dag-node-kind {
+  font-family: 'Inter', sans-serif;
+  letter-spacing: 0.04em;
+}
+
+.dag-node-name {
+  font-family: 'Inter', sans-serif;
+}
+
+.dag-node-metric {
+  letter-spacing: -0.01em;
+}
+
+/* Selected node: also brighten connected edges */
+.dag-node-selected .dag-node-bg {
+  filter: drop-shadow(0 0 8px rgba(240, 160, 48, 0.3));
+}
+

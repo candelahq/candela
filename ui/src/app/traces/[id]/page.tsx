@@ -6,7 +6,10 @@ import { useParams, useRouter } from "next/navigation";
 import { useTrace, kindLabel, kindColor } from "@/hooks/useTrace";
 import type { SpanNode } from "@/hooks/useTrace";
 import { ErrorBanner } from "@/components/ErrorBanner";
+import { AgentDAG } from "@/components/AgentDAG";
 import { SpanStatus } from "@/gen/candela/types/trace_pb";
+
+type ViewMode = "waterfall" | "graph";
 
 
 function ExpandablePre({ content, label }: { content: string; label: string }) {
@@ -296,6 +299,7 @@ export default function TraceDetailPage() {
   const params = useParams();
   const router = useRouter();
   const traceId = params.id as string;
+  const [viewMode, setViewMode] = useState<ViewMode>("waterfall");
 
   const { trace, loading, error, selectedSpanId, selectedNode, toggleSpan,
     visibleSpans, collapsedIds, toggleCollapse, collapseAll, expandAll } =
@@ -368,61 +372,90 @@ export default function TraceDetailPage() {
               </div>
             </div>
 
-            {/* Waterfall + Detail split */}
+            {/* View toggle + content */}
             <div className="waterfall-split">
               <div className="waterfall-panel animate-in">
                 <div className="waterfall-header">
-                  <span className="table-title">Span Waterfall</span>
+                  {/* View mode toggle */}
+                  <div className="view-toggle">
+                    <button
+                      className={`view-toggle-btn ${viewMode === "waterfall" ? "view-toggle-active" : ""}`}
+                      onClick={() => setViewMode("waterfall")}
+                    >
+                      ☰ Waterfall
+                    </button>
+                    <button
+                      className={`view-toggle-btn ${viewMode === "graph" ? "view-toggle-active" : ""}`}
+                      onClick={() => setViewMode("graph")}
+                    >
+                      🔀 Agent Graph
+                    </button>
+                  </div>
                   <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                    <button
-                      className="btn" style={{ padding: "3px 8px", fontSize: 11 }}
-                      onClick={collapseAll}
-                      title="Collapse all"
-                    >
-                      ⊟ Collapse
-                    </button>
-                    <button
-                      className="btn" style={{ padding: "3px 8px", fontSize: 11 }}
-                      onClick={expandAll}
-                      title="Expand all"
-                    >
-                      ⊞ Expand
-                    </button>
+                    {viewMode === "waterfall" && (
+                      <>
+                        <button
+                          className="btn btn-xs"
+                          onClick={collapseAll}
+                          title="Collapse all"
+                        >
+                          ⊟ Collapse
+                        </button>
+                        <button
+                          className="btn btn-xs"
+                          onClick={expandAll}
+                          title="Expand all"
+                        >
+                          ⊞ Expand
+                        </button>
+                      </>
+                    )}
                     <span style={{ fontSize: 12, color: "var(--text-muted)" }}>
                       {trace.totalDurationMs.toFixed(0)}ms total
                     </span>
                   </div>
                 </div>
-                {/* Time ruler */}
-                <div className="waterfall-ruler">
-                  <div className="waterfall-ruler-label" style={{ left: 0 }}>0ms</div>
-                  <div className="waterfall-ruler-label" style={{ left: "25%" }}>
-                    {(trace.totalDurationMs * 0.25).toFixed(0)}ms
-                  </div>
-                  <div className="waterfall-ruler-label" style={{ left: "50%" }}>
-                    {(trace.totalDurationMs * 0.5).toFixed(0)}ms
-                  </div>
-                  <div className="waterfall-ruler-label" style={{ left: "75%" }}>
-                    {(trace.totalDurationMs * 0.75).toFixed(0)}ms
-                  </div>
-                  <div className="waterfall-ruler-label" style={{ right: 0 }}>
-                    {trace.totalDurationMs.toFixed(0)}ms
-                  </div>
-                </div>
-                {/* Span rows */}
-                <div className="waterfall-body">
-                  {visibleSpans.map((node) => (
-                    <SpanRow
-                      key={node.span.spanId}
-                      node={node}
-                      totalDurationMs={trace.totalDurationMs}
-                      selected={node.span.spanId === selectedSpanId}
-                      collapsed={collapsedIds.has(node.span.spanId)}
-                      onClick={() => toggleSpan(node.span.spanId)}
-                      onToggleCollapse={() => toggleCollapse(node.span.spanId)}
-                    />
-                  ))}
-                </div>
+
+                {viewMode === "waterfall" ? (
+                  <>
+                    {/* Time ruler */}
+                    <div className="waterfall-ruler">
+                      <div className="waterfall-ruler-label" style={{ left: 0 }}>0ms</div>
+                      <div className="waterfall-ruler-label" style={{ left: "25%" }}>
+                        {(trace.totalDurationMs * 0.25).toFixed(0)}ms
+                      </div>
+                      <div className="waterfall-ruler-label" style={{ left: "50%" }}>
+                        {(trace.totalDurationMs * 0.5).toFixed(0)}ms
+                      </div>
+                      <div className="waterfall-ruler-label" style={{ left: "75%" }}>
+                        {(trace.totalDurationMs * 0.75).toFixed(0)}ms
+                      </div>
+                      <div className="waterfall-ruler-label" style={{ right: 0 }}>
+                        {trace.totalDurationMs.toFixed(0)}ms
+                      </div>
+                    </div>
+                    {/* Span rows */}
+                    <div className="waterfall-body">
+                      {visibleSpans.map((node) => (
+                        <SpanRow
+                          key={node.span.spanId}
+                          node={node}
+                          totalDurationMs={trace.totalDurationMs}
+                          selected={node.span.spanId === selectedSpanId}
+                          collapsed={collapsedIds.has(node.span.spanId)}
+                          onClick={() => toggleSpan(node.span.spanId)}
+                          onToggleCollapse={() => toggleCollapse(node.span.spanId)}
+                        />
+                      ))}
+                    </div>
+                  </>
+                ) : (
+                  <AgentDAG
+                    tree={trace.tree}
+                    selectedSpanId={selectedSpanId}
+                    onSelectSpan={toggleSpan}
+                  />
+                )}
               </div>
 
               {/* Detail panel */}

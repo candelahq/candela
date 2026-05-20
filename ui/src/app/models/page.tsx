@@ -210,10 +210,10 @@ export default function ModelsPage() {
                         <span className="badge badge-info">{m.provider}</span>
                       </td>
                       <td style={{ textAlign: "right", fontFamily: "monospace", fontSize: 11, color: "var(--text-secondary)" }}>
-                        {m.inputPricePerMillion != null ? `$${m.inputPricePerMillion.toFixed(2)}` : "—"}
+                        {m.inputPricePerMillion != null ? `$${m.inputPricePerMillion.toFixed(3)}` : "—"}
                       </td>
                       <td style={{ textAlign: "right", fontFamily: "monospace", fontSize: 11, color: "var(--text-secondary)" }}>
-                        {m.outputPricePerMillion != null ? `$${m.outputPricePerMillion.toFixed(2)}` : "—"}
+                        {m.outputPricePerMillion != null ? `$${m.outputPricePerMillion.toFixed(3)}` : "—"}
                       </td>
                       <td style={{ textAlign: "right" }}>{m.callCount.toLocaleString()}</td>
                       <td style={{ textAlign: "right" }}>{fmtTokens(m.inputTokens)}</td>
@@ -285,14 +285,8 @@ export default function ModelsPage() {
 // Cache badge inline component
 // ──────────────────────────────────────────
 
-const tierColors: Record<CacheEfficiency["tier"], string> = {
-  excellent: "#4ade80",
-  good: "var(--accent)",
-  low: "var(--warning, #f59e0b)",
-};
-
 function CacheBadge({ eff }: { eff: CacheEfficiency }) {
-  const color = tierColors[eff.tier];
+  const color = eff.color;
   return (
     <span
       style={{

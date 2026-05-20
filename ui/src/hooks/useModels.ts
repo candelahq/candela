@@ -30,8 +30,8 @@ interface SortState {
 function compare(a: EnrichedModelRow, b: EnrichedModelRow, key: ModelSortKey): number {
   if (key === "inputPrice") return (a.inputPricePerMillion ?? 0) - (b.inputPricePerMillion ?? 0);
   if (key === "outputPrice") return (a.outputPricePerMillion ?? 0) - (b.outputPricePerMillion ?? 0);
-  const va = a[key];
-  const vb = b[key];
+  const va = a[key as keyof ModelUsageRow];
+  const vb = b[key as keyof ModelUsageRow];
   if (typeof va === "string" && typeof vb === "string") {
     return va.localeCompare(vb);
   }

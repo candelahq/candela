@@ -49,9 +49,15 @@ proxy:
         provider: openai
       - id: o3-mini
         provider: openai
+      - id: claude-opus-4.7
+        provider: anthropic
+      - id: claude-sonnet-4.6
+        provider: anthropic
       - id: claude-sonnet-4-20250514
         provider: anthropic
       - id: claude-opus-4-20250514
+        provider: anthropic
+      - id: claude-haiku-4.5
         provider: anthropic
       - id: gemini-3.5-flash
         provider: gemini-oai
@@ -60,6 +66,8 @@ proxy:
       - id: gemini-3.1-pro
         provider: gemini-oai
       - id: gemini-3.0-flash
+        provider: gemini-oai
+      - id: gemini-3.0-pro
         provider: gemini-oai
       - id: gemini-2.5-pro
         provider: gemini-oai

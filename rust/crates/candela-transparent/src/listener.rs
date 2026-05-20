@@ -466,4 +466,174 @@ mod tests {
         cancel.cancel();
         let _ = handle.await;
     }
+
+    #[tokio::test]
+    async fn listener_cancel_stops_cleanly() {
+        let providers = vec![candela_proxy::Provider {
+            name: "openai".into(),
+            upstream_url: "https://api.openai.com".into(),
+            host: None,
+            host_pattern: None,
+            intercept: None,
+            format_translator: None,
+            path_rewriter: None,
+        }];
+        let sni_map = Arc::new(SNIMap::build(&providers));
+
+        let tcp_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let listener = TransparentListener::new(Config {
+            listen_addr: "127.0.0.1:0".into(),
+            sni_map,
+            proxy_addr: "127.0.0.1:0".into(),
+        });
+
+        let cancel = tokio_util::sync::CancellationToken::new();
+        let cancel_clone = cancel.clone();
+
+        let handle = tokio::spawn(async move {
+            let _ = listener
+                .listen_and_serve_on(tcp_listener, cancel_clone)
+                .await;
+        });
+
+        // Cancel immediately — listener should shut down gracefully.
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        cancel.cancel();
+        let result = tokio::time::timeout(Duration::from_secs(2), handle).await;
+        assert!(result.is_ok(), "listener should exit within 2 seconds");
+    }
+
+    #[test]
+    fn stats_concurrent_updates() {
+        use std::thread;
+
+        let stats = Arc::new(Stats::default());
+
+        let handles: Vec<_> = (0..10)
+            .map(|_| {
+                let s = Arc::clone(&stats);
+                thread::spawn(move || {
+                    for _ in 0..100 {
+                        s.intercepted.fetch_add(1, Ordering::Relaxed);
+                        s.passthrough.fetch_add(1, Ordering::Relaxed);
+                        s.errors.fetch_add(1, Ordering::Relaxed);
+                    }
+                })
+            })
+            .collect();
+
+        for h in handles {
+            h.join().unwrap();
+        }
+
+        let (i, p, e) = stats.snapshot();
+        assert_eq!(i, 1000, "10 threads × 100 increments");
+        assert_eq!(p, 1000);
+        assert_eq!(e, 1000);
+    }
+
+    #[tokio::test]
+    async fn listener_non_tls_passthrough_only() {
+        let providers = vec![candela_proxy::Provider {
+            name: "openai".into(),
+            upstream_url: "https://api.openai.com".into(),
+            host: None,
+            host_pattern: None,
+            intercept: None,
+            format_translator: None,
+            path_rewriter: None,
+        }];
+        let sni_map = Arc::new(SNIMap::build(&providers));
+
+        let tcp_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = tcp_listener.local_addr().unwrap();
+
+        let listener = TransparentListener::new(Config {
+            listen_addr: addr.to_string(),
+            sni_map,
+            proxy_addr: "127.0.0.1:0".into(),
+        });
+
+        let cancel = tokio_util::sync::CancellationToken::new();
+        let cancel_clone = cancel.clone();
+        let stats = Arc::clone(listener.stats());
+
+        let handle = tokio::spawn(async move {
+            let _ = listener
+                .listen_and_serve_on(tcp_listener, cancel_clone)
+                .await;
+        });
+
+        tokio::time::sleep(Duration::from_millis(50)).await;
+
+        // Send 3 non-TLS connections — all should be passthrough.
+        for _ in 0..3 {
+            if let Ok(mut conn) = TcpStream::connect(addr).await {
+                let _ = conn.write_all(b"HELLO NON-TLS\r\n").await;
+                tokio::time::sleep(Duration::from_millis(100)).await;
+                drop(conn);
+            }
+        }
+
+        tokio::time::sleep(Duration::from_millis(200)).await;
+
+        let (intercepted, passthrough, _) = stats.snapshot();
+        assert_eq!(intercepted, 0, "no TLS → no intercepts");
+        assert_eq!(passthrough, 3, "all 3 should be passthrough");
+
+        cancel.cancel();
+        let _ = handle.await;
+    }
+
+    #[tokio::test]
+    async fn listener_unknown_sni_passthrough() {
+        let providers = vec![candela_proxy::Provider {
+            name: "openai".into(),
+            upstream_url: "https://api.openai.com".into(),
+            host: None,
+            host_pattern: None,
+            intercept: None,
+            format_translator: None,
+            path_rewriter: None,
+        }];
+        let sni_map = Arc::new(SNIMap::build(&providers));
+
+        let tcp_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = tcp_listener.local_addr().unwrap();
+
+        let listener = TransparentListener::new(Config {
+            listen_addr: addr.to_string(),
+            sni_map,
+            proxy_addr: "127.0.0.1:0".into(),
+        });
+
+        let cancel = tokio_util::sync::CancellationToken::new();
+        let cancel_clone = cancel.clone();
+        let stats = Arc::clone(listener.stats());
+
+        let handle = tokio::spawn(async move {
+            let _ = listener
+                .listen_and_serve_on(tcp_listener, cancel_clone)
+                .await;
+        });
+
+        tokio::time::sleep(Duration::from_millis(50)).await;
+
+        // TLS ClientHello with an unknown SNI — should be passthrough.
+        let hello = build_test_client_hello("unknown.example.com");
+        if let Ok(mut conn) = TcpStream::connect(addr).await {
+            let _ = conn.write_all(&hello).await;
+            tokio::time::sleep(Duration::from_millis(200)).await;
+            drop(conn);
+        }
+
+        tokio::time::sleep(Duration::from_millis(100)).await;
+
+        let (intercepted, passthrough, _) = stats.snapshot();
+        assert_eq!(intercepted, 0, "unknown SNI → no intercept");
+        assert_eq!(passthrough, 1, "unknown SNI → passthrough");
+
+        cancel.cancel();
+        let _ = handle.await;
+    }
 }

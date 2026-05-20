@@ -372,4 +372,30 @@ mod tests {
             "handshake type 2, want ClientHello (1)"
         );
     }
+
+    #[test]
+    fn parse_wildcard_subdomain() {
+        let hostname = "deep.sub.api.anthropic.com";
+        let data = build_client_hello(hostname);
+        let sni = parse_client_hello_sni(&data).unwrap();
+        assert_eq!(sni, hostname);
+    }
+
+    #[test]
+    fn parse_single_byte_host() {
+        // Edge case: single-character hostname.
+        let data = build_client_hello("x");
+        let sni = parse_client_hello_sni(&data).unwrap();
+        assert_eq!(sni, "x");
+    }
+
+    #[test]
+    fn parse_max_label_hostname() {
+        // DNS label max is 63 chars; a max-ish hostname.
+        let long_label = "a".repeat(63);
+        let hostname = format!("{long_label}.example.com");
+        let data = build_client_hello(&hostname);
+        let sni = parse_client_hello_sni(&data).unwrap();
+        assert_eq!(sni, hostname);
+    }
 }

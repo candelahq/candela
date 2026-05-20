@@ -16,6 +16,9 @@
 //!   OTLP_ENDPOINT      — OTLP/HTTP endpoint for span export (optional)
 //!   OTLP_HEADERS       — comma-separated key=value OTLP auth headers
 //!   CORS_ORIGINS       — comma-separated allowed origins (default: *)
+//!   TRANSPARENT_PORT   — port for transparent proxy (enables iptables
+//!                        interception mode, mutually exclusive with
+//!                        Tetragon kprobe enforcement)
 //!
 //! Ported from: `cmd/candela-sidecar/main.go`
 
@@ -29,7 +32,7 @@ use tracing::info;
 
 use candela_core::Span;
 use candela_proxy::handler::{self, AppState};
-use candela_proxy::{Config, Provider, SpanSubmitter};
+use candela_proxy::{Config, Provider, SNIMap, SpanSubmitter};
 
 /// Log-only span submitter for development / initial wiring.
 struct LogSubmitter;
@@ -67,6 +70,7 @@ async fn main() -> anyhow::Result<()> {
     let gcp_project = env::var("GCP_PROJECT").unwrap_or_default();
     let _vertex_region = env_or("VERTEX_REGION", "us-central1");
     let project_id = env_or("CANDELA_PROJECT_ID", &gcp_project);
+    let transparent_port = env::var("TRANSPARENT_PORT").ok();
 
     if project_id.is_empty() {
         tracing::warn!(
@@ -87,7 +91,6 @@ async fn main() -> anyhow::Result<()> {
                 "openai" => "https://api.openai.com".to_string(),
                 "anthropic" => "https://api.anthropic.com".to_string(),
                 _ => {
-                    // Check for env-provided upstream: {NAME}_UPSTREAM_URL
                     let env_key = format!("{}_UPSTREAM_URL", name.to_uppercase().replace('-', "_"));
                     match env::var(&env_key) {
                         Ok(url) => url,
@@ -144,7 +147,7 @@ async fn main() -> anyhow::Result<()> {
 
     // ── Build proxy ──
     let proxy = Arc::new(candela_proxy::Proxy::new(Config {
-        providers,
+        providers: providers.clone(),
         project_id: project_id.clone(),
     }));
 
@@ -158,8 +161,33 @@ async fn main() -> anyhow::Result<()> {
         port = %port,
         project_id = %project_id,
         cors_origins = %cors_origins,
+        transparent = transparent_port.as_deref().unwrap_or("disabled"),
         "🕯️ candela-sidecar starting"
     );
+
+    // ── Cancellation token for coordinated shutdown ──
+    let cancel = tokio_util::sync::CancellationToken::new();
+
+    // ── Transparent proxy (optional) ──
+    let transparent_handle = if let Some(tp) = &transparent_port {
+        let sni_map = Arc::new(SNIMap::build(&providers));
+        let transparent_listener = candela_transparent::listener::TransparentListener::new(
+            candela_transparent::listener::Config {
+                listen_addr: format!("0.0.0.0:{tp}"),
+                sni_map,
+                proxy_addr: format!("127.0.0.1:{port}"),
+            },
+        );
+
+        let cancel_clone = cancel.clone();
+        Some(tokio::spawn(async move {
+            if let Err(e) = transparent_listener.listen_and_serve(cancel_clone).await {
+                tracing::error!(error = %e, "transparent proxy failed");
+            }
+        }))
+    } else {
+        None
+    };
 
     // ── HTTP server ──
     let app = Router::new()
@@ -179,6 +207,12 @@ async fn main() -> anyhow::Result<()> {
     axum::serve(listener, app)
         .with_graceful_shutdown(shutdown_signal())
         .await?;
+
+    // Signal transparent proxy to stop.
+    cancel.cancel();
+    if let Some(h) = transparent_handle {
+        let _ = h.await;
+    }
 
     info!("sidecar stopped");
     Ok(())
@@ -213,16 +247,12 @@ mod tests {
     // U-15: env_or returns default when env var is unset.
     #[test]
     fn env_or_returns_default_when_unset() {
-        // Use a key that definitely doesn't exist.
         let result = env_or("CANDELA_TEST_NONEXISTENT_VAR_12345", "fallback");
         assert_eq!(result, "fallback");
     }
 
     #[test]
     fn env_or_returns_env_when_set() {
-        // Test env_or logic without mutating global state:
-        // env::var succeeds → env_or returns its value (not the default).
-        // We rely on PATH always being set on all platforms.
         let result = env_or("PATH", "fallback");
         assert_ne!(result, "fallback");
         assert!(!result.is_empty());

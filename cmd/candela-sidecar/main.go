@@ -38,6 +38,7 @@ import (
 	"github.com/candelahq/candela/pkg/storage"
 	otlpexporter "github.com/candelahq/candela/pkg/storage/otlpexporter"
 	pubsubstore "github.com/candelahq/candela/pkg/storage/pubsub"
+	"github.com/candelahq/candela/pkg/tetragonaudit"
 	"github.com/candelahq/candela/pkg/transparent"
 )
 
@@ -59,6 +60,8 @@ func main() {
 	otlpHeaders := os.Getenv("OTLP_HEADERS")
 	corsOrigins := envOr("CORS_ORIGINS", "*")
 	transparentPort := os.Getenv("TRANSPARENT_PORT")
+	tetragonAudit := os.Getenv("TETRAGON_AUDIT")
+	tetragonOTelEndpoint := envOr("TETRAGON_OTEL_ENDPOINT", otlpEndpoint)
 
 	slog.Info("🕯️ candela-sidecar starting",
 		"port", port,
@@ -249,6 +252,50 @@ func main() {
 		slog.Info("🔍 transparent proxy enabled",
 			"port", transparentPort,
 			"sni_hosts", sniMap.Hosts())
+	}
+
+	// ── Tetragon audit pipeline (optional) ──
+	if tetragonAudit != "" {
+		var auditSink tetragonaudit.Sink
+
+		if tetragonOTelEndpoint != "" {
+			otelSink, err := tetragonaudit.NewOTelSink(tetragonaudit.OTelSinkConfig{
+				Endpoint: tetragonOTelEndpoint,
+				Headers:  parseHeaders(otlpHeaders),
+			})
+			if err != nil {
+				slog.Error("failed to initialize Tetragon OTel sink", "error", err)
+				os.Exit(1)
+			}
+			auditSink = otelSink
+			slog.Info("📡 Tetragon audit → OTel logs enabled",
+				"endpoint", tetragonOTelEndpoint)
+		} else {
+			slog.Warn("⚠️  TETRAGON_AUDIT set but no OTel endpoint — audit logs will be discarded")
+			// Use the built-in structured logger sink.
+			auditSink = &tetragonaudit.LogSink{}
+		}
+
+		pipeline := tetragonaudit.NewPipeline(tetragonaudit.PipelineConfig{
+			Sink: auditSink,
+		})
+
+		go func() {
+			f, err := os.Open(tetragonAudit)
+			if err != nil {
+				slog.Error("failed to open Tetragon audit source", "path", tetragonAudit, "error", err)
+				return
+			}
+			defer func() { _ = f.Close() }()
+
+			slog.Info("📋 Tetragon audit pipeline started", "source", tetragonAudit)
+			if err := pipeline.ProcessJSONStream(ctx, f); err != nil && ctx.Err() == nil {
+				slog.Error("Tetragon audit pipeline error", "error", err)
+			}
+			p, d, e := pipeline.Stats().Snapshot()
+			slog.Info("Tetragon audit pipeline stopped",
+				"processed", p, "dropped", d, "errors", e)
+		}()
 	}
 
 	<-ctx.Done()

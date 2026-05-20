@@ -212,9 +212,11 @@ dependencies = [
  "candela-processor",
  "candela-proxy",
  "candela-storage",
+ "candela-transparent",
  "reqwest",
  "serde_json",
  "tokio",
+ "tokio-util",
  "tower-http",
  "tracing",
  "tracing-subscriber",
@@ -233,6 +235,19 @@ dependencies = [
  "serde_json",
  "tokio",
  "tokio-test",
+ "tracing",
+]
+
+[[package]]
+name = "candela-transparent"
+version = "0.1.0"
+dependencies = [
+ "bytes",
+ "candela-proxy",
+ "libc",
+ "tokio",
+ "tokio-test",
+ "tokio-util",
  "tracing",
 ]
 

@@ -2,6 +2,50 @@
 
 All notable changes to Candela are documented here, organized by development phase. PRs are merged to `main`.
 
+## v0.4.7 — 2026-05-20
+
+### eBPF Enforcement Pipeline (#234, #245)
+- Production-ready eBPF enforcement with transparent `iptables` redirection and SNI-based routing
+- Tetragon `TracingPolicy` for kernel-level process enforcement (audit + enforce modes)
+- Cilium `FQDNNetworkPolicy` templates for network-level egress control
+- Single-source-of-truth `candela-policy.yaml` — Helm derives all enforcement resources
+- gRPC source integration with Hubble stubs for Tetragon event ingestion
+
+### Tetragon Audit Hardening (#250)
+- `CloseSend()` and graceful shutdown logging for gRPC audit streams
+- Case-insensitive SIGKILL detection for cross-platform reliability
+- `MultiSink` implementation for fan-out audit event routing
+- Comprehensive unit tests and regression coverage for gRPC error handling
+
+### Phase A Observability Hardening (#248)
+- Circuit breaker resilience for upstream provider failures
+- Fuzz testing for proxy SSE parser to surface edge-case crashes
+- Runtime coverage improvements across `vllm`, `ollama`, and `lmstudio` packages
+- `SpanProcessor` isolated failure domains — a single sink failure never blocks others
+
+### Multi-Cloud Auth (#235, #241)
+- `candela auth login --provider gcp|aws` — native OAuth2 and SSO support
+- AWS Bedrock integration with SigV4 request signing
+- Interactive provider selection with config persistence and proxy restart prompt
+- Zero dependency on `gcloud` or `aws` CLI for authentication
+
+### Expanded Model Support
+- Gemini 3.5 Flash pricing and deploy config
+- Gemini 3.0 Pro, Claude Opus 4.7, Claude Sonnet 4.6, Claude Haiku 4.5
+- LM Studio catalog expansion for latest model variants
+
+### Desktop Refactor (#246)
+- User-scoped observability with `UserScopeProvider` across Dashboard, Traces, and Models pages
+- Consolidated `GetDashboardData` RPC replaces legacy fan-out endpoints
+- Settings page refactor with live data and actionable insights
+
+### Fixes & CI
+- OAuth callback UTF-8 encoding bug fix (#244)
+- `workflow_run` trigger for deploy workflow (#77 — CI-only, no user-facing changes)
+- Gemini proxy parity — tests, pricing, config API, direct route (#240)
+
+---
+
 ## v0.3.3 — 2026-05-18
 
 ### Consolidated Dashboard RPC (#232)

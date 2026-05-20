@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"go.opentelemetry.io/collector/pdata/pcommon"
@@ -148,7 +149,7 @@ func (s *OTelSink) exportLogs(ctx context.Context, logs plog.Logs) error {
 		return fmt.Errorf("tetragonaudit: marshal OTLP log: %w", err)
 	}
 
-	url := s.endpoint + "/v1/logs"
+	url := strings.TrimSuffix(s.endpoint, "/") + "/v1/logs"
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(data))
 	if err != nil {
 		return fmt.Errorf("tetragonaudit: create HTTP request: %w", err)

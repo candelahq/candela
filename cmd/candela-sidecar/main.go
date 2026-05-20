@@ -293,11 +293,16 @@ func main() {
 				"addr", tetragonGRPCAddr)
 			closers = append(closers, func() { _ = grpcSrc.Close() })
 
-			// gRPC streaming is started by the caller after obtaining
-			// a TetragonEventStream from the gRPC connection.
-			// The connection is ready; streaming will begin when the
-			// Tetragon observer API client is initialized.
-			_ = pipeline // pipeline is available for use with StreamEvents
+			go func() {
+				slog.Info("📋 Tetragon gRPC audit pipeline started", "addr", tetragonGRPCAddr)
+				stream := tetragonaudit.NewGRPCEventStreamAdapter(grpcSrc.Conn())
+				if err := grpcSrc.StreamEvents(ctx, stream, pipeline); err != nil && ctx.Err() == nil {
+					slog.Error("Tetragon gRPC audit pipeline error", "error", err)
+				}
+				p, d, e := pipeline.Stats().Snapshot()
+				slog.Info("Tetragon gRPC audit pipeline stopped",
+					"processed", p, "dropped", d, "errors", e)
+			}()
 		} else {
 			go func() {
 				f, err := os.Open(tetragonAudit)

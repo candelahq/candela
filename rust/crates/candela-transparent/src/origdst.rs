@@ -53,10 +53,7 @@ pub fn get_original_dst(stream: &tokio::net::TcpStream) -> io::Result<SocketAddr
         }
     }
 
-    Err(io::Error::new(
-        io::ErrorKind::Other,
-        "getsockopt SO_ORIGINAL_DST failed",
-    ))
+    Err(io::Error::other("getsockopt SO_ORIGINAL_DST failed"))
 }
 
 /// Stub for non-Linux platforms.

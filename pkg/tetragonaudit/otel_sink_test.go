@@ -292,3 +292,36 @@ func assertAttr(t *testing.T, attrs pcommon.Map, key, want string) {
 		t.Errorf("attribute %q = %q, want %q", key, v.Str(), want)
 	}
 }
+
+func TestOTelSink_TrailingSlashEndpoint(t *testing.T) {
+	var requestURL string
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestURL = r.URL.Path
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer ts.Close()
+
+	// Endpoint with trailing slash — should NOT produce double-slash.
+	sink, err := NewOTelSink(OTelSinkConfig{
+		Endpoint: ts.URL + "/",
+	})
+	if err != nil {
+		t.Fatalf("NewOTelSink: %v", err)
+	}
+
+	if err := sink.Emit(context.Background(), AuditRecord{Severity: "INFO"}); err != nil {
+		t.Fatalf("Emit: %v", err)
+	}
+
+	if requestURL != "/v1/logs" {
+		t.Errorf("expected path /v1/logs, got %q (double-slash bug?)", requestURL)
+	}
+}
+
+func TestGRPCEventStreamAdapter_NilStream(t *testing.T) {
+	adapter := &GRPCEventStreamAdapter{stream: nil}
+	_, err := adapter.Recv()
+	if err == nil {
+		t.Fatal("expected error from nil stream adapter")
+	}
+}

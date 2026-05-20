@@ -395,14 +395,14 @@ export default function TraceDetailPage() {
                     {viewMode === "waterfall" && (
                       <>
                         <button
-                          className="btn" style={{ padding: "3px 8px", fontSize: 11 }}
+                          className="btn btn-xs"
                           onClick={collapseAll}
                           title="Collapse all"
                         >
                           ⊟ Collapse
                         </button>
                         <button
-                          className="btn" style={{ padding: "3px 8px", fontSize: 11 }}
+                          className="btn btn-xs"
                           onClick={expandAll}
                           title="Expand all"
                         >

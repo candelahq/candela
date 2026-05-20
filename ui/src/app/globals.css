@@ -2464,6 +2464,11 @@ tr:hover .model-bar {
   min-width: 0;
 }
 
+.btn-xs {
+  padding: 3px 8px;
+  font-size: 11px;
+}
+
 /* ──────────────────────────────────────────
    View Toggle (Waterfall / Graph)
    ────────────────────────────────────────── */

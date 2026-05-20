@@ -14,6 +14,17 @@ const NODE_H = 72;
 const H_GAP = 40; // horizontal gap between siblings
 const V_GAP = 80; // vertical gap between levels
 
+// Node rendering constants
+const BADGE_CHAR_WIDTH = 7.5;
+const BADGE_PADDING = 10;
+const BADGE_HEIGHT = 18;
+const BADGE_Y = 10;
+const BADGE_X = 14;
+const ERR_BADGE_WIDTH = 28;
+const ERR_BADGE_OFFSET = 38;
+const SPAN_NAME_MAX_LEN = 30;
+const SPAN_NAME_TRUNC_LEN = 28;
+
 // ──────────────────────────────────────────
 // Layout types
 // ──────────────────────────────────────────
@@ -113,6 +124,7 @@ function DAGEdge({
       stroke="var(--border)"
       strokeWidth={1.5}
       fill="none"
+      markerEnd="url(#dag-arrow)"
     />
   );
 }
@@ -186,16 +198,16 @@ function DAGNode({
 
       {/* Kind badge */}
       <rect
-        x={14}
-        y={10}
-        width={label.length * 7.5 + 10}
-        height={18}
+        x={BADGE_X}
+        y={BADGE_Y}
+        width={label.length * BADGE_CHAR_WIDTH + BADGE_PADDING}
+        height={BADGE_HEIGHT}
         rx={4}
         fill={color}
         opacity={0.15}
       />
       <text
-        x={14 + (label.length * 7.5 + 10) / 2}
+        x={BADGE_X + (label.length * BADGE_CHAR_WIDTH + BADGE_PADDING) / 2}
         y={22}
         textAnchor="middle"
         className="dag-node-kind"
@@ -210,16 +222,16 @@ function DAGNode({
       {isError && (
         <>
           <rect
-            x={NODE_W - 38}
-            y={10}
-            width={28}
-            height={18}
+            x={NODE_W - ERR_BADGE_OFFSET}
+            y={BADGE_Y}
+            width={ERR_BADGE_WIDTH}
+            height={BADGE_HEIGHT}
             rx={4}
             fill="var(--error)"
             opacity={0.15}
           />
           <text
-            x={NODE_W - 24}
+            x={NODE_W - ERR_BADGE_OFFSET + ERR_BADGE_WIDTH / 2}
             y={22}
             textAnchor="middle"
             fill="var(--error)"
@@ -240,8 +252,8 @@ function DAGNode({
         fontSize={12}
         fontWeight={500}
       >
-        {node.span.name.length > 30
-          ? node.span.name.slice(0, 28) + "…"
+        {node.span.name.length > SPAN_NAME_MAX_LEN
+          ? node.span.name.slice(0, SPAN_NAME_TRUNC_LEN) + "…"
           : node.span.name}
       </text>
 
@@ -329,8 +341,8 @@ export function AgentDAG({
 
         {/* Edges */}
         <g className="dag-edges">
-          {edges.map((edge, i) => (
-            <DAGEdge key={i} from={edge.from} to={edge.to} />
+          {edges.map((edge) => (
+            <DAGEdge key={`${edge.from.node.span.spanId}-${edge.to.node.span.spanId}`} from={edge.from} to={edge.to} />
           ))}
         </g>
 

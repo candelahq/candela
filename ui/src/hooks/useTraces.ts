@@ -1,10 +1,11 @@
 "use client";
 
-import { useCallback, useReducer, useRef } from "react";
+import { useCallback, useEffect, useReducer, useRef } from "react";
 import { traceClient } from "@/lib/api";
 import { DEFAULT_PROJECT_ID } from "@/lib/constants";
 import type { TraceSummaryRow, TraceFilters } from "@/types/traces";
 import { DEFAULT_FILTERS } from "@/types/traces";
+import { useScope } from "@/components/UserScopeProvider";
 
 type State = {
   traces: TraceSummaryRow[];
@@ -79,8 +80,15 @@ function mapTrace(t: {
 /**
  * Hook for fetching and filtering traces.
  * Encapsulates the ListTraces RPC, debounced search, and filter state.
+ *
+ * Scope-aware: In "personal" mode the backend already scopes by the
+ * authenticated user's Firebase token.  We pass `include_budget=true`
+ * as a hint header so the backend knows this is a personal-scope request.
+ * Re-fetches automatically when the scope mode changes.
  */
 export function useTraces() {
+  const { isPersonalScope, mode } = useScope();
+
   const [state, dispatch] = useReducer(reducer, {
     traces: [],
     loading: true,
@@ -88,12 +96,21 @@ export function useTraces() {
     filters: DEFAULT_FILTERS,
   });
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Track the previous scope mode so we can detect changes
+  const prevModeRef = useRef(mode);
 
   const fetchTraces = useCallback((f: TraceFilters) => {
     dispatch({ type: "fetch", filters: f });
+
+    // Build headers — the backend interprets the auth token + this hint
+    // to decide whether to filter to the authenticated user's traces.
+    const headers: Record<string, string> = {};
+    if (f.jobId) headers["X-Candela-Job-Id"] = f.jobId;
+    if (isPersonalScope) headers["X-Candela-Scope"] = "personal";
+
     traceClient
       .listTraces({
-        projectId: DEFAULT_PROJECT_ID, // FIXME: Hardcoded - see constants.ts for evolution plan
+        projectId: DEFAULT_PROJECT_ID,
         pagination: { pageSize: 100 },
         search: f.search,
         model: f.model,
@@ -102,7 +119,7 @@ export function useTraces() {
         orderBy: f.orderBy,
         descending: f.descending,
       }, {
-        headers: f.jobId ? { "X-Candela-Job-Id": f.jobId } : {},
+        headers,
       })
       .then((res) => {
         dispatch({
@@ -111,7 +128,7 @@ export function useTraces() {
         });
       })
       .catch((err) => dispatch({ type: "error", message: err.message }));
-  }, []);
+  }, [isPersonalScope]);
 
   const updateFilters = useCallback(
     (patch: Partial<TraceFilters>) => {
@@ -147,6 +164,14 @@ export function useTraces() {
     () => fetchTraces(state.filters),
     [state.filters, fetchTraces]
   );
+
+  // Re-fetch when scope mode changes
+  useEffect(() => {
+    if (prevModeRef.current !== mode) {
+      prevModeRef.current = mode;
+      fetchTraces(state.filters);
+    }
+  }, [mode, fetchTraces, state.filters]);
 
   return {
     traces: state.traces,

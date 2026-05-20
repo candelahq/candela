@@ -65,18 +65,21 @@ test.describe("App Shell", () => {
 
 test.describe("Dashboard", () => {
   test("shows stats when backend responds", async ({ page }) => {
-    await mockConnectRPC(page, "/candela.v1.DashboardService/GetUsageSummary", {
-      totalTraces: "42",
-      totalSpans: "128",
-      totalLlmCalls: "42",
-      totalInputTokens: "10000",
-      totalOutputTokens: "5000",
-      totalCostUsd: 3.47,
-      avgLatencyMs: 234.5,
-      errorRate: 0.02,
-      tracesOverTime: [],
-      costOverTime: [],
-      tokensOverTime: [],
+    await mockConnectRPC(page, "/candela.v1.DashboardService/GetDashboardData", {
+      summary: {
+        totalTraces: "42",
+        totalSpans: "128",
+        totalLlmCalls: "42",
+        totalInputTokens: "10000",
+        totalOutputTokens: "5000",
+        totalCostUsd: 3.47,
+        avgLatencyMs: 234.5,
+        errorRate: 0.02,
+        tracesOverTime: [],
+        costOverTime: [],
+        tokensOverTime: [],
+      },
+      models: [],
     });
     await mockConnectRPC(page, "/candela.v1.TraceService/ListTraces", {
       traces: [],
@@ -458,17 +461,20 @@ test.describe("Settings", () => {
   });
 
   test("shows connected status when backend responds", async ({ page }) => {
-    await mockConnectRPC(page, "/candela.v1.DashboardService/GetUsageSummary", {
-      totalTraces: "100",
-      totalSpans: "500",
-      totalLlmCalls: "100",
-      totalInputTokens: "0",
-      totalOutputTokens: "0",
-      totalCostUsd: 0,
-      avgLatencyMs: 0,
-      errorRate: 0,
-      costOverTime: [],
-      tokensOverTime: [],
+    await mockConnectRPC(page, "/candela.v1.DashboardService/GetDashboardData", {
+      summary: {
+        totalTraces: "100",
+        totalSpans: "500",
+        totalLlmCalls: "100",
+        totalInputTokens: "0",
+        totalOutputTokens: "0",
+        totalCostUsd: 0,
+        avgLatencyMs: 0,
+        errorRate: 0,
+        costOverTime: [],
+        tokensOverTime: [],
+      },
+      models: [],
     });
 
     await page.goto("/settings");
@@ -484,6 +490,26 @@ test.describe("Settings", () => {
   });
 
   test("shows configured providers", async ({ page }) => {
+    await mockConnectRPC(page, "/candela.v1.DashboardService/GetDashboardData", {
+      summary: {
+        totalTraces: "10",
+        totalSpans: "30",
+        totalLlmCalls: "10",
+        totalInputTokens: "0",
+        totalOutputTokens: "0",
+        totalCostUsd: 0,
+        avgLatencyMs: 0,
+        errorRate: 0,
+        costOverTime: [],
+        tokensOverTime: [],
+      },
+      models: [
+        { model: "gpt-4o", provider: "OpenAI", callCount: 5, inputTokens: 0, outputTokens: 0, costUsd: 0, avgLatencyMs: 0 },
+        { model: "gemini-2.5-pro", provider: "Google (Gemini)", callCount: 3, inputTokens: 0, outputTokens: 0, costUsd: 0, avgLatencyMs: 0 },
+        { model: "claude-sonnet-4", provider: "Anthropic", callCount: 2, inputTokens: 0, outputTokens: 0, costUsd: 0, avgLatencyMs: 0 },
+      ],
+    });
+
     await page.goto("/settings");
     await expect(page.locator(".settings-provider-chip").filter({ hasText: "OpenAI" })).toBeVisible();
     await expect(page.locator(".settings-provider-chip").filter({ hasText: "Google (Gemini)" })).toBeVisible();

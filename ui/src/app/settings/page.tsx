@@ -2,6 +2,7 @@
 
 import { useEffect, useReducer } from "react";
 import { dashboardClient } from "@/lib/api";
+import { useCurrentUser } from "@/hooks/useCurrentUser";
 import { timestampFromDate } from "@bufbuild/protobuf/wkt";
 import { API_BASE_URL } from "@/lib/constants";
 
@@ -15,13 +16,23 @@ interface SettingsState {
   health: HealthStatus;
   backendVersion: string;
   traceCount: number | null;
+  llmCalls: number | null;
+  totalCost: number | null;
+  modelCount: number | null;
   storageBackend: string;
   providers: string[];
 }
 
 type Action =
   | { type: "checking" }
-  | { type: "connected"; traceCount: number }
+  | {
+      type: "connected";
+      traceCount: number;
+      llmCalls: number;
+      totalCost: number;
+      providers: string[];
+      modelCount: number;
+    }
   | { type: "offline" };
 
 function reducer(state: SettingsState, action: Action): SettingsState {
@@ -29,7 +40,15 @@ function reducer(state: SettingsState, action: Action): SettingsState {
     case "checking":
       return { ...state, health: "checking" };
     case "connected":
-      return { ...state, health: "connected", traceCount: action.traceCount };
+      return {
+        ...state,
+        health: "connected",
+        traceCount: action.traceCount,
+        llmCalls: action.llmCalls,
+        totalCost: action.totalCost,
+        providers: action.providers,
+        modelCount: action.modelCount,
+      };
     case "offline":
       return { ...state, health: "offline" };
   }
@@ -40,12 +59,17 @@ function reducer(state: SettingsState, action: Action): SettingsState {
 // ──────────────────────────────────────────
 
 export default function SettingsPage() {
+  const { user, isAdmin, isLoading: userLoading } = useCurrentUser();
+
   const [state, dispatch] = useReducer(reducer, {
     health: "checking",
     backendVersion: process.env.NEXT_PUBLIC_APP_VERSION ?? "v0.1.0-dev",
     traceCount: null,
+    llmCalls: null,
+    totalCost: null,
+    modelCount: null,
     storageBackend: "DuckDB",
-    providers: ["OpenAI", "Google (Gemini)", "Anthropic"],
+    providers: [],
   });
 
   useEffect(() => {
@@ -55,14 +79,25 @@ export default function SettingsPage() {
     const start = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
 
     dashboardClient
-      .getUsageSummary({
+      .getDashboardData({
         timeRange: {
           start: timestampFromDate(start),
           end: timestampFromDate(now),
         },
+        includeBudget: true,
       })
       .then((res) => {
-        dispatch({ type: "connected", traceCount: Number(res.totalTraces) });
+        const uniqueProviders = [
+          ...new Set((res.models || []).map((m) => m.provider).filter(Boolean)),
+        ];
+        dispatch({
+          type: "connected",
+          traceCount: Number(res.summary?.totalTraces ?? 0),
+          llmCalls: Number(res.summary?.totalLlmCalls ?? 0),
+          totalCost: res.summary?.totalCostUsd ?? 0,
+          providers: uniqueProviders.length > 0 ? uniqueProviders : ["OpenAI", "Google (Gemini)", "Anthropic"],
+          modelCount: (res.models || []).length,
+        });
       })
       .catch(() => {
         dispatch({ type: "offline" });
@@ -90,17 +125,48 @@ export default function SettingsPage() {
       </header>
 
       <div className="main-body">
+        {/* User Account Card */}
+        {!userLoading && user && (
+          <div className="card animate-in user-account-card" style={{ marginBottom: 16 }}>
+            <div className="card-title">Your Account</div>
+            <div className="user-account-body">
+              <div className="user-account-avatar">
+                {user.email.charAt(0).toUpperCase()}
+              </div>
+              <div className="user-account-info">
+                <div className="settings-grid">
+                  <div className="settings-row">
+                    <span className="settings-label">Email</span>
+                    <span className="settings-value mono">{user.email}</span>
+                  </div>
+                  <div className="settings-row">
+                    <span className="settings-label">Display Name</span>
+                    <span className="settings-value">
+                      {user.displayName || user.email.split("@")[0]}
+                    </span>
+                  </div>
+                  <div className="settings-row">
+                    <span className="settings-label">Role</span>
+                    <span className="settings-value">
+                      <span className={`badge ${isAdmin ? "badge-warning" : "badge-info"}`}>
+                        {isAdmin ? "Admin" : "Developer"}
+                      </span>
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Backend Connection */}
-        <div className="card animate-in" style={{ marginBottom: 16 }}>
+        <div className="card animate-in" style={{ marginBottom: 16, animationDelay: "0.05s" }}>
           <div className="card-title">Backend Connection</div>
           <div className="settings-grid">
             <div className="settings-row">
               <span className="settings-label">Status</span>
               <span className="settings-value">
-                <span
-                  className="health-dot"
-                  style={{ background: healthDot }}
-                />
+                <span className="health-dot" style={{ background: healthDot }} />
                 {healthLabel}
               </span>
             </div>
@@ -116,11 +182,42 @@ export default function SettingsPage() {
               <span className="settings-label">Version</span>
               <span className="settings-value mono">{state.backendVersion}</span>
             </div>
+          </div>
+        </div>
+
+        {/* System Overview (live data) */}
+        <div className="card animate-in" style={{ marginBottom: 16, animationDelay: "0.08s" }}>
+          <div className="card-title">System Overview (30 days)</div>
+          <div className="settings-grid">
             {state.traceCount !== null && (
               <div className="settings-row">
-                <span className="settings-label">Total Traces (30d)</span>
+                <span className="settings-label">Total Traces</span>
                 <span className="settings-value">
                   {state.traceCount.toLocaleString()}
+                </span>
+              </div>
+            )}
+            {state.llmCalls !== null && (
+              <div className="settings-row">
+                <span className="settings-label">LLM Calls</span>
+                <span className="settings-value">
+                  {state.llmCalls.toLocaleString()}
+                </span>
+              </div>
+            )}
+            {state.totalCost !== null && (
+              <div className="settings-row">
+                <span className="settings-label">Total Cost</span>
+                <span className="settings-value">
+                  ${state.totalCost.toFixed(2)}
+                </span>
+              </div>
+            )}
+            {state.modelCount !== null && (
+              <div className="settings-row">
+                <span className="settings-label">Active Models</span>
+                <span className="settings-value">
+                  {state.modelCount}
                 </span>
               </div>
             )}
@@ -128,10 +225,7 @@ export default function SettingsPage() {
         </div>
 
         {/* Storage */}
-        <div
-          className="card animate-in"
-          style={{ marginBottom: 16, animationDelay: "0.05s" }}
-        >
+        <div className="card animate-in" style={{ marginBottom: 16, animationDelay: "0.1s" }}>
           <div className="card-title">Storage Backend</div>
           <div className="settings-grid">
             <div className="settings-row">
@@ -148,10 +242,7 @@ export default function SettingsPage() {
         </div>
 
         {/* Configured Providers */}
-        <div
-          className="card animate-in"
-          style={{ animationDelay: "0.1s" }}
-        >
+        <div className="card animate-in" style={{ animationDelay: "0.12s" }}>
           <div className="card-title">Configured Providers</div>
           <div className="settings-providers">
             {state.providers.map((p) => (

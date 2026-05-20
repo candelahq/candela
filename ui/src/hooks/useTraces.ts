@@ -171,8 +171,7 @@ export function useTraces() {
       prevModeRef.current = mode;
       fetchTraces(state.filters);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mode]);
+  }, [mode, fetchTraces, state.filters]);
 
   return {
     traces: state.traces,

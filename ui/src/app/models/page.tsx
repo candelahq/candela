@@ -137,7 +137,7 @@ export default function ModelsPage() {
                 <div
                   className="budget-bar-fill"
                   style={{
-                    width: `${Math.min(100, ((totals.totalCost) / (totals.totalCost + budgetContext.totalRemainingUsd)) * 100)}%`,
+                    width: `${(totals.totalCost + budgetContext.totalRemainingUsd) > 0 ? Math.min(100, (totals.totalCost / (totals.totalCost + budgetContext.totalRemainingUsd)) * 100) : 0}%`,
                   }}
                 />
               </div>

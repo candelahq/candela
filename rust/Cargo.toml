@@ -5,6 +5,7 @@ members = [
     "crates/candela-proxy",
     "crates/candela-processor",
     "crates/candela-storage",
+    "crates/candela-transparent",
     "bins/candela-proxy",
     "bins/candela-sidecar",
 ]
@@ -18,6 +19,7 @@ repository = "https://github.com/candelahq/candela"
 [workspace.dependencies]
 # Async runtime
 tokio = { version = "1", features = ["full"] }
+tokio-util = "0.7"
 
 # HTTP framework + reverse proxy
 axum = "0.8"
@@ -63,6 +65,7 @@ candela-core = { path = "crates/candela-core" }
 candela-proxy = { path = "crates/candela-proxy" }
 candela-processor = { path = "crates/candela-processor" }
 candela-storage = { path = "crates/candela-storage" }
+candela-transparent = { path = "crates/candela-transparent" }
 
 [profile.release]
 lto = true

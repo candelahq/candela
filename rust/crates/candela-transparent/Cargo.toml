@@ -1,0 +1,19 @@
+[package]
+name = "candela-transparent"
+description = "Transparent proxy listener for iptables-redirected TLS connections"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+candela-proxy = { workspace = true }
+tokio = { workspace = true }
+tokio-util = { workspace = true }
+tracing = { workspace = true }
+bytes = { workspace = true }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+libc = "0.2"
+
+[dev-dependencies]
+tokio-test = { workspace = true }

@@ -114,6 +114,10 @@ func NewGRPCEventStreamAdapter(ctx context.Context, conn *grpc.ClientConn) (*GRP
 	if err := stream.SendMsg([]byte("{}")); err != nil {
 		return nil, fmt.Errorf("tetragonaudit: failed to send GetEvents request: %w", err)
 	}
+	// Signal that the client is done sending (server-streaming RPC best practice).
+	if err := stream.CloseSend(); err != nil {
+		return nil, fmt.Errorf("tetragonaudit: failed to close send stream: %w", err)
+	}
 	return &GRPCEventStreamAdapter{stream: stream}, nil
 }
 

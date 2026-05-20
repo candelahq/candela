@@ -99,3 +99,42 @@ func TestPipelineStatsSnapshot(t *testing.T) {
 		t.Errorf("errors = %d, want 1", errors)
 	}
 }
+
+func TestSIGKILLCaseInsensitive(t *testing.T) {
+	// Regression: kernel/Tetragon may emit SIGKILL in different casing.
+	cases := []string{"SIGKILL", "Sigkill", "sigkill", "SigKill"}
+
+	for _, action := range cases {
+		t.Run("normalize_"+action, func(t *testing.T) {
+			sink := &CollectorSink{}
+			p := NewPipeline(PipelineConfig{Sink: sink})
+			event := Event{
+				NodeName: "n1",
+				ProcessKprobe: &ProcessKprobe{
+					Process:      &Process{Binary: "/bin/kill"},
+					FunctionName: "security_task_kill",
+					Action:       action,
+					PolicyName:   "enforce",
+				},
+			}
+			_ = p.ProcessEvent(context.Background(), event)
+			records := sink.GetRecords()
+			if len(records) != 1 {
+				t.Fatalf("got %d records, want 1", len(records))
+			}
+			if records[0].Severity != "CRITICAL" {
+				t.Errorf("action=%q: severity=%q, want CRITICAL", action, records[0].Severity)
+			}
+		})
+
+		t.Run("enforcementFilter_"+action, func(t *testing.T) {
+			filter := EnforcementOnly()
+			event := Event{
+				ProcessKprobe: &ProcessKprobe{Action: action},
+			}
+			if !filter(event) {
+				t.Errorf("EnforcementOnly() rejected action=%q, want accepted", action)
+			}
+		})
+	}
+}

@@ -4,6 +4,8 @@ import Link from "next/link";
 import { useDashboard } from "@/hooks/useDashboard";
 import { AreaChart } from "@/components/chart";
 import { TimeRangeSelector } from "@/components/TimeRangeSelector";
+import { ScopeToggle } from "@/components/ScopeToggle";
+import { useScope } from "@/components/UserScopeProvider";
 import { ErrorBanner } from "@/components/ErrorBanner";
 import { SkeletonCard } from "@/components/SkeletonCard";
 import { SpanStatus } from "@/gen/candela/types/trace_pb";
@@ -22,6 +24,7 @@ const statusLabel = (s: number) => {
 // ──────────────────────────────────────────
 
 export default function DashboardPage() {
+  const { includeBudget } = useScope();
   const {
     summary,
     recentTraces,
@@ -30,7 +33,7 @@ export default function DashboardPage() {
     timeRange,
     setTimeRange,
     refresh,
-  } = useDashboard();
+  } = useDashboard({ includeBudget });
 
   const totalTokens = summary
     ? (summary.totalInputTokens + summary.totalOutputTokens).toLocaleString()
@@ -41,6 +44,7 @@ export default function DashboardPage() {
       <header className="main-header">
         <h1>Dashboard</h1>
         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          <ScopeToggle />
           <TimeRangeSelector value={timeRange} onChange={setTimeRange} />
           <button className="btn" onClick={refresh}>
             🔄

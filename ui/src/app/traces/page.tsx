@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useTraces } from "@/hooks/useTraces";
+import { ScopeToggle } from "@/components/ScopeToggle";
 import { ErrorBanner } from "@/components/ErrorBanner";
 import type { TraceFilters } from "@/types/traces";
 
@@ -42,6 +43,7 @@ export default function TracesPage() {
       <header className="main-header">
         <h1>Traces</h1>
         <div style={{ display: "flex", gap: 8 }}>
+          <ScopeToggle />
           <button className="btn" onClick={refresh}>
             🔄 Refresh
           </button>

@@ -5,7 +5,30 @@ import { dashboardClient, traceClient } from "@/lib/api";
 import { DEFAULT_PROJECT_ID } from "@/lib/constants";
 import { timestampFromDate } from "@bufbuild/protobuf/wkt";
 import type { DataPoint } from "@/components/chart";
-import type { GetJobLeaderboardResponse, JobUsage } from "@/gen/candela/v1/dashboard_service_pb";
+import type { GetJobLeaderboardResponse, JobUsage, ModelUsage } from "@/gen/candela/v1/dashboard_service_pb";
+import type { UserBudget, BudgetGrant } from "@/gen/candela/types/user_pb";
+
+// ──────────────────────────────────────────
+// Types
+// ──────────────────────────────────────────
+
+export interface ModelUsageRow {
+  model: string;
+  provider: string;
+  callCount: number;
+  inputTokens: number;
+  outputTokens: number;
+  costUsd: number;
+  avgLatencyMs: number;
+  cacheReadTokens: number;
+  cacheCreationTokens: number;
+}
+
+export interface BudgetContext {
+  budget: UserBudget | null;
+  totalRemainingUsd: number;
+  activeGrants: BudgetGrant[];
+}
 
 export interface DashboardSummary {
   totalTraces: number;
@@ -47,6 +70,8 @@ export type TimeRange = "24h" | "7d" | "30d";
 type State = {
   summary: DashboardSummary | null;
   recentTraces: RecentTrace[];
+  models: ModelUsageRow[];
+  budgetContext: BudgetContext | null;
   loading: boolean;
   error: string | null;
   timeRange: TimeRange;
@@ -55,7 +80,13 @@ type State = {
 
 type Action =
   | { type: "fetch" }
-  | { type: "success"; summary: DashboardSummary; recentTraces: RecentTrace[] }
+  | {
+      type: "success";
+      summary: DashboardSummary;
+      recentTraces: RecentTrace[];
+      models: ModelUsageRow[];
+      budgetContext: BudgetContext | null;
+    }
   | { type: "error"; message: string }
   | { type: "refresh" }
   | { type: "setTimeRange"; range: TimeRange };
@@ -65,7 +96,14 @@ function reducer(state: State, action: Action): State {
     case "fetch":
       return { ...state, loading: true, error: null };
     case "success":
-      return { ...state, loading: false, summary: action.summary, recentTraces: action.recentTraces };
+      return {
+        ...state,
+        loading: false,
+        summary: action.summary,
+        recentTraces: action.recentTraces,
+        models: action.models,
+        budgetContext: action.budgetContext,
+      };
     case "error":
       return { ...state, loading: false, error: action.message };
     case "refresh":
@@ -74,6 +112,10 @@ function reducer(state: State, action: Action): State {
       return { ...state, timeRange: action.range, fetchCount: state.fetchCount + 1 };
   }
 }
+
+// ──────────────────────────────────────────
+// Helpers
+// ──────────────────────────────────────────
 
 function timeRangeToMs(range: TimeRange): number {
   switch (range) {
@@ -98,14 +140,41 @@ function toDataPoints(pts: Array<{ timestamp: string; value: number }> | undefin
   }));
 }
 
+function mapModelUsage(m: ModelUsage): ModelUsageRow {
+  return {
+    model: m.model,
+    provider: m.provider,
+    callCount: Number(m.callCount),
+    inputTokens: Number(m.inputTokens),
+    outputTokens: Number(m.outputTokens),
+    costUsd: m.costUsd,
+    avgLatencyMs: m.avgLatencyMs,
+    cacheReadTokens: Number(m.cacheReadTokens),
+    cacheCreationTokens: Number(m.cacheCreationTokens),
+  };
+}
+
+// ──────────────────────────────────────────
+// Hook
+// ──────────────────────────────────────────
+
 /**
- * Hook for fetching the dashboard usage summary with time-series data
- * and recent traces. Supports time range filtering.
+ * Hook for fetching the consolidated dashboard data via GetDashboardData RPC.
+ *
+ * This replaces the previous fan-out of GetUsageSummary + GetModelBreakdown + GetMyUsage
+ * with a single round-trip. When `includeBudget` is true (the default when authenticated),
+ * the response includes per-user budget/grant context.
+ *
+ * Recent traces are still fetched separately via ListTraces.
  */
-export function useDashboard() {
+export function useDashboard(options?: { includeBudget?: boolean }) {
+  const includeBudget = options?.includeBudget ?? true;
+
   const [state, dispatch] = useReducer(reducer, {
     summary: null,
     recentTraces: [],
+    models: [],
+    budgetContext: null,
     loading: true,
     error: null,
     timeRange: "24h",
@@ -118,50 +187,66 @@ export function useDashboard() {
 
     const now = new Date();
     const start = new Date(now.getTime() - timeRangeToMs(state.timeRange));
+    const timeRange = {
+      start: timestampFromDate(start),
+      end: timestampFromDate(now),
+    };
 
-    const summaryPromise = dashboardClient.getUsageSummary({
-      projectId: DEFAULT_PROJECT_ID, // FIXME: Hardcoded - see constants.ts for evolution plan
-      timeRange: {
-        start: timestampFromDate(start),
-        end: timestampFromDate(now),
-      },
+    // ── Primary RPC: GetDashboardData (replaces GetUsageSummary + GetModelBreakdown) ──
+    const dashboardPromise = dashboardClient.getDashboardData({
+      projectId: DEFAULT_PROJECT_ID,
+      timeRange,
+      includeBudget,
     });
 
+    // ── Recent traces (still separate — no equivalent in GetDashboardData) ──
     const tracesPromise = traceClient.listTraces({
-      projectId: DEFAULT_PROJECT_ID, // FIXME: Hardcoded - see constants.ts for evolution plan
+      projectId: DEFAULT_PROJECT_ID,
       orderBy: "start_time",
       descending: true,
       pagination: { pageSize: 5 },
     });
 
+    // ── Job leaderboard (still separate) ──
     const jobLeaderboardPromise = dashboardClient.getJobLeaderboard({
       projectId: DEFAULT_PROJECT_ID,
-      timeRange: {
-        start: timestampFromDate(start),
-        end: timestampFromDate(now),
-      },
+      timeRange,
       limit: 10,
     }).catch(() => ({ jobs: [] })); // Degrade gracefully if job_id column missing
 
-    Promise.all([summaryPromise, tracesPromise, jobLeaderboardPromise])
-      .then(([res, tracesRes, jobRes]) => {
+    Promise.all([dashboardPromise, tracesPromise, jobLeaderboardPromise])
+      .then(([dashRes, tracesRes, jobRes]) => {
         if (cancelled) return;
+
+        const res = dashRes.summary;
+        const models = (dashRes.models || []).map(mapModelUsage);
+
+        // Map budget context from the consolidated response
+        let budgetCtx: BudgetContext | null = null;
+        if (dashRes.budgetContext) {
+          budgetCtx = {
+            budget: dashRes.budgetContext.budget ?? null,
+            totalRemainingUsd: dashRes.budgetContext.totalRemainingUsd,
+            activeGrants: dashRes.budgetContext.activeGrants,
+          };
+        }
+
         dispatch({
           type: "success",
           summary: {
-            totalTraces: Number(res.totalTraces),
-            totalSpans: Number(res.totalSpans),
-            totalLlmCalls: Number(res.totalLlmCalls),
-            totalInputTokens: Number(res.totalInputTokens),
-            totalOutputTokens: Number(res.totalOutputTokens),
-            totalCostUsd: res.totalCostUsd,
-            avgLatencyMs: res.avgLatencyMs,
-            errorRate: res.errorRate,
-            totalCacheReadTokens: Number(res.totalCacheReadTokens ?? 0),
-            totalCacheCreationTokens: Number(res.totalCacheCreationTokens ?? 0),
-            tracesOverTime: toDataPoints(res.tracesOverTime, state.timeRange),
-            costOverTime: toDataPoints(res.costOverTime, state.timeRange),
-            tokensOverTime: toDataPoints(res.tokensOverTime, state.timeRange),
+            totalTraces: Number(res?.totalTraces ?? 0),
+            totalSpans: Number(res?.totalSpans ?? 0),
+            totalLlmCalls: Number(res?.totalLlmCalls ?? 0),
+            totalInputTokens: Number(res?.totalInputTokens ?? 0),
+            totalOutputTokens: Number(res?.totalOutputTokens ?? 0),
+            totalCostUsd: res?.totalCostUsd ?? 0,
+            avgLatencyMs: res?.avgLatencyMs ?? 0,
+            errorRate: res?.errorRate ?? 0,
+            totalCacheReadTokens: Number(res?.totalCacheReadTokens ?? 0),
+            totalCacheCreationTokens: Number(res?.totalCacheCreationTokens ?? 0),
+            tracesOverTime: toDataPoints(res?.tracesOverTime, state.timeRange),
+            costOverTime: toDataPoints(res?.costOverTime, state.timeRange),
+            tokensOverTime: toDataPoints(res?.tokensOverTime, state.timeRange),
             jobLeaderboard: (jobRes as Pick<GetJobLeaderboardResponse, "jobs">).jobs.map((j: JobUsage) => ({
               jobId: j.jobId,
               callCount: Number(j.callCount),
@@ -189,6 +274,8 @@ export function useDashboard() {
                 : "—",
             };
           }),
+          models,
+          budgetContext: budgetCtx,
         });
       })
       .catch((err) => {
@@ -196,7 +283,7 @@ export function useDashboard() {
       });
 
     return () => { cancelled = true; };
-  }, [state.fetchCount, state.timeRange]);
+  }, [state.fetchCount, state.timeRange, includeBudget]);
 
   const refresh = useCallback(() => dispatch({ type: "refresh" }), []);
   const setTimeRange = useCallback(
@@ -207,6 +294,8 @@ export function useDashboard() {
   return {
     summary: state.summary,
     recentTraces: state.recentTraces,
+    models: state.models,
+    budgetContext: state.budgetContext,
     loading: state.loading,
     error: state.error,
     timeRange: state.timeRange,

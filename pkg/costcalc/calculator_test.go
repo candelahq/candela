@@ -144,6 +144,24 @@ func TestCalculate(t *testing.T) {
 			wantMax:      0.009,
 		},
 		{
+			name:         "Gemini 3.5 Flash",
+			provider:     "google",
+			model:        "gemini-3.5-flash",
+			inputTokens:  1000,
+			outputTokens: 500,
+			wantMin:      0.005, // 1K×$1.50/M + 500×$9.00/M = $0.0015 + $0.0045 = $0.006
+			wantMax:      0.007,
+		},
+		{
+			name:         "Gemini 3.5 Flash via gemini-oai provider",
+			provider:     "gemini-oai",
+			model:        "gemini-3.5-flash",
+			inputTokens:  1000,
+			outputTokens: 500,
+			wantMin:      0.005,
+			wantMax:      0.007,
+		},
+		{
 			name:         "Provider-agnostic fallback",
 			provider:     "gemini-oai",
 			model:        "gemini-2.5-pro",

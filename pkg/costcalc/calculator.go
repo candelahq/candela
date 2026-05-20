@@ -438,6 +438,8 @@ func (c *Calculator) loadDefaults() {
 		{Provider: "google", Model: "gemini-3.1-pro", InputPerMillion: 2.00, OutputPerMillion: 12.00},
 		{Provider: "google", Model: "gemini-3.1-flash", InputPerMillion: 0.50, OutputPerMillion: 3.00},
 		{Provider: "google", Model: "gemini-3.1-flash-lite", InputPerMillion: 0.25, OutputPerMillion: 1.50},
+		// Gemini 3.5 (May 2026)
+		{Provider: "google", Model: "gemini-3.5-flash", InputPerMillion: 1.50, OutputPerMillion: 9.00},
 		// Gemini 3.0 (Preview)
 		{Provider: "google", Model: "gemini-3.0-pro", InputPerMillion: 2.00, OutputPerMillion: 12.00},
 		{Provider: "google", Model: "gemini-3.0-flash", InputPerMillion: 0.50, OutputPerMillion: 3.00},

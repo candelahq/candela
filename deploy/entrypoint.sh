@@ -36,7 +36,9 @@ proxy:
     - anthropic
     - anthropic-vertex
     - anthropic-direct
+    - anthropic-bedrock
     - gemini-oai
+    - gemini-direct
   lmstudio:
     enabled: ${CANDELA_LMSTUDIO_ENABLED:-true}
     port: ${CANDELA_LMSTUDIO_PORT:-1234}
@@ -51,6 +53,14 @@ proxy:
         provider: anthropic
       - id: claude-opus-4-20250514
         provider: anthropic
+      - id: gemini-3.5-flash
+        provider: gemini-oai
+      - id: gemini-3.1-flash
+        provider: gemini-oai
+      - id: gemini-3.1-pro
+        provider: gemini-oai
+      - id: gemini-3.0-flash
+        provider: gemini-oai
       - id: gemini-2.5-pro
         provider: gemini-oai
       - id: gemini-2.5-flash

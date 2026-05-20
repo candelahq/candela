@@ -5,6 +5,7 @@ package processor
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -17,8 +18,10 @@ import (
 
 // SpanProcessor buffers incoming spans and flushes them to storage in batches.
 // Supports fan-out to multiple SpanWriter sinks (e.g. DuckDB + Pub/Sub).
+// Each sink is wrapped in a ResilientWriter with circuit breaking, bulkhead
+// isolation, and configurable timeouts.
 type SpanProcessor struct {
-	writers      []storage.SpanWriter
+	writers      []*ResilientWriter
 	calc         *costcalc.Calculator
 	batchSize    int
 	spanCh       chan storage.Span
@@ -27,12 +30,37 @@ type SpanProcessor struct {
 	droppedSpans atomic.Int64
 }
 
-// New creates a new in-process span processor.
-// All provided writers receive every batch on flush.
+// New creates a new in-process span processor with default resilience settings.
+// All provided writers receive every batch on flush, each wrapped in a
+// ResilientWriter with default circuit breaker and bulkhead config.
+// For fine-grained control, use NewWithConfig.
 func New(writers []storage.SpanWriter, calc *costcalc.Calculator, batchSize int) *SpanProcessor {
+	configs := make([]SinkConfig, len(writers))
+	for i, w := range writers {
+		configs[i] = SinkConfig{
+			Writer: w,
+			Name:   fmt.Sprintf("sink-%d", i),
+		}
+	}
+	return NewWithConfig(configs, calc, batchSize)
+}
+
+// NewWithConfig creates a span processor with explicit per-sink configuration.
+// Each SinkConfig controls the circuit breaker threshold, bulkhead size,
+// and write timeout for its sink independently.
+func NewWithConfig(configs []SinkConfig, calc *costcalc.Calculator, batchSize int) *SpanProcessor {
 	if batchSize <= 0 {
 		batchSize = 100
 	}
+
+	writers := make([]*ResilientWriter, len(configs))
+	for i, cfg := range configs {
+		if cfg.Name == "" {
+			cfg.Name = fmt.Sprintf("sink-%d", i)
+		}
+		writers[i] = NewResilientWriter(cfg)
+	}
+
 	return &SpanProcessor{
 		writers:   writers,
 		calc:      calc,
@@ -88,9 +116,11 @@ func (p *SpanProcessor) Run(ctx context.Context) {
 		}
 
 		// Fan-out: write to all sinks independently and in parallel.
+		// Each ResilientWriter handles its own circuit breaker, bulkhead,
+		// and timeout — no raw goroutine management needed here.
 		// Deep-clone each span's reference types to prevent cross-sink mutation.
 		var wg sync.WaitGroup
-		for _, w := range p.writers {
+		for _, rw := range p.writers {
 			sinkBatch := make([]storage.Span, len(batch))
 			for i, s := range batch {
 				sinkBatch[i] = s
@@ -109,14 +139,12 @@ func (p *SpanProcessor) Run(ctx context.Context) {
 				}
 			}
 			wg.Add(1)
-			go func(w storage.SpanWriter, batch []storage.Span) {
+			go func(rw *ResilientWriter, batch []storage.Span) {
 				defer wg.Done()
-				sinkCtx, sinkCancel := context.WithTimeout(ctx, 30*time.Second)
-				defer sinkCancel()
-				if err := w.IngestSpans(sinkCtx, batch); err != nil {
-					slog.Error("failed to flush spans", "error", err, "count", len(batch))
-				}
-			}(w, sinkBatch)
+				// ResilientWriter applies its own timeout, circuit breaker,
+				// and bulkhead internally — just call IngestSpans.
+				_ = rw.IngestSpans(ctx, batch)
+			}(rw, sinkBatch)
 		}
 		wg.Wait()
 		slog.Debug("flushed spans to storage", "count", len(batch), "sinks", len(p.writers))
@@ -170,4 +198,15 @@ func (p *SpanProcessor) Stop() {
 // DroppedSpans returns the total number of spans dropped due to buffer pressure.
 func (p *SpanProcessor) DroppedSpans() int64 {
 	return p.droppedSpans.Load()
+}
+
+// SinkHealth returns the health status of all configured sinks.
+// Each entry reports the circuit breaker state, write counts, and
+// failure metrics for a single sink.
+func (p *SpanProcessor) SinkHealth() []SinkHealth {
+	health := make([]SinkHealth, len(p.writers))
+	for i, rw := range p.writers {
+		health[i] = rw.Health()
+	}
+	return health
 }

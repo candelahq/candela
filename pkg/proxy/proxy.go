@@ -1582,16 +1582,23 @@ func extractStreamingUsage(provider string, data []byte) (content string, inputT
 // --- Helpers ---
 
 func toInt64(v interface{}) int64 {
+	var result int64
 	switch n := v.(type) {
 	case float64:
-		return int64(n)
+		result = int64(n)
 	case int64:
-		return n
+		result = n
 	case json.Number:
-		i, _ := n.Int64()
-		return i
+		result, _ = n.Int64()
+	default:
+		return 0
 	}
-	return 0
+	// Token counts are always non-negative; clamp to 0 to guard against
+	// malformed upstream responses (discovered by fuzzing).
+	if result < 0 {
+		return 0
+	}
+	return result
 }
 
 // isUtilityEndpoint returns true for API paths that are non-generative

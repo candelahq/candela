@@ -670,26 +670,32 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 	// Check if this is a streaming request (check BEFORE translation).
 	isStreaming := isStreamingRequest(providerName, reqBody)
 
+	// Extract model from request once — reused for pricing gate, body
+	// enrichment, and path rewriting. For most providers the model is in
+	// the request body; for "google" it's in the URL path
+	// (e.g. /v1beta/models/gemini-2.5-flash:generateContent).
+	requestModel, _ := extractRequestInfo(providerName, reqBody)
+	if requestModel == "" {
+		requestModel = extractModelFromURLPath(upstreamPath)
+	}
+
 	// ── Pricing gate (#6) — blocks unpriced cloud models universally ──
 	// This runs for ALL requests (solo, team, local) to prevent untracked
 	// API calls that would show $0 cost. Only "local" provider is exempt.
-	{
-		model, _ := extractRequestInfo(providerName, reqBody)
-		if model != "" && strings.ToLower(providerName) != "local" && !p.calc.HasPricing(providerName, model) {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusPaymentRequired)
-			errBody, _ := json.Marshal(map[string]any{
-				"error": map[string]any{
-					"message": "no pricing configured for model " + model + " — contact your admin",
-					"type":    "pricing_not_configured",
-					"code":    402,
-				},
-			})
-			_, _ = w.Write(errBody)
-			slog.Warn("blocked request: no pricing for model",
-				"user_id", effectiveUserID, "provider", providerName, "model", model)
-			return
-		}
+	if requestModel != "" && strings.ToLower(providerName) != "local" && !p.calc.HasPricing(providerName, requestModel) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusPaymentRequired)
+		errBody, _ := json.Marshal(map[string]any{
+			"error": map[string]any{
+				"message": "no pricing configured for model " + requestModel + " — contact your admin",
+				"type":    "pricing_not_configured",
+				"code":    402,
+			},
+		})
+		_, _ = w.Write(errBody)
+		slog.Warn("blocked request: no pricing for model",
+			"user_id", effectiveUserID, "provider", providerName, "model", requestModel)
+		return
 	}
 
 	// ── Budget pre-flight with model-aware floor (#7) ──
@@ -756,7 +762,7 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 			"streaming", isStreaming)
 	}
 
-	// --- Vertex AI body enrichment for native passthrough ---
+	// --- Vertex AI body enrichment for native Anthropic passthrough ---
 	// When there's no FormatTranslator (e.g. anthropic-vertex), the body is
 	// forwarded as-is. But Vertex AI rawPredict requires:
 	//   1. `anthropic_version` in the body (Claude Code sends it as a header)
@@ -765,7 +771,10 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 	// or model stripping — Bedrock accepts the model in the URL and ignores
 	// extra body fields. Use RequestSigner to distinguish: Bedrock uses SigV4
 	// signing, Vertex uses Bearer tokens.
-	if provider.FormatTranslator == nil && provider.PathRewriter != nil && provider.RequestSigner == nil {
+	// NOTE: This block is scoped to Anthropic providers — Gemini providers with
+	// PathRewriter have different body requirements (model prefix, no stripping).
+	isAnthropicPassthrough := providerName == "anthropic-vertex"
+	if provider.FormatTranslator == nil && provider.PathRewriter != nil && provider.RequestSigner == nil && isAnthropicPassthrough {
 		var bodyMap map[string]interface{}
 		if json.Unmarshal(upstreamBody, &bodyMap) == nil && bodyMap != nil {
 			modified := false
@@ -820,14 +829,29 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// --- Vertex AI Gemini model prefix injection ---
+	// Vertex AI's OpenAI-compat endpoint requires model names to include the
+	// publisher prefix (e.g. "google/gemini-2.5-flash"). Transparently inject
+	// the "google/" prefix so clients can send bare model names.
+	// Uses requestModel (extracted once above) to avoid redundant JSON parsing.
+	if providerName == "gemini-oai" && provider.PathRewriter != nil && requestModel != "" && !strings.HasPrefix(requestModel, "google/") {
+		var bodyMap map[string]interface{}
+		if json.Unmarshal(upstreamBody, &bodyMap) == nil && bodyMap != nil {
+			bodyMap["model"] = "google/" + requestModel
+			if prefixed, err := json.Marshal(bodyMap); err == nil {
+				upstreamBody = prefixed
+			}
+		}
+	}
+
 	// --- Path rewriting ---
 	// If the provider has a PathRewriter, rewrite the upstream URL path
 	// (e.g. Vertex AI project-scoped model endpoints).
-	// When FormatTranslator is nil (e.g. anthropic-vertex), the model comes
-	// from the request body rather than from translation.
+	// Uses translatedModel (from FormatTranslator) or requestModel
+	// (extracted once above from body or URL path).
 	modelForPath := translatedModel
-	if modelForPath == "" && provider.PathRewriter != nil {
-		modelForPath, _ = extractRequestInfo(providerName, reqBody)
+	if modelForPath == "" {
+		modelForPath = requestModel
 	}
 	if provider.PathRewriter != nil && modelForPath != "" {
 		upstreamPath = provider.PathRewriter.RewritePath(modelForPath, isStreaming)
@@ -1610,4 +1634,23 @@ func isUtilityEndpoint(path string) bool {
 		strings.HasSuffix(path, "/tokenize") ||
 		strings.HasSuffix(path, "/models") ||
 		path == "/v1/models"
+}
+
+// extractModelFromURLPath extracts a model name from a Google API URL path.
+// Supports patterns like:
+//
+//	/v1beta/models/gemini-2.5-flash:generateContent → gemini-2.5-flash
+//	/v1/models/gemini-2.5-pro:streamGenerateContent → gemini-2.5-pro
+func extractModelFromURLPath(path string) string {
+	const marker = "/models/"
+	idx := strings.LastIndex(path, marker)
+	if idx < 0 {
+		return ""
+	}
+	rest := path[idx+len(marker):]
+	// Strip the method suffix (e.g. ":generateContent").
+	if colon := strings.Index(rest, ":"); colon > 0 {
+		rest = rest[:colon]
+	}
+	return rest
 }

@@ -570,6 +570,44 @@ func (r *VertexAIPathRewriter) RewritePath(model string, streaming bool) string 
 }
 
 // ====================================================================
+// VertexAIGeminiOAIPathRewriter — implements PathRewriter
+// ====================================================================
+
+// VertexAIGeminiOAIPathRewriter rewrites URL paths for Vertex AI's OpenAI-compatible
+// Gemini endpoint. The model name is in the request body (not the URL), so this
+// returns a static path to the OpenAI-compat endpoint.
+type VertexAIGeminiOAIPathRewriter struct {
+	ProjectID string // GCP project ID
+	Region    string // GCP region (e.g. "us-central1")
+}
+
+func (r *VertexAIGeminiOAIPathRewriter) RewritePath(model string, streaming bool) string {
+	// Vertex AI's OpenAI-compat endpoint uses a fixed path — model is in the body.
+	return fmt.Sprintf("/v1/projects/%s/locations/%s/endpoints/openapi/chat/completions",
+		r.ProjectID, r.Region)
+}
+
+// ====================================================================
+// VertexAIGooglePathRewriter — implements PathRewriter
+// ====================================================================
+
+// VertexAIGooglePathRewriter rewrites URL paths for Vertex AI's native Gemini
+// publisher endpoint (e.g. publishers/google/models/{model}:generateContent).
+type VertexAIGooglePathRewriter struct {
+	ProjectID string // GCP project ID
+	Region    string // GCP region (e.g. "us-central1")
+}
+
+func (r *VertexAIGooglePathRewriter) RewritePath(model string, streaming bool) string {
+	method := "generateContent"
+	if streaming {
+		method = "streamGenerateContent"
+	}
+	return fmt.Sprintf("/v1/projects/%s/locations/%s/publishers/google/models/%s:%s",
+		r.ProjectID, r.Region, model, method)
+}
+
+// ====================================================================
 // Shared types for OpenAI ↔ Anthropic translation
 // ====================================================================
 

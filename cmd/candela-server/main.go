@@ -233,20 +233,17 @@ func main() {
 				"error", adcErr)
 		}
 
-		// Attach ADC to Gemini / Google providers.
-		// These use the Generative Language API directly (no Vertex AI project needed).
-		if tokenSource != nil {
-			for i, p := range allProviders {
-				if p.Name == "gemini-oai" || p.Name == "google" {
-					allProviders[i].TokenSource = tokenSource
-					slog.Info("🔐 GCP-backed provider configured with ADC",
-						"provider", p.Name, "upstream", p.UpstreamURL)
-				}
-			}
-		}
+		// NOTE: Gemini/Google ADC is NOT configured here for the Generative
+		// Language API (generativelanguage.googleapis.com) because that endpoint
+		// does NOT accept OAuth2 ADC tokens — it requires API keys. Instead,
+		// when Vertex AI is configured below, Gemini routes are redirected to
+		// the Vertex AI endpoint which natively accepts ADC tokens.
 
-		// Attach FormatTranslator + PathRewriter + ADC to the Anthropic provider
-		// if Vertex AI is configured.
+		// Attach FormatTranslator + PathRewriter + ADC to providers when
+		// Vertex AI is configured. This handles:
+		//   - anthropic / anthropic-vertex → Vertex AI rawPredict
+		//   - gemini-oai → Vertex AI OpenAI-compat endpoint
+		//   - google → Vertex AI native Gemini publisher endpoint
 		if cfg.Proxy.VertexAI.ProjectID != "" {
 			region := cfg.Proxy.VertexAI.Region
 			if region == "" {
@@ -254,7 +251,8 @@ func main() {
 			}
 
 			for i, p := range allProviders {
-				if p.Name == "anthropic" || p.Name == "anthropic-vertex" {
+				switch p.Name {
+				case "anthropic", "anthropic-vertex":
 					allProviders[i].UpstreamURL = fmt.Sprintf(
 						"https://%s-aiplatform.googleapis.com", region)
 					allProviders[i].PathRewriter = &proxy.VertexAIPathRewriter{
@@ -280,6 +278,34 @@ func main() {
 						"adc", tokenSource != nil,
 						"format_translation", p.Name == "anthropic",
 						"caching_mode", cfg.Proxy.VertexAI.CachingMode)
+
+				case "gemini-oai", "google":
+					// Route through Vertex AI endpoints for ADC auth support.
+					allProviders[i].UpstreamURL = fmt.Sprintf(
+						"https://%s-aiplatform.googleapis.com", region)
+					if p.Name == "gemini-oai" {
+						allProviders[i].PathRewriter = &proxy.VertexAIGeminiOAIPathRewriter{
+							ProjectID: cfg.Proxy.VertexAI.ProjectID,
+							Region:    region,
+						}
+					} else {
+						allProviders[i].PathRewriter = &proxy.VertexAIGooglePathRewriter{
+							ProjectID: cfg.Proxy.VertexAI.ProjectID,
+							Region:    region,
+						}
+					}
+					if tokenSource != nil {
+						allProviders[i].TokenSource = tokenSource
+					}
+					msg := "🔐 Gemini-OAI via Vertex AI configured"
+					if p.Name == "google" {
+						msg = "🔐 Google native via Vertex AI configured"
+					}
+					slog.Info(msg,
+						"provider", p.Name,
+						"project", cfg.Proxy.VertexAI.ProjectID,
+						"region", region,
+						"adc", tokenSource != nil)
 				}
 			}
 		}

@@ -35,17 +35,18 @@ func (bytesCodec) Marshal(v any) ([]byte, error) {
 func (bytesCodec) Unmarshal(data []byte, v any) error {
 	switch p := v.(type) {
 	case *[]byte:
-		*p = data
+		// Copy data — gRPC transport buffers may be reused.
+		*p = append((*p)[:0], data...)
 		return nil
 	case *json.RawMessage:
-		*p = json.RawMessage(data)
+		*p = append((*p)[:0], data...)
 		return nil
 	default:
 		return fmt.Errorf("bytesCodec: unsupported type %T", v)
 	}
 }
 
-func (bytesCodec) Name() string { return "bytes" }
+func (bytesCodec) Name() string { return "hubble-bytes" }
 
 func init() {
 	encoding.RegisterCodec(bytesCodec{})
@@ -176,7 +177,7 @@ func (s *GRPCFlowSource) newStream(ctx context.Context, filter FlowFilter) (grpc
 		return nil, fmt.Errorf("hubbleaudit: gRPC connection is nil")
 	}
 	desc := &grpc.StreamDesc{ServerStreams: true}
-	codec := encoding.GetCodec("bytes")
+	codec := encoding.GetCodec("hubble-bytes")
 	stream, err := s.conn.NewStream(ctx, desc, "/observer.Observer/GetFlows",
 		grpc.ForceCodec(codec))
 	if err != nil {

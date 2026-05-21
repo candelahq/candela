@@ -256,6 +256,7 @@ func main() {
 	}
 
 	// ── Tetragon audit pipeline (optional) ──
+	var auditPipeline *tetragonaudit.Pipeline
 	if tetragonAudit != "" || tetragonGRPCAddr != "" {
 		var auditSink tetragonaudit.Sink
 
@@ -277,8 +278,20 @@ func main() {
 			auditSink = &tetragonaudit.LogSink{}
 		}
 
-		pipeline := tetragonaudit.NewPipeline(tetragonaudit.PipelineConfig{
+		auditPipeline = tetragonaudit.NewPipeline(tetragonaudit.PipelineConfig{
 			Sink: auditSink,
+		})
+
+		// Register health endpoint.
+		mux.HandleFunc("/debug/tetragon/health", func(w http.ResponseWriter, r *http.Request) {
+			h := auditPipeline.Health()
+			w.Header().Set("Content-Type", "application/json")
+			if !h.Healthy {
+				w.WriteHeader(http.StatusServiceUnavailable)
+			}
+			_, _ = fmt.Fprintf(w,
+				`{"healthy":%t,"connected":%t,"last_event_at":"%s","processed":%d,"dropped":%d,"errors":%d}`+"\n",
+				h.Healthy, h.Connected, h.LastEventAt.Format(time.RFC3339), h.Processed, h.Dropped, h.Errors)
 		})
 
 		// Prefer gRPC source over file source.
@@ -295,17 +308,11 @@ func main() {
 
 			go func() {
 				slog.Info("📋 Tetragon gRPC audit pipeline started", "addr", tetragonGRPCAddr)
-				stream, err := tetragonaudit.NewGRPCEventStreamAdapter(ctx, grpcSrc.Conn())
-				if err != nil {
-					if ctx.Err() == nil {
-						slog.Error("Tetragon gRPC audit pipeline error during stream initialization", "error", err)
-					}
-					return
-				}
-				if err := grpcSrc.StreamEvents(ctx, stream, pipeline); err != nil && ctx.Err() == nil {
+				err := grpcSrc.StreamEventsWithRetry(ctx, auditPipeline, tetragonaudit.RetryConfig{})
+				if ctx.Err() == nil && err != nil {
 					slog.Error("Tetragon gRPC audit pipeline error", "error", err)
 				}
-				p, d, e := pipeline.Stats().Snapshot()
+				p, d, e := auditPipeline.Stats().Snapshot()
 				slog.Info("Tetragon gRPC audit pipeline stopped",
 					"processed", p, "dropped", d, "errors", e)
 			}()
@@ -318,11 +325,13 @@ func main() {
 				}
 				defer func() { _ = f.Close() }()
 
+				auditPipeline.SetConnected(true)
 				slog.Info("📋 Tetragon audit pipeline started", "source", tetragonAudit)
-				if err := pipeline.ProcessJSONStream(ctx, f); err != nil && ctx.Err() == nil {
+				if err := auditPipeline.ProcessJSONStream(ctx, f); err != nil && ctx.Err() == nil {
 					slog.Error("Tetragon audit pipeline error", "error", err)
 				}
-				p, d, e := pipeline.Stats().Snapshot()
+				auditPipeline.SetConnected(false)
+				p, d, e := auditPipeline.Stats().Snapshot()
 				slog.Info("Tetragon audit pipeline stopped",
 					"processed", p, "dropped", d, "errors", e)
 			}()
@@ -334,6 +343,13 @@ func main() {
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
+
+	// Drain audit pipeline first (flush any buffered OTel logs).
+	if auditPipeline != nil {
+		if err := auditPipeline.Drain(shutdownCtx); err != nil {
+			slog.Warn("audit pipeline drain error", "error", err)
+		}
+	}
 
 	// Close sinks first (flush pending spans), then server.
 	proc.Stop()

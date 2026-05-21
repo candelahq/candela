@@ -15,6 +15,7 @@ import (
 )
 
 var _ Sink = (*OTelSink)(nil)
+var _ Flusher = (*OTelSink)(nil)
 
 // OTelSinkConfig holds configuration for the OTel log exporter.
 type OTelSinkConfig struct {
@@ -175,5 +176,13 @@ func (s *OTelSink) exportLogs(ctx context.Context, logs plog.Logs) error {
 		"endpoint", url,
 	)
 
+	return nil
+}
+
+// Flush closes idle HTTP connections to ensure a clean shutdown.
+// The OTelSink exports synchronously per-event, so there's no pending
+// batch to flush — but closing idle connections ensures transport cleanup.
+func (s *OTelSink) Flush(_ context.Context) error {
+	s.client.CloseIdleConnections()
 	return nil
 }

@@ -6,6 +6,9 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"math"
+	"math/rand/v2"
+	"time"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
@@ -85,6 +88,114 @@ func (s *GRPCSource) Close() error {
 	return nil
 }
 
+// Addr returns the configured gRPC address.
+func (s *GRPCSource) Addr() string {
+	return s.addr
+}
+
+// RetryConfig controls the reconnect backoff behavior.
+type RetryConfig struct {
+	// InitialDelay is the first backoff duration (default: 1s).
+	InitialDelay time.Duration
+	// MaxDelay is the backoff ceiling (default: 30s).
+	MaxDelay time.Duration
+	// Multiplier is the backoff factor (default: 2.0).
+	Multiplier float64
+}
+
+func (rc RetryConfig) withDefaults() RetryConfig {
+	if rc.InitialDelay <= 0 {
+		rc.InitialDelay = time.Second
+	}
+	if rc.MaxDelay <= 0 {
+		rc.MaxDelay = 30 * time.Second
+	}
+	if rc.Multiplier <= 0 {
+		rc.Multiplier = 2.0
+	}
+	return rc
+}
+
+// StreamEventsWithRetry streams events from the Tetragon gRPC API with
+// automatic reconnection on failure using exponential backoff.
+//
+// On each connection failure, the method sleeps for an exponentially-growing
+// duration (with ±25% jitter) before retrying. On successful reconnection
+// the backoff resets to InitialDelay.
+//
+// The loop exits cleanly when ctx is cancelled (graceful shutdown).
+func (s *GRPCSource) StreamEventsWithRetry(ctx context.Context, pipeline *Pipeline, rc RetryConfig) error {
+	rc = rc.withDefaults()
+	attempt := 0
+
+	for {
+		// Check for cancellation before each attempt.
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+
+		stream, err := NewGRPCEventStreamAdapter(ctx, s.conn)
+		if err != nil {
+			pipeline.SetConnected(false)
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			delay := backoff(attempt, rc)
+			slog.Warn("tetragonaudit: gRPC stream creation failed, retrying",
+				"error", err, "attempt", attempt+1, "backoff", delay)
+			attempt++
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(delay):
+				continue
+			}
+		}
+
+		slog.Info("tetragonaudit: gRPC stream connected", "addr", s.addr, "attempt", attempt+1)
+		pipeline.SetConnected(true)
+		attempt = 0 // Reset on successful connection.
+
+		err = s.StreamEvents(ctx, stream, pipeline)
+		pipeline.SetConnected(false)
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		if err == nil {
+			// Clean EOF — server shut the stream. Reconnect after a small delay
+			// to avoid a tight loop during rolling updates or config mismatches.
+			slog.Info("tetragonaudit: gRPC stream ended, reconnecting", "addr", s.addr)
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(rc.InitialDelay):
+				continue
+			}
+		}
+
+		delay := backoff(attempt, rc)
+		slog.Warn("tetragonaudit: gRPC stream error, reconnecting",
+			"error", err, "attempt", attempt+1, "backoff", delay)
+		attempt++
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(delay):
+		}
+	}
+}
+
+// backoff computes the delay for a given attempt with ±25% jitter.
+func backoff(attempt int, rc RetryConfig) time.Duration {
+	d := float64(rc.InitialDelay) * math.Pow(rc.Multiplier, float64(attempt))
+	if d > float64(rc.MaxDelay) {
+		d = float64(rc.MaxDelay)
+	}
+	// Add ±25% jitter.
+	jitter := d * 0.25 * (2*rand.Float64() - 1) //nolint:gosec
+	return time.Duration(d + jitter)
+}
+
 // Conn returns the underlying gRPC connection for advanced usage
 // (e.g. creating Tetragon-specific clients).
 func (s *GRPCSource) Conn() *grpc.ClientConn {
@@ -105,6 +216,9 @@ type GRPCEventStreamAdapter struct {
 // It initiates a server-streaming RPC on the Tetragon FineGuidanceSensors/GetEvents
 // endpoint and returns an adapter that reads raw event bytes.
 func NewGRPCEventStreamAdapter(ctx context.Context, conn *grpc.ClientConn) (*GRPCEventStreamAdapter, error) {
+	if conn == nil {
+		return nil, fmt.Errorf("tetragonaudit: gRPC connection is nil")
+	}
 	desc := &grpc.StreamDesc{ServerStreams: true}
 	stream, err := conn.NewStream(ctx, desc, "/tetragon.FineGuidanceSensors/GetEvents")
 	if err != nil {

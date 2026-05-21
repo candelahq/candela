@@ -10,6 +10,16 @@ import (
 	"time"
 )
 
+// VertexAIUpstreamURL returns the correct upstream URL for a Vertex AI region.
+// The global endpoint uses "https://aiplatform.googleapis.com" (no region prefix),
+// while regional endpoints use "https://{region}-aiplatform.googleapis.com".
+func VertexAIUpstreamURL(region string) string {
+	if region == "global" {
+		return "https://aiplatform.googleapis.com"
+	}
+	return fmt.Sprintf("https://%s-aiplatform.googleapis.com", region)
+}
+
 // dateVersionRe matches a trailing date suffix like "-20250514" at the end of a model name.
 var dateVersionRe = regexp.MustCompile(`-(\d{8})$`)
 

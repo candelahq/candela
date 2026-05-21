@@ -996,7 +996,7 @@ func buildCloudProxy(cfg Config, submitter *processor.SpanProcessor) (*proxy.Pro
 			p.UpstreamURL = "https://generativelanguage.googleapis.com/v1beta/openai"
 			p.TokenSource = tokenSource
 		case "anthropic":
-			p.UpstreamURL = fmt.Sprintf("https://%s-aiplatform.googleapis.com", region)
+			p.UpstreamURL = proxy.VertexAIUpstreamURL(region)
 			p.TokenSource = tokenSource
 			ft := &proxy.AnthropicFormatTranslator{}
 			if cfg.VertexAI.CachingMode != "" {
@@ -1025,7 +1025,7 @@ func buildCloudProxy(cfg Config, submitter *processor.SpanProcessor) (*proxy.Pro
 		case "anthropic-vertex":
 			// Native Anthropic Messages API routed via Vertex AI rawPredict.
 			// Candela injects GCP ADC auth — no client API key needed.
-			p.UpstreamURL = fmt.Sprintf("https://%s-aiplatform.googleapis.com", region)
+			p.UpstreamURL = proxy.VertexAIUpstreamURL(region)
 			p.TokenSource = tokenSource
 			p.PathRewriter = &proxy.VertexAIPathRewriter{
 				ProjectID: project,

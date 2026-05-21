@@ -253,8 +253,7 @@ func main() {
 			for i, p := range allProviders {
 				switch p.Name {
 				case "anthropic", "anthropic-vertex":
-					allProviders[i].UpstreamURL = fmt.Sprintf(
-						"https://%s-aiplatform.googleapis.com", region)
+					allProviders[i].UpstreamURL = proxy.VertexAIUpstreamURL(region)
 					allProviders[i].PathRewriter = &proxy.VertexAIPathRewriter{
 						ProjectID: cfg.Proxy.VertexAI.ProjectID,
 						Region:    region,
@@ -279,29 +278,36 @@ func main() {
 						"format_translation", p.Name == "anthropic",
 						"caching_mode", cfg.Proxy.VertexAI.CachingMode)
 
-				case "gemini-oai", "google":
-					// Route through Vertex AI endpoints for ADC auth support.
-					allProviders[i].UpstreamURL = fmt.Sprintf(
-						"https://%s-aiplatform.googleapis.com", region)
-					if p.Name == "gemini-oai" {
-						allProviders[i].PathRewriter = &proxy.VertexAIGeminiOAIPathRewriter{
-							ProjectID: cfg.Proxy.VertexAI.ProjectID,
-							Region:    region,
-						}
-					} else {
-						allProviders[i].PathRewriter = &proxy.VertexAIGooglePathRewriter{
-							ProjectID: cfg.Proxy.VertexAI.ProjectID,
-							Region:    region,
-						}
+				case "gemini-oai":
+					// Route through Vertex AI's OpenAI-compatible endpoint.
+					// Path: /v1/projects/{P}/locations/{R}/endpoints/openapi/chat/completions
+					// Model prefix "google/" is injected by proxy body enrichment.
+					allProviders[i].UpstreamURL = proxy.VertexAIUpstreamURL(region)
+					allProviders[i].PathRewriter = &proxy.VertexAIGeminiOAIPathRewriter{
+						ProjectID: cfg.Proxy.VertexAI.ProjectID,
+						Region:    region,
 					}
 					if tokenSource != nil {
 						allProviders[i].TokenSource = tokenSource
 					}
-					msg := "🔐 Gemini-OAI via Vertex AI configured"
-					if p.Name == "google" {
-						msg = "🔐 Google native via Vertex AI configured"
+					slog.Info("🔐 Gemini-OAI via Vertex AI configured",
+						"provider", p.Name,
+						"project", cfg.Proxy.VertexAI.ProjectID,
+						"region", region,
+						"adc", tokenSource != nil)
+
+				case "google":
+					// Route through Vertex AI's native Gemini publisher endpoint.
+					// Path: /v1/projects/{P}/locations/{R}/publishers/google/models/{M}:{method}
+					allProviders[i].UpstreamURL = proxy.VertexAIUpstreamURL(region)
+					allProviders[i].PathRewriter = &proxy.VertexAIGooglePathRewriter{
+						ProjectID: cfg.Proxy.VertexAI.ProjectID,
+						Region:    region,
 					}
-					slog.Info(msg,
+					if tokenSource != nil {
+						allProviders[i].TokenSource = tokenSource
+					}
+					slog.Info("🔐 Google native via Vertex AI configured",
 						"provider", p.Name,
 						"project", cfg.Proxy.VertexAI.ProjectID,
 						"region", region,

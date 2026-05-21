@@ -595,3 +595,22 @@ func TestVertexAIPathRewriter(t *testing.T) {
 		})
 	}
 }
+
+func TestVertexAIUpstreamURL(t *testing.T) {
+	tests := []struct {
+		region string
+		want   string
+	}{
+		{"global", "https://aiplatform.googleapis.com"},
+		{"us-central1", "https://us-central1-aiplatform.googleapis.com"},
+		{"europe-west4", "https://europe-west4-aiplatform.googleapis.com"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.region, func(t *testing.T) {
+			got := VertexAIUpstreamURL(tt.region)
+			if got != tt.want {
+				t.Errorf("VertexAIUpstreamURL(%q) = %q, want %q", tt.region, got, tt.want)
+			}
+		})
+	}
+}

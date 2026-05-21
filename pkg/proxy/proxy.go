@@ -756,7 +756,7 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 			"streaming", isStreaming)
 	}
 
-	// --- Vertex AI body enrichment for native passthrough ---
+	// --- Vertex AI body enrichment for native Anthropic passthrough ---
 	// When there's no FormatTranslator (e.g. anthropic-vertex), the body is
 	// forwarded as-is. But Vertex AI rawPredict requires:
 	//   1. `anthropic_version` in the body (Claude Code sends it as a header)
@@ -765,7 +765,10 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 	// or model stripping — Bedrock accepts the model in the URL and ignores
 	// extra body fields. Use RequestSigner to distinguish: Bedrock uses SigV4
 	// signing, Vertex uses Bearer tokens.
-	if provider.FormatTranslator == nil && provider.PathRewriter != nil && provider.RequestSigner == nil {
+	// NOTE: This block is scoped to Anthropic providers — Gemini providers with
+	// PathRewriter have different body requirements (model prefix, no stripping).
+	isAnthropicPassthrough := providerName == "anthropic-vertex" || providerName == "anthropic-direct"
+	if provider.FormatTranslator == nil && provider.PathRewriter != nil && provider.RequestSigner == nil && isAnthropicPassthrough {
 		var bodyMap map[string]interface{}
 		if json.Unmarshal(upstreamBody, &bodyMap) == nil && bodyMap != nil {
 			modified := false
@@ -816,6 +819,22 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 					"anthropic_version", bodyMap["anthropic_version"],
 					"system_snippet", systemSnippet,
 					"body_len", len(upstreamBody))
+			}
+		}
+	}
+
+	// --- Vertex AI Gemini model prefix injection ---
+	// Vertex AI's OpenAI-compat endpoint requires model names to include the
+	// publisher prefix (e.g. "google/gemini-2.5-flash"). Transparently inject
+	// the "google/" prefix so clients can send bare model names.
+	if providerName == "gemini-oai" && provider.PathRewriter != nil {
+		var bodyMap map[string]interface{}
+		if json.Unmarshal(upstreamBody, &bodyMap) == nil && bodyMap != nil {
+			if model, ok := bodyMap["model"].(string); ok && !strings.HasPrefix(model, "google/") {
+				bodyMap["model"] = "google/" + model
+				if prefixed, err := json.Marshal(bodyMap); err == nil {
+					upstreamBody = prefixed
+				}
 			}
 		}
 	}

@@ -773,7 +773,7 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 	// signing, Vertex uses Bearer tokens.
 	// NOTE: This block is scoped to Anthropic providers — Gemini providers with
 	// PathRewriter have different body requirements (model prefix, no stripping).
-	isAnthropicPassthrough := providerName == "anthropic-vertex"
+	isAnthropicPassthrough := providerName == "anthropic-vertex" || providerName == "anthropic-direct"
 	if provider.FormatTranslator == nil && provider.PathRewriter != nil && provider.RequestSigner == nil && isAnthropicPassthrough {
 		var bodyMap map[string]interface{}
 		if json.Unmarshal(upstreamBody, &bodyMap) == nil && bodyMap != nil {
@@ -834,14 +834,9 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 	// publisher prefix (e.g. "google/gemini-2.5-flash"). Transparently inject
 	// the "google/" prefix so clients can send bare model names.
 	// Uses requestModel (extracted once above) to avoid redundant JSON parsing.
+	// Uses rewriteModelField (regex) to avoid expensive JSON round-trip.
 	if providerName == "gemini-oai" && provider.PathRewriter != nil && requestModel != "" && !strings.HasPrefix(requestModel, "google/") {
-		var bodyMap map[string]interface{}
-		if json.Unmarshal(upstreamBody, &bodyMap) == nil && bodyMap != nil {
-			bodyMap["model"] = "google/" + requestModel
-			if prefixed, err := json.Marshal(bodyMap); err == nil {
-				upstreamBody = prefixed
-			}
-		}
+		upstreamBody = rewriteModelField(upstreamBody, "google/"+requestModel)
 	}
 
 	// --- Path rewriting ---

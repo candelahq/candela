@@ -111,6 +111,8 @@ func (s *GRPCFlowSource) Observe(ctx context.Context, filter FlowFilter) (<-chan
 // Fields mirror the Hubble proto without requiring a proto dependency.
 type flowRequest struct {
 	Whitelist []flowFilterEntry `json:"whitelist,omitempty"`
+	Since     *time.Time        `json:"since,omitempty"`
+	Follow    bool              `json:"follow,omitempty"`
 }
 
 type flowFilterEntry struct {
@@ -121,32 +123,47 @@ type flowFilterEntry struct {
 }
 
 // buildRequest translates a FlowFilter into the JSON request body.
+// Pod/namespace filters use separate whitelist entries for source and
+// destination to achieve OR semantics ("source OR destination matches").
 func buildRequest(filter FlowFilter) ([]byte, error) {
-	req := flowRequest{}
+	req := flowRequest{
+		Since:  filter.Since,
+		Follow: true,
+	}
 
-	entry := flowFilterEntry{
-		Verdict: filter.Verdicts,
+	newEntry := func() flowFilterEntry {
+		return flowFilterEntry{
+			Verdict: filter.Verdicts,
+		}
 	}
 
 	// Build pod filter from namespace/podname if provided.
+	// Use separate entries for source and destination to achieve OR logic;
+	// combining both in one entry would create AND semantics.
 	if filter.PodName != "" {
 		podFilter := filter.PodName
 		if filter.Namespace != "" {
 			podFilter = filter.Namespace + "/" + filter.PodName
 		}
-		entry.SourcePod = []string{podFilter}
-		entry.DestPod = []string{podFilter}
+		e1 := newEntry()
+		e1.SourcePod = []string{podFilter}
+		req.Whitelist = append(req.Whitelist, e1)
+
+		e2 := newEntry()
+		e2.DestPod = []string{podFilter}
+		req.Whitelist = append(req.Whitelist, e2)
 	} else if filter.Namespace != "" {
 		// Namespace-only filter uses wildcard pod matching.
 		nsFilter := filter.Namespace + "/"
-		entry.SourcePod = []string{nsFilter}
-		entry.DestPod = []string{nsFilter}
-	}
+		e1 := newEntry()
+		e1.SourcePod = []string{nsFilter}
+		req.Whitelist = append(req.Whitelist, e1)
 
-	// Only add the whitelist entry if at least one filter field is set.
-	if len(entry.SourcePod) > 0 || len(entry.DestPod) > 0 ||
-		len(entry.Verdict) > 0 || len(entry.Type) > 0 {
-		req.Whitelist = append(req.Whitelist, entry)
+		e2 := newEntry()
+		e2.DestPod = []string{nsFilter}
+		req.Whitelist = append(req.Whitelist, e2)
+	} else if len(filter.Verdicts) > 0 {
+		req.Whitelist = append(req.Whitelist, newEntry())
 	}
 
 	return json.Marshal(req)

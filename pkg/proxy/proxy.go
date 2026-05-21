@@ -773,7 +773,7 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 	// signing, Vertex uses Bearer tokens.
 	// NOTE: This block is scoped to Anthropic providers — Gemini providers with
 	// PathRewriter have different body requirements (model prefix, no stripping).
-	isAnthropicPassthrough := providerName == "anthropic-vertex" || providerName == "anthropic-direct"
+	isAnthropicPassthrough := providerName == "anthropic-vertex"
 	if provider.FormatTranslator == nil && provider.PathRewriter != nil && provider.RequestSigner == nil && isAnthropicPassthrough {
 		var bodyMap map[string]interface{}
 		if json.Unmarshal(upstreamBody, &bodyMap) == nil && bodyMap != nil {

@@ -152,12 +152,22 @@ type Sink interface {
 	Emit(ctx context.Context, record AuditRecord) error
 }
 
+// Flusher is an optional interface for sinks that buffer data and need
+// an explicit flush before shutdown.
+type Flusher interface {
+	Flush(ctx context.Context) error
+}
+
 // Pipeline reads Tetragon events from a source and forwards them to a Sink
 // as normalized AuditRecords.
 type Pipeline struct {
 	sink    Sink
 	stats   PipelineStats
 	filters []EventFilter
+
+	mu        sync.Mutex
+	lastEvent time.Time
+	connected bool
 }
 
 // EventFilter returns true if the event should be processed.
@@ -196,6 +206,71 @@ func NewPipeline(cfg PipelineConfig) *Pipeline {
 // Stats returns the pipeline's processing statistics.
 func (p *Pipeline) Stats() *PipelineStats {
 	return &p.stats
+}
+
+// PipelineHealth reports the current health of the audit pipeline.
+type PipelineHealth struct {
+	Healthy     bool      `json:"healthy"`
+	Connected   bool      `json:"connected"`
+	LastEventAt time.Time `json:"last_event_at,omitempty"`
+	Processed   int64     `json:"processed"`
+	Dropped     int64     `json:"dropped"`
+	Errors      int64     `json:"errors"`
+}
+
+// Health returns a snapshot of the pipeline's health status.
+// Healthy is true when the pipeline is connected and has received
+// at least one event within the last 5 minutes.
+func (p *Pipeline) Health() PipelineHealth {
+	processed, dropped, errors := p.stats.Snapshot()
+
+	p.mu.Lock()
+	lastEvent := p.lastEvent
+	connected := p.connected
+	p.mu.Unlock()
+
+	healthy := connected
+	if !lastEvent.IsZero() {
+		// If we've seen events before, consider unhealthy if stale > 5m.
+		healthy = connected && time.Since(lastEvent) < 5*time.Minute
+	}
+
+	return PipelineHealth{
+		Healthy:     healthy,
+		Connected:   connected,
+		LastEventAt: lastEvent,
+		Processed:   processed,
+		Dropped:     dropped,
+		Errors:      errors,
+	}
+}
+
+// SetConnected updates the pipeline's connection status.
+func (p *Pipeline) SetConnected(connected bool) {
+	p.mu.Lock()
+	p.connected = connected
+	p.mu.Unlock()
+}
+
+// Drain flushes any buffered data in the sink and returns.
+// If the sink implements Flusher, it is called with the given context.
+func (p *Pipeline) Drain(ctx context.Context) error {
+	if f, ok := p.sink.(Flusher); ok {
+		return f.Flush(ctx)
+	}
+	// MultiSink: check if any child implements Flusher.
+	if ms, ok := p.sink.(*MultiSink); ok {
+		var firstErr error
+		for _, s := range ms.Sinks {
+			if f, ok := s.(Flusher); ok {
+				if err := f.Flush(ctx); err != nil && firstErr == nil {
+					firstErr = err
+				}
+			}
+		}
+		return firstErr
+	}
+	return nil
 }
 
 // ProcessJSONStream reads newline-delimited JSON Tetragon events from
@@ -273,6 +348,11 @@ func (p *Pipeline) ProcessEvent(ctx context.Context, event Event) error {
 	p.stats.mu.Lock()
 	p.stats.Processed++
 	p.stats.mu.Unlock()
+
+	p.mu.Lock()
+	p.lastEvent = time.Now()
+	p.mu.Unlock()
+
 	return nil
 }
 

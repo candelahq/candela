@@ -12,7 +12,46 @@ import (
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/encoding"
 )
+
+func init() {
+	// Register the bytes codec so both client (via ForceCodec) and server
+	// (via content-subtype discovery) can use raw byte transport without
+	// requiring protobuf message types.
+	encoding.RegisterCodec(bytesCodec{})
+}
+
+// bytesCodec is a gRPC codec for raw byte transfer without protobuf.
+// This enables the Tetragon adapter to communicate using JSON-encoded
+// bytes without importing the full Tetragon protobuf dependency.
+type bytesCodec struct{}
+
+func (bytesCodec) Marshal(v any) ([]byte, error) {
+	switch m := v.(type) {
+	case []byte:
+		return m, nil
+	case json.RawMessage:
+		return []byte(m), nil
+	default:
+		return nil, fmt.Errorf("bytesCodec: unsupported type %T", v)
+	}
+}
+
+func (bytesCodec) Unmarshal(data []byte, v any) error {
+	switch m := v.(type) {
+	case *[]byte:
+		*m = append((*m)[:0], data...)
+		return nil
+	case *json.RawMessage:
+		*m = append((*m)[:0], data...)
+		return nil
+	default:
+		return fmt.Errorf("bytesCodec: unsupported type %T", v)
+	}
+}
+
+func (bytesCodec) Name() string { return "bytes" }
 
 // GRPCSource streams Tetragon events from the Tetragon gRPC export API.
 // This is the production event source for in-cluster deployments where
@@ -220,7 +259,8 @@ func NewGRPCEventStreamAdapter(ctx context.Context, conn *grpc.ClientConn) (*GRP
 		return nil, fmt.Errorf("tetragonaudit: gRPC connection is nil")
 	}
 	desc := &grpc.StreamDesc{ServerStreams: true}
-	stream, err := conn.NewStream(ctx, desc, "/tetragon.FineGuidanceSensors/GetEvents")
+	stream, err := conn.NewStream(ctx, desc, "/tetragon.FineGuidanceSensors/GetEvents",
+		grpc.ForceCodec(bytesCodec{}))
 	if err != nil {
 		return nil, fmt.Errorf("tetragonaudit: failed to create gRPC stream: %w", err)
 	}

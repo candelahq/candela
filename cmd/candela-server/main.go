@@ -222,20 +222,35 @@ func main() {
 	if cfg.Proxy.Enabled {
 		allProviders := proxy.DefaultProviders()
 
+		// Get ADC token source for automatic GCP auth.
+		// Used by Anthropic (Vertex AI), Gemini, and Google providers so the
+		// Cloud Run service account authenticates to upstream APIs on behalf
+		// of users — individual user tokens never reach the upstream provider.
+		tokenSource, adcErr := google.DefaultTokenSource(context.Background(),
+			"https://www.googleapis.com/auth/cloud-platform")
+		if adcErr != nil {
+			slog.Warn("failed to get GCP ADC — GCP-backed providers will require manual auth",
+				"error", adcErr)
+		}
+
+		// Attach ADC to Gemini / Google providers.
+		// These use the Generative Language API directly (no Vertex AI project needed).
+		if tokenSource != nil {
+			for i, p := range allProviders {
+				if p.Name == "gemini-oai" || p.Name == "google" {
+					allProviders[i].TokenSource = tokenSource
+					slog.Info("🔐 GCP-backed provider configured with ADC",
+						"provider", p.Name, "upstream", p.UpstreamURL)
+				}
+			}
+		}
+
 		// Attach FormatTranslator + PathRewriter + ADC to the Anthropic provider
 		// if Vertex AI is configured.
 		if cfg.Proxy.VertexAI.ProjectID != "" {
 			region := cfg.Proxy.VertexAI.Region
 			if region == "" {
 				region = "us-central1"
-			}
-
-			// Get ADC token source for automatic GCP auth.
-			tokenSource, adcErr := google.DefaultTokenSource(context.Background(),
-				"https://www.googleapis.com/auth/cloud-platform")
-			if adcErr != nil {
-				slog.Warn("failed to get GCP ADC — Anthropic proxy will require manual auth",
-					"error", adcErr)
 			}
 
 			for i, p := range allProviders {

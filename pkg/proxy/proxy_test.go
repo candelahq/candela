@@ -617,3 +617,50 @@ func TestUserID_EmptyWithoutAuthContext(t *testing.T) {
 		t.Errorf("span UserID = %q, want empty string", spans[0].UserID)
 	}
 }
+
+func TestExtractModelFromURLPath(t *testing.T) {
+	tests := []struct {
+		name string
+		path string
+		want string
+	}{
+		{
+			"standard generateContent",
+			"/v1/projects/my-proj/locations/us-central1/publishers/google/models/gemini-2.5-flash:generateContent",
+			"gemini-2.5-flash",
+		},
+		{
+			"streamGenerateContent",
+			"/v1/projects/p/locations/global/publishers/google/models/gemini-3.5-flash:streamGenerateContent",
+			"gemini-3.5-flash",
+		},
+		{
+			"no method suffix",
+			"/v1/projects/p/locations/global/publishers/google/models/gemini-2.5-pro",
+			"gemini-2.5-pro",
+		},
+		{
+			"no /models/ marker",
+			"/v1/projects/p/locations/us-central1/endpoints/openapi/chat/completions",
+			"",
+		},
+		{
+			"model with colon at start (empty name)",
+			"/v1/publishers/google/models/:generateContent",
+			"",
+		},
+		{
+			"multiple /models/ segments uses last",
+			"/v1/models/fake/publishers/google/models/gemini-2.5-flash:generateContent",
+			"gemini-2.5-flash",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := extractModelFromURLPath(tt.path)
+			if got != tt.want {
+				t.Errorf("extractModelFromURLPath(%q) = %q, want %q", tt.path, got, tt.want)
+			}
+		})
+	}
+}

@@ -1644,7 +1644,7 @@ func extractModelFromURLPath(path string) string {
 	}
 	rest := path[idx+len(marker):]
 	// Strip the method suffix (e.g. ":generateContent").
-	if colon := strings.Index(rest, ":"); colon > 0 {
+	if colon := strings.Index(rest, ":"); colon >= 0 {
 		rest = rest[:colon]
 	}
 	return rest

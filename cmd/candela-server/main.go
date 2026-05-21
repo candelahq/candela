@@ -253,8 +253,7 @@ func main() {
 			for i, p := range allProviders {
 				switch p.Name {
 				case "anthropic", "anthropic-vertex":
-					allProviders[i].UpstreamURL = fmt.Sprintf(
-						"https://%s-aiplatform.googleapis.com", region)
+					allProviders[i].UpstreamURL = proxy.VertexAIUpstreamURL(region)
 					allProviders[i].PathRewriter = &proxy.VertexAIPathRewriter{
 						ProjectID: cfg.Proxy.VertexAI.ProjectID,
 						Region:    region,

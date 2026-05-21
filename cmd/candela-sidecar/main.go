@@ -21,6 +21,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -289,9 +290,7 @@ func main() {
 			if !h.Healthy {
 				w.WriteHeader(http.StatusServiceUnavailable)
 			}
-			_, _ = fmt.Fprintf(w,
-				`{"healthy":%t,"connected":%t,"last_event_at":"%s","processed":%d,"dropped":%d,"errors":%d}`+"\n",
-				h.Healthy, h.Connected, h.LastEventAt.Format(time.RFC3339), h.Processed, h.Dropped, h.Errors)
+			_ = json.NewEncoder(w).Encode(h)
 		})
 
 		// Prefer gRPC source over file source.

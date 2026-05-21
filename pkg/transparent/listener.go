@@ -326,9 +326,19 @@ func (l *Listener) resolveOrigDst(conn net.Conn, sni string) string {
 	// Try SO_ORIGINAL_DST first (works when traffic was iptables-redirected).
 	if tcpConn, ok := conn.(*net.TCPConn); ok {
 		if origDst, err := GetOriginalDst(tcpConn); err == nil {
-			slog.Debug("transparent: resolved via SO_ORIGINAL_DST",
-				"dest", origDst, "sni", sni)
-			return origDst
+			// Guard against self-connection: when there is no iptables
+			// REDIRECT rule, SO_ORIGINAL_DST returns the actual destination
+			// the client connected to — which is this listener itself.
+			// Tunneling back to ourselves creates an infinite accept loop
+			// that burns through file descriptors until the process crashes.
+			if origDst == conn.LocalAddr().String() {
+				slog.Debug("transparent: SO_ORIGINAL_DST returned self, skipping",
+					"dest", origDst, "sni", sni)
+			} else {
+				slog.Debug("transparent: resolved via SO_ORIGINAL_DST",
+					"dest", origDst, "sni", sni)
+				return origDst
+			}
 		}
 	}
 

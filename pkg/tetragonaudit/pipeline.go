@@ -161,9 +161,10 @@ type Flusher interface {
 // Pipeline reads Tetragon events from a source and forwards them to a Sink
 // as normalized AuditRecords.
 type Pipeline struct {
-	sink    Sink
-	stats   PipelineStats
-	filters []EventFilter
+	sink           Sink
+	stats          PipelineStats
+	filters        []EventFilter
+	staleThreshold time.Duration
 
 	mu        sync.Mutex
 	lastEvent time.Time
@@ -192,14 +193,23 @@ func (s *PipelineStats) Snapshot() (processed, dropped, errors int64) {
 type PipelineConfig struct {
 	Sink    Sink
 	Filters []EventFilter
+
+	// HealthStaleThreshold is the duration after which the pipeline is
+	// considered unhealthy if no events have been received. Defaults to 5m.
+	HealthStaleThreshold time.Duration
 }
 
 // NewPipeline creates an audit pipeline that normalizes Tetragon events
 // and forwards them to the configured Sink.
 func NewPipeline(cfg PipelineConfig) *Pipeline {
+	staleThreshold := cfg.HealthStaleThreshold
+	if staleThreshold == 0 {
+		staleThreshold = 5 * time.Minute
+	}
 	return &Pipeline{
-		sink:    cfg.Sink,
-		filters: cfg.Filters,
+		sink:           cfg.Sink,
+		filters:        cfg.Filters,
+		staleThreshold: staleThreshold,
 	}
 }
 
@@ -231,8 +241,8 @@ func (p *Pipeline) Health() PipelineHealth {
 
 	healthy := connected
 	if !lastEvent.IsZero() {
-		// If we've seen events before, consider unhealthy if stale > 5m.
-		healthy = connected && time.Since(lastEvent) < 5*time.Minute
+		// If we've seen events before, consider unhealthy if stale.
+		healthy = connected && time.Since(lastEvent) < p.staleThreshold
 	}
 
 	return PipelineHealth{

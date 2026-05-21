@@ -174,12 +174,13 @@ func TestListenerWildcardSNI(t *testing.T) {
 // sendTLSClientHello connects to the given address and sends a TLS ClientHello
 // with the specified server name. The handshake will fail (no TLS server),
 // but the ClientHello bytes are what we need.
-func sendTLSClientHello(t *testing.T, addr, serverName string) {
+// Returns true if the dial succeeded (connection reached the listener).
+func sendTLSClientHello(t *testing.T, addr, serverName string) bool {
 	t.Helper()
 	conn, err := net.DialTimeout("tcp", addr, 2*time.Second)
 	if err != nil {
 		t.Logf("sendTLSClientHello: dial %s failed (expected in some cases): %v", addr, err)
-		return
+		return false
 	}
 	defer func() { _ = conn.Close() }()
 
@@ -201,6 +202,7 @@ func sendTLSClientHello(t *testing.T, addr, serverName string) {
 	case <-done:
 	case <-time.After(1 * time.Second):
 	}
+	return true
 }
 
 // TestListenerConcurrentRace hammers the listener with many concurrent
@@ -234,11 +236,17 @@ func TestListenerConcurrentRace(t *testing.T) {
 	// Send 50 concurrent TLS connections.
 	const N = 50
 	var wg sync.WaitGroup
+	var dialFailures int64
+	var mu sync.Mutex
 	wg.Add(N)
 	for i := 0; i < N; i++ {
 		go func() {
 			defer wg.Done()
-			sendTLSClientHello(t, ln.Addr().String(), "api.openai.com")
+			if !sendTLSClientHello(t, ln.Addr().String(), "api.openai.com") {
+				mu.Lock()
+				dialFailures++
+				mu.Unlock()
+			}
 		}()
 	}
 	wg.Wait()
@@ -249,11 +257,12 @@ func TestListenerConcurrentRace(t *testing.T) {
 	intercepted, passthrough, errors := listener.Stats().Snapshot()
 	total := intercepted + passthrough + errors
 
-	// We don't assert exact counts because upstream dials may fail,
-	// but the total must equal N (each connection is counted exactly once).
-	if total != N {
-		t.Errorf("total stats (%d intercepted + %d passthrough + %d errors = %d) != %d connections",
-			intercepted, passthrough, errors, total, N)
+	// Connections that failed to dial (e.g. "too many open files" in CI)
+	// never reach the listener, so subtract them from the expected count.
+	expected := int64(N) - dialFailures
+	if total != expected {
+		t.Errorf("total stats (%d intercepted + %d passthrough + %d errors = %d) != %d expected (%d sent - %d dial failures)",
+			intercepted, passthrough, errors, total, expected, int64(N), dialFailures)
 	}
 }
 

@@ -308,9 +308,7 @@ func main() {
 
 			go func() {
 				slog.Info("📋 Tetragon gRPC audit pipeline started", "addr", tetragonGRPCAddr)
-				auditPipeline.SetConnected(true)
 				err := grpcSrc.StreamEventsWithRetry(ctx, auditPipeline, tetragonaudit.RetryConfig{})
-				auditPipeline.SetConnected(false)
 				if ctx.Err() == nil && err != nil {
 					slog.Error("Tetragon gRPC audit pipeline error", "error", err)
 				}

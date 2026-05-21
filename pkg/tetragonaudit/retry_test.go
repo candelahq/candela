@@ -27,6 +27,15 @@ func TestStreamEventsWithRetry_ReconnectsAfterFailure(t *testing.T) {
 	if !errors.Is(err, context.DeadlineExceeded) && !errors.Is(err, context.Canceled) {
 		t.Fatalf("expected context error, got: %v", err)
 	}
+
+	// After retry loop exits, health should report disconnected.
+	h := pipeline.Health()
+	if h.Connected {
+		t.Error("expected Connected=false after retry loop exits")
+	}
+	if h.Healthy {
+		t.Error("expected Healthy=false after retry loop exits")
+	}
 }
 
 func TestStreamEventsWithRetry_CancelledImmediately(t *testing.T) {

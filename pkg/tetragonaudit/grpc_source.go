@@ -136,6 +136,7 @@ func (s *GRPCSource) StreamEventsWithRetry(ctx context.Context, pipeline *Pipeli
 
 		stream, err := NewGRPCEventStreamAdapter(ctx, s.conn)
 		if err != nil {
+			pipeline.SetConnected(false)
 			if ctx.Err() != nil {
 				return ctx.Err()
 			}
@@ -152,16 +153,24 @@ func (s *GRPCSource) StreamEventsWithRetry(ctx context.Context, pipeline *Pipeli
 		}
 
 		slog.Info("tetragonaudit: gRPC stream connected", "addr", s.addr, "attempt", attempt+1)
+		pipeline.SetConnected(true)
 		attempt = 0 // Reset on successful connection.
 
 		err = s.StreamEvents(ctx, stream, pipeline)
+		pipeline.SetConnected(false)
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
 		if err == nil {
-			// Clean EOF — server shut the stream. Reconnect.
+			// Clean EOF — server shut the stream. Reconnect after a small delay
+			// to avoid a tight loop during rolling updates or config mismatches.
 			slog.Info("tetragonaudit: gRPC stream ended, reconnecting", "addr", s.addr)
-			continue
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(rc.InitialDelay):
+				continue
+			}
 		}
 
 		delay := backoff(attempt, rc)

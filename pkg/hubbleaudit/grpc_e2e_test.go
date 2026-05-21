@@ -9,9 +9,6 @@ import (
 	"testing"
 	"time"
 
-	// Import tetragonaudit to trigger bytesCodec registration via init().
-	_ "github.com/candelahq/candela/pkg/tetragonaudit"
-
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 )

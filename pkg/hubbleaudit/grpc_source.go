@@ -16,6 +16,41 @@ import (
 	"google.golang.org/grpc/encoding"
 )
 
+// bytesCodec is a gRPC codec for raw byte transfer without protobuf.
+// This is registered locally so hubbleaudit can be used independently
+// of the tetragonaudit package.
+type bytesCodec struct{}
+
+func (bytesCodec) Marshal(v any) ([]byte, error) {
+	switch b := v.(type) {
+	case []byte:
+		return b, nil
+	case json.RawMessage:
+		return []byte(b), nil
+	default:
+		return nil, fmt.Errorf("bytesCodec: unsupported type %T", v)
+	}
+}
+
+func (bytesCodec) Unmarshal(data []byte, v any) error {
+	switch p := v.(type) {
+	case *[]byte:
+		*p = data
+		return nil
+	case *json.RawMessage:
+		*p = json.RawMessage(data)
+		return nil
+	default:
+		return fmt.Errorf("bytesCodec: unsupported type %T", v)
+	}
+}
+
+func (bytesCodec) Name() string { return "bytes" }
+
+func init() {
+	encoding.RegisterCodec(bytesCodec{})
+}
+
 // GRPCFlowSourceConfig configures the Hubble gRPC flow source.
 type GRPCFlowSourceConfig struct {
 	// Addr is the Hubble relay gRPC endpoint
@@ -62,7 +97,7 @@ func NewGRPCFlowSource(cfg GRPCFlowSourceConfig) (*GRPCFlowSource, error) {
 // The returned channel is closed when the context is cancelled or the
 // stream encounters a fatal error.
 func (s *GRPCFlowSource) Observe(ctx context.Context, filter FlowFilter) (<-chan Flow, error) {
-	stream, err := s.newStream(ctx)
+	stream, err := s.newStream(ctx, filter)
 	if err != nil {
 		return nil, err
 	}
@@ -72,9 +107,71 @@ func (s *GRPCFlowSource) Observe(ctx context.Context, filter FlowFilter) (<-chan
 	return ch, nil
 }
 
+// flowRequest is the JSON representation of a Hubble GetFlowsRequest.
+// Fields mirror the Hubble proto without requiring a proto dependency.
+type flowRequest struct {
+	Whitelist []flowFilterEntry `json:"whitelist,omitempty"`
+	Since     *time.Time        `json:"since,omitempty"`
+	Follow    bool              `json:"follow,omitempty"`
+}
+
+type flowFilterEntry struct {
+	SourcePod []string `json:"source_pod,omitempty"`
+	DestPod   []string `json:"destination_pod,omitempty"`
+	Verdict   []string `json:"verdict,omitempty"`
+	Type      []string `json:"type,omitempty"`
+}
+
+// buildRequest translates a FlowFilter into the JSON request body.
+// Pod/namespace filters use separate whitelist entries for source and
+// destination to achieve OR semantics ("source OR destination matches").
+func buildRequest(filter FlowFilter) ([]byte, error) {
+	req := flowRequest{
+		Since:  filter.Since,
+		Follow: true,
+	}
+
+	newEntry := func() flowFilterEntry {
+		return flowFilterEntry{
+			Verdict: filter.Verdicts,
+		}
+	}
+
+	// Build pod filter from namespace/podname if provided.
+	// Use separate entries for source and destination to achieve OR logic;
+	// combining both in one entry would create AND semantics.
+	if filter.PodName != "" {
+		podFilter := filter.PodName
+		if filter.Namespace != "" {
+			podFilter = filter.Namespace + "/" + filter.PodName
+		}
+		e1 := newEntry()
+		e1.SourcePod = []string{podFilter}
+		req.Whitelist = append(req.Whitelist, e1)
+
+		e2 := newEntry()
+		e2.DestPod = []string{podFilter}
+		req.Whitelist = append(req.Whitelist, e2)
+	} else if filter.Namespace != "" {
+		// Namespace-only filter uses wildcard pod matching.
+		nsFilter := filter.Namespace + "/"
+		e1 := newEntry()
+		e1.SourcePod = []string{nsFilter}
+		req.Whitelist = append(req.Whitelist, e1)
+
+		e2 := newEntry()
+		e2.DestPod = []string{nsFilter}
+		req.Whitelist = append(req.Whitelist, e2)
+	} else if len(filter.Verdicts) > 0 {
+		req.Whitelist = append(req.Whitelist, newEntry())
+	}
+
+	return json.Marshal(req)
+}
+
 // newStream creates a server-streaming RPC on the Hubble Observer/GetFlows
-// endpoint using the globally registered bytesCodec.
-func (s *GRPCFlowSource) newStream(ctx context.Context) (grpc.ClientStream, error) {
+// endpoint using the locally registered bytesCodec.
+func (s *GRPCFlowSource) newStream(ctx context.Context, filter FlowFilter) (grpc.ClientStream, error) {
 	if s.conn == nil {
 		return nil, fmt.Errorf("hubbleaudit: gRPC connection is nil")
 	}
@@ -85,8 +182,12 @@ func (s *GRPCFlowSource) newStream(ctx context.Context) (grpc.ClientStream, erro
 	if err != nil {
 		return nil, fmt.Errorf("hubbleaudit: failed to create gRPC stream: %w", err)
 	}
-	// Send empty request to initiate flow streaming.
-	if err := stream.SendMsg([]byte("{}")); err != nil {
+	// Marshal and send the filter as the GetFlows request.
+	reqBody, err := buildRequest(filter)
+	if err != nil {
+		return nil, fmt.Errorf("hubbleaudit: failed to marshal GetFlows request: %w", err)
+	}
+	if err := stream.SendMsg(reqBody); err != nil {
 		return nil, fmt.Errorf("hubbleaudit: failed to send GetFlows request: %w", err)
 	}
 	if err := stream.CloseSend(); err != nil {
@@ -173,7 +274,7 @@ func (s *GRPCFlowSource) StreamWithRetry(ctx context.Context, handler FlowHandle
 			return ctx.Err()
 		}
 
-		stream, err := s.newStream(ctx)
+		stream, err := s.newStream(ctx, s.cfg.Filter)
 		if err != nil {
 			s.SetConnected(false)
 			if ctx.Err() != nil {

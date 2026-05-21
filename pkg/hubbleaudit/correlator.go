@@ -81,12 +81,14 @@ func (c *WindowCorrelator) Ingest(flow Flow) {
 	}
 
 	// Index by source pod.
-	if key := podKey(flow.Source); key != "" {
-		c.podIndex[key] = append(c.podIndex[key], c.head)
+	srcKey := podKey(flow.Source)
+	if srcKey != "" {
+		c.podIndex[srcKey] = append(c.podIndex[srcKey], c.head)
 	}
-	// Index by destination pod.
-	if key := podKey(flow.Destination); key != "" {
-		c.podIndex[key] = append(c.podIndex[key], c.head)
+	// Index by destination pod (skip if same as source to avoid duplicates).
+	dstKey := podKey(flow.Destination)
+	if dstKey != "" && dstKey != srcKey {
+		c.podIndex[dstKey] = append(c.podIndex[dstKey], c.head)
 	}
 	// Index by network tuple.
 	if key := tupleKey(flow); key != "" {
@@ -103,16 +105,18 @@ func (c *WindowCorrelator) Ingest(flow Flow) {
 func (c *WindowCorrelator) evictAt(pos int) {
 	old := c.ring[pos].flow
 
-	if key := podKey(old.Source); key != "" {
-		c.podIndex[key] = removeIndex(c.podIndex[key], pos)
-		if len(c.podIndex[key]) == 0 {
-			delete(c.podIndex, key)
+	srcKey := podKey(old.Source)
+	if srcKey != "" {
+		c.podIndex[srcKey] = removeIndex(c.podIndex[srcKey], pos)
+		if len(c.podIndex[srcKey]) == 0 {
+			delete(c.podIndex, srcKey)
 		}
 	}
-	if key := podKey(old.Destination); key != "" {
-		c.podIndex[key] = removeIndex(c.podIndex[key], pos)
-		if len(c.podIndex[key]) == 0 {
-			delete(c.podIndex, key)
+	dstKey := podKey(old.Destination)
+	if dstKey != "" && dstKey != srcKey {
+		c.podIndex[dstKey] = removeIndex(c.podIndex[dstKey], pos)
+		if len(c.podIndex[dstKey]) == 0 {
+			delete(c.podIndex, dstKey)
 		}
 	}
 	if key := tupleKey(old); key != "" {
@@ -151,7 +155,7 @@ func (c *WindowCorrelator) Correlate(_ context.Context, key string, window time.
 		if entry.flow.Time.Before(cutoff) {
 			continue // flow itself is outside the window
 		}
-		result = append(result, entry.flow)
+		result = append(result, copyFlow(entry.flow))
 	}
 
 	return result, nil
@@ -204,4 +208,23 @@ func removeIndex(s []int, val int) []int {
 		}
 	}
 	return s
+}
+
+// copyEndpoint returns a shallow copy of an Endpoint with its labels slice
+// duplicated to prevent callers from mutating internal state.
+func copyEndpoint(ep Endpoint) Endpoint {
+	if len(ep.Labels) > 0 {
+		labels := make([]string, len(ep.Labels))
+		copy(labels, ep.Labels)
+		ep.Labels = labels
+	}
+	return ep
+}
+
+// copyFlow returns a defensive copy of a Flow, duplicating label slices
+// in both endpoints so callers cannot mutate the correlator's ring buffer.
+func copyFlow(f Flow) Flow {
+	f.Source = copyEndpoint(f.Source)
+	f.Destination = copyEndpoint(f.Destination)
+	return f
 }

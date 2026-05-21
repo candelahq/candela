@@ -239,7 +239,7 @@ func main() {
 			for i, p := range allProviders {
 				if p.Name == "gemini-oai" || p.Name == "google" {
 					allProviders[i].TokenSource = tokenSource
-					slog.Info("🔐 Gemini provider configured with ADC",
+					slog.Info("🔐 GCP-backed provider configured with ADC",
 						"provider", p.Name, "upstream", p.UpstreamURL)
 				}
 			}

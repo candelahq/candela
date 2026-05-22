@@ -233,9 +233,9 @@ func main() {
 				"error", adcErr)
 		}
 
-		// NOTE: Gemini/Google providers use the Generative Language API
-		// (generativelanguage.googleapis.com) which accepts ADC OAuth2 tokens,
-		// avoiding regional model availability issues entirely.
+		// NOTE: Gemini/Google providers are configured below to use the Vertex AI
+		// global endpoint. This avoids regional model availability issues
+		// and natively accepts ADC OAuth2 tokens.
 
 		// Attach FormatTranslator + PathRewriter + ADC to Anthropic providers
 		// when Vertex AI is configured. Anthropic routes through regional
@@ -277,35 +277,59 @@ func main() {
 			}
 		}
 
-		// Configure Gemini providers — these route through the Google
-		// Generative Language API (generativelanguage.googleapis.com), which
-		// accepts ADC OAuth2 tokens and avoids regional model availability issues.
-		// No Vertex AI ProjectID required.
-		for i, p := range allProviders {
-			switch p.Name {
-			case "gemini-oai":
-				// OpenAI-compatible endpoint. The PathRewriter strips /v1 so
-				// clients sending /v1/chat/completions hit the correct upstream
-				// path at /v1beta/openai/chat/completions.
-				allProviders[i].UpstreamURL = "https://generativelanguage.googleapis.com/v1beta/openai"
-				allProviders[i].PathRewriter = &proxy.GenLangOAIPathRewriter{}
-				if tokenSource != nil {
-					allProviders[i].TokenSource = tokenSource
-				}
-				slog.Info("🔐 Gemini-OAI via Generative Language API configured",
-					"provider", p.Name,
-					"adc", tokenSource != nil)
+		// Configure Gemini providers — these route through Vertex AI's
+		// global OpenAI-compatible endpoint (aiplatform.googleapis.com with
+		// locations/global). This accepts ADC OAuth2 tokens and avoids
+		// regional model availability issues.
+		// Requires a ProjectID for the endpoint path.
+		geminiProjectID := cfg.Proxy.VertexAI.ProjectID
+		if geminiProjectID != "" {
+			for i, p := range allProviders {
+				switch p.Name {
+				case "gemini-oai":
+					// OpenAI-compatible endpoint via Vertex AI global.
+					// Path: /v1/projects/{project}/locations/global/endpoints/openapi/chat/completions
+					// Model names require "google/" prefix (injected by handleProxy).
+					allProviders[i].UpstreamURL = proxy.VertexAIUpstreamURL("global")
+					allProviders[i].PathRewriter = &proxy.VertexAIGeminiOAIPathRewriter{
+						ProjectID: geminiProjectID,
+						Region:    "global",
+					}
+					if tokenSource != nil {
+						allProviders[i].TokenSource = tokenSource
+					}
+					slog.Info("🔐 Gemini-OAI via Vertex AI global endpoint configured",
+						"provider", p.Name,
+						"project", geminiProjectID,
+						"adc", tokenSource != nil)
 
-			case "google":
-				// Native Gemini endpoint — path is forwarded as-is from client.
-				allProviders[i].UpstreamURL = "https://generativelanguage.googleapis.com"
-				if tokenSource != nil {
-					allProviders[i].TokenSource = tokenSource
+				case "google":
+					// Native Gemini endpoint via Vertex AI global.
+					allProviders[i].UpstreamURL = proxy.VertexAIUpstreamURL("global")
+					allProviders[i].PathRewriter = &proxy.VertexAIGooglePathRewriter{
+						ProjectID: geminiProjectID,
+						Region:    "global",
+					}
+					if tokenSource != nil {
+						allProviders[i].TokenSource = tokenSource
+					}
+					slog.Info("🔐 Google native via Vertex AI global endpoint configured",
+						"provider", p.Name,
+						"project", geminiProjectID,
+						"adc", tokenSource != nil)
 				}
-				slog.Info("🔐 Google native via Generative Language API configured",
-					"provider", p.Name,
-					"adc", tokenSource != nil)
 			}
+		} else {
+			// Without a project ID, Gemini providers can't route to Vertex AI.
+			// Remove them from allProviders to prevent broken defaults.
+			slog.Warn("⚠️ Gemini providers require vertex_ai.project_id — gemini-oai and google providers will be disabled")
+			var filtered []proxy.Provider
+			for _, p := range allProviders {
+				if p.Name != "gemini-oai" && p.Name != "google" {
+					filtered = append(filtered, p)
+				}
+			}
+			allProviders = filtered
 		}
 
 		var activeProviders []proxy.Provider

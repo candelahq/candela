@@ -63,22 +63,21 @@ pub async fn mitm_intercept(
         .map_err(|_| anyhow::anyhow!("proxy dial timeout to {proxy_addr}"))??;
 
     // 5. Bidirectional copy: decrypted client ↔ plaintext proxy.
-    let (mut tls_read, mut tls_write) = io::split(tls_stream);
-    let (mut proxy_read, mut proxy_write) = proxy_stream.split();
-
-    let client_to_proxy = io::copy(&mut tls_read, &mut proxy_write);
-    let proxy_to_client = io::copy(&mut proxy_read, &mut tls_write);
-
-    tokio::select! {
-        result = client_to_proxy => {
-            if let Err(e) = result {
-                debug!(sni = %sni, error = %e, "client→proxy copy error");
-            }
+    //    copy_bidirectional drains both directions fully before closing,
+    //    avoiding response truncation when the client finishes sending
+    //    before the proxy finishes responding.
+    let mut tls_stream = tls_stream;
+    match io::copy_bidirectional(&mut tls_stream, &mut proxy_stream).await {
+        Ok((client_to_proxy, proxy_to_client)) => {
+            debug!(
+                sni = %sni,
+                client_to_proxy,
+                proxy_to_client,
+                "MITM bidirectional copy completed"
+            );
         }
-        result = proxy_to_client => {
-            if let Err(e) = result {
-                debug!(sni = %sni, error = %e, "proxy→client copy error");
-            }
+        Err(e) => {
+            debug!(sni = %sni, error = %e, "MITM bidirectional copy error");
         }
     }
 

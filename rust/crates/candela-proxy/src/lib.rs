@@ -99,14 +99,25 @@ impl Provider {
     }
 }
 
-/// Maps TLS SNI hostnames to their corresponding provider names.
+/// Metadata stored per SNI entry in the routing map.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SNIEntry {
+    /// Provider name (e.g. "openai").
+    pub provider: String,
+    /// Whether MITM TLS termination should be used for this provider.
+    /// When `false`, matched connections are tunneled without termination
+    /// (useful for providers with certificate pinning).
+    pub should_mitm: bool,
+}
+
+/// Maps TLS SNI hostnames to their corresponding provider routing metadata.
 /// Used by the transparent proxy listener to route intercepted connections.
 pub struct SNIMap {
-    /// Exact hostname → provider name (e.g. "api.openai.com" → "openai").
-    exact: HashMap<String, String>,
-    /// Wildcard suffix → provider name (stored without "*." prefix).
-    /// E.g. "aiplatform.googleapis.com" → "anthropic".
-    wildcards: HashMap<String, String>,
+    /// Exact hostname → entry (e.g. "api.openai.com" → SNIEntry).
+    exact: HashMap<String, SNIEntry>,
+    /// Wildcard suffix → entry (stored without "*." prefix).
+    /// E.g. "-aiplatform.googleapis.com" → SNIEntry.
+    wildcards: HashMap<String, SNIEntry>,
 }
 
 impl SNIMap {
@@ -121,40 +132,41 @@ impl SNIMap {
             if !p.should_intercept() {
                 continue;
             }
+            let entry = SNIEntry {
+                provider: p.name.clone(),
+                should_mitm: p.should_mitm(),
+            };
             // Register wildcard pattern if present.
             if let Some(ref pattern) = p.host_pattern {
                 // Store the suffix after "*" (e.g. "*.foo.com" → ".foo.com",
                 // "*-foo.com" → "-foo.com").
                 let suffix = pattern.strip_prefix('*').unwrap_or(pattern);
-                wildcards
-                    .entry(suffix.to_string())
-                    .or_insert_with(|| p.name.clone());
+                wildcards.entry(suffix.to_string()).or_insert(entry);
                 continue;
             }
             // Register exact hostname.
             if let Some(host) = p.effective_host() {
-                exact.entry(host).or_insert_with(|| p.name.clone());
+                exact.entry(host).or_insert(entry);
             }
         }
 
         Self { exact, wildcards }
     }
 
-    /// Returns the provider name for the given SNI hostname.
+    /// Returns the SNI entry for the given hostname.
     /// Checks exact matches first, then wildcard suffix matches.
-    pub fn lookup(&self, hostname: &str) -> Option<&str> {
+    pub fn lookup(&self, hostname: &str) -> Option<&SNIEntry> {
         // Exact match.
-        if let Some(name) = self.exact.get(hostname) {
-            return Some(name.as_str());
+        if let Some(entry) = self.exact.get(hostname) {
+            return Some(entry);
         }
         // Wildcard suffix match: e.g. "us-central1-aiplatform.googleapis.com"
         // matches "*-aiplatform.googleapis.com" (suffix "-aiplatform.googleapis.com").
         // Also supports subdomain wildcards: "sub.example.com" matches
         // "*.example.com" (suffix ".example.com").
-        for (suffix, name) in &self.wildcards {
-            if hostname.len() > suffix.len() && hostname[hostname.len() - suffix.len()..] == *suffix
-            {
-                return Some(name.as_str());
+        for (suffix, entry) in &self.wildcards {
+            if hostname.len() > suffix.len() && hostname.ends_with(suffix.as_str()) {
+                return Some(entry);
             }
         }
         None
@@ -394,6 +406,11 @@ mod tests {
 
     // ── SNIMap tests ──
 
+    /// Helper to extract provider name from lookup result.
+    fn lookup_provider<'a>(map: &'a SNIMap, hostname: &str) -> Option<&'a str> {
+        map.lookup(hostname).map(|e| e.provider.as_str())
+    }
+
     #[test]
     fn sni_map_exact_lookup() {
         let providers = vec![
@@ -402,8 +419,11 @@ mod tests {
         ];
         let m = SNIMap::build(&providers);
 
-        assert_eq!(m.lookup("api.openai.com"), Some("openai"));
-        assert_eq!(m.lookup("api.anthropic.com"), Some("anthropic-direct"));
+        assert_eq!(lookup_provider(&m, "api.openai.com"), Some("openai"));
+        assert_eq!(
+            lookup_provider(&m, "api.anthropic.com"),
+            Some("anthropic-direct")
+        );
         assert_eq!(m.lookup("unknown.com"), None);
     }
 
@@ -416,11 +436,11 @@ mod tests {
         let m = SNIMap::build(&providers);
 
         assert_eq!(
-            m.lookup("us-central1-aiplatform.googleapis.com"),
+            lookup_provider(&m, "us-central1-aiplatform.googleapis.com"),
             Some("anthropic")
         );
         assert_eq!(
-            m.lookup("europe-west4-aiplatform.googleapis.com"),
+            lookup_provider(&m, "europe-west4-aiplatform.googleapis.com"),
             Some("anthropic")
         );
         assert_eq!(m.lookup("api.openai.com"), None);
@@ -442,7 +462,7 @@ mod tests {
 
         // Should resolve to "google", not "gemini-oai".
         assert_eq!(
-            m.lookup("generativelanguage.googleapis.com"),
+            lookup_provider(&m, "generativelanguage.googleapis.com"),
             Some("google")
         );
     }
@@ -474,7 +494,7 @@ mod tests {
             test_provider("second", "https://api.openai.com"),
         ];
         let m = SNIMap::build(&providers);
-        assert_eq!(m.lookup("api.openai.com"), Some("first"));
+        assert_eq!(lookup_provider(&m, "api.openai.com"), Some("first"));
     }
 
     /// SECURITY: verify both suffix patterns (*-foo.com) and subdomain
@@ -490,12 +510,12 @@ mod tests {
 
         // Should match: GCP regional endpoints.
         assert_eq!(
-            m.lookup("us-central1-aiplatform.googleapis.com"),
+            lookup_provider(&m, "us-central1-aiplatform.googleapis.com"),
             Some("anthropic"),
             "valid GCP region should match"
         );
         assert_eq!(
-            m.lookup("europe-west4-aiplatform.googleapis.com"),
+            lookup_provider(&m, "europe-west4-aiplatform.googleapis.com"),
             Some("anthropic"),
             "valid GCP region should match"
         );
@@ -515,12 +535,12 @@ mod tests {
         let sm = SNIMap::build(&sub_providers);
 
         assert_eq!(
-            sm.lookup("sub.example.com"),
+            lookup_provider(&sm, "sub.example.com"),
             Some("test"),
             "subdomain should match"
         );
         assert_eq!(
-            sm.lookup("deep.sub.example.com"),
+            lookup_provider(&sm, "deep.sub.example.com"),
             Some("test"),
             "deep subdomain should match"
         );

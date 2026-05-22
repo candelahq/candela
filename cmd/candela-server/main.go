@@ -233,26 +233,18 @@ func main() {
 				"error", adcErr)
 		}
 
-		// NOTE: Gemini/Google ADC is NOT configured here for the Generative
-		// Language API (generativelanguage.googleapis.com) because that endpoint
-		// does NOT accept OAuth2 ADC tokens — it requires API keys. Instead,
-		// when Vertex AI is configured below, Gemini routes are redirected to
-		// the Vertex AI endpoint which natively accepts ADC tokens.
+		// NOTE: Gemini/Google providers use the Generative Language API
+		// (generativelanguage.googleapis.com) which accepts ADC OAuth2 tokens,
+		// avoiding regional model availability issues entirely.
 
-		// Attach FormatTranslator + PathRewriter + ADC to providers when
-		// Vertex AI is configured. This handles:
-		//   - anthropic / anthropic-vertex → Vertex AI rawPredict
-		//   - gemini-oai → Vertex AI OpenAI-compat endpoint
-		//   - google → Vertex AI native Gemini publisher endpoint
+		// Attach FormatTranslator + PathRewriter + ADC to Anthropic providers
+		// when Vertex AI is configured. Anthropic routes through regional
+		// Vertex AI publisher endpoints (rawPredict/streamRawPredict).
 		if cfg.Proxy.VertexAI.ProjectID != "" {
 			region := cfg.Proxy.VertexAI.Region
 			if region == "" {
 				region = "us-central1"
 			}
-
-			// Gemini 3.x models are only available on the global endpoint.
-			// Anthropic models require a regional endpoint.
-			geminiRegion := "global"
 
 			for i, p := range allProviders {
 				switch p.Name {
@@ -281,42 +273,38 @@ func main() {
 						"adc", tokenSource != nil,
 						"format_translation", p.Name == "anthropic",
 						"caching_mode", cfg.Proxy.VertexAI.CachingMode)
-
-				case "gemini-oai":
-					// Route through Vertex AI's OpenAI-compatible endpoint.
-					// Path: /v1/projects/{P}/locations/{R}/endpoints/openapi/chat/completions
-					// Model prefix "google/" is injected by proxy body enrichment.
-					allProviders[i].UpstreamURL = proxy.VertexAIUpstreamURL(geminiRegion)
-					allProviders[i].PathRewriter = &proxy.VertexAIGeminiOAIPathRewriter{
-						ProjectID: cfg.Proxy.VertexAI.ProjectID,
-						Region:    geminiRegion,
-					}
-					if tokenSource != nil {
-						allProviders[i].TokenSource = tokenSource
-					}
-					slog.Info("🔐 Gemini-OAI via Vertex AI configured",
-						"provider", p.Name,
-						"project", cfg.Proxy.VertexAI.ProjectID,
-						"region", geminiRegion,
-						"adc", tokenSource != nil)
-
-				case "google":
-					// Route through Vertex AI's native Gemini publisher endpoint.
-					// Path: /v1/projects/{P}/locations/{R}/publishers/google/models/{M}:{method}
-					allProviders[i].UpstreamURL = proxy.VertexAIUpstreamURL(geminiRegion)
-					allProviders[i].PathRewriter = &proxy.VertexAIGooglePathRewriter{
-						ProjectID: cfg.Proxy.VertexAI.ProjectID,
-						Region:    geminiRegion,
-					}
-					if tokenSource != nil {
-						allProviders[i].TokenSource = tokenSource
-					}
-					slog.Info("🔐 Google native via Vertex AI configured",
-						"provider", p.Name,
-						"project", cfg.Proxy.VertexAI.ProjectID,
-						"region", geminiRegion,
-						"adc", tokenSource != nil)
 				}
+			}
+		}
+
+		// Configure Gemini providers — these route through the Google
+		// Generative Language API (generativelanguage.googleapis.com), which
+		// accepts ADC OAuth2 tokens and avoids regional model availability issues.
+		// No Vertex AI ProjectID required.
+		for i, p := range allProviders {
+			switch p.Name {
+			case "gemini-oai":
+				// OpenAI-compatible endpoint. The PathRewriter strips /v1 so
+				// clients sending /v1/chat/completions hit the correct upstream
+				// path at /v1beta/openai/chat/completions.
+				allProviders[i].UpstreamURL = "https://generativelanguage.googleapis.com/v1beta/openai"
+				allProviders[i].PathRewriter = &proxy.GenLangOAIPathRewriter{}
+				if tokenSource != nil {
+					allProviders[i].TokenSource = tokenSource
+				}
+				slog.Info("🔐 Gemini-OAI via Generative Language API configured",
+					"provider", p.Name,
+					"adc", tokenSource != nil)
+
+			case "google":
+				// Native Gemini endpoint — path is forwarded as-is from client.
+				allProviders[i].UpstreamURL = "https://generativelanguage.googleapis.com"
+				if tokenSource != nil {
+					allProviders[i].TokenSource = tokenSource
+				}
+				slog.Info("🔐 Google native via Generative Language API configured",
+					"provider", p.Name,
+					"adc", tokenSource != nil)
 			}
 		}
 

@@ -618,6 +618,24 @@ func (r *VertexAIGooglePathRewriter) RewritePath(model string, streaming bool) s
 }
 
 // ====================================================================
+// GenLangOAIPathRewriter — implements PathRewriter
+// ====================================================================
+
+// GenLangOAIPathRewriter rewrites URL paths for the Google Generative Language
+// API's OpenAI-compatible endpoint. OpenAI SDK clients send paths like
+// /v1/chat/completions, but the GenLang upstream is already mounted at
+// /v1beta/openai, so we strip the /v1 prefix to produce the correct path
+// (e.g. /chat/completions).
+type GenLangOAIPathRewriter struct{}
+
+func (r *GenLangOAIPathRewriter) RewritePath(_ string, _ bool) string {
+	// The GenLang OpenAI-compat endpoint uses a static path; model is in the body.
+	// Stripping /v1 from /v1/chat/completions → /chat/completions, which the
+	// proxy appends to UpstreamURL (https://generativelanguage.googleapis.com/v1beta/openai).
+	return "/chat/completions"
+}
+
+// ====================================================================
 // Shared types for OpenAI ↔ Anthropic translation
 // ====================================================================
 

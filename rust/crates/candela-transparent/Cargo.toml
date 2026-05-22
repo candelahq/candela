@@ -11,9 +11,19 @@ tokio = { workspace = true }
 tokio-util = { workspace = true }
 tracing = { workspace = true }
 bytes = { workspace = true }
+anyhow = { workspace = true }
+
+# TLS MITM (Phase 5)
+rustls = { workspace = true }
+tokio-rustls = { workspace = true }
+rcgen = { workspace = true }
+rustls-pemfile = { workspace = true }
+time = { workspace = true }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 libc = "0.2"
 
 [dev-dependencies]
 tokio-test = { workspace = true }
+rustls = { workspace = true }
+tokio-rustls = { workspace = true }

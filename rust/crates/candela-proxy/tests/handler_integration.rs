@@ -91,6 +91,7 @@ async fn start_proxy(
             host: None,
             host_pattern: None,
             intercept: None,
+            mitm: None,
             format_translator: None,
             path_rewriter: None,
         }],

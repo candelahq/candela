@@ -62,6 +62,12 @@ pub struct Provider {
     /// provider should set this to `false`. Default: `true` (`None` = true).
     pub intercept: Option<bool>,
 
+    /// Whether to perform MITM TLS termination for this provider.
+    /// If `false`, intercepted connections are tunneled without termination
+    /// (useful for providers with certificate pinning).
+    /// Default: `true` (`None` = true).
+    pub mitm: Option<bool>,
+
     pub format_translator: Option<Arc<dyn FormatTranslator>>,
     pub path_rewriter: Option<Arc<dyn PathRewriter>>,
     // TODO: token_source for ADC injection
@@ -84,6 +90,12 @@ impl Provider {
     /// provider's host. Defaults to `true` if `intercept` is `None`.
     pub fn should_intercept(&self) -> bool {
         self.intercept.unwrap_or(true)
+    }
+
+    /// Returns whether MITM TLS termination should be used for this provider.
+    /// Defaults to `true` if `mitm` is `None`.
+    pub fn should_mitm(&self) -> bool {
+        self.mitm.unwrap_or(true)
     }
 }
 
@@ -278,6 +290,7 @@ mod tests {
             host: None,
             host_pattern: None,
             intercept: None,
+            mitm: None,
             format_translator: None,
             path_rewriter: None,
         }

@@ -6,6 +6,8 @@
 //!
 //! Ported from: `pkg/transparent/`
 
+pub mod ca;
 pub mod listener;
+pub mod mitm;
 pub mod origdst;
 pub mod sni;

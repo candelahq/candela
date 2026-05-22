@@ -250,6 +250,10 @@ func main() {
 				region = "us-central1"
 			}
 
+			// Gemini 3.x models are only available on the global endpoint.
+			// Anthropic models require a regional endpoint.
+			geminiRegion := "global"
+
 			for i, p := range allProviders {
 				switch p.Name {
 				case "anthropic", "anthropic-vertex":
@@ -282,10 +286,10 @@ func main() {
 					// Route through Vertex AI's OpenAI-compatible endpoint.
 					// Path: /v1/projects/{P}/locations/{R}/endpoints/openapi/chat/completions
 					// Model prefix "google/" is injected by proxy body enrichment.
-					allProviders[i].UpstreamURL = proxy.VertexAIUpstreamURL(region)
+					allProviders[i].UpstreamURL = proxy.VertexAIUpstreamURL(geminiRegion)
 					allProviders[i].PathRewriter = &proxy.VertexAIGeminiOAIPathRewriter{
 						ProjectID: cfg.Proxy.VertexAI.ProjectID,
-						Region:    region,
+						Region:    geminiRegion,
 					}
 					if tokenSource != nil {
 						allProviders[i].TokenSource = tokenSource
@@ -293,16 +297,16 @@ func main() {
 					slog.Info("🔐 Gemini-OAI via Vertex AI configured",
 						"provider", p.Name,
 						"project", cfg.Proxy.VertexAI.ProjectID,
-						"region", region,
+						"region", geminiRegion,
 						"adc", tokenSource != nil)
 
 				case "google":
 					// Route through Vertex AI's native Gemini publisher endpoint.
 					// Path: /v1/projects/{P}/locations/{R}/publishers/google/models/{M}:{method}
-					allProviders[i].UpstreamURL = proxy.VertexAIUpstreamURL(region)
+					allProviders[i].UpstreamURL = proxy.VertexAIUpstreamURL(geminiRegion)
 					allProviders[i].PathRewriter = &proxy.VertexAIGooglePathRewriter{
 						ProjectID: cfg.Proxy.VertexAI.ProjectID,
-						Region:    region,
+						Region:    geminiRegion,
 					}
 					if tokenSource != nil {
 						allProviders[i].TokenSource = tokenSource
@@ -310,7 +314,7 @@ func main() {
 					slog.Info("🔐 Google native via Vertex AI configured",
 						"provider", p.Name,
 						"project", cfg.Proxy.VertexAI.ProjectID,
-						"region", region,
+						"region", geminiRegion,
 						"adc", tokenSource != nil)
 				}
 			}

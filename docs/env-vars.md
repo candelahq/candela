@@ -22,8 +22,7 @@ These are used by the container entrypoint (`deploy/entrypoint.sh`) to generate 
 | `CANDELA_PROXY_ENABLED` | `false` | Enable the LLM API proxy |
 | `CANDELA_VERTEX_PROJECT` | _(empty)_ | GCP project for Vertex AI (required for Anthropic proxy) |
 | `CANDELA_VERTEX_REGION` | `us-east5` | Vertex AI region (must have Claude access) |
-| `CANDELA_LMSTUDIO_ENABLED` | `true` | Enable LM Studio compatible endpoints |
-| `CANDELA_LMSTUDIO_PORT` | `1234` | Secondary listener port for LM Studio compat |
+
 
 ### Authentication
 
@@ -136,5 +135,5 @@ CLOUD_RUN_URL=https://candela-xxx.a.run.app
 
 # Optional
 CANDELA_DEV_MODE=false  # default
-CANDELA_LMSTUDIO_ENABLED=true  # default
+
 ```

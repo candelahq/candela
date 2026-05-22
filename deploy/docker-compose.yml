@@ -20,12 +20,10 @@ services:
     ports:
       - "3000:3000"   # Next.js UI
       - "8181:8181"   # Go backend API
-      - "1234:1234"   # LM Studio compat listener
     environment:
       CANDELA_STORAGE_BACKEND: duckdb
       CANDELA_DEV_MODE: "true"
       CANDELA_PROXY_ENABLED: "true"
-      CANDELA_LMSTUDIO_ENABLED: "true"
     volumes:
       - candela_data:/data
     healthcheck:

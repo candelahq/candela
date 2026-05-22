@@ -69,11 +69,6 @@ type Config struct {
 			Region      string `yaml:"region"`       // e.g. "us-central1"
 			CachingMode string `yaml:"caching_mode"` // off|auto|system-only (default: auto)
 		} `yaml:"vertex_ai"`
-		LMStudio struct {
-			Enabled bool                `yaml:"enabled"`
-			Port    int                 `yaml:"port"` // Default: 1234 (LM Studio default)
-			Models  []proxy.CompatModel `yaml:"models"`
-		} `yaml:"lmstudio"`
 	} `yaml:"proxy"`
 	CORS struct {
 		AllowedOrigins []string `yaml:"allowed_origins"` // e.g. ["http://localhost:3000"]
@@ -371,19 +366,6 @@ func main() {
 			}
 			slog.Info("🔀 LLM proxy enabled", "routes", names)
 
-			// LM Studio compat mode: register /v1/ routes on main mux
-			// and start a secondary listener on the LM Studio port.
-			if cfg.Proxy.LMStudio.Enabled && len(cfg.Proxy.LMStudio.Models) > 0 {
-				llmProxy.RegisterCompatRoutes(mux, cfg.Proxy.LMStudio.Models)
-
-				var modelNames []string
-				for _, m := range cfg.Proxy.LMStudio.Models {
-					modelNames = append(modelNames, m.ID)
-				}
-				slog.Info("🖥️  LM Studio compat mode enabled",
-					"models", modelNames,
-					"main_routes", []string{"/v1/models", "/v1/chat/completions"})
-			}
 		} else {
 			slog.Warn("proxy enabled but no valid providers configured")
 		}
@@ -468,68 +450,12 @@ func main() {
 		}
 	}()
 
-	// Secondary LM Studio-compatible listener (port 1234 by default).
-	// This lets IntelliJ's "Enable LM Studio" checkbox work with zero URL changes.
-	var lmSrv *http.Server
-	if cfg.Proxy.LMStudio.Enabled && len(cfg.Proxy.LMStudio.Models) > 0 && llmProxy != nil {
-		lmPort := cfg.Proxy.LMStudio.Port
-		if lmPort == 0 {
-			lmPort = 1234
-		}
-
-		// Build a minimal mux for the LM Studio port.
-		// Reuse the same proxy instance — shares circuit breakers,
-		// connection pool, and respects provider filtering.
-		lmMux := http.NewServeMux()
-		llmProxy.RegisterRoutes(lmMux)
-		llmProxy.RegisterCompatRoutes(lmMux, cfg.Proxy.LMStudio.Models)
-
-		// Health check for LM Studio port.
-		lmMux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
-			_, _ = fmt.Fprintln(w, `{"status":"ok","mode":"lmstudio"}`)
-		})
-
-		// Wrap LM Studio mux with the same auth + CORS middleware as the main
-		// server. Without this, port 1234 would be completely unauthenticated,
-		// allowing anyone on the network to make unlimited LLM API calls.
-		authedLmMux := auth.FirebaseAuthMiddleware(
-			corsMiddleware(lmMux, cfg.CORS.AllowedOrigins),
-			fbAuthClient,
-			cloudRunURL,
-			userAuth,
-			devMode,
-			cfg.Auth.AllowedServiceAccounts,
-		)
-
-		lmAddr := fmt.Sprintf("%s:%d", cfg.Server.Host, lmPort)
-		lmSrv = &http.Server{
-			Addr:              lmAddr,
-			Handler:           authedLmMux,
-			ReadHeaderTimeout: 10 * time.Second,
-			WriteTimeout:      10 * time.Minute,
-			IdleTimeout:       120 * time.Second,
-		}
-
-		go func() {
-			slog.Info("🖥️  LM Studio compat listener starting", "addr", lmAddr)
-			if err := lmSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-				slog.Warn("LM Studio compat listener failed (port may be in use)",
-					"addr", lmAddr, "error", err)
-			}
-		}()
-	}
-
 	<-ctx.Done()
 	slog.Info("shutting down...")
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	if lmSrv != nil {
-		if err := lmSrv.Shutdown(shutdownCtx); err != nil {
-			slog.Error("LM Studio listener shutdown error", "error", err)
-		}
-	}
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		slog.Error("shutdown error", "error", err)
 	}

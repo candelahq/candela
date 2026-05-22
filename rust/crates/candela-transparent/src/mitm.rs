@@ -196,19 +196,39 @@ mod tests {
         assert_eq!(result, b"only peeked");
     }
 
+    fn install_crypto_provider() {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+    }
+
     #[tokio::test]
-    #[ignore = "pre-existing close_notify race — tracked for follow-up"]
     async fn mitm_intercept_end_to_end() {
+        install_crypto_provider();
         use std::sync::Arc;
+        use tokio::io::AsyncWriteExt;
         use tokio::net::TcpListener;
 
-        // Start a mock plaintext echo server (simulates the Candela proxy).
+        // Start a mock plaintext echo server that reads exactly N bytes
+        // (sent as a 4-byte big-endian length prefix) then echoes them back.
+        // This avoids depending on half-close / EOF which races with TLS
+        // close_notify timing.
         let echo_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let echo_addr = echo_listener.local_addr().unwrap();
         let echo_handle = tokio::spawn(async move {
             if let Ok((mut stream, _)) = echo_listener.accept().await {
-                let (mut r, mut w) = stream.split();
-                let _ = io::copy(&mut r, &mut w).await;
+                // Read 4-byte length prefix.
+                let mut len_buf = [0u8; 4];
+                stream.read_exact(&mut len_buf).await.unwrap();
+                let len = u32::from_be_bytes(len_buf) as usize;
+
+                // Read exactly `len` payload bytes.
+                let mut payload = vec![0u8; len];
+                stream.read_exact(&mut payload).await.unwrap();
+
+                // Echo the payload back (without the length prefix).
+                stream.write_all(&payload).await.unwrap();
+                stream.flush().await.unwrap();
+                // Shut down our write side so the MITM copy sees EOF.
+                let _ = stream.shutdown().await;
             }
         });
 
@@ -228,20 +248,16 @@ mod tests {
             let (stream, _) = mitm_listener.accept().await.unwrap();
 
             // Read the "peeked" bytes (simulating the listener peek).
-            // In the real flow, listener.rs reads these bytes first.
-            // For this test, the client sends its ClientHello directly,
-            // and we read it here then pass it as "peeked".
             let mut buf = vec![0u8; 16384];
             let n = stream.peek(&mut buf).await.unwrap();
             let peeked = buf[..n].to_vec();
 
-            // Now the actual stream still has those bytes; read them off.
+            // Consume the peeked bytes from the socket.
             let mut discard = vec![0u8; n];
-            use tokio::io::AsyncReadExt;
             let mut stream2 = stream;
             stream2.read_exact(&mut discard).await.unwrap();
 
-            let result = mitm_intercept(
+            mitm_intercept(
                 stream2,
                 &peeked,
                 "test.example.com",
@@ -249,10 +265,7 @@ mod tests {
                 &proxy_addr_str,
                 &stats_clone,
             )
-            .await;
-
-            // The MITM intercept should succeed (handshake + copy).
-            result
+            .await
         });
 
         // Connect a TLS client that trusts the ephemeral CA.
@@ -271,17 +284,31 @@ mod tests {
         let tcp = TcpStream::connect(mitm_addr).await.unwrap();
         let mut tls = connector.connect(server_name, tcp).await.unwrap();
 
-        // Send test data and read the echo.
-        use tokio::io::AsyncWriteExt;
-        tls.write_all(b"hello mitm").await.unwrap();
-        tls.shutdown().await.unwrap();
+        // Build a length-prefixed payload: [4-byte big-endian len][payload].
+        let payload = b"hello mitm";
+        let len_prefix = (payload.len() as u32).to_be_bytes();
+        tls.write_all(&len_prefix).await.unwrap();
+        tls.write_all(payload).await.unwrap();
+        tls.flush().await.unwrap();
 
+        // Read the echoed response. The echo server writes exactly `payload`
+        // bytes then shuts down its write side, so read_to_end will return
+        // once the proxy-side copy propagates the EOF.
         let mut response = Vec::new();
-        tls.read_to_end(&mut response).await.unwrap();
-        assert_eq!(response, b"hello mitm", "echo should return same data");
+        let read_result =
+            tokio::time::timeout(Duration::from_secs(5), tls.read_to_end(&mut response)).await;
+        assert!(read_result.is_ok(), "read should not time out");
+        assert_eq!(response, payload, "echo should return same data");
+
+        // Clean shutdown after we have the response.
+        let _ = tls.shutdown().await;
 
         // Wait for handlers to finish.
-        let _ = tokio::time::timeout(Duration::from_secs(2), mitm_handle).await;
+        let mitm_result = tokio::time::timeout(Duration::from_secs(2), mitm_handle).await;
+        assert!(
+            mitm_result.is_ok(),
+            "MITM handler should complete within timeout"
+        );
         let _ = tokio::time::timeout(Duration::from_secs(1), echo_handle).await;
 
         // Verify stats.

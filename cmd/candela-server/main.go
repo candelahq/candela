@@ -233,9 +233,9 @@ func main() {
 				"error", adcErr)
 		}
 
-		// NOTE: Gemini/Google providers use the Generative Language API
-		// (generativelanguage.googleapis.com) which accepts ADC OAuth2 tokens,
-		// avoiding regional model availability issues entirely.
+		// NOTE: Gemini/Google providers are configured below to use the Vertex AI
+		// global endpoint. This avoids regional model availability issues
+		// and natively accepts ADC OAuth2 tokens.
 
 		// Attach FormatTranslator + PathRewriter + ADC to Anthropic providers
 		// when Vertex AI is configured. Anthropic routes through regional
@@ -320,7 +320,16 @@ func main() {
 				}
 			}
 		} else {
-			slog.Warn("⚠️ Gemini providers require vertex_ai.project_id — gemini-oai and google providers will not be available")
+			// Without a project ID, Gemini providers can't route to Vertex AI.
+			// Remove them from allProviders to prevent broken defaults.
+			slog.Warn("⚠️ Gemini providers require vertex_ai.project_id — gemini-oai and google providers will be disabled")
+			var filtered []proxy.Provider
+			for _, p := range allProviders {
+				if p.Name != "gemini-oai" && p.Name != "google" {
+					filtered = append(filtered, p)
+				}
+			}
+			allProviders = filtered
 		}
 
 		var activeProviders []proxy.Provider

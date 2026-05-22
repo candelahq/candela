@@ -38,11 +38,12 @@ const PEEK_BUF_SIZE: usize = 16384;
 pub struct Stats {
     pub intercepted: AtomicI64,
     pub passthrough: AtomicI64,
+    pub mitm: AtomicI64,
     pub errors: AtomicI64,
 }
 
 impl Stats {
-    /// Returns a snapshot of the current counters.
+    /// Returns a snapshot of the current counters (intercepted, passthrough, errors).
     pub fn snapshot(&self) -> (i64, i64, i64) {
         (
             self.intercepted.load(Ordering::Relaxed),
@@ -54,7 +55,8 @@ impl Stats {
     /// Returns a JSON representation of the stats.
     pub fn to_json(&self) -> String {
         let (i, p, e) = self.snapshot();
-        format!(r#"{{"intercepted":{i},"passthrough":{p},"errors":{e}}}"#)
+        let m = self.mitm.load(Ordering::Relaxed);
+        format!(r#"{{"intercepted":{i},"passthrough":{p},"mitm":{m},"errors":{e}}}"#)
     }
 }
 
@@ -386,6 +388,7 @@ mod tests {
             host: None,
             host_pattern: None,
             intercept: None,
+            mitm: None,
             format_translator: None,
             path_rewriter: None,
         }];
@@ -409,6 +412,7 @@ mod tests {
             host: None,
             host_pattern: None,
             intercept: None,
+            mitm: None,
             format_translator: None,
             path_rewriter: None,
         }];
@@ -493,6 +497,7 @@ mod tests {
             host: None,
             host_pattern: None,
             intercept: None,
+            mitm: None,
             format_translator: None,
             path_rewriter: None,
         }];
@@ -558,6 +563,7 @@ mod tests {
             host: None,
             host_pattern: None,
             intercept: None,
+            mitm: None,
             format_translator: None,
             path_rewriter: None,
         }];
@@ -618,6 +624,7 @@ mod tests {
             host: None,
             host_pattern: None,
             intercept: None,
+            mitm: None,
             format_translator: None,
             path_rewriter: None,
         }];

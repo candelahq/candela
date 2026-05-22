@@ -48,6 +48,13 @@ tracing-subscriber = { version = "0.3", features = ["json", "env-filter"] }
 # HTTP client (OTLP export, upstream proxying)
 reqwest = { version = "0.12", default-features = false, features = ["gzip", "json", "rustls-tls"] }
 
+# TLS (MITM transparent proxy)
+rustls = "0.23"
+tokio-rustls = "0.26"
+rcgen = "0.14"
+rustls-pemfile = "2"
+time = "0.3"
+
 # Utilities
 anyhow = "1"
 thiserror = "2"

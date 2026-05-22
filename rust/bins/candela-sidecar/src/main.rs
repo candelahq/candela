@@ -107,6 +107,7 @@ async fn main() -> anyhow::Result<()> {
                 host: None,
                 host_pattern: None,
                 intercept: None,
+                mitm: None,
                 format_translator: None,
                 path_rewriter: None,
             })

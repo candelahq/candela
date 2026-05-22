@@ -19,6 +19,11 @@
 //!   TRANSPARENT_PORT   — port for transparent proxy (enables iptables
 //!                        interception mode, mutually exclusive with
 //!                        Tetragon kprobe enforcement)
+//!   MITM_CA_ENABLED    — set to "true" or "1" to enable MITM TLS
+//!                        termination via ephemeral CA (requires
+//!                        TRANSPARENT_PORT)
+//!   MITM_CA_PEM_PATH   — path to write the CA certificate PEM for
+//!                        trust injection (default: /var/run/candela/ca.pem)
 //!
 //! Ported from: `cmd/candela-sidecar/main.go`
 
@@ -172,11 +177,39 @@ async fn main() -> anyhow::Result<()> {
     // ── Transparent proxy (optional) ──
     let transparent_handle = if let Some(tp) = &transparent_port {
         let sni_map = Arc::new(SNIMap::build(&providers));
+
+        // Initialize ephemeral CA for MITM when enabled.
+        let mitm_ca_enabled = env::var("MITM_CA_ENABLED")
+            .map(|v| v.eq_ignore_ascii_case("true") || v == "1")
+            .unwrap_or(false);
+
+        let mitm_ca = if mitm_ca_enabled {
+            match candela_transparent::ca::EphemeralCA::generate() {
+                Ok(ca) => {
+                    // Write CA PEM for trust injection.
+                    let pem_path = env_or("MITM_CA_PEM_PATH", "/var/run/candela/ca.pem");
+                    if let Err(e) = ca.write_ca_pem(std::path::Path::new(&pem_path)) {
+                        tracing::warn!(path = %pem_path, error = %e, "failed to write CA PEM");
+                    } else {
+                        info!(path = %pem_path, "ephemeral CA PEM written for trust injection");
+                    }
+                    Some(Arc::new(ca))
+                }
+                Err(e) => {
+                    tracing::error!(error = %e, "failed to generate ephemeral CA, MITM disabled");
+                    None
+                }
+            }
+        } else {
+            None
+        };
+
         let transparent_listener = candela_transparent::listener::TransparentListener::new(
             candela_transparent::listener::Config {
                 listen_addr: format!("0.0.0.0:{tp}"),
                 sni_map,
                 proxy_addr: format!("127.0.0.1:{port}"),
+                mitm_ca,
             },
         );
 

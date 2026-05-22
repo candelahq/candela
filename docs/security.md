@@ -292,7 +292,7 @@ Candela provides kernel-level enforcement to guarantee that **all LLM API traffi
 | **Network** | Cilium `FQDNNetworkPolicy` | Block direct egress to LLM provider hostnames |
 | **Kernel** | Tetragon `TracingPolicy` (eBPF kprobes) | Detect/kill unauthorized binaries connecting to port 443 |
 | **Redirect** | `iptables` init container | Transparently redirect outbound TLS to sidecar |
-| **TLS** | Ephemeral CA + SNI-based routing | MITM for transparent interception without SDK changes |
+| **TLS** | Ephemeral CA + SNI-based routing | MITM termination for request-level observability; per-provider opt-out |
 
 ### Single Source of Truth
 
@@ -324,6 +324,81 @@ enforcement:
 | 2 | Config file loading in `candela-sidecar` | ✅ Shipped |
 | 3 | Helm chart with enforcement templates | ✅ Shipped |
 | 4 | Transparent listener (Go — SNI routing) | ✅ Shipped |
-| 5 | Transparent listener (Rust — `rustls`) | 🚧 In Progress |
+| 5 | TLS MITM termination (Rust — `rustls` + `rcgen`) | ✅ Shipped |
 | 6 | Tetragon + Hubble observability integration | 📋 Planned |
+
+---
+
+## 🔒 MITM TLS Termination (Phase 5)
+
+For intercepted (SNI-matched) LLM connections, the transparent listener performs
+full TLS termination using an ephemeral per-pod CA. This enables request-level
+observability (model, tokens, cost) without any SDK changes.
+
+### Architecture
+
+```
+┌───────────────┐  TLS (ephemeral cert)  ┌───────────┐  plaintext (bidir copy)  ┌────────┐  TLS (real cert)  ┌──────────┐
+│  Application  │ ───────────────────→  │Transparent│ ───────────────────────→ │ Candela│ ───────────────→ │ Upstream │
+│  (any SDK)    │                      │  Listener │                          │  Proxy │                    │  LLM API │
+└───────────────┘                      │  :15001  │                          │  :8080 │                    └──────────┘
+                                       └───────────┘                          └────────┘
+```
+
+### Ephemeral CA
+
+The `EphemeralCA` (implemented in `candela-transparent::ca`) generates a self-signed
+CA certificate at pod startup. For each intercepted SNI hostname, it dynamically
+generates a leaf certificate with:
+
+- `subjectAltName: DNS:<sni>` matching the original upstream
+- Short validity (24h) since it's ephemeral
+- ALPN: `["h2", "http/1.1"]` for protocol transparency
+- Certificates are cached per-hostname to avoid regeneration
+
+### Trust Injection
+
+The application pod must trust the ephemeral CA certificate. This follows the
+same pattern used by Istio/Envoy sidecars:
+
+1. Init container writes CA PEM to a shared volume (e.g., `/var/run/candela/ca.pem`)
+2. Application pod mounts the volume and sets `SSL_CERT_FILE` / `REQUESTS_CA_BUNDLE`
+3. The Helm chart mounts the CA cert volume automatically
+
+### Provider MITM Opt-Out
+
+Providers with certificate pinning can disable MITM via `mitm: false`:
+
+```yaml
+providers:
+  - name: pinned-service
+    upstream: https://internal.pinned.example.com
+    intercept: true
+    mitm: false   # connections are intercepted for stats but tunneled without TLS termination
+```
+
+When `mitm: false`, the connection is counted as `intercepted` but tunneled
+directly to the original destination (Phase 4 passthrough behavior).
+
+### Protocol Transparency
+
+The MITM layer is strictly L4-transparent. After TLS termination, decrypted bytes
+flow via `copy_bidirectional` to the proxy as plaintext TCP. The client’s chosen
+protocol (HTTP/1.1 or HTTP/2, negotiated via ALPN) passes through unchanged —
+the proxy’s `hyper` server auto-detects both.
+
+### Stats
+
+The transparent listener exposes counters at `/stats`:
+
+```json
+{"intercepted": 10, "mitm": 8, "passthrough": 2, "errors": 0}
+```
+
+| Counter | Description |
+|---------|-------------|
+| `intercepted` | Connections whose SNI matched a provider |
+| `mitm` | Connections that completed MITM TLS termination |
+| `passthrough` | Connections tunneled without interception |
+| `errors` | Failed connections (handshake failures, timeouts) |
 

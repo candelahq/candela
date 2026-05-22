@@ -165,8 +165,7 @@ impl SNIMap {
         // Also supports subdomain wildcards: "sub.example.com" matches
         // "*.example.com" (suffix ".example.com").
         for (suffix, entry) in &self.wildcards {
-            if hostname.len() > suffix.len() && hostname[hostname.len() - suffix.len()..] == *suffix
-            {
+            if hostname.len() > suffix.len() && hostname.ends_with(suffix.as_str()) {
                 return Some(entry);
             }
         }

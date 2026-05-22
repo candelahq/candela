@@ -180,7 +180,7 @@ async fn main() -> anyhow::Result<()> {
 
         // Initialize ephemeral CA for MITM when enabled.
         let mitm_ca_enabled = env::var("MITM_CA_ENABLED")
-            .map(|v| v == "true" || v == "1")
+            .map(|v| v.eq_ignore_ascii_case("true") || v == "1")
             .unwrap_or(false);
 
         let mitm_ca = if mitm_ca_enabled {

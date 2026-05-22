@@ -729,4 +729,197 @@ mod tests {
         cancel.cancel();
         let _ = handle.await;
     }
+
+    /// With `mitm_ca = Some(...)` and a provider that has `mitm: Some(true)` (default),
+    /// a TLS ClientHello matching that provider's SNI should trigger MITM
+    /// interception. We verify via the `stats.mitm` counter.
+    #[tokio::test]
+    async fn listener_mitm_intercepts_when_enabled() {
+        // Install crypto provider (ring) — idempotent.
+        let _ = rustls::crypto::ring::default_provider().install_default();
+
+        // Stand up a plaintext echo server that the MITM layer forwards to.
+        let echo_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let echo_addr = echo_listener.local_addr().unwrap();
+        let echo_handle = tokio::spawn(async move {
+            if let Ok((mut stream, _)) = echo_listener.accept().await {
+                use tokio::io::{AsyncReadExt, AsyncWriteExt};
+                // Length-prefixed echo: read 4-byte BE len, read payload, echo, shutdown.
+                let mut len_buf = [0u8; 4];
+                if stream.read_exact(&mut len_buf).await.is_ok() {
+                    let len = u32::from_be_bytes(len_buf) as usize;
+                    let mut payload = vec![0u8; len];
+                    if stream.read_exact(&mut payload).await.is_ok() {
+                        let _ = stream.write_all(&payload).await;
+                        let _ = stream.shutdown().await;
+                    }
+                }
+            }
+        });
+
+        // Provider with default mitm (None → defaults to true in SNIMap).
+        let providers = vec![candela_proxy::Provider {
+            name: "openai".into(),
+            upstream_url: "https://api.openai.com".into(),
+            host: None,
+            host_pattern: None,
+            intercept: None,
+            mitm: None, // defaults to true
+            format_translator: None,
+            path_rewriter: None,
+        }];
+        let sni_map = Arc::new(SNIMap::build(&providers));
+
+        // Generate ephemeral CA.
+        let ca = Arc::new(crate::ca::EphemeralCA::generate().unwrap());
+
+        let tcp_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = tcp_listener.local_addr().unwrap();
+
+        let listener = TransparentListener::new(Config {
+            listen_addr: addr.to_string(),
+            sni_map,
+            proxy_addr: echo_addr.to_string(),
+            mitm_ca: Some(Arc::clone(&ca)),
+        });
+
+        let cancel = tokio_util::sync::CancellationToken::new();
+        let cancel_clone = cancel.clone();
+        let stats = Arc::clone(listener.stats());
+
+        let handle = tokio::spawn(async move {
+            let _ = listener
+                .listen_and_serve_on(tcp_listener, cancel_clone)
+                .await;
+        });
+
+        tokio::time::sleep(Duration::from_millis(50)).await;
+
+        let base_mitm = stats.mitm.load(Ordering::Relaxed);
+
+        // Connect a TLS client that trusts the ephemeral CA.
+        let mut root_store = rustls::RootCertStore::empty();
+        root_store.add(ca.ca_cert_der.clone()).unwrap();
+        let client_cfg = Arc::new(
+            rustls::ClientConfig::builder()
+                .with_root_certificates(root_store)
+                .with_no_client_auth(),
+        );
+        let connector = tokio_rustls::TlsConnector::from(client_cfg);
+        let server_name = rustls::pki_types::ServerName::try_from("api.openai.com")
+            .unwrap()
+            .to_owned();
+
+        let tcp = TcpStream::connect(addr).await.unwrap();
+        let tls_result =
+            tokio::time::timeout(Duration::from_secs(5), connector.connect(server_name, tcp)).await;
+
+        if let Ok(Ok(mut tls)) = tls_result {
+            use tokio::io::{AsyncReadExt, AsyncWriteExt};
+            // Send length-prefixed payload.
+            let payload = b"mitm-test";
+            let len_prefix = (payload.len() as u32).to_be_bytes();
+            let _ = tls.write_all(&len_prefix).await;
+            let _ = tls.write_all(payload).await;
+            let _ = tls.flush().await;
+
+            let mut response = Vec::new();
+            let _ =
+                tokio::time::timeout(Duration::from_secs(3), tls.read_to_end(&mut response)).await;
+
+            assert_eq!(response, payload, "echo should return same data via MITM");
+            let _ = tls.shutdown().await;
+        }
+
+        tokio::time::sleep(Duration::from_millis(200)).await;
+
+        let mitm_count = stats.mitm.load(Ordering::Relaxed);
+        assert!(
+            mitm_count - base_mitm >= 1,
+            "expected at least 1 MITM intercept, delta={}",
+            mitm_count - base_mitm
+        );
+
+        cancel.cancel();
+        let _ = handle.await;
+        let _ = echo_handle.await;
+    }
+
+    /// With `mitm_ca = Some(...)` but a provider that has `mitm: Some(false)`,
+    /// a TLS ClientHello matching that provider's SNI should be intercepted
+    /// (counted) but NOT MITM'd — it should tunnel passthrough.
+    #[tokio::test]
+    async fn listener_mitm_optout_tunnels_passthrough() {
+        // Provider with explicit mitm opt-out.
+        let providers = vec![candela_proxy::Provider {
+            name: "pinned-service".into(),
+            upstream_url: "https://api.pinned.example.com".into(),
+            host: Some("api.pinned.example.com".into()),
+            host_pattern: None,
+            intercept: Some(true),
+            mitm: Some(false), // MITM opt-out
+            format_translator: None,
+            path_rewriter: None,
+        }];
+        let sni_map = Arc::new(SNIMap::build(&providers));
+
+        // CA is present, but should not be used for this provider.
+        let _ = rustls::crypto::ring::default_provider().install_default();
+        let ca = Arc::new(crate::ca::EphemeralCA::generate().unwrap());
+
+        let tcp_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = tcp_listener.local_addr().unwrap();
+
+        let listener = TransparentListener::new(Config {
+            listen_addr: addr.to_string(),
+            sni_map,
+            proxy_addr: "127.0.0.1:0".into(), // doesn't matter, tunnel will fail
+            mitm_ca: Some(ca),
+        });
+
+        let cancel = tokio_util::sync::CancellationToken::new();
+        let cancel_clone = cancel.clone();
+        let stats = Arc::clone(listener.stats());
+
+        let handle = tokio::spawn(async move {
+            let _ = listener
+                .listen_and_serve_on(tcp_listener, cancel_clone)
+                .await;
+        });
+
+        tokio::time::sleep(Duration::from_millis(50)).await;
+
+        let base_mitm = stats.mitm.load(Ordering::Relaxed);
+        let (base_i, _, _) = stats.snapshot();
+
+        // Send a TLS ClientHello with the opt-out provider's SNI.
+        let hello = build_test_client_hello("api.pinned.example.com");
+        if let Ok(mut conn) = TcpStream::connect(addr).await {
+            let _ = conn.write_all(&hello).await;
+            tokio::time::sleep(Duration::from_millis(200)).await;
+            drop(conn);
+        }
+
+        tokio::time::sleep(Duration::from_millis(100)).await;
+
+        let (intercepted, _, _) = stats.snapshot();
+        let mitm_count = stats.mitm.load(Ordering::Relaxed);
+
+        // Should be intercepted (SNI matched)...
+        assert!(
+            intercepted - base_i >= 1,
+            "expected at least 1 intercepted connection, delta={}",
+            intercepted - base_i
+        );
+
+        // ...but NOT MITM'd (provider opted out).
+        assert_eq!(
+            mitm_count - base_mitm,
+            0,
+            "MITM counter should not increase for opted-out provider"
+        );
+
+        cancel.cancel();
+        let _ = handle.await;
+    }
 }

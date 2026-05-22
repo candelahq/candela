@@ -21,6 +21,8 @@ use tracing::{debug, info, warn};
 
 use candela_proxy::SNIMap;
 
+use crate::ca::EphemeralCA;
+use crate::mitm;
 use crate::origdst;
 use crate::sni;
 
@@ -64,18 +66,23 @@ impl Stats {
 pub struct Config {
     /// Address to listen on (e.g. ":15001" or "0.0.0.0:15001").
     pub listen_addr: String,
-    /// Maps SNI hostnames to provider names.
+    /// Maps SNI hostnames to provider routing metadata.
     pub sni_map: Arc<SNIMap>,
     /// Address of the Candela HTTP proxy (e.g. "127.0.0.1:8080").
     pub proxy_addr: String,
+    /// Optional ephemeral CA for MITM TLS termination.
+    /// When `None`, all connections use passthrough tunneling (Phase 4 behavior).
+    /// When `Some`, intercepted connections are MITM-terminated and forwarded
+    /// as plaintext to `proxy_addr`.
+    pub mitm_ca: Option<Arc<EphemeralCA>>,
 }
 
 /// Transparent proxy listener that intercepts iptables-redirected connections.
 pub struct TransparentListener {
     listen_addr: String,
     sni_map: Arc<SNIMap>,
-    #[allow(dead_code)]
     proxy_addr: String,
+    mitm_ca: Option<Arc<EphemeralCA>>,
     stats: Arc<Stats>,
 }
 
@@ -86,6 +93,7 @@ impl TransparentListener {
             listen_addr: cfg.listen_addr,
             sni_map: cfg.sni_map,
             proxy_addr: cfg.proxy_addr,
+            mitm_ca: cfg.mitm_ca,
             stats: Arc::new(Stats::default()),
         }
     }
@@ -106,6 +114,7 @@ impl TransparentListener {
         info!(
             addr = %self.listen_addr,
             sni_hosts = ?self.sni_map.hosts(),
+            mitm_enabled = self.mitm_ca.is_some(),
             "🔍 transparent proxy listening"
         );
 
@@ -120,8 +129,10 @@ impl TransparentListener {
                         Ok((stream, _addr)) => {
                             let sni_map = Arc::clone(&self.sni_map);
                             let stats = Arc::clone(&self.stats);
+                            let mitm_ca = self.mitm_ca.clone();
+                            let proxy_addr = self.proxy_addr.clone();
                             tokio::spawn(async move {
-                                handle_conn(stream, &sni_map, &stats).await;
+                                handle_conn(stream, &sni_map, &stats, mitm_ca.as_deref(), &proxy_addr).await;
                             });
                         }
                         Err(e) => {
@@ -150,8 +161,10 @@ impl TransparentListener {
                         Ok((stream, _addr)) => {
                             let sni_map = Arc::clone(&self.sni_map);
                             let stats = Arc::clone(&self.stats);
+                            let mitm_ca = self.mitm_ca.clone();
+                            let proxy_addr = self.proxy_addr.clone();
                             tokio::spawn(async move {
-                                handle_conn(stream, &sni_map, &stats).await;
+                                handle_conn(stream, &sni_map, &stats, mitm_ca.as_deref(), &proxy_addr).await;
                             });
                         }
                         Err(e) => {
@@ -165,7 +178,13 @@ impl TransparentListener {
 }
 
 /// Processes a single intercepted connection.
-async fn handle_conn(mut stream: TcpStream, sni_map: &SNIMap, stats: &Stats) {
+async fn handle_conn(
+    mut stream: TcpStream,
+    sni_map: &SNIMap,
+    stats: &Stats,
+    mitm_ca: Option<&EphemeralCA>,
+    proxy_addr: &str,
+) {
     // Peek the first bytes to extract the TLS ClientHello SNI.
     let mut buf = vec![0u8; PEEK_BUF_SIZE];
     let n = match tokio::time::timeout(PEEK_TIMEOUT, stream.read(&mut buf)).await {
@@ -202,13 +221,44 @@ async fn handle_conn(mut stream: TcpStream, sni_map: &SNIMap, stats: &Stats) {
 
     // Look up SNI in provider map.
     match sni_map.lookup(&sni_hostname) {
-        Some(provider) => {
-            info!(
-                sni = %sni_hostname,
-                provider = %provider,
-                "transparent: intercepting LLM connection"
-            );
+        Some(entry) => {
             stats.intercepted.fetch_add(1, Ordering::Relaxed);
+
+            // Check if MITM TLS termination is enabled and the provider allows it.
+            if let Some(ca) = mitm_ca {
+                if entry.should_mitm {
+                    info!(
+                        sni = %sni_hostname,
+                        provider = %entry.provider,
+                        "transparent: MITM intercepting LLM connection"
+                    );
+                    if let Err(e) =
+                        mitm::mitm_intercept(stream, peeked, &sni_hostname, ca, proxy_addr, stats)
+                            .await
+                    {
+                        warn!(
+                            sni = %sni_hostname,
+                            provider = %entry.provider,
+                            error = %e,
+                            "MITM intercept failed, connection dropped"
+                        );
+                        stats.errors.fetch_add(1, Ordering::Relaxed);
+                    }
+                    return;
+                }
+                // Provider has mitm: false — fall through to tunnel passthrough.
+                info!(
+                    sni = %sni_hostname,
+                    provider = %entry.provider,
+                    "transparent: MITM opt-out, tunneling passthrough"
+                );
+            } else {
+                info!(
+                    sni = %sni_hostname,
+                    provider = %entry.provider,
+                    "transparent: intercepting LLM connection (passthrough)"
+                );
+            }
         }
         None => {
             debug!(sni = %sni_hostname, "transparent: SNI not in provider map, passthrough");
@@ -216,8 +266,7 @@ async fn handle_conn(mut stream: TcpStream, sni_map: &SNIMap, stats: &Stats) {
         }
     }
 
-    // Tunnel to original destination (both intercepted and passthrough).
-    // Full MITM with cert generation comes in a future phase.
+    // Tunnel to original destination (passthrough path — no MITM).
     tunnel_to_orig_dest(&mut stream, peeked, &sni_hostname, stats).await;
 }
 
@@ -398,6 +447,7 @@ mod tests {
             listen_addr: "127.0.0.1:0".into(),
             sni_map,
             proxy_addr: "127.0.0.1:8080".into(),
+            mitm_ca: None,
         });
 
         let (i, p, e) = listener.stats().snapshot();
@@ -425,6 +475,7 @@ mod tests {
             listen_addr: addr.to_string(),
             sni_map,
             proxy_addr: "127.0.0.1:0".into(),
+            mitm_ca: None,
         });
 
         let cancel = tokio_util::sync::CancellationToken::new();
@@ -508,6 +559,7 @@ mod tests {
             listen_addr: "127.0.0.1:0".into(),
             sni_map,
             proxy_addr: "127.0.0.1:0".into(),
+            mitm_ca: None,
         });
 
         let cancel = tokio_util::sync::CancellationToken::new();
@@ -576,6 +628,7 @@ mod tests {
             listen_addr: addr.to_string(),
             sni_map,
             proxy_addr: "127.0.0.1:0".into(),
+            mitm_ca: None,
         });
 
         let cancel = tokio_util::sync::CancellationToken::new();
@@ -637,6 +690,7 @@ mod tests {
             listen_addr: addr.to_string(),
             sni_map,
             proxy_addr: "127.0.0.1:0".into(),
+            mitm_ca: None,
         });
 
         let cancel = tokio_util::sync::CancellationToken::new();

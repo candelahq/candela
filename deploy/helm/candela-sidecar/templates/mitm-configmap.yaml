@@ -1,0 +1,99 @@
+{{- if .Values.mitm.enabled }}
+# MITM TLS termination sidecar resources.
+# This ConfigMap provides a Pod mutating template for injecting the
+# Candela sidecar with MITM capabilities into application deployments.
+#
+# Usage: Mount these volumes and env vars alongside the sidecar container.
+# See the README for integration patterns.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "candela-sidecar.fullname" . }}-mitm
+  labels:
+    {{- include "candela-sidecar.labels" . | nindent 4 }}
+data:
+  # Sidecar container spec fragment (JSON Patch compatible).
+  # Operators can reference this to build mutating webhook patches
+  # or manually merge into Deployment specs.
+  sidecar.yaml: |
+    # ── Sidecar container ──
+    containers:
+      - name: candela-sidecar
+        image: {{ .Values.image.repository }}:{{ .Values.image.tag }}
+        imagePullPolicy: {{ .Values.image.pullPolicy }}
+        ports:
+          - name: proxy
+            containerPort: 8080
+            protocol: TCP
+          {{- if .Values.transparent.enabled }}
+          - name: transparent
+            containerPort: {{ .Values.transparent.port }}
+            protocol: TCP
+          {{- end }}
+        env:
+          - name: PORT
+            value: "8080"
+          {{- if .Values.gcpProject }}
+          - name: GCP_PROJECT
+            value: {{ .Values.gcpProject | quote }}
+          {{- end }}
+          {{- if .Values.candelaProjectId }}
+          - name: CANDELA_PROJECT_ID
+            value: {{ .Values.candelaProjectId | quote }}
+          {{- end }}
+          {{- if .Values.transparent.enabled }}
+          - name: TRANSPARENT_PORT
+            value: {{ .Values.transparent.port | quote }}
+          {{- end }}
+          - name: MITM_CA_ENABLED
+            value: "true"
+          - name: MITM_CA_PEM_PATH
+            value: {{ .Values.mitm.caPemPath | quote }}
+          {{- if .Values.pubsub.topic }}
+          - name: PUBSUB_TOPIC
+            value: {{ .Values.pubsub.topic | quote }}
+          - name: SPAN_FORMAT
+            value: {{ .Values.pubsub.format | quote }}
+          {{- end }}
+          {{- if .Values.otlp.endpoint }}
+          - name: OTLP_ENDPOINT
+            value: {{ .Values.otlp.endpoint | quote }}
+          {{- end }}
+          {{- if .Values.otlp.headers }}
+          - name: OTLP_HEADERS
+            value: {{ .Values.otlp.headers | quote }}
+          {{- end }}
+          - name: CORS_ORIGINS
+            value: {{ .Values.cors.origins | quote }}
+          - name: PROVIDERS
+            value: {{ include "candela-sidecar.providerNames" . | quote }}
+        volumeMounts:
+          - name: {{ .Values.mitm.caVolume.name }}
+            mountPath: {{ .Values.mitm.caVolume.mountPath }}
+        resources:
+          {{- toYaml .Values.resources | nindent 10 }}
+
+    # ── Volume definition (add to pod spec) ──
+    volumes:
+      - name: {{ .Values.mitm.caVolume.name }}
+        emptyDir:
+          sizeLimit: 1Mi
+
+  # Application container env vars for CA trust injection.
+  # Add these to the application container's env section.
+  trust-env.yaml: |
+    env:
+    {{- range $key, $value := .Values.mitm.trustEnv }}
+    {{- if $value }}
+      - name: {{ $key }}
+        value: {{ $value | quote }}
+    {{- end }}
+    {{- end }}
+
+  # Application container volumeMount for CA PEM access.
+  trust-volume.yaml: |
+    volumeMounts:
+      - name: {{ .Values.mitm.caVolume.name }}
+        mountPath: {{ .Values.mitm.caVolume.mountPath }}
+        readOnly: true
+{{- end }}

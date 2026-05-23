@@ -4,15 +4,23 @@
 //! then forwards the decrypted bytes to the Candela HTTP proxy via a
 //! plaintext TCP connection. The interceptor is fully protocol-transparent:
 //! it performs byte-level `copy_bidirectional` without parsing HTTP.
+//!
+//! **Trace context propagation:** The MITM layer does NOT inject or modify
+//! HTTP headers — it operates at the byte level. W3C `traceparent` headers
+//! propagate naturally: the client's HTTP request (including trace headers)
+//! flows through the decrypted TLS stream → plaintext to the proxy handler,
+//! which already parses `traceparent` (see `handler.rs`). The `#[instrument]`
+//! spans here provide sidecar-internal observability for the MITM lifecycle
+//! itself (handshake timing, byte counts, errors).
 
 use std::io::Cursor;
 use std::sync::atomic::Ordering;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use tokio::io::{self, AsyncRead, AsyncWrite};
 use tokio::net::TcpStream;
 use tokio_rustls::TlsAcceptor;
-use tracing::debug;
+use tracing::{Instrument, debug, info_span};
 
 use crate::ca::EphemeralCA;
 use crate::listener::Stats;
@@ -28,6 +36,11 @@ const PROXY_DIAL_TIMEOUT: Duration = Duration::from_secs(5);
 /// 4. Bidirectionally copies bytes between the decrypted TLS stream and
 ///    the proxy connection.
 ///
+/// The function is instrumented with a `tracing` span (`mitm.tls_termination`)
+/// that records SNI, proxy address, handshake success, and byte counts.
+/// When the sidecar exports to an OTLP collector, these spans provide
+/// visibility into the MITM lifecycle alongside the proxy's LLM spans.
+///
 /// # Errors
 ///
 /// Returns an error if any step fails (cert generation, TLS handshake,
@@ -40,49 +53,78 @@ pub async fn mitm_intercept(
     proxy_addr: &str,
     stats: &Stats,
 ) -> anyhow::Result<()> {
-    // 1. Get the TLS ServerConfig for this hostname.
-    let server_config = ca.server_config_for(sni)?;
-    let acceptor = TlsAcceptor::from(server_config);
+    let span = info_span!(
+        "mitm.tls_termination",
+        sni = %sni,
+        proxy_addr = %proxy_addr,
+        handshake_ok = tracing::field::Empty,
+        handshake_ms = tracing::field::Empty,
+        bytes_client_to_proxy = tracing::field::Empty,
+        bytes_proxy_to_client = tracing::field::Empty,
+        duration_ms = tracing::field::Empty,
+    );
 
-    // 2. Replay the peeked ClientHello.
-    //    We already consumed these bytes from the socket; we need to
-    //    prepend them so the TLS acceptor sees the full handshake.
-    let replay = ReplayStream::new(peeked, client);
+    async {
+        let start = Instant::now();
 
-    // 3. Accept TLS handshake.
-    let tls_stream = acceptor.accept(replay).await.map_err(|e| {
-        debug!(sni = %sni, error = %e, "MITM TLS handshake failed");
-        anyhow::anyhow!("TLS handshake failed for {sni}: {e}")
-    })?;
+        // 1. Get the TLS ServerConfig for this hostname.
+        let server_config = ca.server_config_for(sni)?;
+        let acceptor = TlsAcceptor::from(server_config);
 
-    debug!(sni = %sni, "MITM TLS handshake succeeded");
+        // 2. Replay the peeked ClientHello.
+        //    We already consumed these bytes from the socket; we need to
+        //    prepend them so the TLS acceptor sees the full handshake.
+        let replay = ReplayStream::new(peeked, client);
 
-    // 4. Open plaintext connection to the Candela proxy.
-    let mut proxy_stream = tokio::time::timeout(PROXY_DIAL_TIMEOUT, TcpStream::connect(proxy_addr))
-        .await
-        .map_err(|_| anyhow::anyhow!("proxy dial timeout to {proxy_addr}"))??;
+        // 3. Accept TLS handshake.
+        let tls_stream = acceptor.accept(replay).await.map_err(|e| {
+            tracing::Span::current().record("handshake_ok", false);
+            debug!(sni = %sni, error = %e, "MITM TLS handshake failed");
+            anyhow::anyhow!("TLS handshake failed for {sni}: {e}")
+        })?;
 
-    // 5. Bidirectional copy: decrypted client ↔ plaintext proxy.
-    //    copy_bidirectional drains both directions fully before closing,
-    //    avoiding response truncation when the client finishes sending
-    //    before the proxy finishes responding.
-    let mut tls_stream = tls_stream;
-    match io::copy_bidirectional(&mut tls_stream, &mut proxy_stream).await {
-        Ok((client_to_proxy, proxy_to_client)) => {
-            debug!(
-                sni = %sni,
-                client_to_proxy,
-                proxy_to_client,
-                "MITM bidirectional copy completed"
-            );
+        let handshake_elapsed = start.elapsed();
+        let current_span = tracing::Span::current();
+        current_span.record("handshake_ok", true);
+        current_span.record("handshake_ms", handshake_elapsed.as_millis() as u64);
+        debug!(sni = %sni, handshake_ms = handshake_elapsed.as_millis(), "MITM TLS handshake succeeded");
+
+        // 4. Open plaintext connection to the Candela proxy.
+        let mut proxy_stream =
+            tokio::time::timeout(PROXY_DIAL_TIMEOUT, TcpStream::connect(proxy_addr))
+                .await
+                .map_err(|_| anyhow::anyhow!("proxy dial timeout to {proxy_addr}"))??;
+
+        // 5. Bidirectional copy: decrypted client ↔ plaintext proxy.
+        //    copy_bidirectional drains both directions fully before closing,
+        //    avoiding response truncation when the client finishes sending
+        //    before the proxy finishes responding.
+        let mut tls_stream = tls_stream;
+        match io::copy_bidirectional(&mut tls_stream, &mut proxy_stream).await {
+            Ok((client_to_proxy, proxy_to_client)) => {
+                let current = tracing::Span::current();
+                current.record("bytes_client_to_proxy", client_to_proxy);
+                current.record("bytes_proxy_to_client", proxy_to_client);
+                current.record("duration_ms", start.elapsed().as_millis() as u64);
+                debug!(
+                    sni = %sni,
+                    client_to_proxy,
+                    proxy_to_client,
+                    duration_ms = %start.elapsed().as_millis(),
+                    "MITM bidirectional copy completed"
+                );
+            }
+            Err(e) => {
+                tracing::Span::current().record("duration_ms", start.elapsed().as_millis() as u64);
+                debug!(sni = %sni, error = %e, "MITM bidirectional copy error");
+            }
         }
-        Err(e) => {
-            debug!(sni = %sni, error = %e, "MITM bidirectional copy error");
-        }
+
+        stats.mitm.fetch_add(1, Ordering::Relaxed);
+        Ok(())
     }
-
-    stats.mitm.fetch_add(1, Ordering::Relaxed);
-    Ok(())
+    .instrument(span)
+    .await
 }
 
 /// A stream that replays `peeked` bytes before reading from the inner stream.

@@ -50,6 +50,27 @@ transparent:
   enabled: false
   port: 15001
 
+# ── MITM TLS termination ──
+# When enabled, the sidecar generates an ephemeral CA at startup and
+# terminates TLS for intercepted LLM traffic, forwarding decrypted
+# bytes to the HTTP proxy for request-level observability.
+mitm:
+  enabled: false
+  # Path where the sidecar writes the ephemeral CA PEM.
+  caPemPath: "/var/run/candela/ca.pem"
+  # Shared volume for CA PEM trust injection (emptyDir).
+  # The sidecar writes the CA cert here; the application reads it via
+  # SSL_CERT_FILE / REQUESTS_CA_BUNDLE / NODE_EXTRA_CA_CERTS.
+  caVolume:
+    name: candela-ca
+    mountPath: "/var/run/candela"
+  # Environment variables injected into the application container
+  # to trust the ephemeral CA. Set to empty string to disable.
+  trustEnv:
+    SSL_CERT_FILE: "/var/run/candela/ca.pem"
+    REQUESTS_CA_BUNDLE: "/var/run/candela/ca.pem"
+    NODE_EXTRA_CA_CERTS: "/var/run/candela/ca.pem"
+
 # ── iptables init container ──
 iptables:
   enabled: false

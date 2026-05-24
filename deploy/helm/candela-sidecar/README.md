@@ -90,6 +90,67 @@ This single config generates:
 
 > ⚠️ **Tetragon and transparent proxy are mutually exclusive.** Tetragon kprobes fire at the syscall level *before* iptables NAT, so they would kill the app process before the proxy can intercept. The Helm chart will fail if both are enabled.
 
+## MITM TLS Termination
+
+When `mitm.enabled=true`, the sidecar generates an ephemeral CA at startup and performs TLS termination on intercepted LLM traffic. This enables **request-level observability** (model, tokens, cost) without requiring SDK modifications.
+
+### How It Works
+
+```
+App Container                Sidecar Container
+┌──────────┐   TLS (ephemeral cert)   ┌──────────────────┐   plaintext   ┌────────┐   TLS   ┌──────────┐
+│ curl/SDK │ ────────────────────────► │ Transparent      │ ────────────► │ HTTP   │ ──────► │ Upstream │
+│          │                           │ Listener :15001  │               │ Proxy  │         │ LLM API  │
+└──────────┘                           └──────────────────┘               │ :8080  │         └──────────┘
+     ▲                                        │                           └────────┘
+     │ trusts CA via SSL_CERT_FILE            │ writes CA PEM
+     └────────────────────────────────────────┘
+              /var/run/candela/ca.pem (emptyDir volume)
+```
+
+### Enable MITM
+
+```bash
+helm install candela-sidecar deploy/helm/candela-sidecar/ \
+  --set transparent.enabled=true \
+  --set iptables.enabled=true \
+  --set mitm.enabled=true \
+  --set gcpProject=my-project
+```
+
+The Helm chart generates a `ConfigMap` with sidecar container spec fragments
+and trust injection env vars. Merge these into your Deployment:
+
+1. **Add the sidecar container** (from `sidecar.yaml` in the ConfigMap)
+2. **Add the `candela-ca` emptyDir volume** to the pod spec
+3. **Mount the volume** in the application container (read-only)
+4. **Set trust env vars** (`SSL_CERT_FILE`, `REQUESTS_CA_BUNDLE`, `NODE_EXTRA_CA_CERTS`)
+
+### Provider Opt-Out
+
+Providers with certificate pinning can opt out of MITM while still being
+intercepted for connection-level metrics:
+
+```yaml
+providers:
+  - name: openai
+    host: api.openai.com
+    intercept: true
+    mitm: true    # default
+  - name: pinned-service
+    host: pinned.example.com
+    intercept: true
+    mitm: false   # tunnel passthrough, no TLS termination
+```
+
+### W3C Trace Context
+
+The MITM layer is protocol-transparent — it performs byte-level
+`copy_bidirectional` between the decrypted TLS stream and the proxy.
+W3C `traceparent` headers in the client's HTTP request propagate
+naturally to the proxy handler, which already parses them for span
+correlation. No header injection is needed.
+
 ## Monitoring
 
 The transparent proxy exposes stats via:

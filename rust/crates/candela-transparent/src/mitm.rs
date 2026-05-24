@@ -4,15 +4,23 @@
 //! then forwards the decrypted bytes to the Candela HTTP proxy via a
 //! plaintext TCP connection. The interceptor is fully protocol-transparent:
 //! it performs byte-level `copy_bidirectional` without parsing HTTP.
+//!
+//! **Trace context propagation:** The MITM layer does NOT inject or modify
+//! HTTP headers — it operates at the byte level. W3C `traceparent` headers
+//! propagate naturally: the client's HTTP request (including trace headers)
+//! flows through the decrypted TLS stream → plaintext to the proxy handler,
+//! which already parses `traceparent` (see `handler.rs`). The `#[instrument]`
+//! spans here provide sidecar-internal observability for the MITM lifecycle
+//! itself (handshake timing, byte counts, errors).
 
 use std::io::Cursor;
 use std::sync::atomic::Ordering;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use tokio::io::{self, AsyncRead, AsyncWrite};
 use tokio::net::TcpStream;
 use tokio_rustls::TlsAcceptor;
-use tracing::debug;
+use tracing::{Instrument, debug, info_span};
 
 use crate::ca::EphemeralCA;
 use crate::listener::Stats;
@@ -28,6 +36,11 @@ const PROXY_DIAL_TIMEOUT: Duration = Duration::from_secs(5);
 /// 4. Bidirectionally copies bytes between the decrypted TLS stream and
 ///    the proxy connection.
 ///
+/// The function is instrumented with a `tracing` span (`mitm.tls_termination`)
+/// that records SNI, proxy address, handshake success, and byte counts.
+/// When the sidecar exports to an OTLP collector, these spans provide
+/// visibility into the MITM lifecycle alongside the proxy's LLM spans.
+///
 /// # Errors
 ///
 /// Returns an error if any step fails (cert generation, TLS handshake,
@@ -40,49 +53,100 @@ pub async fn mitm_intercept(
     proxy_addr: &str,
     stats: &Stats,
 ) -> anyhow::Result<()> {
-    // 1. Get the TLS ServerConfig for this hostname.
-    let server_config = ca.server_config_for(sni)?;
-    let acceptor = TlsAcceptor::from(server_config);
+    let span = info_span!(
+        "mitm.tls_termination",
+        sni = %sni,
+        proxy_addr = %proxy_addr,
+        handshake_ok = tracing::field::Empty,
+        handshake_ms = tracing::field::Empty,
+        bytes_client_to_proxy = tracing::field::Empty,
+        bytes_proxy_to_client = tracing::field::Empty,
+        duration_ms = tracing::field::Empty,
+    );
 
-    // 2. Replay the peeked ClientHello.
-    //    We already consumed these bytes from the socket; we need to
-    //    prepend them so the TLS acceptor sees the full handshake.
-    let replay = ReplayStream::new(peeked, client);
+    async {
+        let start = Instant::now();
 
-    // 3. Accept TLS handshake.
-    let tls_stream = acceptor.accept(replay).await.map_err(|e| {
-        debug!(sni = %sni, error = %e, "MITM TLS handshake failed");
-        anyhow::anyhow!("TLS handshake failed for {sni}: {e}")
-    })?;
+        // Helper: record duration_ms on the current span regardless of
+        // which exit path we take. This ensures OTLP exporters always
+        // see the total MITM attempt duration.
+        let record_duration = || {
+            tracing::Span::current()
+                .record("duration_ms", start.elapsed().as_millis() as u64);
+        };
 
-    debug!(sni = %sni, "MITM TLS handshake succeeded");
+        // 1. Get the TLS ServerConfig for this hostname.
+        let server_config = ca.server_config_for(sni).map_err(|e| {
+            let current = tracing::Span::current();
+            current.record("handshake_ok", false);
+            current.record("duration_ms", start.elapsed().as_millis() as u64);
+            debug!(sni = %sni, error = %e, "MITM cert generation failed");
+            e
+        })?;
+        let acceptor = TlsAcceptor::from(server_config);
 
-    // 4. Open plaintext connection to the Candela proxy.
-    let mut proxy_stream = tokio::time::timeout(PROXY_DIAL_TIMEOUT, TcpStream::connect(proxy_addr))
-        .await
-        .map_err(|_| anyhow::anyhow!("proxy dial timeout to {proxy_addr}"))??;
+        // 2. Replay the peeked ClientHello.
+        //    We already consumed these bytes from the socket; we need to
+        //    prepend them so the TLS acceptor sees the full handshake.
+        let replay = ReplayStream::new(peeked, client);
 
-    // 5. Bidirectional copy: decrypted client ↔ plaintext proxy.
-    //    copy_bidirectional drains both directions fully before closing,
-    //    avoiding response truncation when the client finishes sending
-    //    before the proxy finishes responding.
-    let mut tls_stream = tls_stream;
-    match io::copy_bidirectional(&mut tls_stream, &mut proxy_stream).await {
-        Ok((client_to_proxy, proxy_to_client)) => {
-            debug!(
-                sni = %sni,
-                client_to_proxy,
-                proxy_to_client,
-                "MITM bidirectional copy completed"
-            );
+        // 3. Accept TLS handshake.
+        let tls_stream = acceptor.accept(replay).await.map_err(|e| {
+            let current = tracing::Span::current();
+            current.record("handshake_ok", false);
+            current.record("duration_ms", start.elapsed().as_millis() as u64);
+            debug!(sni = %sni, error = %e, "MITM TLS handshake failed");
+            anyhow::anyhow!("TLS handshake failed for {sni}: {e}")
+        })?;
+
+        let handshake_elapsed = start.elapsed();
+        let current_span = tracing::Span::current();
+        current_span.record("handshake_ok", true);
+        current_span.record("handshake_ms", handshake_elapsed.as_millis() as u64);
+        debug!(sni = %sni, handshake_ms = handshake_elapsed.as_millis(), "MITM TLS handshake succeeded");
+
+        // 4. Open plaintext connection to the Candela proxy.
+        let mut proxy_stream =
+            tokio::time::timeout(PROXY_DIAL_TIMEOUT, TcpStream::connect(proxy_addr))
+                .await
+                .map_err(|_| {
+                    record_duration();
+                    anyhow::anyhow!("proxy dial timeout to {proxy_addr}")
+                })?
+                .inspect_err(|_| {
+                    record_duration();
+                })?;
+
+        // 5. Bidirectional copy: decrypted client ↔ plaintext proxy.
+        //    copy_bidirectional drains both directions fully before closing,
+        //    avoiding response truncation when the client finishes sending
+        //    before the proxy finishes responding.
+        let mut tls_stream = tls_stream;
+        match io::copy_bidirectional(&mut tls_stream, &mut proxy_stream).await {
+            Ok((client_to_proxy, proxy_to_client)) => {
+                let current = tracing::Span::current();
+                current.record("bytes_client_to_proxy", client_to_proxy);
+                current.record("bytes_proxy_to_client", proxy_to_client);
+                current.record("duration_ms", start.elapsed().as_millis() as u64);
+                debug!(
+                    sni = %sni,
+                    client_to_proxy,
+                    proxy_to_client,
+                    duration_ms = start.elapsed().as_millis() as u64,
+                    "MITM bidirectional copy completed"
+                );
+            }
+            Err(e) => {
+                record_duration();
+                debug!(sni = %sni, error = %e, duration_ms = start.elapsed().as_millis() as u64, "MITM bidirectional copy error");
+            }
         }
-        Err(e) => {
-            debug!(sni = %sni, error = %e, "MITM bidirectional copy error");
-        }
+
+        stats.mitm.fetch_add(1, Ordering::Relaxed);
+        Ok(())
     }
-
-    stats.mitm.fetch_add(1, Ordering::Relaxed);
-    Ok(())
+    .instrument(span)
+    .await
 }
 
 /// A stream that replays `peeked` bytes before reading from the inner stream.
@@ -315,6 +379,142 @@ mod tests {
             stats.mitm.load(Ordering::Relaxed),
             1,
             "MITM counter should be 1"
+        );
+    }
+
+    /// Verifies that mitm_intercept returns an error and does NOT increment
+    /// stats when the proxy address is unreachable (exercises the proxy dial
+    /// timeout error path, which should record duration_ms on the span).
+    #[tokio::test]
+    async fn mitm_intercept_proxy_unreachable_returns_error() {
+        install_crypto_provider();
+        use std::sync::Arc;
+        use tokio::net::TcpListener;
+
+        let ca = Arc::new(EphemeralCA::generate().unwrap());
+        let stats = Arc::new(Stats::default());
+
+        // Bind a listener for the MITM side, but point proxy_addr at a
+        // port nothing is listening on.
+        let mitm_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let mitm_addr = mitm_listener.local_addr().unwrap();
+
+        // Use a port that will refuse connections.
+        let bad_proxy_addr = "127.0.0.1:1"; // port 1 — almost certainly refused
+
+        let ca_clone = Arc::clone(&ca);
+        let stats_clone = Arc::clone(&stats);
+        let proxy_str = bad_proxy_addr.to_string();
+
+        let mitm_handle = tokio::spawn(async move {
+            let (stream, _) = mitm_listener.accept().await.unwrap();
+            let mut buf = vec![0u8; 16384];
+            let n = stream.peek(&mut buf).await.unwrap();
+            let peeked = buf[..n].to_vec();
+            let mut stream2 = stream;
+            let mut discard = vec![0u8; n];
+            stream2.read_exact(&mut discard).await.unwrap();
+
+            mitm_intercept(
+                stream2,
+                &peeked,
+                "unreachable.example.com",
+                &ca_clone,
+                &proxy_str,
+                &stats_clone,
+            )
+            .await
+        });
+
+        // Connect a TLS client.
+        let mut root_store = rustls::RootCertStore::empty();
+        root_store.add(ca.ca_cert_der.clone()).unwrap();
+        let client_cfg = Arc::new(
+            rustls::ClientConfig::builder()
+                .with_root_certificates(root_store)
+                .with_no_client_auth(),
+        );
+        let connector = tokio_rustls::TlsConnector::from(client_cfg);
+        let server_name = rustls::pki_types::ServerName::try_from("unreachable.example.com")
+            .unwrap()
+            .to_owned();
+
+        let tcp = TcpStream::connect(mitm_addr).await.unwrap();
+        // The TLS handshake should succeed (the MITM accepts it), but then
+        // the proxy dial should fail.
+        let tls_result = connector.connect(server_name, tcp).await;
+        // The handshake may succeed or fail depending on timing. Either way,
+        // the MITM handler should complete with an error.
+        drop(tls_result);
+
+        let result = tokio::time::timeout(Duration::from_secs(10), mitm_handle)
+            .await
+            .expect("MITM handler should complete");
+        let inner = result.expect("task should not panic");
+        assert!(inner.is_err(), "should error on unreachable proxy");
+
+        // Stats should NOT be incremented on failure.
+        assert_eq!(
+            stats.mitm.load(Ordering::Relaxed),
+            0,
+            "MITM counter should remain 0 on error"
+        );
+    }
+
+    /// Verifies that sending non-TLS garbage data results in a handshake
+    /// failure error (exercises the handshake_ok=false span recording path).
+    #[tokio::test]
+    async fn mitm_intercept_non_tls_data_returns_error() {
+        install_crypto_provider();
+        use std::sync::Arc;
+        use tokio::io::AsyncWriteExt;
+        use tokio::net::TcpListener;
+
+        let ca = Arc::new(EphemeralCA::generate().unwrap());
+        let stats = Arc::new(Stats::default());
+
+        let echo_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let echo_addr = echo_listener.local_addr().unwrap();
+
+        let mitm_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let mitm_addr = mitm_listener.local_addr().unwrap();
+
+        let ca_clone = Arc::clone(&ca);
+        let stats_clone = Arc::clone(&stats);
+        let proxy_addr_str = echo_addr.to_string();
+
+        let mitm_handle = tokio::spawn(async move {
+            let (stream, _) = mitm_listener.accept().await.unwrap();
+            // Simulate peeking some garbage "ClientHello".
+            let garbage = b"NOT A TLS CLIENT HELLO";
+            mitm_intercept(
+                stream,
+                garbage,
+                "garbage.example.com",
+                &ca_clone,
+                &proxy_addr_str,
+                &stats_clone,
+            )
+            .await
+        });
+
+        // Connect and send garbage (non-TLS) data.
+        let mut tcp = TcpStream::connect(mitm_addr).await.unwrap();
+        tcp.write_all(b"GET / HTTP/1.1\r\nHost: garbage.example.com\r\n\r\n")
+            .await
+            .unwrap();
+
+        let result = tokio::time::timeout(Duration::from_secs(5), mitm_handle)
+            .await
+            .expect("MITM handler should complete");
+        let inner = result.expect("task should not panic");
+        assert!(inner.is_err(), "should error on non-TLS handshake");
+
+        // Stats should NOT be incremented on failure.
+        assert_eq!(
+            stats.mitm.load(Ordering::Relaxed),
+            0,
+            "MITM counter should remain 0 on handshake failure"
         );
     }
 }

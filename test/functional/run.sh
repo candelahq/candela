@@ -36,6 +36,13 @@ echo ""
 
 mkdir -p "$REPORT_DIR"
 
+  # Compat routes (/v1/) are only registered by the CLI binary, not candela-server.
+  # Include compat tests only when a CLI binary is under test.
+  COMPAT_TESTS=()
+  if [[ -n "${HURL_INCLUDE_COMPAT:-}" ]]; then
+    COMPAT_TESTS=("$SCRIPT_DIR"/compat/*.hurl)
+  fi
+
 hurl --test \
   --variable CANDELA_URL="$CANDELA_URL" \
   --variable MOCK_UPSTREAM_URL="$MOCK_URL" \
@@ -44,7 +51,7 @@ hurl --test \
   "${EXTRA_ARGS[@]}" \
   "$SCRIPT_DIR"/proxy/*.hurl \
   "$SCRIPT_DIR"/billing/*.hurl \
-  "$SCRIPT_DIR"/compat/*.hurl \
+  "${COMPAT_TESTS[@]}" \
   "$SCRIPT_DIR"/security/*.hurl \
   "$SCRIPT_DIR"/dashboard/dashboard_auth.hurl
 

@@ -67,34 +67,9 @@ proxy:
     - anthropic-direct
     - gemini-oai
 
-  # LM Studio compatibility mode.
-  # Serves /v1/chat/completions and /v1/models at the root path (no /proxy/ prefix).
-  # Model names in requests are routed to the matching upstream provider.
-  # Also starts a secondary listener on the LM Studio default port (1234)
-  # so IntelliJ/tools can simply "Enable LM Studio" with no URL changes.
-  lmstudio:
-    enabled: true
-    port: 1234              # Secondary listener port (default: 1234, LM Studio's default)
-    models:
-      - id: gpt-4o
-        provider: openai
-      - id: gpt-4o-mini
-        provider: openai
-      - id: o3-mini
-        provider: openai
-      - id: claude-sonnet-4-20250514
-        provider: anthropic
-      - id: claude-opus-4-20250514
-        provider: anthropic
-      - id: gemini-2.5-pro
-        provider: gemini-oai
-      - id: gemini-2.5-flash
-        provider: gemini-oai
-      # Local models (requires a running Ollama/vLLM/LM Studio)
-      # - id: llama3.2:8b
-      #   provider: local
-      # - id: codellama:13b
-      #   provider: local
+  # NOTE: LM Studio compatibility mode (/v1/ routes + port 1234 listener) is
+  # only available in the local CLI (`candela`), not in candela-server.
+  # See ~/.config/candela/config.yaml for local LM Studio compat settings.
 
 # Pricing overrides.
 # Built-in defaults cover all cloud models at list prices.

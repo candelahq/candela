@@ -5,8 +5,6 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
-
-	"github.com/candelahq/candela/pkg/costcalc"
 )
 
 // TestCORS_TraceparentHeader verifies that the server's CORS middleware
@@ -38,7 +36,7 @@ func TestCORS_TraceparentHeader(t *testing.T) {
 // a 200 response with application/json content type.
 func TestCORS_ModelsEndpointReturnsJSON(t *testing.T) {
 	submitter := &mockSubmitter{}
-	calc := costcalc.New()
+	calc := newCalcWithTestModels()
 
 	p := New(Config{
 		Providers: []Provider{{Name: "openai", UpstreamURL: "http://localhost:1"}},

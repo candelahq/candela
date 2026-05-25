@@ -8,15 +8,13 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
-
-	"github.com/candelahq/candela/pkg/costcalc"
 )
 
 // TestCompatRoute_ModelNameInjection verifies that user-supplied model names
 // are JSON-encoded in error responses to prevent XSS/injection.
 func TestCompatRoute_ModelNameInjection(t *testing.T) {
 	submitter := &mockSubmitter{}
-	calc := costcalc.New()
+	calc := newCalcWithTestModels()
 
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -78,7 +76,7 @@ func TestHandleProxy_MaxBytesError413(t *testing.T) {
 	defer upstream.Close()
 
 	submitter := &mockSubmitter{}
-	calc := costcalc.New()
+	calc := newCalcWithTestModels()
 
 	p := New(Config{
 		Providers: []Provider{{Name: "openai", UpstreamURL: upstream.URL}},
@@ -113,7 +111,7 @@ func TestHandleProxy_MaxBytesError413(t *testing.T) {
 // are not reflected raw in error responses.
 func TestHandleProxy_UnknownProviderSanitized(t *testing.T) {
 	submitter := &mockSubmitter{}
-	calc := costcalc.New()
+	calc := newCalcWithTestModels()
 
 	p := New(Config{
 		Providers: []Provider{{Name: "openai", UpstreamURL: "http://localhost:1"}},
@@ -164,7 +162,7 @@ func TestRequestID_UsesTraceIDFormat(t *testing.T) {
 	defer upstream.Close()
 
 	submitter := &mockSubmitter{}
-	calc := costcalc.New()
+	calc := newCalcWithTestModels()
 	p := New(Config{
 		Providers: []Provider{{Name: "openai", UpstreamURL: upstream.URL}},
 		ProjectID: "test",
@@ -197,7 +195,7 @@ func TestRequestID_UsesTraceIDFormat(t *testing.T) {
 // TestHandleProxy_EmptyPath verifies that a malformed proxy path returns 400.
 func TestHandleProxy_EmptyPath(t *testing.T) {
 	submitter := &mockSubmitter{}
-	calc := costcalc.New()
+	calc := newCalcWithTestModels()
 	p := New(Config{
 		Providers: []Provider{{Name: "openai", UpstreamURL: "http://localhost:1"}},
 		ProjectID: "test",
@@ -216,7 +214,7 @@ func TestHandleProxy_EmptyPath(t *testing.T) {
 // TestHandleProxy_GETModelsRoute verifies the synthetic /v1/models route.
 func TestHandleProxy_GETModelsRoute(t *testing.T) {
 	submitter := &mockSubmitter{}
-	calc := costcalc.New()
+	calc := newCalcWithTestModels()
 
 	p := New(Config{
 		Providers: []Provider{{Name: "anthropic", UpstreamURL: "http://localhost:1"}},

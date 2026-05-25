@@ -12,8 +12,6 @@ import (
 	"time"
 
 	"golang.org/x/oauth2"
-
-	"github.com/candelahq/candela/pkg/costcalc"
 )
 
 // ====================================================================
@@ -46,7 +44,7 @@ func TestADCTokenInjection(t *testing.T) {
 	defer upstream.Close()
 
 	submitter := &mockSubmitter{}
-	calc := costcalc.New()
+	calc := newCalcWithTestModels()
 
 	p := New(Config{
 		Providers: []Provider{{
@@ -93,7 +91,7 @@ func TestADCTokenFailure(t *testing.T) {
 	defer upstream.Close()
 
 	submitter := &mockSubmitter{}
-	calc := costcalc.New()
+	calc := newCalcWithTestModels()
 
 	p := New(Config{
 		Providers: []Provider{{
@@ -144,7 +142,7 @@ func TestUpstream429_SurfacedToClient(t *testing.T) {
 	defer upstream.Close()
 
 	submitter := &mockSubmitter{}
-	calc := costcalc.New()
+	calc := newCalcWithTestModels()
 
 	p := New(Config{
 		Providers: []Provider{{Name: "anthropic", UpstreamURL: upstream.URL}},
@@ -193,7 +191,7 @@ func TestUpstream500_SurfacedToClient(t *testing.T) {
 	defer upstream.Close()
 
 	submitter := &mockSubmitter{}
-	calc := costcalc.New()
+	calc := newCalcWithTestModels()
 
 	p := New(Config{
 		Providers: []Provider{{Name: "anthropic", UpstreamURL: upstream.URL}},
@@ -238,7 +236,7 @@ func TestUpstream500_SurfacedToClient(t *testing.T) {
 
 func TestUpstreamUnreachable_502(t *testing.T) {
 	submitter := &mockSubmitter{}
-	calc := costcalc.New()
+	calc := newCalcWithTestModels()
 
 	// Point to a guaranteed-closed port.
 	p := New(Config{
@@ -282,7 +280,7 @@ func TestUpstream500_TracksErrorInSpan(t *testing.T) {
 	defer upstream.Close()
 
 	submitter := &mockSubmitter{}
-	calc := costcalc.New()
+	calc := newCalcWithTestModels()
 
 	p := New(Config{
 		Providers: []Provider{{Name: "anthropic", UpstreamURL: upstream.URL}},
@@ -373,7 +371,7 @@ func TestStreamingSSE_EndToEnd_WithTranslation(t *testing.T) {
 	defer upstream.Close()
 
 	submitter := &mockSubmitter{}
-	calc := costcalc.New()
+	calc := newCalcWithTestModels()
 
 	p := New(Config{
 		Providers: []Provider{{
@@ -463,7 +461,7 @@ func TestStreamingSSE_Passthrough_NoTranslation(t *testing.T) {
 	defer upstream.Close()
 
 	submitter := &mockSubmitter{}
-	calc := costcalc.New()
+	calc := newCalcWithTestModels()
 
 	p := New(Config{
 		Providers: []Provider{{Name: "openai", UpstreamURL: upstream.URL}},

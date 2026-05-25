@@ -7,8 +7,6 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/candelahq/candela/pkg/costcalc"
 )
 
 // ── Unit Tests: parseBaggage ───────────────────────────────────────────────
@@ -184,7 +182,7 @@ func TestProxy_TenantID_HeaderPropagatedToSpan(t *testing.T) {
 	p := New(Config{
 		Providers: []Provider{{Name: "openai", UpstreamURL: upstream.URL}},
 		ProjectID: "proj-test",
-	}, sub, costcalc.New())
+	}, sub, newCalcWithTestModels())
 
 	mux := http.NewServeMux()
 	p.RegisterRoutes(mux)
@@ -231,7 +229,7 @@ func TestProxy_TenantID_BaggageWinsOverHeader(t *testing.T) {
 	p := New(Config{
 		Providers: []Provider{{Name: "openai", UpstreamURL: upstream.URL}},
 		ProjectID: "proj-test",
-	}, sub, costcalc.New())
+	}, sub, newCalcWithTestModels())
 
 	mux := http.NewServeMux()
 	p.RegisterRoutes(mux)
@@ -278,7 +276,7 @@ func TestProxy_TenantID_AbsentHeaderLeavesEmpty(t *testing.T) {
 	p := New(Config{
 		Providers: []Provider{{Name: "openai", UpstreamURL: upstream.URL}},
 		ProjectID: "proj-test",
-	}, sub, costcalc.New())
+	}, sub, newCalcWithTestModels())
 
 	mux := http.NewServeMux()
 	p.RegisterRoutes(mux)
@@ -324,7 +322,7 @@ func TestProxy_TenantID_InvalidHeaderRejected(t *testing.T) {
 	p := New(Config{
 		Providers: []Provider{{Name: "openai", UpstreamURL: upstream.URL}},
 		ProjectID: "proj-test",
-	}, sub, costcalc.New())
+	}, sub, newCalcWithTestModels())
 
 	mux := http.NewServeMux()
 	p.RegisterRoutes(mux)
@@ -372,7 +370,7 @@ func TestProxy_TenantID_MultiBaggageHeaders(t *testing.T) {
 	p := New(Config{
 		Providers: []Provider{{Name: "openai", UpstreamURL: upstream.URL}},
 		ProjectID: "proj-test",
-	}, sub, costcalc.New())
+	}, sub, newCalcWithTestModels())
 
 	mux := http.NewServeMux()
 	p.RegisterRoutes(mux)
@@ -417,7 +415,7 @@ func TestProxy_TenantID_Precedence(t *testing.T) {
 	p := New(Config{
 		Providers: []Provider{{Name: "openai", UpstreamURL: upstream.URL}},
 		ProjectID: "proj-test",
-	}, sub, costcalc.New())
+	}, sub, newCalcWithTestModels())
 
 	mux := http.NewServeMux()
 	p.RegisterRoutes(mux)
@@ -452,7 +450,7 @@ func TestProxy_TenantID_Streaming(t *testing.T) {
 	p := New(Config{
 		Providers: []Provider{{Name: "openai", UpstreamURL: upstream.URL}},
 		ProjectID: "proj-test",
-	}, sub, costcalc.New())
+	}, sub, newCalcWithTestModels())
 
 	mux := http.NewServeMux()
 	p.RegisterRoutes(mux)

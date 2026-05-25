@@ -427,22 +427,22 @@ func (c *Calculator) key(provider, model string) string {
 
 // loadDefaults populates built-in list prices for all cloud models reachable
 // through the Candela proxy. This should be exhaustive — every model a user
-// can call through OpenAI, Google, or Anthropic must have a price here.
+// can call through Google or Anthropic must have a price here.
 //
-// Prices are list prices in USD per 1 million tokens (as of April 2026).
+// Prices are list prices in USD per 1 million tokens (as of May 2026).
 // For negotiated or discounted rates, use config overrides.
 func (c *Calculator) loadDefaults() {
 	defaults := []ModelPricing{
 		// ── Google Gemini ─────────────────────────────────────────
-		// Gemini 3.1 (latest, May 2026)
-		{Provider: "google", Model: "gemini-3.1-pro", InputPerMillion: 2.00, OutputPerMillion: 12.00},
-		{Provider: "google", Model: "gemini-3.1-flash", InputPerMillion: 0.50, OutputPerMillion: 3.00},
-		{Provider: "google", Model: "gemini-3.1-flash-lite", InputPerMillion: 0.25, OutputPerMillion: 1.50},
-		// Gemini 3.5 (May 2026)
+		// Gemini 3.5 (latest, May 2026)
 		{Provider: "google", Model: "gemini-3.5-flash", InputPerMillion: 1.50, OutputPerMillion: 9.00},
-		// Gemini 3.0 (Preview)
-		{Provider: "google", Model: "gemini-3.0-pro", InputPerMillion: 2.00, OutputPerMillion: 12.00},
-		{Provider: "google", Model: "gemini-3.0-flash", InputPerMillion: 0.50, OutputPerMillion: 3.00},
+		// Gemini 3.1
+		{Provider: "google", Model: "gemini-3.1-pro", InputPerMillion: 2.00, OutputPerMillion: 12.00,
+			InputPerMillionHigh: 4.00, OutputPerMillionHigh: 18.00, TierThresholdTokens: 200_000},
+		{Provider: "google", Model: "gemini-3.1-flash-lite", InputPerMillion: 0.25, OutputPerMillion: 1.50},
+		// Gemini 3
+		{Provider: "google", Model: "gemini-3-flash", InputPerMillion: 0.50, OutputPerMillion: 3.00},
+		{Provider: "google", Model: "gemini-3-flash-lite", InputPerMillion: 0.02, OutputPerMillion: 0.10},
 		// Gemini 2.5
 		{Provider: "google", Model: "gemini-2.5-pro", InputPerMillion: 1.25, OutputPerMillion: 10.00,
 			InputPerMillionHigh: 2.50, OutputPerMillionHigh: 15.00, TierThresholdTokens: 200_000},
@@ -450,28 +450,9 @@ func (c *Calculator) loadDefaults() {
 		{Provider: "google", Model: "gemini-2.5-flash-lite", InputPerMillion: 0.10, OutputPerMillion: 0.40},
 		// Gemini 2.0
 		{Provider: "google", Model: "gemini-2.0-flash", InputPerMillion: 0.10, OutputPerMillion: 0.40},
-		{Provider: "google", Model: "gemini-2.0-pro", InputPerMillion: 1.25, OutputPerMillion: 10.00},
 		// Gemini 1.5 (legacy)
 		{Provider: "google", Model: "gemini-1.5-flash", InputPerMillion: 0.075, OutputPerMillion: 0.30},
 		{Provider: "google", Model: "gemini-1.5-pro", InputPerMillion: 1.25, OutputPerMillion: 5.00},
-
-		// ── OpenAI ───────────────────────────────────────────────
-		// GPT-5.4 (latest, March 2026)
-		{Provider: "openai", Model: "gpt-5.4-pro", InputPerMillion: 30.00, OutputPerMillion: 180.00},
-		{Provider: "openai", Model: "gpt-5.4", InputPerMillion: 2.50, OutputPerMillion: 15.00},
-		{Provider: "openai", Model: "gpt-5.4-mini", InputPerMillion: 0.75, OutputPerMillion: 4.50},
-		{Provider: "openai", Model: "gpt-5.4-nano", InputPerMillion: 0.20, OutputPerMillion: 1.25},
-		// GPT-4o
-		{Provider: "openai", Model: "gpt-4o", InputPerMillion: 2.50, OutputPerMillion: 10.00},
-		{Provider: "openai", Model: "gpt-4o-mini", InputPerMillion: 0.15, OutputPerMillion: 0.60},
-		// GPT-4 (legacy)
-		{Provider: "openai", Model: "gpt-4-turbo", InputPerMillion: 10.00, OutputPerMillion: 30.00},
-		{Provider: "openai", Model: "gpt-3.5-turbo", InputPerMillion: 0.50, OutputPerMillion: 1.50},
-		// Reasoning models
-		{Provider: "openai", Model: "o3", InputPerMillion: 10.00, OutputPerMillion: 40.00},
-		{Provider: "openai", Model: "o3-mini", InputPerMillion: 1.10, OutputPerMillion: 4.40},
-		{Provider: "openai", Model: "o1", InputPerMillion: 15.00, OutputPerMillion: 60.00},
-		{Provider: "openai", Model: "o1-mini", InputPerMillion: 3.00, OutputPerMillion: 12.00},
 
 		// ── Anthropic (via Vertex AI or direct) ──────────────────
 		// Claude 4.6/4.7 (latest)

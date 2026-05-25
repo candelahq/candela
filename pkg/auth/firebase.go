@@ -19,6 +19,11 @@ import (
 // is treated as a transient failure and results in a 500 instead of 403.
 var ErrNotRegistered = errors.New("user not registered")
 
+// errServiceAccountDenied is the user-facing message returned when a service
+// account attempts to authenticate but is not on the allowlist.
+const errServiceAccountDenied = "service account not authorized — use personal credentials (candela auth login) or contact your admin to allowlist this SA. " +
+	"Check your identity: a service account may be unintentionally used from your environment (ADC, GOOGLE_APPLICATION_CREDENTIALS, etc.)"
+
 // UserAuthorizer checks if an email belongs to a registered user.
 // Returns nil if the user exists.
 // Returns ErrNotRegistered (or a wrapped form) if the user does not exist.
@@ -136,8 +141,7 @@ func FirebaseAuthMiddleware(next http.Handler, fbAuth *fbauth.Client, cloudRunAu
 					if !saAllowlist.IsAllowed(user.Email) {
 						slog.Warn("service account not in allowlist — access denied",
 							"email", user.Email, "path", r.URL.Path)
-						writeError(w, http.StatusForbidden,
-							"service account not authorized — use personal credentials (gcloud auth application-default login) or contact your admin to allowlist this SA")
+						writeError(w, http.StatusForbidden, errServiceAccountDenied)
 						return
 					}
 					slog.Debug("service account authenticated (allowlisted)",
@@ -165,8 +169,7 @@ func FirebaseAuthMiddleware(next http.Handler, fbAuth *fbauth.Client, cloudRunAu
 				if !saAllowlist.IsAllowed(user.Email) {
 					slog.Warn("service account not in allowlist — access denied (OAuth2)",
 						"email", user.Email, "path", r.URL.Path)
-					writeError(w, http.StatusForbidden,
-						"service account not authorized — use personal credentials (gcloud auth application-default login) or contact your admin to allowlist this SA")
+					writeError(w, http.StatusForbidden, errServiceAccountDenied)
 					return
 				}
 				slog.Debug("service account authenticated via OAuth2 (allowlisted)",

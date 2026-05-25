@@ -130,11 +130,15 @@ func runTests(ctx context.Context, addr string) error {
 			all := sink.GetRecords()
 			if len(all) > baselineCount {
 				newRecords = all[baselineCount:]
-				slog.Info("received events", "new", len(newRecords), "total", len(all))
-				// We expect at least 1 event from our syscalls.
-				// In practice Tetragon may generate many more events from
-				// other processes in the container, so we filter below.
-				goto validate
+				// Wait specifically for a port-443 event from our test
+				// traffic, not just any event (avoids false positives from
+				// background processes).
+				for _, r := range newRecords {
+					if r.DstPort == 443 {
+						slog.Info("received matching events", "new", len(newRecords), "total", len(all))
+						goto validate
+					}
+				}
 			}
 		}
 	}

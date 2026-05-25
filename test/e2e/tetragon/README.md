@@ -7,7 +7,7 @@ against a **real Tetragon agent** running in a Docker container.
 
 | Test | Description |
 |------|-------------|
-| **Event Schema Fidelity** | Generates `tcp_connect` syscalls to port 443, then validates that Tetragon events arrive via gRPC with correct `FunctionName`, `DstPort`, `Action`, `Binary`, and `Timestamp` fields. |
+| **Event Schema Fidelity** | Generates `tcp_connect` kprobe events for port 443, then validates that Tetragon events arrive via gRPC with correct `FunctionName`, `DstPort`, `Action`, `Binary`, and `Timestamp` fields. |
 | **Pipeline Health** | Confirms the `tetragonaudit.Pipeline` reports `Connected=true` and `Processed>0` after receiving real eBPF events. |
 | **Pipeline Stats** | Validates that the pipeline's processing counters are consistent. |
 

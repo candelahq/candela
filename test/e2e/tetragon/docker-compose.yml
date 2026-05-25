@@ -1,0 +1,62 @@
+# Docker Compose: Tetragon Integration Test
+#
+# Validates the full eBPF event pipeline against a real Tetragon agent:
+#   1. Tetragon agent (privileged, BPF filesystem)
+#   2. Test runner connecting to Tetragon gRPC export API
+#
+# Usage:
+#   docker compose -f test/e2e/tetragon/docker-compose.yml up \
+#     --build --abort-on-container-exit --exit-code-from test-runner
+#
+# Requires: Docker with privileged container support (for BPF).
+
+services:
+  # ── Tetragon Agent ─────────────────────────────────────────────────────────
+  # Runs the Cilium Tetragon agent with full BPF access.
+  # The agent loads the TracingPolicy from /etc/tetragon/tetragon.tp.d/
+  # and exposes the gRPC export API on port 54321.
+  tetragon:
+    image: quay.io/cilium/tetragon:v1.3.0
+    privileged: true
+    pid: host
+    volumes:
+      # Mount BPF filesystem for eBPF program loading.
+      - /sys/fs/bpf:/sys/fs/bpf
+      # Mount TracingPolicy for the test scenario.
+      - ./tracingpolicy.yaml:/etc/tetragon/tetragon.tp.d/test-policy.yaml:ro
+    # Override the default gRPC server address (localhost:54321) to bind on
+    # all interfaces so the test-runner container can reach it.
+    # NOTE: TETRAGON_EXPORT_ADDR controls file export, not the gRPC server.
+    command:
+      - tetragon
+      - --server-address=0.0.0.0:54321
+    networks:
+      - tetragon-test
+    healthcheck:
+      test: ["CMD", "tetra", "status", "--server-address", "localhost:54321"]
+      interval: 3s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+
+  # ── Test Runner ────────────────────────────────────────────────────────────
+  # Connects to Tetragon's gRPC export API, generates known syscalls
+  # (tcp_connect to port 443), and validates that matching events arrive.
+  test-runner:
+    build:
+      context: ../../..
+      dockerfile: test/e2e/tetragon/test-runner/Dockerfile
+    depends_on:
+      tetragon:
+        condition: service_healthy
+    environment:
+      # Tetragon gRPC endpoint.
+      - TETRAGON_ADDR=tetragon:54321
+      # Timeout for the entire test run.
+      - TEST_TIMEOUT=60s
+    networks:
+      - tetragon-test
+
+networks:
+  tetragon-test:
+    driver: bridge

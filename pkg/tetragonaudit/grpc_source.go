@@ -10,48 +10,11 @@ import (
 	"math/rand/v2"
 	"time"
 
+	tetragon "github.com/cilium/tetragon/api/v1/tetragon"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
-	"google.golang.org/grpc/encoding"
+	"google.golang.org/protobuf/encoding/protojson"
 )
-
-func init() {
-	// Register the bytes codec so both client (via ForceCodec) and server
-	// (via content-subtype discovery) can use raw byte transport without
-	// requiring protobuf message types.
-	encoding.RegisterCodec(bytesCodec{})
-}
-
-// bytesCodec is a gRPC codec for raw byte transfer without protobuf.
-// This enables the Tetragon adapter to communicate using JSON-encoded
-// bytes without importing the full Tetragon protobuf dependency.
-type bytesCodec struct{}
-
-func (bytesCodec) Marshal(v any) ([]byte, error) {
-	switch m := v.(type) {
-	case []byte:
-		return m, nil
-	case json.RawMessage:
-		return []byte(m), nil
-	default:
-		return nil, fmt.Errorf("bytesCodec: unsupported type %T", v)
-	}
-}
-
-func (bytesCodec) Unmarshal(data []byte, v any) error {
-	switch m := v.(type) {
-	case *[]byte:
-		*m = append((*m)[:0], data...)
-		return nil
-	case *json.RawMessage:
-		*m = append((*m)[:0], data...)
-		return nil
-	default:
-		return fmt.Errorf("bytesCodec: unsupported type %T", v)
-	}
-}
-
-func (bytesCodec) Name() string { return "bytes" }
 
 // GRPCSource streams Tetragon events from the Tetragon gRPC export API.
 // This is the production event source for in-cluster deployments where
@@ -80,7 +43,7 @@ func NewGRPCSource(addr string, opts ...grpc.DialOption) (*GRPCSource, error) {
 
 // TetragonEventStream is the interface for a Tetragon gRPC event stream.
 // This abstracts the Tetragon GetEvents streaming RPC to support testing
-// without importing the full Tetragon protobuf dependency.
+// without requiring a live Tetragon instance.
 type TetragonEventStream interface {
 	// Recv blocks until the next event is available or the stream ends.
 	Recv() ([]byte, error)
@@ -241,48 +204,52 @@ func (s *GRPCSource) Conn() *grpc.ClientConn {
 	return s.conn
 }
 
-// GRPCEventStreamAdapter wraps a gRPC ClientStream to implement
-// TetragonEventStream. This avoids importing the full Tetragon protobuf
-// dependency while still supporting real gRPC streaming.
-//
-// The adapter sends a GetEventsRequest on the Tetragon export RPC path
-// and returns raw JSON-encoded event bytes from each response.
+// protojsonMarshaler is the shared protojson marshaler used to convert
+// Tetragon protobuf responses into JSON that our Event struct can parse.
+// UseProtoNames ensures field names match the proto definitions (snake_case),
+// which aligns with our JSON struct tags.
+var protojsonMarshaler = protojson.MarshalOptions{
+	UseProtoNames: true,
+}
+
+// GRPCEventStreamAdapter wraps a Tetragon FineGuidanceSensors_GetEventsClient
+// to implement TetragonEventStream. It uses the official Tetragon gRPC client
+// with proper protobuf marshaling, converting each GetEventsResponse into
+// JSON bytes for the downstream pipeline.
 type GRPCEventStreamAdapter struct {
-	stream grpc.ClientStream
+	stream tetragon.FineGuidanceSensors_GetEventsClient
 }
 
 // NewGRPCEventStreamAdapter creates a TetragonEventStream from a gRPC connection.
 // It initiates a server-streaming RPC on the Tetragon FineGuidanceSensors/GetEvents
-// endpoint and returns an adapter that reads raw event bytes.
+// endpoint using the official generated gRPC client.
 func NewGRPCEventStreamAdapter(ctx context.Context, conn *grpc.ClientConn) (*GRPCEventStreamAdapter, error) {
 	if conn == nil {
 		return nil, fmt.Errorf("tetragonaudit: gRPC connection is nil")
 	}
-	desc := &grpc.StreamDesc{ServerStreams: true}
-	stream, err := conn.NewStream(ctx, desc, "/tetragon.FineGuidanceSensors/GetEvents",
-		grpc.ForceCodec(bytesCodec{}))
+	client := tetragon.NewFineGuidanceSensorsClient(conn)
+	stream, err := client.GetEvents(ctx, &tetragon.GetEventsRequest{})
 	if err != nil {
 		return nil, fmt.Errorf("tetragonaudit: failed to create gRPC stream: %w", err)
-	}
-	// Send empty request to initiate streaming.
-	if err := stream.SendMsg([]byte("{}")); err != nil {
-		return nil, fmt.Errorf("tetragonaudit: failed to send GetEvents request: %w", err)
-	}
-	// Signal that the client is done sending (server-streaming RPC best practice).
-	if err := stream.CloseSend(); err != nil {
-		return nil, fmt.Errorf("tetragonaudit: failed to close send stream: %w", err)
 	}
 	return &GRPCEventStreamAdapter{stream: stream}, nil
 }
 
 // Recv blocks until the next event is available from the gRPC stream.
+// It receives a protobuf GetEventsResponse and converts it to JSON bytes
+// using protojson, which the pipeline can then unmarshal into our Event struct.
 func (a *GRPCEventStreamAdapter) Recv() ([]byte, error) {
 	if a.stream == nil {
 		return nil, io.EOF
 	}
-	var raw json.RawMessage
-	if err := a.stream.RecvMsg(&raw); err != nil {
+	resp, err := a.stream.Recv()
+	if err != nil {
 		return nil, err
 	}
-	return []byte(raw), nil
+	// Convert protobuf response to JSON for the existing pipeline.
+	data, err := protojsonMarshaler.Marshal(resp)
+	if err != nil {
+		return nil, fmt.Errorf("tetragonaudit: failed to marshal GetEventsResponse to JSON: %w", err)
+	}
+	return data, nil
 }

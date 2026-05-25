@@ -2,7 +2,6 @@ package tetragonaudit
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net"
 	"sync"
@@ -10,26 +9,29 @@ import (
 	"testing"
 	"time"
 
+	tetragon "github.com/cilium/tetragon/api/v1/tetragon"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/protobuf/types/known/timestamppb"
+	"google.golang.org/protobuf/types/known/wrapperspb"
 )
 
 // ─── Mock Tetragon gRPC Server ───────────────────────────────────────────────
 //
-// mockTetragonServer implements a minimal gRPC server that serves
-// /tetragon.FineGuidanceSensors/GetEvents with configurable behavior per
-// connection attempt. This enables full lifecycle testing of
-// StreamEventsWithRetry without any Tetragon proto dependency.
+// mockTetragonServer implements FineGuidanceSensorsServer with configurable
+// behavior per connection attempt. This enables full lifecycle testing of
+// StreamEventsWithRetry using proper protobuf encoding.
 
 // streamBehavior defines what the mock server does on each connection.
 type streamBehavior struct {
-	// Events to send before closing. Each is JSON-serialized.
-	Events []Event
-	// Err to return after sending all events. nil = clean EOF.
+	// Responses to send before closing. Each is a GetEventsResponse.
+	Responses []*tetragon.GetEventsResponse
+	// Err to return after sending all responses. nil = clean EOF.
 	Err error
 }
 
 type mockTetragonServer struct {
+	tetragon.UnimplementedFineGuidanceSensorsServer
 	mu         sync.Mutex
 	behaviors  []streamBehavior
 	attempt    int
@@ -44,60 +46,8 @@ func newMockTetragonServer(behaviors ...streamBehavior) *mockTetragonServer {
 	}
 }
 
-// serve starts the mock gRPC server and returns the listener address.
-// The returned cleanup function stops the server.
-func (m *mockTetragonServer) serve(t *testing.T) (addr string, cleanup func()) {
-	t.Helper()
-
-	lis, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("mock server listen: %v", err)
-	}
-
-	srv := grpc.NewServer()
-
-	// Register a raw service handler for the Tetragon export RPC path.
-	// This avoids importing Tetragon protobufs while testing the real gRPC layer.
-	handler := func(srv any, stream grpc.ServerStream) error {
-		return m.handleGetEvents(srv, stream)
-	}
-	sd := grpc.ServiceDesc{
-		ServiceName: "tetragon.FineGuidanceSensors",
-		HandlerType: (*mockTetragonService)(nil),
-		Streams: []grpc.StreamDesc{
-			{
-				StreamName:    "GetEvents",
-				Handler:       handler,
-				ServerStreams: true,
-				ClientStreams: false,
-			},
-		},
-		Metadata: "tetragon/sensors.proto",
-	}
-	// The second argument must be a non-nil value that implements HandlerType.
-	srv.RegisterService(&sd, &mockTetragonServiceImpl{})
-
-	go func() {
-		_ = srv.Serve(lis) // errors expected on GracefulStop
-	}()
-
-	return lis.Addr().String(), func() { srv.GracefulStop() }
-}
-
-// mockTetragonService is the interface type for RegisterService's HandlerType.
-type mockTetragonService interface{}
-
-// mockTetragonServiceImpl satisfies the interface.
-type mockTetragonServiceImpl struct{}
-
-// handleGetEvents is the gRPC stream handler for GetEvents.
-func (m *mockTetragonServer) handleGetEvents(_ any, stream grpc.ServerStream) error {
-	// Read the client's request (we don't care about its content).
-	var req json.RawMessage
-	if err := stream.RecvMsg(&req); err != nil {
-		return err
-	}
-
+// GetEvents implements FineGuidanceSensorsServer.
+func (m *mockTetragonServer) GetEvents(_ *tetragon.GetEventsRequest, stream tetragon.FineGuidanceSensors_GetEventsServer) error {
 	m.totalConns.Add(1)
 
 	m.mu.Lock()
@@ -117,19 +67,35 @@ func (m *mockTetragonServer) handleGetEvents(_ any, stream grpc.ServerStream) er
 	default:
 	}
 
-	// Stream events.
-	for _, ev := range behavior.Events {
-		b, err := json.Marshal(ev)
-		if err != nil {
-			return fmt.Errorf("mock server: marshal: %w", err)
-		}
-		if err := stream.SendMsg(json.RawMessage(b)); err != nil {
+	// Stream responses.
+	for _, resp := range behavior.Responses {
+		if err := stream.Send(resp); err != nil {
 			return err
 		}
 	}
 
 	// Return the configured error (nil = clean EOF).
 	return behavior.Err
+}
+
+// serve starts the mock gRPC server and returns the listener address.
+// The returned cleanup function stops the server.
+func (m *mockTetragonServer) serve(t *testing.T) (addr string, cleanup func()) {
+	t.Helper()
+
+	lis, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("mock server listen: %v", err)
+	}
+
+	srv := grpc.NewServer()
+	tetragon.RegisterFineGuidanceSensorsServer(srv, m)
+
+	go func() {
+		_ = srv.Serve(lis) // errors expected on GracefulStop
+	}()
+
+	return lis.Addr().String(), func() { srv.GracefulStop() }
 }
 
 // waitForConnections blocks until n connections have been received or timeout.
@@ -148,15 +114,22 @@ func (m *mockTetragonServer) waitForConnections(t *testing.T, n int, timeout tim
 
 // ─── Helper ──────────────────────────────────────────────────────────────────
 
-func testEvent(binary string) Event {
-	return Event{
-		Time:     time.Now().UTC(),
+// testResponse creates a GetEventsResponse with a ProcessKprobe event
+// for the given binary path.
+func testResponse(binary string) *tetragon.GetEventsResponse {
+	return &tetragon.GetEventsResponse{
 		NodeName: "e2e-node",
-		ProcessKprobe: &ProcessKprobe{
-			Process:      &Process{Binary: binary, UID: 1000},
-			FunctionName: "tcp_connect",
-			Action:       "post",
-			PolicyName:   "e2e-test",
+		Time:     timestamppb.Now(),
+		Event: &tetragon.GetEventsResponse_ProcessKprobe{
+			ProcessKprobe: &tetragon.ProcessKprobe{
+				Process: &tetragon.Process{
+					Binary: binary,
+					Uid:    wrapperspb.UInt32(1000),
+				},
+				FunctionName: "tcp_connect",
+				Action:       tetragon.KprobeAction_KPROBE_ACTION_POST,
+				PolicyName:   "e2e-test",
+			},
 		},
 	}
 }
@@ -168,7 +141,10 @@ func testEvent(binary string) Event {
 // health + stats.
 func TestE2E_StreamAndProcess(t *testing.T) {
 	mock := newMockTetragonServer(streamBehavior{
-		Events: []Event{testEvent("/usr/bin/curl"), testEvent("/usr/bin/python3")},
+		Responses: []*tetragon.GetEventsResponse{
+			testResponse("/usr/bin/curl"),
+			testResponse("/usr/bin/python3"),
+		},
 	})
 	addr, cleanup := mock.serve(t)
 	defer cleanup()
@@ -243,12 +219,12 @@ func TestE2E_ReconnectAfterError(t *testing.T) {
 	mock := newMockTetragonServer(
 		// Attempt 1: sends 1 event then returns an error.
 		streamBehavior{
-			Events: []Event{testEvent("/bin/first")},
-			Err:    fmt.Errorf("mock transient error"),
+			Responses: []*tetragon.GetEventsResponse{testResponse("/bin/first")},
+			Err:       fmt.Errorf("mock transient error"),
 		},
 		// Attempt 2: sends 1 event then clean EOF.
 		streamBehavior{
-			Events: []Event{testEvent("/bin/second")},
+			Responses: []*tetragon.GetEventsResponse{testResponse("/bin/second")},
 		},
 	)
 	addr, cleanup := mock.serve(t)
@@ -305,12 +281,12 @@ func TestE2E_HealthToggles(t *testing.T) {
 	mock := newMockTetragonServer(
 		// Attempt 1: send 1 event, then error → triggers backoff.
 		streamBehavior{
-			Events: []Event{testEvent("/bin/health-check")},
-			Err:    fmt.Errorf("mock error for health toggle test"),
+			Responses: []*tetragon.GetEventsResponse{testResponse("/bin/health-check")},
+			Err:       fmt.Errorf("mock error for health toggle test"),
 		},
 		// Attempt 2: send 1 event, clean EOF → triggers InitialDelay.
 		streamBehavior{
-			Events: []Event{testEvent("/bin/health-check-2")},
+			Responses: []*tetragon.GetEventsResponse{testResponse("/bin/health-check-2")},
 		},
 	)
 	addr, cleanup := mock.serve(t)
@@ -378,8 +354,8 @@ func TestE2E_HealthToggles(t *testing.T) {
 func TestE2E_CleanEOFBackoff(t *testing.T) {
 	mock := newMockTetragonServer(
 		// Both attempts: clean EOF immediately.
-		streamBehavior{Events: []Event{testEvent("/bin/eof1")}},
-		streamBehavior{Events: []Event{testEvent("/bin/eof2")}},
+		streamBehavior{Responses: []*tetragon.GetEventsResponse{testResponse("/bin/eof1")}},
+		streamBehavior{Responses: []*tetragon.GetEventsResponse{testResponse("/bin/eof2")}},
 	)
 	addr, cleanup := mock.serve(t)
 	defer cleanup()
@@ -431,7 +407,7 @@ func TestE2E_MultipleReconnects(t *testing.T) {
 		streamBehavior{Err: fmt.Errorf("fail-2")},
 		streamBehavior{Err: fmt.Errorf("fail-3")},
 		// 4th attempt succeeds.
-		streamBehavior{Events: []Event{testEvent("/bin/success")}},
+		streamBehavior{Responses: []*tetragon.GetEventsResponse{testResponse("/bin/success")}},
 	)
 	addr, cleanup := mock.serve(t)
 	defer cleanup()
@@ -490,12 +466,12 @@ func TestE2E_MultipleReconnects(t *testing.T) {
 // during active streaming exits cleanly without hanging.
 func TestE2E_GracefulShutdownDuringStream(t *testing.T) {
 	// Server that streams events slowly (one every 100ms).
-	slowEvents := make([]Event, 50)
-	for i := range slowEvents {
-		slowEvents[i] = testEvent(fmt.Sprintf("/bin/slow-%d", i))
+	slowResponses := make([]*tetragon.GetEventsResponse, 50)
+	for i := range slowResponses {
+		slowResponses[i] = testResponse(fmt.Sprintf("/bin/slow-%d", i))
 	}
 
-	mock := newMockTetragonServer(streamBehavior{Events: slowEvents})
+	mock := newMockTetragonServer(streamBehavior{Responses: slowResponses})
 	addr, cleanup := mock.serve(t)
 	defer cleanup()
 
@@ -551,7 +527,7 @@ func TestE2E_DrainAfterShutdown(t *testing.T) {
 	flushSink := &flushRecordingSink{flushed: &flushed}
 
 	mock := newMockTetragonServer(streamBehavior{
-		Events: []Event{testEvent("/bin/drain-test")},
+		Responses: []*tetragon.GetEventsResponse{testResponse("/bin/drain-test")},
 	})
 	addr, cleanup := mock.serve(t)
 	defer cleanup()

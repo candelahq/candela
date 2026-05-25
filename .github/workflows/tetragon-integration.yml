@@ -1,0 +1,76 @@
+# Tetragon Integration Test
+#
+# Runs the docker-compose based integration test with a real Tetragon agent.
+# This validates the full eBPF event pipeline end-to-end:
+#   - Real kernel kprobe event generation
+#   - Tetragon gRPC export API
+#   - Event schema fidelity against tetragonaudit.Event
+#
+# Gated to:
+#   - Manual trigger (workflow_dispatch)
+#   - Pushes/PRs touching the tetragonaudit package or e2e test infra
+
+name: Tetragon Integration
+
+on:
+  workflow_dispatch: {}
+  push:
+    branches: [main]
+    paths:
+      - 'pkg/tetragonaudit/**'
+      - 'test/e2e/tetragon/**'
+  pull_request:
+    paths:
+      - 'pkg/tetragonaudit/**'
+      - 'test/e2e/tetragon/**'
+
+jobs:
+  tetragon-e2e:
+    name: Tetragon E2E
+    # Ubuntu has full BPF support; macOS runners do not.
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Compose
+        run: docker compose version
+
+      - name: Run Tetragon Integration Test
+        run: |
+          docker compose \
+            -f test/e2e/tetragon/docker-compose.yml \
+            up \
+            --build \
+            --abort-on-container-exit \
+            --exit-code-from test-runner
+        timeout-minutes: 10
+
+      - name: Collect Tetragon Logs
+        if: always()
+        run: |
+          docker compose \
+            -f test/e2e/tetragon/docker-compose.yml \
+            logs tetragon > tetragon-agent.log 2>&1 || true
+          docker compose \
+            -f test/e2e/tetragon/docker-compose.yml \
+            logs test-runner > test-runner.log 2>&1 || true
+
+      - name: Upload Logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tetragon-integration-logs
+          path: |
+            tetragon-agent.log
+            test-runner.log
+          retention-days: 14
+
+      - name: Teardown
+        if: always()
+        run: |
+          docker compose \
+            -f test/e2e/tetragon/docker-compose.yml \
+            down --volumes --remove-orphans

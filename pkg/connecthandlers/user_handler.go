@@ -710,6 +710,9 @@ func userToProto(u *storage.UserRecord) *typespb.User {
 	if !u.LastSeenAt.IsZero() {
 		pb.LastSeenAt = timestamppb.New(u.LastSeenAt)
 	}
+	if !u.LastActiveAt.IsZero() {
+		pb.LastActiveAt = timestamppb.New(u.LastActiveAt)
+	}
 	return pb
 }
 

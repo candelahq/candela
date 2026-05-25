@@ -1304,6 +1304,15 @@ func (p *Proxy) deductBudget(ctx context.Context, provider Provider, model, user
 		return
 	}
 
+	// Best-effort: update the user's last-active timestamp (proxy usage).
+	go func() {
+		bgCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := p.users.TouchLastActive(bgCtx, userID); err != nil {
+			slog.Warn("touch_last_active failed", "user_id", userID, "error", err)
+		}
+	}()
+
 	// Async: threshold notification is best-effort.
 	if p.budgetCk != nil {
 		go func() {

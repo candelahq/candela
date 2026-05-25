@@ -138,24 +138,26 @@ func (s *Store) Close() error {
 // It owns the firestore:" struct tags so storage.UserRecord remains
 // database-agnostic (no Firestore-specific annotations on the shared type).
 type firestoreUser struct {
-	ID          string    `firestore:"id"`
-	Email       string    `firestore:"email"`
-	DisplayName string    `firestore:"display_name,omitempty"`
-	Role        string    `firestore:"role,omitempty"`
-	Status      string    `firestore:"status,omitempty"`
-	CreatedAt   time.Time `firestore:"created_at,omitempty"`
-	LastSeenAt  time.Time `firestore:"last_seen_at,omitempty"`
-	RateLimit   int       `firestore:"rate_limit,omitempty"`
+	ID           string    `firestore:"id"`
+	Email        string    `firestore:"email"`
+	DisplayName  string    `firestore:"display_name,omitempty"`
+	Role         string    `firestore:"role,omitempty"`
+	Status       string    `firestore:"status,omitempty"`
+	CreatedAt    time.Time `firestore:"created_at,omitempty"`
+	LastSeenAt   time.Time `firestore:"last_seen_at,omitempty"`
+	LastActiveAt time.Time `firestore:"last_active_at,omitempty"`
+	RateLimit    int       `firestore:"rate_limit,omitempty"`
 }
 
 func userToFirestore(u *storage.UserRecord) *firestoreUser {
 	fu := &firestoreUser{
-		ID:         u.ID,
-		Email:      u.Email,
-		Role:       u.Role,
-		Status:     u.Status,
-		CreatedAt:  u.CreatedAt,
-		LastSeenAt: u.LastSeenAt,
+		ID:           u.ID,
+		Email:        u.Email,
+		Role:         u.Role,
+		Status:       u.Status,
+		CreatedAt:    u.CreatedAt,
+		LastSeenAt:   u.LastSeenAt,
+		LastActiveAt: u.LastActiveAt,
 	}
 	if u.DisplayName != nil {
 		fu.DisplayName = *u.DisplayName
@@ -168,12 +170,13 @@ func userToFirestore(u *storage.UserRecord) *firestoreUser {
 
 func firestoreToUser(fu *firestoreUser) *storage.UserRecord {
 	u := &storage.UserRecord{
-		ID:         fu.ID,
-		Email:      fu.Email,
-		Role:       fu.Role,
-		Status:     fu.Status,
-		CreatedAt:  fu.CreatedAt,
-		LastSeenAt: fu.LastSeenAt,
+		ID:           fu.ID,
+		Email:        fu.Email,
+		Role:         fu.Role,
+		Status:       fu.Status,
+		CreatedAt:    fu.CreatedAt,
+		LastSeenAt:   fu.LastSeenAt,
+		LastActiveAt: fu.LastActiveAt,
 	}
 	if fu.DisplayName != "" {
 		u.DisplayName = &fu.DisplayName
@@ -474,6 +477,18 @@ func (s *Store) TouchLastSeen(ctx context.Context, id string) error {
 	})
 	if err != nil {
 		return fmt.Errorf("firestoredb: touching last_seen: %w", err)
+	}
+	return nil
+}
+
+func (s *Store) TouchLastActive(ctx context.Context, id string) error {
+	id = sanitizeID(id)
+	ref := s.client.Collection(usersCol).Doc(id)
+	_, err := ref.Update(ctx, []firestore.Update{
+		{Path: "last_active_at", Value: time.Now().UTC()},
+	})
+	if err != nil {
+		return fmt.Errorf("firestoredb: touching last_active: %w", err)
 	}
 	return nil
 }

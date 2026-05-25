@@ -122,6 +122,13 @@ func (s *integrationStore) TouchLastSeen(_ context.Context, id string) error {
 	return nil
 }
 
+func (s *integrationStore) TouchLastActive(_ context.Context, id string) error {
+	if u, ok := s.users[id]; ok {
+		u.LastActiveAt = time.Now().UTC()
+	}
+	return nil
+}
+
 func (s *integrationStore) DeleteUser(_ context.Context, id string) error {
 	delete(s.users, id)
 	delete(s.budgets, id)

@@ -307,7 +307,8 @@ export default function AdminUsersPage() {
                 <th>Display Name</th>
                 <th>Role</th>
                 <th>Status</th>
-                <th>Last Seen</th>
+                <th>Last Seen <HelpTip text="Last web/dashboard login" /></th>
+                <th>Last Active <HelpTip text="Last proxy/API token usage" /></th>
                 <th>Actions</th>
               </tr>
             </thead>
@@ -322,9 +323,10 @@ export default function AdminUsersPage() {
                     <td>{roleLabel(user.role)}</td>
                     <td><span className={status.className}>{status.label}</span></td>
                     <td className="text-muted">
-                      {user.lastSeenAt
-                        ? new Date(Number(user.lastSeenAt.seconds) * 1000).toLocaleDateString()
-                        : "Never"}
+                      {user.lastSeenAt ? formatDate(user.lastSeenAt) : "Never"}
+                    </td>
+                    <td className="text-muted">
+                      {user.lastActiveAt ? formatDate(user.lastActiveAt) : "Never"}
                     </td>
                     <td>
                       <div className="action-btn-group">
@@ -375,7 +377,7 @@ export default function AdminUsersPage() {
               })}
               {state.users.length === 0 && (
                 <tr>
-                  <td colSpan={6} className="text-center text-muted admin-empty-state">
+                  <td colSpan={7} className="text-center text-muted admin-empty-state">
                     No users yet. Create one to get started.
                   </td>
                 </tr>

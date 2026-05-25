@@ -25,6 +25,18 @@ use tracing::{Instrument, debug, info_span};
 use crate::ca::EphemeralCA;
 use crate::listener::Stats;
 
+/// RAII guard that records `duration_ms` on the current tracing span when
+/// dropped. Guarantees the field is always populated regardless of which
+/// exit path (success, error, early-return) is taken.
+struct DurationGuard(tracing::Span, Instant);
+
+impl Drop for DurationGuard {
+    fn drop(&mut self) {
+        self.0
+            .record("duration_ms", self.1.elapsed().as_millis() as u64);
+    }
+}
+
 /// Timeout for connecting to the local Candela proxy.
 const PROXY_DIAL_TIMEOUT: Duration = Duration::from_secs(5);
 
@@ -66,20 +78,11 @@ pub async fn mitm_intercept(
 
     async {
         let start = Instant::now();
-
-        // Helper: record duration_ms on the current span regardless of
-        // which exit path we take. This ensures OTLP exporters always
-        // see the total MITM attempt duration.
-        let record_duration = || {
-            tracing::Span::current()
-                .record("duration_ms", start.elapsed().as_millis() as u64);
-        };
+        let _duration_guard = DurationGuard(tracing::Span::current(), start);
 
         // 1. Get the TLS ServerConfig for this hostname.
         let server_config = ca.server_config_for(sni).map_err(|e| {
-            let current = tracing::Span::current();
-            current.record("handshake_ok", false);
-            current.record("duration_ms", start.elapsed().as_millis() as u64);
+            tracing::Span::current().record("handshake_ok", false);
             debug!(sni = %sni, error = %e, "MITM cert generation failed");
             e
         })?;
@@ -92,9 +95,7 @@ pub async fn mitm_intercept(
 
         // 3. Accept TLS handshake.
         let tls_stream = acceptor.accept(replay).await.map_err(|e| {
-            let current = tracing::Span::current();
-            current.record("handshake_ok", false);
-            current.record("duration_ms", start.elapsed().as_millis() as u64);
+            tracing::Span::current().record("handshake_ok", false);
             debug!(sni = %sni, error = %e, "MITM TLS handshake failed");
             anyhow::anyhow!("TLS handshake failed for {sni}: {e}")
         })?;
@@ -109,13 +110,7 @@ pub async fn mitm_intercept(
         let mut proxy_stream =
             tokio::time::timeout(PROXY_DIAL_TIMEOUT, TcpStream::connect(proxy_addr))
                 .await
-                .map_err(|_| {
-                    record_duration();
-                    anyhow::anyhow!("proxy dial timeout to {proxy_addr}")
-                })?
-                .inspect_err(|_| {
-                    record_duration();
-                })?;
+                .map_err(|_| anyhow::anyhow!("proxy dial timeout to {proxy_addr}"))??;
 
         // 5. Bidirectional copy: decrypted client ↔ plaintext proxy.
         //    copy_bidirectional drains both directions fully before closing,
@@ -127,18 +122,15 @@ pub async fn mitm_intercept(
                 let current = tracing::Span::current();
                 current.record("bytes_client_to_proxy", client_to_proxy);
                 current.record("bytes_proxy_to_client", proxy_to_client);
-                current.record("duration_ms", start.elapsed().as_millis() as u64);
                 debug!(
                     sni = %sni,
                     client_to_proxy,
                     proxy_to_client,
-                    duration_ms = start.elapsed().as_millis() as u64,
                     "MITM bidirectional copy completed"
                 );
             }
             Err(e) => {
-                record_duration();
-                debug!(sni = %sni, error = %e, duration_ms = start.elapsed().as_millis() as u64, "MITM bidirectional copy error");
+                debug!(sni = %sni, error = %e, "MITM bidirectional copy error");
             }
         }
 

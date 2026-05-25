@@ -475,14 +475,15 @@ type ProjectStore interface {
 // Note: firestore:" tags are intentionally absent. Firestore serialization is
 // the Firestore backend’s concern; this struct is shared across all backends.
 type UserRecord struct {
-	ID          string    `json:"id"`
-	Email       string    `json:"email"`
-	DisplayName *string   `json:"display_name,omitempty"` // nil = unchanged in UpdateUser
-	Role        string    `json:"role,omitempty"`         // "developer" or "admin"
-	Status      string    `json:"status,omitempty"`       // "provisioned", "active", "inactive"
-	CreatedAt   time.Time `json:"created_at,omitempty"`
-	LastSeenAt  time.Time `json:"last_seen_at,omitempty"`
-	RateLimit   *int      `json:"rate_limit,omitempty"` // nil = unchanged; &0 = clear to default
+	ID           string    `json:"id"`
+	Email        string    `json:"email"`
+	DisplayName  *string   `json:"display_name,omitempty"` // nil = unchanged in UpdateUser
+	Role         string    `json:"role,omitempty"`         // "developer" or "admin"
+	Status       string    `json:"status,omitempty"`       // "provisioned", "active", "inactive"
+	CreatedAt    time.Time `json:"created_at,omitempty"`
+	LastSeenAt   time.Time `json:"last_seen_at,omitempty"`
+	LastActiveAt time.Time `json:"last_active_at,omitempty"` // last proxy/API token usage
+	RateLimit    *int      `json:"rate_limit,omitempty"`     // nil = unchanged; &0 = clear to default
 }
 
 // BudgetRecord is the Go representation of a user's recurring budget.
@@ -562,8 +563,11 @@ type UserStore interface {
 	// UpdateUser modifies mutable fields.
 	UpdateUser(ctx context.Context, user *UserRecord) error
 
-	// TouchLastSeen updates the user's last_seen_at timestamp.
+	// TouchLastSeen updates the user's last_seen_at timestamp (web/dashboard login).
 	TouchLastSeen(ctx context.Context, id string) error
+
+	// TouchLastActive updates the user's last_active_at timestamp (proxy/API token usage).
+	TouchLastActive(ctx context.Context, id string) error
 
 	// DeleteUser permanently removes a user and all subcollections.
 	DeleteUser(ctx context.Context, id string) error

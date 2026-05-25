@@ -108,6 +108,13 @@ func (m *mockUserStore) TouchLastSeen(_ context.Context, id string) error {
 	return nil
 }
 
+func (m *mockUserStore) TouchLastActive(_ context.Context, id string) error {
+	if u, ok := m.users[id]; ok {
+		u.LastActiveAt = time.Now().UTC()
+	}
+	return nil
+}
+
 func (m *mockUserStore) DeleteUser(_ context.Context, id string) error {
 	delete(m.users, id)
 	delete(m.budgets, id)
@@ -680,6 +687,50 @@ func TestUserHandler_ListUsers(t *testing.T) {
 	}
 	if resp3.Msg.Pagination.NextPageToken != "" {
 		t.Errorf("expected empty next_page_token on last page, got %q", resp3.Msg.Pagination.NextPageToken)
+	}
+}
+
+func TestUserHandler_ListUsers_LastActiveAtMapping(t *testing.T) {
+	store := newMockUserStore()
+	handler := NewUserHandler(store, 0)
+	ctx := authedCtx("admin@example.com")
+
+	// Create a user.
+	resp, err := handler.CreateUser(ctx, connect.NewRequest(&v1.CreateUserRequest{
+		Email: "mapped@test.com",
+	}))
+	if err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+	userID := resp.Msg.User.Id
+
+	// Simulate proxy usage by touching LastActive.
+	if err := store.TouchLastActive(ctx, userID); err != nil {
+		t.Fatalf("TouchLastActive: %v", err)
+	}
+
+	// List users — LastActiveAt should be in the response.
+	list, err := handler.ListUsers(ctx, connect.NewRequest(&v1.ListUsersRequest{}))
+	if err != nil {
+		t.Fatalf("ListUsers: %v", err)
+	}
+
+	var found *typespb.User
+	for _, u := range list.Msg.Users {
+		if u.Id == userID {
+			found = u
+			break
+		}
+	}
+	if found == nil {
+		t.Fatal("user not found in ListUsers response")
+	}
+	if found.LastActiveAt == nil {
+		t.Error("LastActiveAt should be populated after TouchLastActive")
+	}
+	// LastSeenAt should NOT be set (we didn't call TouchLastSeen).
+	if found.LastSeenAt != nil {
+		t.Error("LastSeenAt should be nil — only TouchLastActive was called")
 	}
 }
 

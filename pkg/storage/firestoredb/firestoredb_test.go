@@ -129,6 +129,78 @@ func TestTouchLastSeen(t *testing.T) {
 	}
 }
 
+func TestTouchLastActive(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	user := &storage.UserRecord{
+		ID:    fmt.Sprintf("test-active-%d", time.Now().UnixNano()),
+		Email: "active@example.com",
+		Role:  "developer",
+	}
+	t.Cleanup(func() { cleanupUser(ctx, s, user.ID) })
+
+	if err := s.CreateUser(ctx, user); err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+
+	if err := s.TouchLastActive(ctx, user.ID); err != nil {
+		t.Fatalf("TouchLastActive: %v", err)
+	}
+
+	got, _ := s.GetUser(ctx, user.ID)
+	// TouchLastActive should NOT promote status to "active" (unlike TouchLastSeen).
+	if got.Status != "provisioned" {
+		t.Errorf("Status after TouchLastActive = %q, want %q (should not change)", got.Status, "provisioned")
+	}
+	if got.LastActiveAt.IsZero() {
+		t.Error("LastActiveAt should not be zero after TouchLastActive")
+	}
+	if !got.LastSeenAt.IsZero() {
+		t.Error("LastSeenAt should remain zero — TouchLastActive must not modify it")
+	}
+}
+
+func TestTouchLastActive_IndependentOfLastSeen(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	user := &storage.UserRecord{
+		ID:    fmt.Sprintf("test-both-%d", time.Now().UnixNano()),
+		Email: "both@example.com",
+		Role:  "developer",
+	}
+	t.Cleanup(func() { cleanupUser(ctx, s, user.ID) })
+
+	if err := s.CreateUser(ctx, user); err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+
+	// Touch both — they should update independently.
+	if err := s.TouchLastSeen(ctx, user.ID); err != nil {
+		t.Fatalf("TouchLastSeen: %v", err)
+	}
+	seenAfter, _ := s.GetUser(ctx, user.ID)
+	seenTime := seenAfter.LastSeenAt
+
+	time.Sleep(10 * time.Millisecond) // ensure distinct timestamps
+
+	if err := s.TouchLastActive(ctx, user.ID); err != nil {
+		t.Fatalf("TouchLastActive: %v", err)
+	}
+
+	got, _ := s.GetUser(ctx, user.ID)
+	if got.LastSeenAt != seenTime {
+		t.Error("TouchLastActive should not overwrite LastSeenAt")
+	}
+	if got.LastActiveAt.IsZero() {
+		t.Error("LastActiveAt should be set after TouchLastActive")
+	}
+	if !got.LastActiveAt.After(got.LastSeenAt) {
+		t.Error("LastActiveAt should be after LastSeenAt (called later)")
+	}
+}
+
 func TestSetAndGetBudget(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()

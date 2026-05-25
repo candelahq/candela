@@ -74,3 +74,4 @@ firebase.json
 !.firebaserc.example
 .firebase/
 /candela
+candela-protos/

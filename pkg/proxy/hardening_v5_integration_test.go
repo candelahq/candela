@@ -1,12 +1,14 @@
 package proxy
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -284,5 +286,83 @@ func TestIntegration_ServiceAccountSkipsBudget(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
 		t.Errorf("status = %d, want 200 (SA bypasses budget), body = %s", resp.StatusCode, body)
+	}
+}
+
+// ──────────────────────────────────────────
+// I-6: Successful proxy request fires TouchLastActive
+// ──────────────────────────────────────────
+
+// trackingUserStore wraps budgetUserStore and counts TouchLastActive calls.
+type trackingUserStore struct {
+	budgetUserStore
+	touchCalls atomic.Int32
+	lastUserID atomic.Value // stores string
+}
+
+func (t *trackingUserStore) TouchLastActive(_ context.Context, id string) error {
+	t.touchCalls.Add(1)
+	t.lastUserID.Store(id)
+	return nil
+}
+
+func TestIntegration_ProxyCallsTouchLastActive(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprint(w, `{"choices":[{"message":{"content":"ok"}}],"usage":{"prompt_tokens":5,"completion_tokens":3}}`)
+	}))
+	defer upstream.Close()
+
+	submitter := &mockSubmitter{}
+	calc := newCalcWithTestModels()
+
+	store := &trackingUserStore{
+		budgetUserStore: budgetUserStore{
+			checkResult: &storage.BudgetCheckResult{
+				Allowed:      true,
+				RemainingUSD: 100,
+			},
+		},
+	}
+
+	p := New(Config{
+		Providers: []Provider{{Name: "openai", UpstreamURL: upstream.URL}},
+		ProjectID: "test-touch-active",
+	}, submitter, calc)
+	p.SetUserStore(store)
+
+	mux := http.NewServeMux()
+	p.RegisterRoutes(mux)
+	srv := httptest.NewServer(withTestAuth(mux))
+	defer srv.Close()
+
+	body := `{"model":"gpt-4o","messages":[{"role":"user","content":"hi"}]}`
+	req, _ := http.NewRequest("POST", srv.URL+"/proxy/openai/v1/chat/completions",
+		strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	_, _ = io.ReadAll(resp.Body)
+	_ = resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+
+	// TouchLastActive fires asynchronously — poll for it.
+	deadline := time.After(2 * time.Second)
+	for store.touchCalls.Load() == 0 {
+		select {
+		case <-deadline:
+			t.Fatal("TouchLastActive was never called within 2s of successful proxy request")
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+
+	if got := store.lastUserID.Load().(string); got != "test@example.com" {
+		t.Errorf("TouchLastActive user_id = %q, want %q (EffectiveID prefers email)", got, "test@example.com")
 	}
 }

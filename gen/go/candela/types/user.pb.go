@@ -183,8 +183,9 @@ type User struct {
 	Role          UserRole               `protobuf:"varint,4,opt,name=role,proto3,enum=candela.types.UserRole" json:"role,omitempty"`
 	Status        UserStatus             `protobuf:"varint,5,opt,name=status,proto3,enum=candela.types.UserStatus" json:"status,omitempty"`
 	CreatedAt     *timestamppb.Timestamp `protobuf:"bytes,6,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
-	LastSeenAt    *timestamppb.Timestamp `protobuf:"bytes,7,opt,name=last_seen_at,json=lastSeenAt,proto3" json:"last_seen_at,omitempty"`
-	RateLimit     int32                  `protobuf:"varint,8,opt,name=rate_limit,json=rateLimit,proto3" json:"rate_limit,omitempty"` // Max requests/minute (0 = default)
+	LastSeenAt    *timestamppb.Timestamp `protobuf:"bytes,7,opt,name=last_seen_at,json=lastSeenAt,proto3" json:"last_seen_at,omitempty"`       // Last web/dashboard login
+	RateLimit     int32                  `protobuf:"varint,8,opt,name=rate_limit,json=rateLimit,proto3" json:"rate_limit,omitempty"`           // Max requests/minute (0 = default)
+	LastActiveAt  *timestamppb.Timestamp `protobuf:"bytes,9,opt,name=last_active_at,json=lastActiveAt,proto3" json:"last_active_at,omitempty"` // Last proxy/API token usage
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -273,6 +274,13 @@ func (x *User) GetRateLimit() int32 {
 		return x.RateLimit
 	}
 	return 0
+}
+
+func (x *User) GetLastActiveAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.LastActiveAt
+	}
+	return nil
 }
 
 // UserBudget tracks a user's recurring spend for a budget period.
@@ -659,7 +667,7 @@ var File_candela_types_user_proto protoreflect.FileDescriptor
 
 const file_candela_types_user_proto_rawDesc = "" +
 	"\n" +
-	"\x18candela/types/user.proto\x12\rcandela.types\x1a\x1fgoogle/protobuf/timestamp.proto\"\xc7\x02\n" +
+	"\x18candela/types/user.proto\x12\rcandela.types\x1a\x1fgoogle/protobuf/timestamp.proto\"\x89\x03\n" +
 	"\x04User\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x14\n" +
 	"\x05email\x18\x02 \x01(\tR\x05email\x12!\n" +
@@ -671,7 +679,8 @@ const file_candela_types_user_proto_rawDesc = "" +
 	"\flast_seen_at\x18\a \x01(\v2\x1a.google.protobuf.TimestampR\n" +
 	"lastSeenAt\x12\x1d\n" +
 	"\n" +
-	"rate_limit\x18\b \x01(\x05R\trateLimit\"\xd7\x02\n" +
+	"rate_limit\x18\b \x01(\x05R\trateLimit\x12@\n" +
+	"\x0elast_active_at\x18\t \x01(\v2\x1a.google.protobuf.TimestampR\flastActiveAt\"\xd7\x02\n" +
 	"\n" +
 	"UserBudget\x12\x17\n" +
 	"\auser_id\x18\x01 \x01(\tR\x06userId\x12\x1b\n" +
@@ -762,19 +771,20 @@ var file_candela_types_user_proto_depIdxs = []int32{
 	1,  // 1: candela.types.User.status:type_name -> candela.types.UserStatus
 	8,  // 2: candela.types.User.created_at:type_name -> google.protobuf.Timestamp
 	8,  // 3: candela.types.User.last_seen_at:type_name -> google.protobuf.Timestamp
-	2,  // 4: candela.types.UserBudget.period_type:type_name -> candela.types.BudgetPeriod
-	8,  // 5: candela.types.UserBudget.period_start:type_name -> google.protobuf.Timestamp
-	8,  // 6: candela.types.UserBudget.period_end:type_name -> google.protobuf.Timestamp
-	8,  // 7: candela.types.BudgetGrant.starts_at:type_name -> google.protobuf.Timestamp
-	8,  // 8: candela.types.BudgetGrant.expires_at:type_name -> google.protobuf.Timestamp
-	8,  // 9: candela.types.BudgetGrant.created_at:type_name -> google.protobuf.Timestamp
-	8,  // 10: candela.types.AuditEntry.timestamp:type_name -> google.protobuf.Timestamp
-	8,  // 11: candela.types.RateWindow.expire_at:type_name -> google.protobuf.Timestamp
-	12, // [12:12] is the sub-list for method output_type
-	12, // [12:12] is the sub-list for method input_type
-	12, // [12:12] is the sub-list for extension type_name
-	12, // [12:12] is the sub-list for extension extendee
-	0,  // [0:12] is the sub-list for field type_name
+	8,  // 4: candela.types.User.last_active_at:type_name -> google.protobuf.Timestamp
+	2,  // 5: candela.types.UserBudget.period_type:type_name -> candela.types.BudgetPeriod
+	8,  // 6: candela.types.UserBudget.period_start:type_name -> google.protobuf.Timestamp
+	8,  // 7: candela.types.UserBudget.period_end:type_name -> google.protobuf.Timestamp
+	8,  // 8: candela.types.BudgetGrant.starts_at:type_name -> google.protobuf.Timestamp
+	8,  // 9: candela.types.BudgetGrant.expires_at:type_name -> google.protobuf.Timestamp
+	8,  // 10: candela.types.BudgetGrant.created_at:type_name -> google.protobuf.Timestamp
+	8,  // 11: candela.types.AuditEntry.timestamp:type_name -> google.protobuf.Timestamp
+	8,  // 12: candela.types.RateWindow.expire_at:type_name -> google.protobuf.Timestamp
+	13, // [13:13] is the sub-list for method output_type
+	13, // [13:13] is the sub-list for method input_type
+	13, // [13:13] is the sub-list for extension type_name
+	13, // [13:13] is the sub-list for extension extendee
+	0,  // [0:13] is the sub-list for field type_name
 }
 
 func init() { file_candela_types_user_proto_init() }

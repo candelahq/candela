@@ -50,6 +50,7 @@ func (b *budgetUserStore) ListUsers(context.Context, string, int, int) ([]*stora
 }
 func (b *budgetUserStore) UpdateUser(context.Context, *storage.UserRecord) error  { return nil }
 func (b *budgetUserStore) TouchLastSeen(context.Context, string) error            { return nil }
+func (b *budgetUserStore) TouchLastActive(context.Context, string) error          { return nil }
 func (b *budgetUserStore) DeleteUser(context.Context, string) error               { return nil }
 func (b *budgetUserStore) SetBudget(context.Context, *storage.BudgetRecord) error { return nil }
 func (b *budgetUserStore) GetBudget(context.Context, string) (*storage.BudgetRecord, error) {

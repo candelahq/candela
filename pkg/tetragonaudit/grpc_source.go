@@ -264,8 +264,9 @@ func NewGRPCEventStreamAdapter(ctx context.Context, conn *grpc.ClientConn) (*GRP
 	if err != nil {
 		return nil, fmt.Errorf("tetragonaudit: failed to create gRPC stream: %w", err)
 	}
-	// Send empty request to initiate streaming.
-	if err := stream.SendMsg([]byte("{}")); err != nil {
+	// Send empty GetEventsRequest to initiate streaming.
+	// An empty protobuf message is zero bytes — NOT JSON "{}".
+	if err := stream.SendMsg([]byte{}); err != nil {
 		return nil, fmt.Errorf("tetragonaudit: failed to send GetEvents request: %w", err)
 	}
 	// Signal that the client is done sending (server-streaming RPC best practice).

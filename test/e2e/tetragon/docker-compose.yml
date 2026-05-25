@@ -24,9 +24,12 @@ services:
       - /sys/fs/bpf:/sys/fs/bpf
       # Mount TracingPolicy for the test scenario.
       - ./tracingpolicy.yaml:/etc/tetragon/tetragon.tp.d/test-policy.yaml:ro
-    environment:
-      # Expose gRPC export API on all interfaces so test-runner can reach it.
-      - TETRAGON_EXPORT_ADDR=0.0.0.0:54321
+    # Override the default gRPC server address (localhost:54321) to bind on
+    # all interfaces so the test-runner container can reach it.
+    # NOTE: TETRAGON_EXPORT_ADDR controls file export, not the gRPC server.
+    command:
+      - tetragon
+      - --server-address=0.0.0.0:54321
     networks:
       - tetragon-test
     healthcheck:

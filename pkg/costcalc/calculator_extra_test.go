@@ -12,16 +12,16 @@ import (
 
 func TestCalculator_FullDiscount_YieldsZeroCost(t *testing.T) {
 	c := New()
-	// Override gpt-4o with 100% discount — should produce $0 cost.
+	// Override claude-sonnet-4 with 100% discount — should produce $0 cost.
 	c.SetPricing(ModelPricing{
-		Provider:         "openai",
-		Model:            "gpt-4o",
-		InputPerMillion:  2.50,
-		OutputPerMillion: 10.00,
+		Provider:         "anthropic",
+		Model:            "claude-sonnet-4",
+		InputPerMillion:  3.00,
+		OutputPerMillion: 15.00,
 		DiscountPercent:  1.0, // 100% off
 	})
 
-	cost := c.Calculate("openai", "gpt-4o", 1_000_000, 1_000_000)
+	cost := c.Calculate("anthropic", "claude-sonnet-4", 1_000_000, 1_000_000)
 	if cost != 0.0 {
 		t.Errorf("Calculate with 100%% discount = %f, want 0.0", cost)
 	}
@@ -33,11 +33,11 @@ func TestCalculator_FullDiscount_HasPricingStillTrue(t *testing.T) {
 	// (admin explicitly configured the model), but documents the behaviour.
 	c := New()
 	c.SetPricing(ModelPricing{
-		Provider:        "openai",
-		Model:           "gpt-4o",
+		Provider:        "anthropic",
+		Model:           "claude-sonnet-4",
 		DiscountPercent: 1.0,
 	})
-	if !c.HasPricing("openai", "gpt-4o") {
+	if !c.HasPricing("anthropic", "claude-sonnet-4") {
 		t.Error("HasPricing should return true even when discount=1.0")
 	}
 }
@@ -49,8 +49,8 @@ func TestCalculator_StackedDiscounts(t *testing.T) {
 	// Model-level 10% discount + global 20% discount.
 	// Effective multiplier: (1 - 0.10) * (1 - 0.20) = 0.90 * 0.80 = 0.72
 	c.SetPricing(ModelPricing{
-		Provider:         "openai",
-		Model:            "gpt-4o",
+		Provider:         "anthropic",
+		Model:            "claude-sonnet-4",
 		InputPerMillion:  1_000_000, // $1 per token for easy math
 		OutputPerMillion: 0,
 		DiscountPercent:  0.10,
@@ -60,7 +60,7 @@ func TestCalculator_StackedDiscounts(t *testing.T) {
 	// 1 input token → baseCost = 1.0
 	// After model 10% off: 0.90
 	// After global 20% off: 0.90 * 0.80 = 0.72
-	cost := c.Calculate("openai", "gpt-4o", 1, 0)
+	cost := c.Calculate("anthropic", "claude-sonnet-4", 1, 0)
 	const want = 0.72
 	if cost < want-0.0001 || cost > want+0.0001 {
 		t.Errorf("stacked discount cost = %f, want ~%f", cost, want)
@@ -95,7 +95,7 @@ func TestClampDiscount_Bounds(t *testing.T) {
 
 func TestCalculator_UnknownModel_ZeroCost(t *testing.T) {
 	c := New()
-	cost := c.Calculate("openai", "gpt-nonexistent-9000", 1_000_000, 1_000_000)
+	cost := c.Calculate("anthropic", "claude-nonexistent-9000", 1_000_000, 1_000_000)
 	if cost != 0 {
 		t.Errorf("unknown model cost = %f, want 0.0", cost)
 	}
@@ -247,9 +247,9 @@ func TestCalculator_TieredPricing_AtExactThreshold(t *testing.T) {
 
 func TestCalculator_TieredPricing_NoTierFields_UsesBaserate(t *testing.T) {
 	c := New()
-	// Models without tiered pricing (e.g. GPT-4o) use base rate regardless of input size.
-	costSmall := c.Calculate("openai", "gpt-4o", 100_000, 10_000)
-	costLarge := c.Calculate("openai", "gpt-4o", 500_000, 10_000)
+	// Models without tiered pricing (e.g. gemini-2.0-flash) use base rate regardless of input size.
+	costSmall := c.Calculate("google", "gemini-2.0-flash", 100_000, 10_000)
+	costLarge := c.Calculate("google", "gemini-2.0-flash", 500_000, 10_000)
 	// Both should use the same rate per token — just different volumes.
 	rateSmall := costSmall / (100_000.0 + 10_000.0)
 	rateLarge := costLarge / (500_000.0 + 10_000.0)

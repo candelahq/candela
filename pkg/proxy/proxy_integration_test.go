@@ -10,7 +10,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/candelahq/candela/pkg/costcalc"
 	"github.com/candelahq/candela/pkg/storage"
 )
 
@@ -48,7 +47,7 @@ func TestProxy_EndToEnd_OpenAI(t *testing.T) {
 	defer upstream.Close()
 
 	submitter := &mockSubmitter{}
-	calc := costcalc.New()
+	calc := newCalcWithTestModels()
 
 	p := New(Config{
 		Providers: []Provider{{Name: "openai", UpstreamURL: upstream.URL}},
@@ -124,7 +123,7 @@ func TestProxy_EndToEnd_CompatBudgetExhausted(t *testing.T) {
 	defer upstream.Close()
 
 	submitter := &mockSubmitter{}
-	calc := costcalc.New()
+	calc := newCalcWithTestModels()
 
 	p := New(Config{
 		Providers: []Provider{{Name: "openai", UpstreamURL: upstream.URL}},
@@ -181,7 +180,7 @@ func TestProxy_EndToEnd_W3CTraceContext(t *testing.T) {
 	defer upstream.Close()
 
 	submitter := &mockSubmitter{}
-	calc := costcalc.New()
+	calc := newCalcWithTestModels()
 	p := New(Config{
 		Providers: []Provider{{Name: "openai", UpstreamURL: upstream.URL}},
 		ProjectID: "test-trace",

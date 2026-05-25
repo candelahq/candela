@@ -35,7 +35,7 @@ func TestSetGlobalDiscount_ClampsAboveOne(t *testing.T) {
 	calc.SetGlobalDiscount(2.0) // should clamp to 1.0
 
 	// With 100% discount, cost should be zero.
-	cost := calc.Calculate("openai", "gpt-4o", 1_000_000, 1_000_000)
+	cost := calc.Calculate("anthropic", "claude-sonnet-4", 1_000_000, 1_000_000)
 	if cost != 0 {
 		t.Errorf("expected $0 with 100%% discount, got %f", cost)
 	}
@@ -46,10 +46,10 @@ func TestSetGlobalDiscount_ClampsNegative(t *testing.T) {
 	calc.SetGlobalDiscount(-0.5) // should clamp to 0.0
 
 	// With 0% discount, cost should be normal.
-	cost := calc.Calculate("openai", "gpt-4o", 1_000_000, 1_000_000)
-	// GPT-4o: $2.50/M in + $10.00/M out = $12.50
-	if math.Abs(cost-12.50) > 0.01 {
-		t.Errorf("expected ~$12.50 with 0%% discount, got %f", cost)
+	cost := calc.Calculate("anthropic", "claude-sonnet-4", 1_000_000, 1_000_000)
+	// Claude Sonnet 4: $3.00/M in + $15.00/M out = $18.00
+	if math.Abs(cost-18.00) > 0.01 {
+		t.Errorf("expected ~$18.00 with 0%% discount, got %f", cost)
 	}
 }
 
@@ -58,16 +58,16 @@ func TestLoadFromConfig_ClampsModelDiscount(t *testing.T) {
 	calc.LoadFromConfig(PricingConfig{
 		Models: []ModelPricing{
 			{
-				Provider:         "openai",
-				Model:            "gpt-4o",
-				InputPerMillion:  2.50,
-				OutputPerMillion: 10.00,
+				Provider:         "anthropic",
+				Model:            "claude-sonnet-4",
+				InputPerMillion:  3.00,
+				OutputPerMillion: 15.00,
 				DiscountPercent:  1.5, // invalid — should clamp to 1.0
 			},
 		},
 	})
 
-	cost := calc.Calculate("openai", "gpt-4o", 1_000_000, 1_000_000)
+	cost := calc.Calculate("anthropic", "claude-sonnet-4", 1_000_000, 1_000_000)
 	if cost != 0 {
 		t.Errorf("expected $0 with clamped 100%% model discount, got %f", cost)
 	}
@@ -80,16 +80,16 @@ func TestCalculate_NeverNegative(t *testing.T) {
 		DiscountPercent: 1.0,
 		Models: []ModelPricing{
 			{
-				Provider:         "openai",
-				Model:            "gpt-4o",
-				InputPerMillion:  2.50,
-				OutputPerMillion: 10.00,
+				Provider:         "anthropic",
+				Model:            "claude-sonnet-4",
+				InputPerMillion:  3.00,
+				OutputPerMillion: 15.00,
 				DiscountPercent:  1.0,
 			},
 		},
 	})
 
-	cost := calc.Calculate("openai", "gpt-4o", 1_000_000, 1_000_000)
+	cost := calc.Calculate("anthropic", "claude-sonnet-4", 1_000_000, 1_000_000)
 	if cost < 0 {
 		t.Errorf("cost must never be negative, got %f", cost)
 	}

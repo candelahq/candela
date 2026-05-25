@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/candelahq/candela/pkg/auth"
-	"github.com/candelahq/candela/pkg/costcalc"
 	"github.com/candelahq/candela/pkg/storage"
 )
 
@@ -26,7 +25,7 @@ func TestIntegration_BudgetGateBlocksViaCompatRoute(t *testing.T) {
 	defer upstream.Close()
 
 	submitter := &mockSubmitter{}
-	calc := costcalc.New()
+	calc := newCalcWithTestModels()
 
 	p := New(Config{
 		Providers: []Provider{{Name: "openai", UpstreamURL: upstream.URL}},
@@ -91,7 +90,7 @@ func TestIntegration_StreamingResponseForwarding(t *testing.T) {
 	defer upstream.Close()
 
 	submitter := &mockSubmitter{}
-	calc := costcalc.New()
+	calc := newCalcWithTestModels()
 
 	p := New(Config{
 		Providers: []Provider{{Name: "openai", UpstreamURL: upstream.URL}},
@@ -158,7 +157,7 @@ func TestIntegration_CircuitBreakerTrips(t *testing.T) {
 	defer upstream.Close()
 
 	submitter := &mockSubmitter{}
-	calc := costcalc.New()
+	calc := newCalcWithTestModels()
 
 	p := New(Config{
 		Providers: []Provider{{Name: "openai", UpstreamURL: upstream.URL}},
@@ -195,7 +194,7 @@ func TestIntegration_CircuitBreakerTrips(t *testing.T) {
 // ──────────────────────────────────────────
 
 func TestIntegration_CompatModelsEndpoint(t *testing.T) {
-	calc := costcalc.New()
+	calc := newCalcWithTestModels()
 	p := New(Config{
 		Providers: []Provider{{Name: "openai", UpstreamURL: "http://localhost:1"}},
 		ProjectID: "test-models",
@@ -243,7 +242,7 @@ func TestIntegration_ServiceAccountSkipsBudget(t *testing.T) {
 	defer upstream.Close()
 
 	submitter := &mockSubmitter{}
-	calc := costcalc.New()
+	calc := newCalcWithTestModels()
 
 	p := New(Config{
 		Providers: []Provider{{Name: "openai", UpstreamURL: upstream.URL}},

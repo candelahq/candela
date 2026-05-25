@@ -155,6 +155,13 @@ func TestProcessorBackPressure(t *testing.T) {
 func TestProcessorCostEnrichment(t *testing.T) {
 	w := &mockWriter{}
 	calc := costcalc.New()
+	// gpt-4o was removed from built-in pricing; inject test-only pricing.
+	calc.SetPricing(costcalc.ModelPricing{
+		Provider:         "openai",
+		Model:            "gpt-4o",
+		InputPerMillion:  2.50,
+		OutputPerMillion: 10.00,
+	})
 	proc := New([]storage.SpanWriter{w}, calc, 1) // batch size 1 = flush immediately
 
 	ctx, cancel := context.WithCancel(context.Background())

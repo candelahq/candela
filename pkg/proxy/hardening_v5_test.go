@@ -216,5 +216,5 @@ func TestAnthropicParser_EmptyUsage(t *testing.T) {
 // ──────────────────────────────────────────
 
 func newTestCalc() *costcalc.Calculator {
-	return costcalc.New()
+	return newCalcWithTestModels()
 }

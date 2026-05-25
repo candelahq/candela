@@ -9,8 +9,6 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/candelahq/candela/pkg/costcalc"
 )
 
 func TestBuildModelsResponse(t *testing.T) {
@@ -83,7 +81,7 @@ func TestBuildModelsResponse_Empty(t *testing.T) {
 
 func TestCompatRoutes_GetModels(t *testing.T) {
 	submitter := &mockSubmitter{}
-	calc := costcalc.New()
+	calc := newCalcWithTestModels()
 
 	p := New(Config{
 		Providers: []Provider{{Name: "openai", UpstreamURL: "http://unused"}},
@@ -147,7 +145,7 @@ func TestCompatRoutes_ChatCompletions_RoutesToProvider(t *testing.T) {
 	defer upstream.Close()
 
 	submitter := &mockSubmitter{}
-	calc := costcalc.New()
+	calc := newCalcWithTestModels()
 
 	p := New(Config{
 		Providers: []Provider{{Name: "openai", UpstreamURL: upstream.URL}},
@@ -215,7 +213,7 @@ func TestCompatRoutes_ChatCompletions_RoutesToProvider(t *testing.T) {
 
 func TestCompatRoutes_ChatCompletions_UnknownModel(t *testing.T) {
 	submitter := &mockSubmitter{}
-	calc := costcalc.New()
+	calc := newCalcWithTestModels()
 
 	p := New(Config{
 		Providers: []Provider{{Name: "openai", UpstreamURL: "http://unused"}},
@@ -255,7 +253,7 @@ func TestCompatRoutes_ChatCompletions_UnknownModel(t *testing.T) {
 
 func TestCompatRoutes_ChatCompletions_MissingModel(t *testing.T) {
 	submitter := &mockSubmitter{}
-	calc := costcalc.New()
+	calc := newCalcWithTestModels()
 
 	p := New(Config{
 		Providers: []Provider{{Name: "openai", UpstreamURL: "http://unused"}},
@@ -291,7 +289,7 @@ func TestCompatRoutes_ChatCompletions_MissingModel(t *testing.T) {
 
 func TestCompatRoutes_ChatCompletions_InvalidJSON(t *testing.T) {
 	submitter := &mockSubmitter{}
-	calc := costcalc.New()
+	calc := newCalcWithTestModels()
 
 	p := New(Config{
 		Providers: []Provider{{Name: "openai", UpstreamURL: "http://unused"}},

@@ -13,16 +13,16 @@ import (
 //   - Zero tokens always return $0.00
 func FuzzCalculate(f *testing.F) {
 	// Seed corpus: realistic inputs covering common providers.
-	f.Add("openai", "gpt-4o", int64(1000), int64(500))
+	f.Add("anthropic", "claude-sonnet-4", int64(1000), int64(500))
 	f.Add("anthropic", "claude-sonnet-4-20250514", int64(2000), int64(1000))
 	f.Add("google", "gemini-2.5-pro", int64(500000), int64(10000))
 	f.Add("local", "llama3", int64(100), int64(50))
 	f.Add("", "", int64(0), int64(0))
 	f.Add("unknown-provider", "unknown-model", int64(99999999), int64(99999999))
 	// Negative tokens (should not panic).
-	f.Add("openai", "gpt-4o", int64(-100), int64(-50))
+	f.Add("google", "gemini-2.0-flash", int64(-100), int64(-50))
 	// Max int64 (overflow boundary).
-	f.Add("openai", "gpt-4o", int64(math.MaxInt64), int64(math.MaxInt64))
+	f.Add("anthropic", "claude-opus-4.7", int64(math.MaxInt64), int64(math.MaxInt64))
 
 	calc := New()
 
@@ -56,7 +56,7 @@ func FuzzCalculate(f *testing.F) {
 //   - When cacheRead and cacheCreate are 0, result equals rawInput
 func FuzzNormalizeCachedInput(f *testing.F) {
 	// Seed corpus covering each provider's semantics.
-	f.Add("openai", "gpt-4o", int64(1000), int64(200), int64(0))
+	f.Add("google", "gemini-2.0-flash", int64(1000), int64(200), int64(0))
 	f.Add("anthropic", "claude-sonnet-4-20250514", int64(500), int64(100), int64(50))
 	f.Add("google", "gemini-2.5-pro", int64(2000), int64(500), int64(100))
 	f.Add("google", "gemini-2.0-flash", int64(1000), int64(300), int64(0))
@@ -64,9 +64,9 @@ func FuzzNormalizeCachedInput(f *testing.F) {
 	f.Add("unknown", "model", int64(1000), int64(500), int64(200))
 	f.Add("", "", int64(0), int64(0), int64(0))
 	// Edge: cache tokens exceed rawInput (possible in inclusive mode).
-	f.Add("openai", "gpt-4o", int64(100), int64(500), int64(500))
+	f.Add("google", "gemini-2.5-flash", int64(100), int64(500), int64(500))
 	// Negative values.
-	f.Add("openai", "gpt-4o", int64(-100), int64(-50), int64(-25))
+	f.Add("anthropic", "claude-haiku-4.5", int64(-100), int64(-50), int64(-25))
 
 	calc := New()
 
@@ -93,7 +93,7 @@ func FuzzNormalizeCachedInputWithTTL(f *testing.F) {
 	f.Add("anthropic", "claude-sonnet-4-20250514", int64(500), int64(100), int64(50), true)
 	f.Add("anthropic", "claude-sonnet-4-20250514", int64(500), int64(100), int64(50), false)
 	f.Add("google", "gemini-2.5-pro", int64(2000), int64(500), int64(100), true)
-	f.Add("openai", "gpt-4o", int64(1000), int64(200), int64(0), false)
+	f.Add("google", "gemini-2.0-flash", int64(1000), int64(200), int64(0), false)
 
 	calc := New()
 

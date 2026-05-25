@@ -489,38 +489,24 @@ func TestNormalizeThenCalculate_Anthropic_E2E(t *testing.T) {
 
 func TestNormalizeThenCalculate_Google_E2E(t *testing.T) {
 	c := New()
-	// Gemini 2.5 Flash: $0.15/M input, $0.60/M output (built-in pricing, below 200K tier).
+	// Gemini 2.5 Flash: $0.30/M input, $2.50/M output (built-in pricing, below 200K tier).
 	// Google response: 1000 total (800 cached, 200 fresh)
 	normalized := c.NormalizeCachedInput("google", "gemini-2.5-flash", 1000, 800, 0)
 	// inclusive: nonCached = 200, cached_eq = round(800 * 0.10) = 80
 	// normalized = 280
 
 	cost := c.Calculate("google", "gemini-2.5-flash", normalized, 100)
-	// Expected: input = 280/1M * $0.15 = $0.000042
-	//           output = 100/1M * $0.60 = $0.000060
-	//           total ≈ $0.000102
-	if cost < 0.00005 || cost > 0.0005 {
+	// Expected: input = 280/1M * $0.30 = $0.000084
+	//           output = 100/1M * $2.50 = $0.000250
+	//           total ≈ $0.000334
+	if cost < 0.0001 || cost > 0.001 {
 		t.Errorf("Google E2E cost = %f, expected small positive value", cost)
 	}
 }
 
-func TestNormalizeThenCalculate_OpenAI_E2E(t *testing.T) {
-	c := New()
-	// GPT-4o: $2.50/M input, $10.00/M output.
-	// OpenAI response: 10000 total (8000 cached, 2000 fresh)
-	normalized := c.NormalizeCachedInput("openai", "gpt-4o", 10000, 8000, 0)
-	// inclusive: nonCached = 2000, cached_eq = round(8000 * 0.5) = 4000
-	// normalized = 6000
-
-	cost := c.Calculate("openai", "gpt-4o", normalized, 1000)
-	// Expected: input = 6000/1M * $2.50 = $0.015
-	//           output = 1000/1M * $10.00 = $0.010
-	//           total = $0.025
-	wantCost := 0.025
-	if cost < wantCost-0.001 || cost > wantCost+0.001 {
-		t.Errorf("OpenAI E2E cost = %f, want ~%f", cost, wantCost)
-	}
-}
+// Note: OpenAI E2E test removed — no built-in pricing for OpenAI models.
+// Cache normalization tests for the "openai" provider (above) remain valid
+// because they test token-reporting semantics, not dollar amounts.
 
 func TestNormalizeThenCalculate_Anthropic_1hTTL_E2E(t *testing.T) {
 	c := New()

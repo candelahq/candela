@@ -18,13 +18,13 @@ func TestCalculate(t *testing.T) {
 		wantMax      float64
 	}{
 		{
-			name:         "GPT-4o basic usage",
-			provider:     "openai",
-			model:        "gpt-4o",
+			name:         "Claude Opus 4.7 basic usage",
+			provider:     "anthropic",
+			model:        "claude-opus-4.7",
 			inputTokens:  1000,
 			outputTokens: 500,
-			wantMin:      0.007,
-			wantMax:      0.008,
+			wantMin:      0.017, // 1K×$5.00/M + 500×$25.00/M = $0.005 + $0.0125 = $0.0175
+			wantMax:      0.018,
 		},
 		{
 			name:         "Gemini 2.0 Flash",
@@ -55,8 +55,8 @@ func TestCalculate(t *testing.T) {
 		},
 		{
 			name:         "Zero tokens returns zero cost",
-			provider:     "openai",
-			model:        "gpt-4o",
+			provider:     "google",
+			model:        "gemini-2.0-flash",
 			inputTokens:  0,
 			outputTokens: 0,
 			wantMin:      0,
@@ -81,13 +81,13 @@ func TestCalculate(t *testing.T) {
 			wantMax:      0,
 		},
 		{
-			name:         "GPT-5.4 pricing present",
-			provider:     "openai",
-			model:        "gpt-5.4",
+			name:         "Claude Haiku 4.5 pricing present",
+			provider:     "anthropic",
+			model:        "claude-haiku-4.5",
 			inputTokens:  1000,
 			outputTokens: 500,
-			wantMin:      0.009,
-			wantMax:      0.011,
+			wantMin:      0.003, // 1K×$1.00/M + 500×$5.00/M = $0.001 + $0.0025 = $0.0035
+			wantMax:      0.004,
 		},
 		{
 			name:         "Gemini 2.5 Flash pricing present",
@@ -108,15 +108,6 @@ func TestCalculate(t *testing.T) {
 			wantMax:      0.009,
 		},
 		{
-			name:         "Gemini 3.1 Flash",
-			provider:     "google",
-			model:        "gemini-3.1-flash",
-			inputTokens:  10000,
-			outputTokens: 2000,
-			wantMin:      0.010, // 10K×$0.50/M + 2K×$3.00/M = $0.005 + $0.006 = $0.011
-			wantMax:      0.012,
-		},
-		{
 			name:         "Gemini 3.1 Flash-Lite",
 			provider:     "google",
 			model:        "gemini-3.1-flash-lite",
@@ -126,22 +117,22 @@ func TestCalculate(t *testing.T) {
 			wantMax:      0.006,
 		},
 		{
-			name:         "Gemini 3.0 Flash Preview",
+			name:         "Gemini 3 Flash",
 			provider:     "google",
-			model:        "gemini-3.0-flash",
+			model:        "gemini-3-flash",
 			inputTokens:  10000,
 			outputTokens: 2000,
-			wantMin:      0.010,
+			wantMin:      0.010, // 10K×$0.50/M + 2K×$3.00/M = $0.005 + $0.006 = $0.011
 			wantMax:      0.012,
 		},
 		{
-			name:         "Gemini 3.0 Pro Preview",
+			name:         "Gemini 3 Flash Lite",
 			provider:     "google",
-			model:        "gemini-3.0-pro",
-			inputTokens:  1000,
-			outputTokens: 500,
-			wantMin:      0.007,
-			wantMax:      0.009,
+			model:        "gemini-3-flash-lite",
+			inputTokens:  100000,
+			outputTokens: 20000,
+			wantMin:      0.003, // 100K×$0.02/M + 20K×$0.10/M = $0.002 + $0.002 = $0.004
+			wantMax:      0.005,
 		},
 		{
 			name:         "Gemini 3.5 Flash",
@@ -204,15 +195,15 @@ func TestSetPricing(t *testing.T) {
 func TestLoadFromConfig(t *testing.T) {
 	calc := New()
 
-	// Override GPT-4o with a negotiated rate
+	// Override Gemini 2.0 Flash with a negotiated rate
 	calc.LoadFromConfig(PricingConfig{
 		Models: []ModelPricing{
-			{Provider: "openai", Model: "gpt-4o", InputPerMillion: 2.00, OutputPerMillion: 8.00},
+			{Provider: "google", Model: "gemini-2.0-flash", InputPerMillion: 0.05, OutputPerMillion: 0.20},
 		},
 	})
 
-	got := calc.Calculate("openai", "gpt-4o", 1_000_000, 1_000_000)
-	want := 10.0 // 2.00 + 8.00 (overridden, not 2.50 + 10.00)
+	got := calc.Calculate("google", "gemini-2.0-flash", 1_000_000, 1_000_000)
+	want := 0.25 // 0.05 + 0.20 (overridden, not 0.10 + 0.40)
 	if math.Abs(got-want) > 0.001 {
 		t.Errorf("Calculate with config override = %f, want %f", got, want)
 	}
@@ -225,12 +216,12 @@ func TestGlobalDiscount(t *testing.T) {
 		DiscountPercent: 0.20, // 20% off
 	})
 
-	// GPT-4o: list = $2.50/M in + $10.00/M out
-	// 1M tokens each: $2.50 + $10.00 = $12.50 base
-	// 20% off: $12.50 × 0.80 = $10.00
-	got := calc.Calculate("openai", "gpt-4o", 1_000_000, 1_000_000)
-	want := 10.0
-	if math.Abs(got-want) > 0.001 {
+	// Claude Sonnet 4: list = $3.00/M in + $15.00/M out
+	// 1M tokens each: $3.00 + $15.00 = $18.00 base
+	// 20% off: $18.00 × 0.80 = $14.40
+	got := calc.Calculate("anthropic", "claude-sonnet-4", 1_000_000, 1_000_000)
+	want := 14.40
+	if math.Abs(got-want) > 0.01 {
 		t.Errorf("Calculate with global discount = %f, want %f", got, want)
 	}
 }
@@ -242,21 +233,21 @@ func TestModelDiscount(t *testing.T) {
 		DiscountPercent: 0.10, // 10% global
 		Models: []ModelPricing{
 			{
-				Provider:         "openai",
-				Model:            "gpt-4o",
-				InputPerMillion:  2.50,
-				OutputPerMillion: 10.00,
+				Provider:         "anthropic",
+				Model:            "claude-sonnet-4",
+				InputPerMillion:  3.00,
+				OutputPerMillion: 15.00,
 				DiscountPercent:  0.20, // 20% model-specific
 			},
 		},
 	})
 
-	// 1M tokens each: $2.50 + $10.00 = $12.50 base
-	// model discount: $12.50 × 0.80 = $10.00
-	// global discount: $10.00 × 0.90 = $9.00
-	got := calc.Calculate("openai", "gpt-4o", 1_000_000, 1_000_000)
-	want := 9.0
-	if math.Abs(got-want) > 0.001 {
+	// 1M tokens each: $3.00 + $15.00 = $18.00 base
+	// model discount: $18.00 × 0.80 = $14.40
+	// global discount: $14.40 × 0.90 = $12.96
+	got := calc.Calculate("anthropic", "claude-sonnet-4", 1_000_000, 1_000_000)
+	want := 12.96
+	if math.Abs(got-want) > 0.01 {
 		t.Errorf("Calculate with stacked discounts = %f, want %f", got, want)
 	}
 }

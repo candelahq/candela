@@ -386,11 +386,11 @@ func (p *Pipeline) normalize(event Event) AuditRecord {
 
 	if kp := event.ProcessKprobe; kp != nil {
 		record.FunctionName = kp.FunctionName
-		record.Action = kp.Action
+		record.Action = normalizeAction(kp.Action)
 		record.PolicyName = kp.PolicyName
 
 		// SIGKILL actions are critical security events.
-		if strings.EqualFold(kp.Action, "SIGKILL") {
+		if strings.EqualFold(record.Action, "SIGKILL") {
 			record.Severity = "CRITICAL"
 		}
 
@@ -455,6 +455,24 @@ func PolicyFilter(policyName string) EventFilter {
 	}
 }
 
+// normalizeAction converts protobuf KprobeAction enum strings to short
+// names used by the pipeline. For example:
+//   - "KPROBE_ACTION_POST" → "post"
+//   - "KPROBE_ACTION_SIGKILL" → "SIGKILL"
+//   - "post" → "post" (no-op for JSON log files)
+func normalizeAction(action string) string {
+	if after, ok := strings.CutPrefix(action, "KPROBE_ACTION_"); ok {
+		// Preserve case for known enforcement actions.
+		switch after {
+		case "SIGKILL", "OVERRIDE":
+			return after
+		default:
+			return strings.ToLower(after)
+		}
+	}
+	return action
+}
+
 // EnforcementOnly filters to events where an enforcement action was taken
 // (e.g., SIGKILL), excluding log-only/post events.
 func EnforcementOnly() EventFilter {
@@ -462,7 +480,7 @@ func EnforcementOnly() EventFilter {
 		if e.ProcessKprobe == nil {
 			return false
 		}
-		action := e.ProcessKprobe.Action
+		action := normalizeAction(e.ProcessKprobe.Action)
 		return strings.EqualFold(action, "SIGKILL")
 	}
 }

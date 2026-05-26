@@ -154,6 +154,9 @@ func spanToRow(span storage.Span) spanRow {
 	}
 
 	for k, v := range span.Attributes {
+		if k == "candela.is_retry" {
+			continue
+		}
 		row.Attributes = append(row.Attributes, AttributeKV{Key: k, Value: v})
 	}
 
@@ -343,7 +346,6 @@ func (s *Store) IngestSpans(ctx context.Context, spans []storage.Span) error {
 
 	for _, span := range spans {
 		if span.Attributes != nil && span.Attributes["candela.is_retry"] == "true" {
-			delete(span.Attributes, "candela.is_retry")
 			pessimisticRows = append(pessimisticRows, spanToRow(span))
 		} else {
 			optimisticSpans = append(optimisticSpans, span)

@@ -355,7 +355,7 @@ func (c *Calculator) HasPricing(provider, model string) bool {
 }
 
 // resolve looks up pricing: config overrides first, then built-in defaults,
-// then precomputed provider-agnostic fallback.
+// then precomputed provider-agnostic fallback, then prefix-based fuzzy match.
 // Provider aliases (e.g. "anthropic-direct" → "anthropic") are resolved before
 // lookup so passthrough routes inherit canonical pricing and config overrides.
 func (c *Calculator) resolve(provider, model string) (ModelPricing, bool) {
@@ -381,7 +381,97 @@ func (c *Calculator) resolve(provider, model string) (ModelPricing, bool) {
 		return p, true
 	}
 
+	// 4. Prefix-based fuzzy match for model variants.
+	// Handles: date suffixes (gpt-4.1-2025-04-14), preview tags
+	// (gemini-2.5-pro-preview-05-06), and OpenAI fine-tunes (ft:gpt-4.1:org:name:id).
+	if base := extractBaseModel(model); base != "" && base != strings.ToLower(model) {
+		baseKey := c.key(provider, base)
+		if p, ok := c.overrides[baseKey]; ok {
+			return p, true
+		}
+		if p, ok := c.defaults[baseKey]; ok {
+			return p, true
+		}
+		if p, ok := c.fallback[base]; ok {
+			return p, true
+		}
+	}
+
 	return ModelPricing{}, false
+}
+
+// extractBaseModel strips common suffixes and prefixes from model names to find
+// the canonical base model for pricing lookup. Returns lowercase base or empty
+// string if no transformation applies.
+//
+// Handles:
+//   - Date suffixes: "gpt-4.1-2025-04-14" → "gpt-4.1"
+//   - Preview/exp tags: "gemini-2.5-pro-preview-05-06" → "gemini-2.5-pro"
+//   - Snapshot suffixes: "claude-sonnet-4-20250514" → "claude-sonnet-4"
+//   - OpenAI fine-tunes: "ft:gpt-4.1:org:custom:id" → "gpt-4.1"
+//   - Latest/stable tags: "gpt-4.1-latest" → "gpt-4.1"
+func extractBaseModel(model string) string {
+	m := strings.ToLower(model)
+
+	// OpenAI fine-tune format: ft:{base_model}:{org}:{name}:{id}
+	if strings.HasPrefix(m, "ft:") {
+		parts := strings.SplitN(m, ":", 3)
+		if len(parts) >= 2 {
+			return parts[1]
+		}
+	}
+
+	// Strip common trailing tags.
+	for _, suffix := range []string{"-latest", "-stable"} {
+		if strings.HasSuffix(m, suffix) {
+			return strings.TrimSuffix(m, suffix)
+		}
+	}
+
+	// Strip -preview* suffix (e.g. "-preview-05-06", "-preview")
+	if idx := strings.Index(m, "-preview"); idx > 0 {
+		return m[:idx]
+	}
+
+	// Strip -exp* suffix (e.g. "-exp-0827")
+	if idx := strings.Index(m, "-exp"); idx > 0 {
+		return m[:idx]
+	}
+
+	// Strip date suffixes: 8-digit (YYYYMMDD) or ISO-like (YYYY-MM-DD).
+	// Match "-20250514" or "-2025-04-14" at the end.
+	if len(m) > 9 {
+		// "-YYYYMMDD" (9 chars)
+		tail := m[len(m)-9:]
+		if tail[0] == '-' && isAllDigits(tail[1:]) {
+			return m[:len(m)-9]
+		}
+	}
+	if len(m) > 11 {
+		// "-YYYY-MM-DD" (11 chars)
+		tail := m[len(m)-11:]
+		if tail[0] == '-' && len(tail) == 11 && tail[5] == '-' && tail[8] == '-' {
+			stripped := strings.ReplaceAll(tail[1:], "-", "")
+			if isAllDigits(stripped) {
+				return m[:len(m)-11]
+			}
+		}
+	}
+
+	return ""
+}
+
+// isAllDigits returns true if s is non-empty and contains only ASCII digits.
+func isAllDigits(s string) bool {
+	if len(s) == 0 {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		if s[i] < '0' || s[i] > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 // rebuildFallback creates a deterministic lookup for model names without providers.

@@ -39,14 +39,19 @@ impl CostCalculator {
         prices.insert("gpt-5.4".into(), (2.50, 15.00));
         prices.insert("gpt-5.4-mini".into(), (0.75, 4.50));
         prices.insert("gpt-5.4-nano".into(), (0.20, 1.25));
-        // GPT-4o
+        // GPT-4.1 family (1M context)
+        prices.insert("gpt-4.1".into(), (2.00, 8.00));
+        prices.insert("gpt-4.1-mini".into(), (0.40, 1.60));
+        prices.insert("gpt-4.1-nano".into(), (0.10, 0.40));
+        // GPT-4o (legacy)
         prices.insert("gpt-4o".into(), (2.50, 10.00));
         prices.insert("gpt-4o-mini".into(), (0.15, 0.60));
         // GPT-4 (legacy)
         prices.insert("gpt-4-turbo".into(), (10.00, 30.00));
         prices.insert("gpt-3.5-turbo".into(), (0.50, 1.50));
-        // Reasoning models
-        prices.insert("o3".into(), (10.00, 40.00));
+        // Reasoning models (o3 price cut: was $10/$40, now $2/$8 as of early 2026)
+        prices.insert("o3".into(), (2.00, 8.00));
+        prices.insert("o4-mini".into(), (1.10, 4.40));
         prices.insert("o3-mini".into(), (1.10, 4.40));
         prices.insert("o1".into(), (15.00, 60.00));
         prices.insert("o1-mini".into(), (3.00, 12.00));

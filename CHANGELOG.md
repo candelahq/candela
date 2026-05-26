@@ -2,6 +2,33 @@
 
 All notable changes to Candela are documented here, organized by development phase. PRs are merged to `main`.
 
+## v0.5.5 — 2026-05-25
+
+### OpenAI Model Pricing (#276)
+- Add pricing for GPT-4.1, o3, o4-mini, and GPT-4o models
+
+### Cache Token Analytics (#280)
+- Surface cache token analytics in all storage backends and handlers
+
+### Billing Fixes (#284)
+- Fix budget period key — read `period_type` from config doc in `GetBudget` and `ResetSpend`
+- Add 64KB tail ring buffer for streaming responses to prevent $0 cost recording on capped streams
+- Clamp `GrantRecord.Remaining()` to 0 to prevent negative values from blocking users with budget remaining
+- Fix `DeductSpend` interface doc — implementation does budget-first waterfall, not grant-first
+
+### IAP Support
+- Service account impersonation for Identity-Aware Proxy authentication
+
+### Infrastructure (#283)
+- Disentangle deployment infrastructure from product repo
+
+### Testing
+- 80+ new billing-path tests covering cost calculation, streaming usage extraction, grant clamping
+- Comprehensive tests for OpenAI pricing and prefix model resolution (#281)
+- Attribution package tests (0% → 93.9% coverage)
+
+---
+
 ## v0.5.4 — 2026-05-25
 
 ### Transparent Proxy — Phase 5 TLS MITM (#266, #267, #268, #270)

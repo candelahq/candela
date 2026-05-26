@@ -54,6 +54,7 @@ func TestHexToBytes_Empty(t *testing.T) {
 
 func TestBuildAttributes_AllGenAIFields(t *testing.T) {
 	s := storage.Span{
+		Name: "openai.chat",
 		GenAI: &storage.GenAIAttributes{
 			Provider:      "openai",
 			Model:         "gpt-4o",
@@ -62,6 +63,7 @@ func TestBuildAttributes_AllGenAIFields(t *testing.T) {
 			TotalTokens:   150,
 			CostUSD:       0.005,
 			Temperature:   0.7,
+			TopP:          0.9,
 			MaxTokens:     4096,
 			InputContent:  "Hello",
 			OutputContent: "Hi there!",
@@ -78,11 +80,13 @@ func TestBuildAttributes_AllGenAIFields(t *testing.T) {
 	}{
 		{"gen_ai.system", "string"},
 		{"gen_ai.request.model", "string"},
+		{"gen_ai.operation.name", "string"},
 		{"gen_ai.usage.input_tokens", "int"},
 		{"gen_ai.usage.output_tokens", "int"},
 		{"gen_ai.usage.total_tokens", "int"},
-		{"gen_ai.usage.cost", "double"},
+		{"gen_ai.usage.cost_usd", "double"},
 		{"gen_ai.request.temperature", "double"},
+		{"gen_ai.request.top_p", "double"},
 		{"gen_ai.request.max_tokens", "int"},
 		{"gen_ai.prompt", "string"},
 		{"gen_ai.completion", "string"},
@@ -322,8 +326,9 @@ func TestBuildAttributes_ZeroValuesEmitted(t *testing.T) {
 
 	for _, key := range []string{
 		"gen_ai.request.temperature",
-		"gen_ai.usage.cost",
+		"gen_ai.usage.cost_usd",
 		"gen_ai.request.max_tokens",
+		"gen_ai.request.top_p",
 	} {
 		if _, ok := attrMap[key]; !ok {
 			t.Errorf("zero-value attribute %q should be present when GenAI is non-nil", key)
@@ -377,4 +382,49 @@ func attrListToMap(attrs []*commonpb.KeyValue) map[string]*commonpb.KeyValue {
 		m[a.Key] = a
 	}
 	return m
+}
+
+// --- extractOperationName tests ---
+
+func TestExtractOperationName(t *testing.T) {
+	tests := []struct {
+		name string
+		want string
+	}{
+		{"openai.chat", "chat"},
+		{"anthropic.chat.stream", "chat"},
+		{"google.chat", "chat"},
+		{"openai.embeddings", "embeddings"},
+		{"unknown", ""},
+		{"", ""},
+	}
+
+	for _, tt := range tests {
+		got := extractOperationName(tt.name)
+		if got != tt.want {
+			t.Errorf("extractOperationName(%q) = %q, want %q", tt.name, got, tt.want)
+		}
+	}
+}
+
+// --- buildResource tests ---
+
+func TestBuildResource_EnvironmentName(t *testing.T) {
+	res := buildResource("proj-1", "my-svc", "production")
+
+	found := false
+	for _, a := range res.Attributes {
+		if a.Key == "deployment.environment.name" {
+			if sv, ok := a.Value.Value.(*commonpb.AnyValue_StringValue); ok && sv.StringValue == "production" {
+				found = true
+			}
+		}
+		// Verify the old key is NOT present.
+		if a.Key == "deployment.environment" {
+			t.Error("legacy deployment.environment should not be present")
+		}
+	}
+	if !found {
+		t.Error("expected deployment.environment.name=production")
+	}
 }

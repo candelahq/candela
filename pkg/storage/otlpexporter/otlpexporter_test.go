@@ -283,7 +283,7 @@ func TestIntegration_HTTPExport(t *testing.T) {
 	for _, tc := range []struct{ key, want string }{
 		{"service.namespace", "test-project"},
 		{"service.name", "my-svc"},
-		{"deployment.environment", "staging"},
+		{"deployment.environment.name", "staging"},
 	} {
 		if resMap[tc.key] != tc.want {
 			t.Errorf("resource %s = %q, want %q", tc.key, resMap[tc.key], tc.want)
@@ -311,8 +311,8 @@ func TestIntegration_HTTPExport(t *testing.T) {
 		attrMap[a.Key] = true
 	}
 	for _, key := range []string{
-		"gen_ai.system", "gen_ai.request.model",
-		"gen_ai.usage.input_tokens", "gen_ai.usage.output_tokens", "gen_ai.usage.cost",
+		"gen_ai.system", "gen_ai.request.model", "gen_ai.operation.name",
+		"gen_ai.usage.input_tokens", "gen_ai.usage.output_tokens", "gen_ai.usage.cost_usd",
 		"enduser.id",
 	} {
 		if !attrMap[key] {

@@ -1352,11 +1352,12 @@ func (p *Proxy) buildSpan(ctx context.Context, params spanParams) {
 	}
 	// Expose raw cache token counts as attributes so the UI can show
 	// cache utilization regardless of provider (Anthropic, OpenAI, Google).
+	// Keys follow the OTel GenAI semantic convention naming.
 	if params.cacheTokens.CacheReadTokens > 0 {
-		attrs["gen_ai.usage.cache_read_tokens"] = fmt.Sprintf("%d", params.cacheTokens.CacheReadTokens)
+		attrs["gen_ai.usage.cache_read.input_tokens"] = fmt.Sprintf("%d", params.cacheTokens.CacheReadTokens)
 	}
 	if params.cacheTokens.CacheCreationTokens > 0 {
-		attrs["gen_ai.usage.cache_creation_tokens"] = fmt.Sprintf("%d", params.cacheTokens.CacheCreationTokens)
+		attrs["gen_ai.usage.cache_creation.input_tokens"] = fmt.Sprintf("%d", params.cacheTokens.CacheCreationTokens)
 	}
 
 	// Use caller's trace context if present (W3C Trace Context propagation).

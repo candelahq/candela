@@ -10,6 +10,7 @@ package otlpexporter
 import (
 	"encoding/hex"
 	"log/slog"
+	"strings"
 
 	"github.com/candelahq/candela/pkg/storage"
 	commonpb "go.opentelemetry.io/proto/otlp/common/v1"
@@ -102,7 +103,7 @@ func buildResource(projectID, serviceName, environment string) *resourcepb.Resou
 		attrs = append(attrs, stringAttr("service.namespace", projectID))
 	}
 	if environment != "" {
-		attrs = append(attrs, stringAttr("deployment.environment", environment))
+		attrs = append(attrs, stringAttr("deployment.environment.name", environment))
 	}
 
 	return &resourcepb.Resource{Attributes: attrs}
@@ -131,12 +132,18 @@ func buildAttributes(s storage.Span) []*commonpb.KeyValue {
 		if g.Model != "" {
 			add(stringAttr("gen_ai.request.model", g.Model))
 		}
+		// gen_ai.operation.name — required by OTel GenAI semconv.
+		// Derived from span name: "openai.chat" → "chat", "anthropic.chat.stream" → "chat".
+		if opName := extractOperationName(s.Name); opName != "" {
+			add(stringAttr("gen_ai.operation.name", opName))
+		}
 		// Always emit numeric fields — zero is a valid value.
 		add(int64Attr("gen_ai.usage.input_tokens", g.InputTokens))
 		add(int64Attr("gen_ai.usage.output_tokens", g.OutputTokens))
 		add(int64Attr("gen_ai.usage.total_tokens", g.TotalTokens))
-		add(float64Attr("gen_ai.usage.cost", g.CostUSD))
+		add(float64Attr("gen_ai.usage.cost_usd", g.CostUSD))
 		add(float64Attr("gen_ai.request.temperature", g.Temperature))
+		add(float64Attr("gen_ai.request.top_p", g.TopP))
 		add(int64Attr("gen_ai.request.max_tokens", g.MaxTokens))
 		if g.InputContent != "" {
 			add(stringAttr("gen_ai.prompt", g.InputContent))
@@ -261,4 +268,17 @@ func float64Attr(key string, value float64) *commonpb.KeyValue {
 		Key:   key,
 		Value: &commonpb.AnyValue{Value: &commonpb.AnyValue_DoubleValue{DoubleValue: value}},
 	}
+}
+
+// extractOperationName derives the OTel gen_ai.operation.name from the Candela
+// span name. Span names follow the pattern "{provider}.{operation}" or
+// "{provider}.{operation}.stream" — e.g. "openai.chat" → "chat",
+// "anthropic.chat.stream" → "chat".
+func extractOperationName(spanName string) string {
+	parts := strings.Split(spanName, ".")
+	if len(parts) < 2 {
+		return ""
+	}
+	// parts[1] is the operation: "chat", "embeddings", etc.
+	return parts[1]
 }

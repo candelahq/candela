@@ -153,15 +153,21 @@ func spanToRow(span storage.Span) spanRow {
 		row.CacheCreationTokens = span.GenAI.CacheCreationTokens
 	}
 
-	for k, v := range span.Attributes {
-		if k == "candela.is_retry" {
-			continue
+	if len(span.Attributes) > 0 {
+		row.Attributes = make([]AttributeKV, 0, len(span.Attributes))
+		for k, v := range span.Attributes {
+			if k == "candela.is_retry" {
+				continue
+			}
+			row.Attributes = append(row.Attributes, AttributeKV{Key: k, Value: v})
 		}
-		row.Attributes = append(row.Attributes, AttributeKV{Key: k, Value: v})
 	}
 
-	for k, v := range span.Labels {
-		row.Labels = append(row.Labels, AttributeKV{Key: k, Value: v})
+	if len(span.Labels) > 0 {
+		row.Labels = make([]AttributeKV, 0, len(span.Labels))
+		for k, v := range span.Labels {
+			row.Labels = append(row.Labels, AttributeKV{Key: k, Value: v})
+		}
 	}
 
 	return row

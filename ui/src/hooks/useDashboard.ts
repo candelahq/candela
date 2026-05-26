@@ -247,7 +247,7 @@ export function useDashboard(options?: { includeBudget?: boolean }) {
             tracesOverTime: toDataPoints(res?.tracesOverTime, state.timeRange),
             costOverTime: toDataPoints(res?.costOverTime, state.timeRange),
             tokensOverTime: toDataPoints(res?.tokensOverTime, state.timeRange),
-            jobLeaderboard: (jobRes && "jobs" in jobRes ? (jobRes.jobs || []) : []).map((j: JobUsage) => ({
+            jobLeaderboard: (jobRes?.jobs ?? []).map((j: JobUsage) => ({
               jobId: j.jobId,
               callCount: Number(j.callCount),
               totalTokens: Number(j.totalTokens),

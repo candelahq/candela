@@ -65,12 +65,13 @@ var uiFS embed.FS
 
 // Config holds the candela-local configuration.
 type Config struct {
-	Remote        string `yaml:"remote"`         // Remote Candela server URL
-	Audience      string `yaml:"audience"`       // IAP OAuth Client ID (OIDC audience)
-	Port          int    `yaml:"port"`           // Local port to listen on
-	LMStudioPort  int    `yaml:"lmstudio_port"`  // LM Studio compat listener port (default: 1234)
-	LocalUpstream string `yaml:"local_upstream"` // Local runtime URL (e.g. http://127.0.0.1:11434)
-	StateDBPath   string `yaml:"state_db_path"`  // Path to SQLite state DB (default: ~/.candela/state.db)
+	Remote            string `yaml:"remote"`              // Remote Candela server URL
+	Audience          string `yaml:"audience"`            // IAP OAuth Client ID (OIDC audience)
+	IAPServiceAccount string `yaml:"iap_service_account"` // SA to impersonate for IAP ID tokens
+	Port              int    `yaml:"port"`                // Local port to listen on
+	LMStudioPort      int    `yaml:"lmstudio_port"`       // LM Studio compat listener port (default: 1234)
+	LocalUpstream     string `yaml:"local_upstream"`      // Local runtime URL (e.g. http://127.0.0.1:11434)
+	StateDBPath       string `yaml:"state_db_path"`       // Path to SQLite state DB (default: ~/.candela/state.db)
 
 	// Runtime management configuration.
 	RuntimeBackend string                `yaml:"runtime_backend"` // "ollama", "vllm", "lmstudio"
@@ -446,9 +447,29 @@ func runForeground() {
 
 		ts, err := idtoken.NewTokenSource(ctx, cfg.Audience)
 		if err == nil {
+			// Strategy 1: Service account credentials → audience-scoped OIDC ID token.
 			slog.Info("using service account ID token source")
 			tokenSource = ts
+		} else if cfg.IAPServiceAccount != "" {
+			// Strategy 1.5: User credentials + SA impersonation → IAP OIDC ID token.
+			// Uses IAM Credentials API to generate an ID token with the IAP audience.
+			slog.Debug("idtoken.NewTokenSource unavailable, trying IAP impersonation", "reason", err)
+			baseTSr, err2 := google.DefaultTokenSource(ctx, "https://www.googleapis.com/auth/cloud-platform")
+			if err2 != nil {
+				slog.Error("failed to get credentials — run 'candela auth login' first",
+					"error", err2)
+				os.Exit(1)
+			}
+			tokenSource = oauth2.ReuseTokenSource(nil, &iapImpersonatingTokenSource{
+				base:           baseTSr,
+				serviceAccount: cfg.IAPServiceAccount,
+				audience:       cfg.Audience,
+			})
+			slog.Info("using IAP via service account impersonation",
+				"sa", cfg.IAPServiceAccount)
 		} else {
+			// Strategy 2: User credentials → OAuth2 access token.
+			// Works when the server validates via userinfo (no IAP).
 			slog.Debug("idtoken.NewTokenSource unavailable (user credentials fallback)", "reason", err)
 			ts2, err2 := google.DefaultTokenSource(ctx, "openid", "email")
 			if err2 != nil {

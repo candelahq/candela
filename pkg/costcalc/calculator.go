@@ -470,6 +470,18 @@ func (c *Calculator) loadDefaults() {
 		{Provider: "anthropic", Model: "claude-3-5-sonnet-20241022", InputPerMillion: 3.00, OutputPerMillion: 15.00},
 		{Provider: "anthropic", Model: "claude-haiku-3-5-20241022", InputPerMillion: 0.80, OutputPerMillion: 4.00},
 		{Provider: "anthropic", Model: "claude-3-opus-20240229", InputPerMillion: 15.00, OutputPerMillion: 75.00},
+
+		// ── OpenAI ───────────────────────────────────────────────
+		// GPT-4.1 family (current flagship, 1M context)
+		{Provider: "openai", Model: "gpt-4.1", InputPerMillion: 2.00, OutputPerMillion: 8.00},
+		{Provider: "openai", Model: "gpt-4.1-mini", InputPerMillion: 0.40, OutputPerMillion: 1.60},
+		{Provider: "openai", Model: "gpt-4.1-nano", InputPerMillion: 0.10, OutputPerMillion: 0.40},
+		// o-series reasoning models
+		{Provider: "openai", Model: "o3", InputPerMillion: 2.00, OutputPerMillion: 8.00},
+		{Provider: "openai", Model: "o4-mini", InputPerMillion: 1.10, OutputPerMillion: 4.40},
+		// GPT-4o (legacy)
+		{Provider: "openai", Model: "gpt-4o", InputPerMillion: 2.50, OutputPerMillion: 10.00},
+		{Provider: "openai", Model: "gpt-4o-mini", InputPerMillion: 0.15, OutputPerMillion: 0.60},
 	}
 	for _, p := range defaults {
 		c.defaults[c.key(p.Provider, p.Model)] = p

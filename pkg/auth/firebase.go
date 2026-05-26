@@ -255,7 +255,10 @@ func validateAccessToken(ctx context.Context, accessToken string) (*User, error)
 func extractBearerToken(r *http.Request) string {
 	auth := r.Header.Get("Authorization")
 	if auth == "" {
-		return ""
+		auth = r.Header.Get("X-Candela-Auth")
+		if auth == "" {
+			return ""
+		}
 	}
 	parts := strings.SplitN(auth, " ", 2)
 	if len(parts) != 2 || !strings.EqualFold(parts[0], "Bearer") {

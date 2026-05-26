@@ -498,7 +498,12 @@ func runForeground() {
 					slog.Error("failed to get auth token", "error", err)
 					return
 				}
+				// Set Proxy-Authorization so Google Cloud IAP consumes it and allows the
+				// Authorization header to flow through to the backend (where FirebaseAuthMiddleware expects it).
+				req.Header.Set("Proxy-Authorization", "Bearer "+token.AccessToken)
 				req.Header.Set("Authorization", "Bearer "+token.AccessToken)
+				// Set custom header as a fallback in case IAP still strips Authorization
+				req.Header.Set("X-Candela-Auth", "Bearer "+token.AccessToken)
 
 				// Preserve the original path.
 				if _, ok := req.Header["User-Agent"]; !ok {

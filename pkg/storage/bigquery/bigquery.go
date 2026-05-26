@@ -110,7 +110,10 @@ type spanRow struct {
 	SessionID           string        `bigquery:"session_id"`
 	// TenantID identifies the downstream customer on whose behalf this LLM call
 	// was made. Populated from X-Candela-Tenant-Id header or W3C Baggage.
-	TenantID string `bigquery:"tenant_id"`
+	TenantID   string        `bigquery:"tenant_id"`
+	JobID      string        `bigquery:"job_id"`
+	TraceGroup string        `bigquery:"trace_group"`
+	Labels     []AttributeKV `bigquery:"labels"`
 }
 
 func spanToRow(span storage.Span) spanRow {
@@ -131,6 +134,8 @@ func spanToRow(span storage.Span) spanRow {
 		UserID:        span.UserID,
 		SessionID:     span.SessionID,
 		TenantID:      span.TenantID,
+		JobID:         span.JobID,
+		TraceGroup:    span.TraceGroup,
 	}
 
 	if span.GenAI != nil {
@@ -149,7 +154,14 @@ func spanToRow(span storage.Span) spanRow {
 	}
 
 	for k, v := range span.Attributes {
+		if k == "candela.is_retry" {
+			continue
+		}
 		row.Attributes = append(row.Attributes, AttributeKV{Key: k, Value: v})
+	}
+
+	for k, v := range span.Labels {
+		row.Labels = append(row.Labels, AttributeKV{Key: k, Value: v})
 	}
 
 	return row
@@ -173,6 +185,8 @@ func rowToSpan(row spanRow) storage.Span {
 		UserID:        row.UserID,
 		SessionID:     row.SessionID,
 		TenantID:      row.TenantID,
+		JobID:         row.JobID,
+		TraceGroup:    row.TraceGroup,
 	}
 
 	// Populate GenAI whenever any meaningful field is set — not just when
@@ -201,6 +215,13 @@ func rowToSpan(row spanRow) storage.Span {
 		span.Attributes = make(map[string]string, len(row.Attributes))
 		for _, attr := range row.Attributes {
 			span.Attributes[attr.Key] = attr.Value
+		}
+	}
+
+	if len(row.Labels) > 0 {
+		span.Labels = make(map[string]string, len(row.Labels))
+		for _, attr := range row.Labels {
+			span.Labels[attr.Key] = attr.Value
 		}
 	}
 
@@ -325,7 +346,6 @@ func (s *Store) IngestSpans(ctx context.Context, spans []storage.Span) error {
 
 	for _, span := range spans {
 		if span.Attributes != nil && span.Attributes["candela.is_retry"] == "true" {
-			delete(span.Attributes, "candela.is_retry")
 			pessimisticRows = append(pessimisticRows, spanToRow(span))
 		} else {
 			optimisticSpans = append(optimisticSpans, span)
@@ -361,14 +381,14 @@ func (s *Store) IngestSpans(ctx context.Context, spans []storage.Span) error {
 					gen_ai_model, gen_ai_provider, gen_ai_input_tokens, gen_ai_output_tokens,
 					gen_ai_total_tokens, gen_ai_cost_usd, gen_ai_temperature, gen_ai_max_tokens,
 					gen_ai_input_content, gen_ai_output_content, gen_ai_cache_read_tokens, gen_ai_cache_creation_tokens,
-					attributes, user_id, session_id, tenant_id
+					attributes, user_id, session_id, tenant_id, job_id, trace_group, labels
 				) VALUES (
 					S.span_id, S.trace_id, S.parent_span_id, S.name, S.kind, S.status, S.status_message,
 					S.start_time, S.end_time, S.duration_ns, S.project_id, S.environment, S.service_name,
 					S.gen_ai_model, S.gen_ai_provider, S.gen_ai_input_tokens, S.gen_ai_output_tokens,
 					S.gen_ai_total_tokens, S.gen_ai_cost_usd, S.gen_ai_temperature, S.gen_ai_max_tokens,
 					S.gen_ai_input_content, S.gen_ai_output_content, S.gen_ai_cache_read_tokens, S.gen_ai_cache_creation_tokens,
-					S.attributes, S.user_id, S.session_id, S.tenant_id
+					S.attributes, S.user_id, S.session_id, S.tenant_id, S.job_id, S.trace_group, S.labels
 				)
 		`, quoteTable(s.tableID))
 
@@ -505,7 +525,8 @@ func (s *Store) QueryTraces(ctx context.Context, tq storage.TraceQuery) (*storag
 		       gen_ai_input_tokens, gen_ai_output_tokens, gen_ai_total_tokens,
 		       gen_ai_cost_usd, gen_ai_temperature, gen_ai_max_tokens,
 		       '' AS gen_ai_input_content, '' AS gen_ai_output_content,
-		       attributes, user_id, session_id
+		       gen_ai_cache_read_tokens, gen_ai_cache_creation_tokens,
+		       attributes, user_id, session_id, tenant_id, job_id, trace_group, labels
 		FROM %s
 		WHERE trace_id IN UNNEST(@traceIDs)
 		ORDER BY start_time ASC, span_id ASC

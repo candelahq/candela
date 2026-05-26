@@ -51,6 +51,7 @@ resource "google_project_service" "apis" {
     "cloudresourcemanager.googleapis.com",
     "firebase.googleapis.com",
     "identitytoolkit.googleapis.com",
+    "iap.googleapis.com",
   ])
 
   service            = each.value

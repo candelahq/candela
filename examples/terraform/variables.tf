@@ -121,3 +121,16 @@ variable "custom_domain" {
   type        = string
   default     = ""
 }
+
+variable "iap_oauth_client_id" {
+  description = "OAuth Client ID for IAP (from GCP Console > APIs & Services > Credentials)"
+  type        = string
+  default     = ""
+}
+
+variable "iap_oauth_client_secret" {
+  description = "OAuth Client Secret for IAP"
+  type        = string
+  sensitive   = true
+  default     = ""
+}

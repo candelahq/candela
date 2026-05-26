@@ -77,8 +77,9 @@ Next.js rewrites:
 
 ```yaml
 # ~/.config/candela/config.yaml
-remote: https://candela-xxx.run.app
-audience: https://candela-xxx.run.app
+remote: https://candela.example.com
+audience: "288865965866-xxx.apps.googleusercontent.com"
+iap_service_account: candela-server@project.iam.gserviceaccount.com
 port: 8181
 ```
 

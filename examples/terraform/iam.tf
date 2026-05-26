@@ -47,3 +47,22 @@ resource "google_service_account_iam_member" "candela_self_token_creator" {
   role               = "roles/iam.serviceAccountTokenCreator"
   member             = "serviceAccount:${google_service_account.candela.email}"
 }
+
+# ── IAP ID Token Creator (custom role) ──
+# Narrow role that only allows generating OIDC ID tokens (getOpenIdToken).
+# This lets candela-local users authenticate through IAP via SA impersonation
+# WITHOUT being able to generate access tokens (which could call LLM APIs directly).
+
+resource "google_project_iam_custom_role" "iap_id_token_creator" {
+  role_id     = "iapIdTokenCreator"
+  title       = "IAP ID Token Creator"
+  description = "Allows generating OIDC ID tokens only (for IAP auth). Cannot generate access tokens."
+  permissions = ["iam.serviceAccounts.getOpenIdToken"]
+  stage       = "GA"
+}
+
+resource "google_service_account_iam_member" "candela_users_iap_token" {
+  service_account_id = google_service_account.candela.name
+  role               = google_project_iam_custom_role.iap_id_token_creator.id
+  member             = "group:${var.invoker_google_group}"
+}

@@ -509,14 +509,16 @@ Connect to a shared Candela server for **budget enforcement, RBAC, and team-wide
 ```yaml
 # ~/.config/candela/config.yaml
 runtime_backend: ollama
-remote: https://candela-xxx.a.run.app
-audience: "12345678.apps.googleusercontent.com"
+remote: https://candela.example.com
+audience: "12345678.apps.googleusercontent.com"        # IAP OAuth Client ID
+iap_service_account: candela-server@project.iam.gserviceaccount.com  # SA to impersonate for IAP
 ```
 
 - Local + cloud models merged into `/v1/models`
 - Smart routing: local models stay local, cloud models route through Candela server
-- OIDC auth injected automatically (uses credentials from `candela auth login`)
+- OIDC auth injected automatically via SA impersonation (IAP-compatible ID token)
 - Team-wide cost tracking, budget enforcement, and centralized governance
+- Prerequisites: `candela auth login --provider gcp`
 
 > [!TIP]
 > See [docs/candela.md](docs/candela.md) for the full setup guide.

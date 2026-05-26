@@ -1,11 +1,11 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
-	"strings"
 	"time"
 
 	"golang.org/x/oauth2"
@@ -45,23 +45,34 @@ func (s *iapImpersonatingTokenSource) Token() (*oauth2.Token, error) {
 		"https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/%s:generateIdToken",
 		s.serviceAccount,
 	)
-	body := fmt.Sprintf(`{"audience":%q,"includeEmail":true}`, s.audience)
+	reqPayload := struct {
+		Audience     string `json:"audience"`
+		IncludeEmail bool   `json:"includeEmail"`
+	}{
+		Audience:     s.audience,
+		IncludeEmail: true,
+	}
+	bodyBytes, err := json.Marshal(reqPayload)
+	if err != nil {
+		return nil, fmt.Errorf("IAP: failed to marshal request body: %w", err)
+	}
 
-	req, err := http.NewRequest("POST", url, strings.NewReader(body))
+	req, err := http.NewRequest("POST", url, bytes.NewReader(bodyBytes))
 	if err != nil {
 		return nil, fmt.Errorf("IAP: failed to build request: %w", err)
 	}
 	req.Header.Set("Authorization", "Bearer "+baseToken.AccessToken)
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := http.DefaultClient.Do(req)
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("IAP: generateIdToken request failed: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
-		respBody, _ := io.ReadAll(resp.Body)
+		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 		return nil, fmt.Errorf("IAP: generateIdToken returned %d: %s\n"+
 			"Ensure you have roles/iam.serviceAccountTokenCreator on %s",
 			resp.StatusCode, respBody, s.serviceAccount)

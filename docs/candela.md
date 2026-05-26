@@ -112,6 +112,7 @@ runtime_backend: ollama
 
 remote: https://candela-xxx.a.run.app
 audience: "12345678.apps.googleusercontent.com"
+iap_service_account: candela-server@project.iam.gserviceaccount.com
 ```
 
 **What you get**:
@@ -121,6 +122,12 @@ audience: "12345678.apps.googleusercontent.com"
   Candela server (with automatic OIDC auth injection via ADC)
 - Team-wide cost tracking, budget enforcement, and traces on the cloud dashboard
 - Cloud-hosted observability for remote model calls
+
+> [!NOTE]
+> `iap_service_account` is required when the Candela server is behind
+> [Cloud IAP](https://cloud.google.com/iap). When set, `candela` uses
+> SA impersonation to obtain an IAP-targeted ID token instead of using
+> the user's own ADC token directly.
 
 **Architecture**:
 ```
@@ -194,6 +201,7 @@ vertex_ai:
 # ── Optional: Team Mode (omit for Solo) ──
 remote: https://candela-xxx.run.app # Candela server URL
 audience: "12345678.apps..."        # IAP audience for OIDC auth
+iap_service_account: "sa@..."       # SA to impersonate for IAP ID tokens
 
 # ── Optional: Advanced ──
 local_upstream: http://localhost:11434  # explicit local runtime URL

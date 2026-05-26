@@ -201,13 +201,66 @@ Token acquisition flow:
 2. Uses `google.DefaultTokenSource()` to get an ADC token
 3. Injects `Authorization: Bearer <token>` on every proxied request
 
+**Strategy 1.5 — IAP Service Account Impersonation**
+
+When `iap_service_account` is set in config, `candela` uses **SA impersonation**
+instead of the user's own ADC token:
+
+```
+IDE → candela (:1234)
+         │
+         └── Cloud model ──┐
+                           ▼
+              IAM generateIdToken API
+              (impersonate iap_service_account)
+                           │
+              Authorization: Bearer <iap-id-token>
+                           ▼
+              IAP ──▶ Candela Server
+```
+
+Token acquisition flow:
+1. `candela` reads `iap_service_account` and `audience` from config
+2. Uses the user's ADC to call the IAM `generateIdToken` API, impersonating the configured service account
+3. The IAM API returns an ID token scoped to the IAP `audience`
+4. `candela` injects `Authorization: Bearer <iap-id-token>` on every proxied request
+
 ---
 
-## IAP Authentication (Legacy)
+## IAP Authentication
 
-The `IAPMiddleware` (`pkg/auth/iap.go`) validates Cloud IAP JWT assertions from the `x-goog-iap-jwt-assertion` header. This is the **original** auth path when Candela ran behind Cloud IAP.
+The `IAPMiddleware` (`pkg/auth/iap.go`) validates Cloud IAP JWT assertions from the `x-goog-iap-jwt-assertion` header. This is used when Candela is deployed behind [Cloud IAP](https://cloud.google.com/iap).
 
 The current production setup uses `FirebaseAuthMiddleware` instead, which provides more flexible multi-strategy auth. The IAP middleware remains available for deployments behind Cloud IAP.
+
+### IAP Auth Flow with SA Impersonation
+
+When `iap_service_account` is configured, `candela` (the local CLI) authenticates
+to an IAP-protected server using **service account impersonation**:
+
+1. The user's ADC calls the IAM `generateIdToken` API on the configured `iap_service_account`
+2. The IAM API returns an OIDC ID token with `audience` set to the IAP client ID
+3. `candela` sends this token in the `Authorization: Bearer` header
+4. Cloud IAP validates the token and forwards the request to the Candela server
+
+### Custom IAP Role — `iapIdTokenCreator`
+
+To restrict what impersonating users can do, Candela defines a custom IAM role
+`iapIdTokenCreator` that grants **only** the `iam.serviceAccounts.getOpenIdToken`
+permission:
+
+```yaml
+# Custom role (Terraform)
+title: IAP ID Token Creator
+permissions:
+  - iam.serviceAccounts.getOpenIdToken
+```
+
+This is intentionally narrower than the built-in `roles/iam.serviceAccountTokenCreator`,
+which also grants `getAccessToken`. By omitting `getAccessToken`, users **cannot**
+obtain an access token for the service account — they can only generate ID tokens
+for IAP authentication. This prevents users from bypassing the IAP proxy to call
+LLM APIs (Vertex AI, OpenAI) directly using the server's service account credentials.
 
 ---
 

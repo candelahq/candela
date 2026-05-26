@@ -1,6 +1,7 @@
 # ──────────────────────────────────────────────────
 # Cloud Run — Candela server (API + proxy)
-# Protected by run.invoker IAM (no IAP).
+# Protected by run.invoker IAM, or by IAP when a
+# custom domain + OAuth credentials are provided.
 # Programmatic access via ID tokens from candela-local.
 # ──────────────────────────────────────────────────
 
@@ -15,6 +16,8 @@ resource "google_cloud_run_v2_service" "candela" {
   location = var.region
 
   deletion_protection = false
+
+  ingress = var.iap_oauth_client_id != "" ? "INGRESS_TRAFFIC_INTERNAL_LOAD_BALANCER" : "INGRESS_TRAFFIC_ALL"
 
   template {
     service_account = google_service_account.candela.email
@@ -97,6 +100,16 @@ resource "google_cloud_run_v2_service" "candela" {
 # 1. A valid Google ID token (audience = Cloud Run service URL)
 # 2. The caller must have roles/run.invoker on the service
 # candela-local injects ID tokens automatically for developer tools.
+
+# When IAP is enabled, Cloud Run needs allUsers invoker because ingress is
+# restricted to the Internal Load Balancer. IAP handles the access gate.
+resource "google_cloud_run_v2_service_iam_member" "allow_unauthenticated" {
+  project  = google_cloud_run_v2_service.candela.project
+  location = google_cloud_run_v2_service.candela.location
+  name     = google_cloud_run_v2_service.candela.name
+  role     = "roles/run.invoker"
+  member   = "allUsers"
+}
 
 resource "google_cloud_run_v2_service_iam_member" "group_invoker" {
   project  = var.project_id

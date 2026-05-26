@@ -27,3 +27,7 @@ invoker_google_group   = "devs@company.com"
 
 # Custom Domain (optional)
 # custom_domain = "candela.company.com"
+
+# ── IAP (optional — enables zero-trust access) ──
+# iap_oauth_client_id     = "YOUR_CLIENT_ID.apps.googleusercontent.com"
+# iap_oauth_client_secret = "GOCSPX-YOUR_SECRET"

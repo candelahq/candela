@@ -23,11 +23,12 @@ output "service_account_email" {
 }
 
 output "candela_local_config" {
-  description = "Template for ~/.candela.yaml"
+  description = "Template for ~/.config/candela/config.yaml"
   value       = <<-EOT
-    # ~/.candela.yaml
-    remote: ${google_cloud_run_v2_service.candela.uri}
-    audience: ${google_cloud_run_v2_service.candela.uri}
+    # ~/.config/candela/config.yaml
+    remote: https://${var.custom_domain}
+    audience: ${var.iap_oauth_client_id}
+    iap_service_account: ${google_service_account.candela.email}
     port: 8181
   EOT
 }

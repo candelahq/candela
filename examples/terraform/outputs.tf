@@ -26,8 +26,8 @@ output "candela_local_config" {
   description = "Template for ~/.config/candela/config.yaml"
   value       = <<-EOT
     # ~/.config/candela/config.yaml
-    remote: https://${var.custom_domain}
-    audience: ${var.iap_oauth_client_id}
+    remote: ${var.custom_domain != "" ? "https://${var.custom_domain}" : google_cloud_run_v2_service.candela.uri}
+    audience: ${var.iap_oauth_client_id != "" ? var.iap_oauth_client_id : google_cloud_run_v2_service.candela.uri}
     iap_service_account: ${google_service_account.candela.email}
     port: 8181
   EOT

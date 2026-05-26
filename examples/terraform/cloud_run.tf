@@ -17,7 +17,7 @@ resource "google_cloud_run_v2_service" "candela" {
 
   deletion_protection = false
 
-  ingress = var.iap_oauth_client_id != "" ? "INGRESS_TRAFFIC_INTERNAL_LOAD_BALANCER" : "INGRESS_TRAFFIC_ALL"
+  ingress = (var.custom_domain != "" && var.iap_oauth_client_id != "") ? "INGRESS_TRAFFIC_INTERNAL_LOAD_BALANCER" : "INGRESS_TRAFFIC_ALL"
 
   template {
     service_account = google_service_account.candela.email
@@ -104,6 +104,7 @@ resource "google_cloud_run_v2_service" "candela" {
 # When IAP is enabled, Cloud Run needs allUsers invoker because ingress is
 # restricted to the Internal Load Balancer. IAP handles the access gate.
 resource "google_cloud_run_v2_service_iam_member" "allow_unauthenticated" {
+  count    = (var.custom_domain != "" && var.iap_oauth_client_id != "") ? 1 : 0
   project  = google_cloud_run_v2_service.candela.project
   location = google_cloud_run_v2_service.candela.location
   name     = google_cloud_run_v2_service.candela.name

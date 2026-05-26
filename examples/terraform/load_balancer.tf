@@ -50,14 +50,12 @@ resource "google_compute_region_network_endpoint_group" "candela" {
 resource "google_compute_backend_service" "candela" {
   count                 = local.has_custom_domain ? 1 : 0
   name                  = "${var.service_name}-backend"
-  protocol              = "HTTPS"
+  protocol              = "HTTP"
   load_balancing_scheme = "EXTERNAL_MANAGED"
   timeout_sec           = 30
 
   backend {
     group           = google_compute_region_network_endpoint_group.candela[0].id
-    balancing_mode  = "UTILIZATION"
-    capacity_scaler = 1
   }
 
   # Enable IAP when OAuth credentials are provided.
@@ -149,6 +147,7 @@ resource "google_compute_global_forwarding_rule" "candela_http" {
 
 # Grant the Google Group access through IAP.
 resource "google_iap_web_backend_service_iam_member" "candela_users" {
+  count               = (local.has_custom_domain && var.iap_oauth_client_id != "") ? 1 : 0
   web_backend_service = google_compute_backend_service.candela[0].name
   role                = "roles/iap.httpsResourceAccessor"
   member              = "group:${var.invoker_google_group}"

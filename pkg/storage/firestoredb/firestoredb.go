@@ -609,16 +609,28 @@ func (s *Store) SetBudget(ctx context.Context, budget *storage.BudgetRecord) err
 }
 
 func (s *Store) GetBudget(ctx context.Context, userID string) (*storage.BudgetRecord, error) {
-	periodKey := currentPeriodKey("daily")
 	userID = sanitizeID(userID)
 	userRef := s.client.Collection(usersCol).Doc(userID)
+
+	// CRIT-1 fix: read period_type from config doc instead of hardcoding "daily".
+	// Previously this always read the daily spend doc, so monthly/weekly budgets
+	// appeared to have $0 spent — bypassing budget enforcement entirely.
+	periodType := "daily"
+	configRef := userRef.Collection(budgetsCol).Doc(budgetConfigDocID)
+	if configSnap, err := configRef.Get(ctx); err == nil && configSnap.Exists() {
+		if pt, _ := configSnap.Data()["period_type"].(string); pt != "" {
+			periodType = pt
+		}
+	}
+	periodKey := currentPeriodKey(periodType)
+
 	ref := userRef.Collection(budgetsCol).Doc(periodKey)
 	snap, err := ref.Get(ctx)
 	if err != nil {
 		if status.Code(err) == codes.NotFound {
 			// #9: Period doc missing — check config doc for auto-rollover.
-			// This happens every day after midnight UTC until the first call
-			// triggers DeductSpend (which auto-creates the period doc).
+			// This happens at period start until the first call triggers
+			// DeductSpend (which auto-creates the period doc).
 			return s.budgetFromConfig(ctx, userRef, userID, periodKey)
 		}
 		return nil, fmt.Errorf("firestoredb: getting budget: %w", err)
@@ -670,13 +682,25 @@ func firestoreFloat(v interface{}) float64 {
 }
 
 func (s *Store) ResetSpend(ctx context.Context, userID string) error {
-	periodKey := currentPeriodKey("daily")
 	userID = sanitizeID(userID)
-	ref := s.client.Collection(usersCol).Doc(userID).
-		Collection(budgetsCol).Doc(periodKey)
+	userRef := s.client.Collection(usersCol).Doc(userID)
+
+	// CRIT-2 fix: read period_type from config doc instead of hardcoding "daily".
+	// Previously this always reset the daily spend doc, so monthly/weekly users'
+	// actual spend doc was never cleared by admin ResetSpend.
+	periodType := "daily"
+	configRef := userRef.Collection(budgetsCol).Doc(budgetConfigDocID)
+	if configSnap, err := configRef.Get(ctx); err == nil && configSnap.Exists() {
+		if pt, _ := configSnap.Data()["period_type"].(string); pt != "" {
+			periodType = pt
+		}
+	}
+	periodKey := currentPeriodKey(periodType)
+
+	ref := userRef.Collection(budgetsCol).Doc(periodKey)
 	// #H: Use Set+Merge instead of Update so this is idempotent on a missing
-	// period doc (new day). Update fails with NOT_FOUND when the spend doc
-	// doesn't exist yet (e.g. called by an admin just after midnight).
+	// period doc (new period). Update fails with NOT_FOUND when the spend doc
+	// doesn't exist yet (e.g. called by an admin just after period rollover).
 	_, err := ref.Set(ctx, map[string]any{
 		"spent_usd":       0,
 		"tokens_used":     0,
@@ -693,8 +717,6 @@ func (s *Store) ResetSpend(ctx context.Context, userID string) error {
 	// CRIT-12 (Option 3): Clear the soft_blocked flag set by DeductSpend
 	// when an overdraft was detected. Admin calling ResetSpend is explicitly
 	// acknowledging the overdraft and unblocking the user.
-	configRef := s.client.Collection(usersCol).Doc(userID).
-		Collection(budgetsCol).Doc(budgetConfigDocID)
 	_, err = configRef.Set(ctx, map[string]any{
 		"soft_blocked":    false,
 		"soft_blocked_at": nil,

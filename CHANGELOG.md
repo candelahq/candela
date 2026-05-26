@@ -2,6 +2,68 @@
 
 All notable changes to Candela are documented here, organized by development phase. PRs are merged to `main`.
 
+## v0.5.4 — 2026-05-25
+
+### Transparent Proxy — Phase 5 TLS MITM (#266, #267, #268, #270)
+- Ephemeral CA certificate generation and TLS interceptor for transparent MITM proxy
+- Complete TLS termination wiring with dynamic cert-per-host generation
+- OTel span instrumentation for MITM requests + Helm trust injection for Kubernetes
+- Switch Gemini from GenLang API to Vertex AI global endpoint
+
+### User Activity Tracking (#274)
+- `last_active_at` field tracking for proxy and API usage events
+
+### Fixes & Refactoring
+- fix(proxy): switch Gemini from GenLang API to Vertex AI global endpoint (#267)
+- fix(auth): update SA denial message to recommend `candela auth login` (#272)
+- chore(costcalc): purge OpenAI models, fix Gemini pricing (#273)
+- refactor(server): remove LM Studio compat mode from candela-server (#269)
+- ci: docker-compose integration test with real Tetragon agent (#271)
+
+---
+
+## v0.5.3 — 2026-05-21
+
+### Gemini Routing Fixes (#264, #265)
+- Route Gemini via `generativelanguage.googleapis.com` for correct API resolution
+- Use global region for Gemini, regional for Anthropic in server-side routing
+
+---
+
+## v0.5.2 — 2026-05-21
+
+### Vertex AI Auth Fixes (#261, #262, #263)
+- Route Gemini through Vertex AI for server-side ADC authentication
+- Wire ADC `TokenSource` into `gemini-oai` and `google` providers
+- Fix global endpoint URL for Vertex AI proxy routing
+
+---
+
+## v0.5.1 — 2026-05-20
+
+### eBPF Observability (#253, #260)
+- Tetragon audit integration with Hubble flow correlation for eBPF-based observability
+- Production-grade gRPC reconnect, health endpoint, and graceful drain for Tetragon audit
+
+### Agent DAG Visualization (#251)
+- Agent DAG graph visualization for trace detail view in the web dashboard
+
+---
+
+## v0.5.0 — 2026-05-20
+
+### Desktop Refactor (#246)
+- User-scoped observability, models page, and settings refactor pushed to desktop app
+
+### UI Enhancements (#249)
+- Model pricing columns and cache efficiency badges in the web dashboard
+
+### Infrastructure
+- Update goreleaser caveats with multi-cloud auth and expanded model catalog
+- docs: add v0.4.7 CHANGELOG and update roadmap (#252)
+
+---
+
 ## v0.4.7 — 2026-05-20
 
 ### eBPF Enforcement Pipeline (#234, #245)

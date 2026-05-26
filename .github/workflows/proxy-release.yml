@@ -61,7 +61,7 @@ jobs:
           cp rust/target/${{ matrix.target }}/release/candela-proxy dist/${{ matrix.artifact }}
           chmod +x dist/${{ matrix.artifact }}
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: ${{ matrix.artifact }}
           path: dist/${{ matrix.artifact }}
@@ -111,7 +111,7 @@ jobs:
         id: version
         run: echo "version=${GITHUB_REF_NAME#proxy-}" >> "$GITHUB_OUTPUT"
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v7
         with:
           path: dist
           merge-multiple: true
@@ -129,7 +129,7 @@ jobs:
           done
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           name: "candela-proxy ${{ steps.version.outputs.version }}"
           body: |

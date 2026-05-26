@@ -37,12 +37,17 @@ resource "google_identity_platform_config" "auth" {
   provider = google-beta
   project  = var.project_id
 
-  authorized_domains = [
-    "localhost",
-    "${var.project_id}.firebaseapp.com",
-    "${var.project_id}.web.app",
-    "candela-${data.google_project.current.number}.${var.region}.run.app",
-  ]
+  authorized_domains = concat(
+    [
+      "localhost",
+      "${var.project_id}.firebaseapp.com",
+      "${var.project_id}.web.app",
+    ],
+    # Cloud Run domain — extracted from the service URL.
+    var.cloud_run_url != "" ? [replace(var.cloud_run_url, "https://", "")] : [],
+    # Custom domain (if configured).
+    var.custom_domain != "" ? [var.custom_domain] : [],
+  )
 
   sign_in {
     allow_duplicate_emails = false

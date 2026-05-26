@@ -103,6 +103,17 @@ variable "github_repo" {
   default     = "candelahq/candela"
 }
 
+# ── Cloud Run URL ──
+# Set this after the first `terraform apply` using the output value.
+# Cloud Run generates a unique URL hash that can't be predicted.
+# Run: terraform apply -var="cloud_run_url=$(terraform output -raw cloud_run_url)"
+
+variable "cloud_run_url" {
+  description = "Cloud Run service URL (e.g., https://candela-abc123def0-uc.a.run.app). Set after first apply."
+  type        = string
+  default     = ""
+}
+
 # ── Custom Domain ──
 
 variable "custom_domain" {

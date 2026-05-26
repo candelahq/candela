@@ -102,3 +102,11 @@ variable "github_repo" {
   type        = string
   default     = "candelahq/candela"
 }
+
+# ── Custom Domain ──
+
+variable "custom_domain" {
+  description = "Custom domain for the Candela deployment (e.g., candela.company.com). Leave empty if not using a custom domain."
+  type        = string
+  default     = ""
+}

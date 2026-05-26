@@ -20,3 +20,6 @@ invoker_google_group   = "devs@company.com"
 
 # NOTE: After `terraform apply`, enable Google Sign-In in Firebase Console:
 #   Firebase Console → Authentication → Sign-in method → Google → Enable
+
+# Custom Domain (optional)
+# custom_domain = "candela.company.com"

@@ -1,0 +1,18 @@
+# candela.production.yaml
+# Copy to ~/.candela.yaml to connect your local CLI to a team server.
+# Get these values from `terraform output candela_local_config` after deploying.
+
+# The Cloud Run URL for your team deployment
+remote: https://candela-XXXXXXXXXX-uc.a.run.app
+
+# The audience for authentication (usually same as remote URL)
+audience: https://candela-XXXXXXXXXX-uc.a.run.app
+
+# Local proxy settings
+port: 8181
+
+# Local model runtime (for Hybrid Solo+Team mode)
+runtime_backend: ollama
+runtime_config:
+  host: 127.0.0.1
+  port: 11434

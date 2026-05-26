@@ -41,7 +41,6 @@ resource "google_identity_platform_config" "auth" {
     "localhost",
     "${var.project_id}.firebaseapp.com",
     "${var.project_id}.web.app",
-    "candela-6y6kmipuda-uc.a.run.app",
     "candela-${data.google_project.current.number}.${var.region}.run.app",
   ]
 

@@ -1,0 +1,102 @@
+# Candela — Publish Server Image
+#
+# Builds the universal candela-server container and pushes to GHCR.
+# No deployment-specific config — deployers pull this image and run it
+# with their own environment variables.
+#
+# The UI container (candela-ui) is NOT published here — each deployer
+# builds it with their own Firebase config via deploy/Dockerfile.ui.
+#
+# Images:
+#   ghcr.io/candelahq/candela-server:<sha>
+#   ghcr.io/candelahq/candela-server:latest   (main branch only)
+#   ghcr.io/candelahq/candela-server:v*        (tagged releases)
+
+name: Publish
+
+on:
+  # Trigger after CI workflow completes successfully on main.
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+    branches: [main]
+
+  # Manual trigger for ad-hoc publishes.
+  workflow_dispatch:
+
+  # Publish on version tags.
+  push:
+    tags: ["v*"]
+
+# Cancel in-flight publishes when a new commit lands on main.
+concurrency:
+  group: publish-server
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  packages: write          # Required to push to GHCR
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: candelahq/candela-server
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    # Only run if CI succeeded (or if manually triggered / tag push).
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      github.event_name == 'push' ||
+      github.event.workflow_run.conclusion == 'success'
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # For workflow_run, check out the commit that triggered CI.
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@main
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Generate proto stubs (from BSR)
+        env:
+          BUF_TOKEN: ${{ secrets.BUF_TOKEN }}
+        run: nix develop -c buf generate
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata (tags, labels)
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            # SHA tag on every build
+            type=sha,prefix=,format=short
+            # latest on main
+            type=raw,value=latest,enable={{is_default_branch}}
+            # Semver tags on version pushes
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

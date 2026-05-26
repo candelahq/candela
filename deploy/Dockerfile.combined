@@ -1,5 +1,7 @@
 # ──────────────────────────────────────────────────
 # Candela — Combined Container (Go backend + Next.js UI)
+# For local development only. Production deployments use
+# deploy/Dockerfile (server) + deploy/Dockerfile.ui (dashboard).
 # Multi-stage build: Go binary + Next.js standalone → single image.
 # ──────────────────────────────────────────────────
 

@@ -385,7 +385,7 @@ func TestServiceAccountAllowlist_ExplicitAllow(t *testing.T) {
 		{"other-sa@my-project.iam.gserviceaccount.com", false},
 		{"candela-ci@different-project.iam.gserviceaccount.com", false},
 		// The specific SA that triggered this fix.
-		{"azra-dev-pubsub@azra-dev.iam.gserviceaccount.com", false},
+		{"external-sa@other-project.iam.gserviceaccount.com", false},
 	}
 
 	for _, tt := range tests {
@@ -508,7 +508,7 @@ func TestFirebaseAuthMiddleware_OAuth2_SA_Denied(t *testing.T) {
 	// network, but we CAN verify that the middleware correctly initializes
 	// the allowlist and that the validateAccessToken path would reject SAs.
 	// We test the unit behavior of the check itself here.
-	saEmail := "azra-dev-pubsub@azra-dev.iam.gserviceaccount.com"
+	saEmail := "external-sa@other-project.iam.gserviceaccount.com"
 	user := &User{ID: "sa-123", Email: saEmail}
 
 	// With empty allowlist (deny-all), a SA user should be blocked.

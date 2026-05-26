@@ -81,7 +81,7 @@ resource "google_cloud_run_v2_service" "candela" {
       }
       env {
         name  = "CLOUD_RUN_URL"
-        value = "https://candela-6y6kmipuda-uc.a.run.app"
+        value = "https://${var.service_name}-${data.google_project.current.number}.${var.region}.run.app"
       }
     }
   }

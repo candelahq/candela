@@ -1,0 +1,70 @@
+# ──────────────────────────────────────────────────
+# Candela UI — Next.js dashboard (deployment-specific)
+# Each deployer builds this with their own Firebase config.
+#
+# Prerequisites: Generate proto stubs before building:
+#   nix develop -c buf generate
+#
+# Build:
+#   docker build -f deploy/Dockerfile.ui \
+#     --build-arg NEXT_PUBLIC_FIREBASE_API_KEY=... \
+#     --build-arg NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN=... \
+#     --build-arg NEXT_PUBLIC_FIREBASE_PROJECT_ID=... \
+#     --build-arg NEXT_PUBLIC_FIREBASE_APP_ID=... \
+#     -t candela-ui .
+#
+# Run:
+#   docker run -p 3000:3000 \
+#     -e BACKEND_URL=http://candela-server:8181 \
+#     candela-ui
+# ──────────────────────────────────────────────────
+
+# ── Stage 1: Build Next.js ──
+FROM node:22-alpine AS builder
+
+WORKDIR /build/ui
+
+# Install dependencies first (cache layer).
+COPY ui/package.json ui/pnpm-lock.yaml ./
+RUN corepack enable && corepack prepare pnpm@10 --activate
+RUN pnpm install --frozen-lockfile
+
+# Copy UI source and build.
+COPY ui/ ./
+
+# Proto stubs are generated into ui/src/gen/ by `buf generate`.
+# They must be present in the ui/ directory before building.
+
+# Build standalone output.
+# NEXT_PUBLIC_API_URL="" makes the client use relative URLs (same origin).
+ENV NEXT_PUBLIC_API_URL=""
+ENV BACKEND_URL="http://localhost:8181"
+
+# Firebase client config — baked at build time (these are public, non-secret values).
+# Each deployer provides their own values via --build-arg.
+ARG NEXT_PUBLIC_FIREBASE_API_KEY
+ARG NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN
+ARG NEXT_PUBLIC_FIREBASE_PROJECT_ID
+ARG NEXT_PUBLIC_FIREBASE_APP_ID
+ENV NEXT_PUBLIC_FIREBASE_API_KEY=${NEXT_PUBLIC_FIREBASE_API_KEY}
+ENV NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN=${NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN}
+ENV NEXT_PUBLIC_FIREBASE_PROJECT_ID=${NEXT_PUBLIC_FIREBASE_PROJECT_ID}
+ENV NEXT_PUBLIC_FIREBASE_APP_ID=${NEXT_PUBLIC_FIREBASE_APP_ID}
+
+RUN pnpm run build
+
+# ── Stage 2: Runtime ──
+FROM node:22-slim
+
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates && rm -rf /var/lib/apt/lists/*
+
+# Next.js standalone server + static assets.
+COPY --from=builder /build/ui/.next/standalone /app/ui
+COPY --from=builder /build/ui/.next/static /app/ui/.next/static
+COPY --from=builder /build/ui/public /app/ui/public
+
+EXPOSE 3000
+
+WORKDIR /app/ui
+# BACKEND_URL can be overridden at runtime to point at the candela-server container.
+CMD ["sh", "-c", "HOSTNAME=0.0.0.0 PORT=3000 exec node server.js"]

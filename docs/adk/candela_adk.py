@@ -325,7 +325,7 @@ class CTMSCandelaContext(CandelaContext):
         once job_id is fully supported.
 
         Args:
-            tenant_id: CTMS tenant identifier (e.g. "azra-health").
+            tenant_id: CTMS tenant identifier (e.g. "acme-health").
             trial_id: NCT ID or internal trial identifier (e.g. "NCT01750580").
             run_id: Optional run/campaign identifier for sub-attribution.
             session_id: Optional session ID for grouping calls.

@@ -166,7 +166,7 @@ def make_funnel_baggage(tenant_id: str, trial_id: str) -> dict:
     return headers
 
 # Example output:
-# {"Baggage": "candela.tenant_id=azra-health,candela.job_id=NCT01750580"}
+# {"Baggage": "candela.tenant_id=acme-health,candela.job_id=NCT01750580"}
 ```
 
 > **Note:** `candela.job_id` support is planned — see the roadmap section below.
@@ -201,7 +201,7 @@ Example output:
 ```
 acme-corp:        $12.45 (342 calls)
 trial-NCT01234:   $7.23  (198 calls)
-azra-health-demo: $3.11  (89 calls)
+acme-health-demo: $3.11  (89 calls)
 ```
 
 This endpoint is **admin-only** (requires admin Firebase token).

@@ -55,8 +55,8 @@ func TestSanitizeID_ConsecutiveDots(t *testing.T) {
 		in   string
 		want string
 	}{
-		// Single dot is fine — austin.bennett@azra-ai.com → unchanged.
-		{"austin.bennett@azra-ai.com", "austin.bennett@azra-ai.com"},
+		// Single dot is fine — jane.doe@example-corp.com → unchanged.
+		{"jane.doe@example-corp.com", "jane.doe@example-corp.com"},
 		// Consecutive dots collapse.
 		{"user..name@foo.com", "user._name@foo.com"},
 		// Slash is replaced.

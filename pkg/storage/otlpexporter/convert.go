@@ -145,6 +145,12 @@ func buildAttributes(s storage.Span) []*commonpb.KeyValue {
 		add(float64Attr("gen_ai.request.temperature", g.Temperature))
 		add(float64Attr("gen_ai.request.top_p", g.TopP))
 		add(int64Attr("gen_ai.request.max_tokens", g.MaxTokens))
+		if g.CacheReadTokens > 0 {
+			add(int64Attr("gen_ai.usage.cache_read.input_tokens", g.CacheReadTokens))
+		}
+		if g.CacheCreationTokens > 0 {
+			add(int64Attr("gen_ai.usage.cache_creation.input_tokens", g.CacheCreationTokens))
+		}
 		if g.InputContent != "" {
 			add(stringAttr("gen_ai.prompt", g.InputContent))
 		}
@@ -280,5 +286,6 @@ func extractOperationName(spanName string) string {
 		return ""
 	}
 	// parts[1] is the operation: "chat", "embeddings", etc.
-	return parts[1]
+	// Normalize to lowercase per OTel convention.
+	return strings.ToLower(parts[1])
 }

@@ -109,12 +109,12 @@ func TestStatusInactiveMatchesGuard(t *testing.T) {
 // ─── CRIT-12: grant overdraft behaviour documentation ────────────────────────
 
 func TestGrantRecord_Remaining_Overdraft(t *testing.T) {
-	// Remaining() can return negative when concurrent DeductSpend calls (CRIT-12
-	// TOCTOU) drive SpentUSD past AmountUSD. This test documents the current
-	// contract so callers know they must guard against negative values.
+	// BILL-3: Remaining() is now clamped to 0 when SpentUSD > AmountUSD.
+	// Previously negative values could reduce the apparent total budget in
+	// CheckBudget (grantsRemaining += g.Remaining()), causing premature blocking.
 	g := &storage.GrantRecord{AmountUSD: 10.0, SpentUSD: 15.0}
-	if got := g.Remaining(); got != -5.0 {
-		t.Errorf("Remaining() on overdraft = %f, want -5.0", got)
+	if got := g.Remaining(); got != 0.0 {
+		t.Errorf("Remaining() on overdraft = %f, want 0.0 (clamped)", got)
 	}
 }
 

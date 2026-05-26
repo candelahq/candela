@@ -517,8 +517,14 @@ type GrantRecord struct {
 }
 
 // Remaining returns how much of this grant is still available.
+// Clamped to 0 to prevent floating-point overdraft from reducing
+// the apparent total budget in CheckBudget (BILL-3).
 func (g *GrantRecord) Remaining() float64 {
-	return g.AmountUSD - g.SpentUSD
+	r := g.AmountUSD - g.SpentUSD
+	if r < 0 {
+		return 0
+	}
+	return r
 }
 
 // AuditRecord is the Go representation of an admin audit log entry.
@@ -601,7 +607,8 @@ type UserStore interface {
 	CheckBudget(ctx context.Context, userID string, estimatedCostUSD float64) (*BudgetCheckResult, error)
 
 	// DeductSpend subtracts actual cost from the user's budget using the
-	// grant-first waterfall: active grants (earliest-expiring first) → monthly budget.
+	// budget-first waterfall: recurring budget → active grants (earliest-expiring first).
+	// Grants absorb overflow when the budget is exhausted.
 	// This must be transactional.
 	DeductSpend(ctx context.Context, userID string, costUSD float64, tokens int64) error
 

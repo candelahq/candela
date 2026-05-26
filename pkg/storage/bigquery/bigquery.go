@@ -708,7 +708,9 @@ func (s *Store) GetModelBreakdown(ctx context.Context, uq storage.UsageQuery) ([
 			COALESCE(SUM(gen_ai_output_tokens), 0) AS output_tokens,
 			COALESCE(SUM(gen_ai_total_tokens), 0) AS total_tokens,
 			COALESCE(SUM(gen_ai_cost_usd), 0) AS total_cost_usd,
-			COALESCE(AVG(duration_ns), 0) AS avg_duration_ns
+			COALESCE(AVG(duration_ns), 0) AS avg_duration_ns,
+			COALESCE(SUM(gen_ai_cache_read_tokens), 0) AS cache_read_tokens,
+			COALESCE(SUM(gen_ai_cache_creation_tokens), 0) AS cache_creation_tokens
 		FROM %s
 		WHERE (@projectID = '' OR project_id = @projectID)
 		  AND start_time >= @startTime
@@ -737,14 +739,16 @@ func (s *Store) GetModelBreakdown(ctx context.Context, uq storage.UsageQuery) ([
 	var models []storage.ModelUsage
 	for {
 		var row struct {
-			Model         string  `bigquery:"model"`
-			Provider      string  `bigquery:"provider"`
-			CallCount     int64   `bigquery:"call_count"`
-			InputTokens   int64   `bigquery:"input_tokens"`
-			OutputTokens  int64   `bigquery:"output_tokens"`
-			TotalTokens   int64   `bigquery:"total_tokens"`
-			TotalCostUSD  float64 `bigquery:"total_cost_usd"`
-			AvgDurationNs float64 `bigquery:"avg_duration_ns"`
+			Model               string  `bigquery:"model"`
+			Provider            string  `bigquery:"provider"`
+			CallCount           int64   `bigquery:"call_count"`
+			InputTokens         int64   `bigquery:"input_tokens"`
+			OutputTokens        int64   `bigquery:"output_tokens"`
+			TotalTokens         int64   `bigquery:"total_tokens"`
+			TotalCostUSD        float64 `bigquery:"total_cost_usd"`
+			AvgDurationNs       float64 `bigquery:"avg_duration_ns"`
+			CacheReadTokens     int64   `bigquery:"cache_read_tokens"`
+			CacheCreationTokens int64   `bigquery:"cache_creation_tokens"`
 		}
 		err := it.Next(&row)
 		if err == iterator.Done {
@@ -754,13 +758,15 @@ func (s *Store) GetModelBreakdown(ctx context.Context, uq storage.UsageQuery) ([
 			return nil, fmt.Errorf("iterating model breakdown: %w", err)
 		}
 		models = append(models, storage.ModelUsage{
-			Model:        row.Model,
-			Provider:     row.Provider,
-			CallCount:    row.CallCount,
-			InputTokens:  row.InputTokens,
-			OutputTokens: row.OutputTokens,
-			CostUSD:      row.TotalCostUSD,
-			AvgLatencyMs: float64(row.AvgDurationNs) / 1e6,
+			Model:               row.Model,
+			Provider:            row.Provider,
+			CallCount:           row.CallCount,
+			InputTokens:         row.InputTokens,
+			OutputTokens:        row.OutputTokens,
+			CostUSD:             row.TotalCostUSD,
+			AvgLatencyMs:        float64(row.AvgDurationNs) / 1e6,
+			CacheReadTokens:     row.CacheReadTokens,
+			CacheCreationTokens: row.CacheCreationTokens,
 		})
 	}
 

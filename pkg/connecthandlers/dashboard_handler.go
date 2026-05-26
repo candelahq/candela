@@ -94,13 +94,15 @@ func (h *DashboardHandler) GetModelBreakdown(
 	var pbModels []*v1.ModelUsage
 	for _, m := range models {
 		pbModels = append(pbModels, &v1.ModelUsage{
-			Model:        m.Model,
-			Provider:     m.Provider,
-			CallCount:    m.CallCount,
-			InputTokens:  m.InputTokens,
-			OutputTokens: m.OutputTokens,
-			CostUsd:      m.CostUSD,
-			AvgLatencyMs: m.AvgLatencyMs,
+			Model:               m.Model,
+			Provider:            m.Provider,
+			CallCount:           m.CallCount,
+			InputTokens:         m.InputTokens,
+			OutputTokens:        m.OutputTokens,
+			CostUsd:             m.CostUSD,
+			AvgLatencyMs:        m.AvgLatencyMs,
+			CacheReadTokens:     m.CacheReadTokens,
+			CacheCreationTokens: m.CacheCreationTokens,
 		})
 	}
 
@@ -227,16 +229,20 @@ func (h *DashboardHandler) GetMyUsage(
 		resp.TotalOutputTokens = summary.TotalOutputTokens
 		resp.TotalCostUsd = summary.TotalCostUSD
 		resp.AvgLatencyMs = summary.AvgLatencyMs
+		resp.TotalCacheReadTokens = summary.TotalCacheReadTokens
+		resp.TotalCacheCreationTokens = summary.TotalCacheCreationTokens
 	}
 	for _, m := range models {
 		resp.Models = append(resp.Models, &v1.ModelUsage{
-			Model:        m.Model,
-			Provider:     m.Provider,
-			CallCount:    m.CallCount,
-			InputTokens:  m.InputTokens,
-			OutputTokens: m.OutputTokens,
-			CostUsd:      m.CostUSD,
-			AvgLatencyMs: m.AvgLatencyMs,
+			Model:               m.Model,
+			Provider:            m.Provider,
+			CallCount:           m.CallCount,
+			InputTokens:         m.InputTokens,
+			OutputTokens:        m.OutputTokens,
+			CostUsd:             m.CostUSD,
+			AvgLatencyMs:        m.AvgLatencyMs,
+			CacheReadTokens:     m.CacheReadTokens,
+			CacheCreationTokens: m.CacheCreationTokens,
 		})
 	}
 	return connect.NewResponse(resp), nil

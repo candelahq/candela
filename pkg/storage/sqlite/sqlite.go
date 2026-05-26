@@ -426,7 +426,9 @@ func (s *Store) GetModelBreakdown(ctx context.Context, q storage.UsageQuery) ([]
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT gen_ai_model, gen_ai_provider,
 			COUNT(*), SUM(gen_ai_input_tokens), SUM(gen_ai_output_tokens),
-			SUM(gen_ai_cost_usd), AVG(duration_ns) / 1000000.0
+			SUM(gen_ai_cost_usd), AVG(duration_ns) / 1000000.0,
+			COALESCE(SUM(gen_ai_cache_read_tokens), 0),
+			COALESCE(SUM(gen_ai_cache_creation_tokens), 0)
 		FROM spans
 		WHERE (? = '' OR project_id = ?) AND start_time >= ? AND start_time <= ?
 			AND gen_ai_model != ''
@@ -444,7 +446,8 @@ func (s *Store) GetModelBreakdown(ctx context.Context, q storage.UsageQuery) ([]
 	for rows.Next() {
 		var m storage.ModelUsage
 		err := rows.Scan(&m.Model, &m.Provider, &m.CallCount,
-			&m.InputTokens, &m.OutputTokens, &m.CostUSD, &m.AvgLatencyMs)
+			&m.InputTokens, &m.OutputTokens, &m.CostUSD, &m.AvgLatencyMs,
+			&m.CacheReadTokens, &m.CacheCreationTokens)
 		if err != nil {
 			return nil, fmt.Errorf("scanning model: %w", err)
 		}

@@ -34,3 +34,133 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+
+  # GoReleaser generates a formula that fails `brew audit` (redundant version,
+  # url/sha256 bare inside on_macos, define_method instead of def install).
+  # This job replaces the generated formula with an audit-clean version,
+  # preserving only the version, URLs, and SHA256 values from GoReleaser.
+  patch-formula:
+    needs: goreleaser
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: candelahq/homebrew-tap
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+
+      - name: Extract version and checksums from generated formula
+        id: extract
+        run: |
+          f="Formula/candela.rb"
+          echo "version=$(grep -oP 'candela_\K[0-9]+\.[0-9]+\.[0-9]+' "$f" | head -1)" >> "$GITHUB_OUTPUT"
+          echo "mac_sha=$(grep -A1 'Darwin_universal' "$f" | grep sha256 | grep -oP '"([a-f0-9]+)"' | tr -d '"')" >> "$GITHUB_OUTPUT"
+          echo "linux_amd_sha=$(grep -A1 'Linux_amd64' "$f" | grep sha256 | grep -oP '"([a-f0-9]+)"' | tr -d '"')" >> "$GITHUB_OUTPUT"
+          echo "linux_arm_sha=$(grep -A1 'Linux_arm64' "$f" | grep sha256 | grep -oP '"([a-f0-9]+)"' | tr -d '"')" >> "$GITHUB_OUTPUT"
+
+      - name: Generate audit-clean formula
+        run: |
+          VERSION="${{ steps.extract.outputs.version }}"
+          MAC_SHA="${{ steps.extract.outputs.mac_sha }}"
+          LINUX_AMD_SHA="${{ steps.extract.outputs.linux_amd_sha }}"
+          LINUX_ARM_SHA="${{ steps.extract.outputs.linux_arm_sha }}"
+
+          cat > Formula/candela.rb << 'RUBY'
+          # typed: false
+          # frozen_string_literal: true
+
+          class Candela < Formula
+            desc "LLM observability proxy — traces, costs, budgets for AI dev tools"
+            homepage "https://github.com/candelahq/candela"
+            license "Apache-2.0"
+
+            on_macos do
+              on_arm do
+                url "https://github.com/candelahq/candela/releases/download/v__VERSION__/candela___VERSION___Darwin_universal.tar.gz"
+                sha256 "__MAC_SHA__"
+              end
+              on_intel do
+                url "https://github.com/candelahq/candela/releases/download/v__VERSION__/candela___VERSION___Darwin_universal.tar.gz"
+                sha256 "__MAC_SHA__"
+              end
+            end
+
+            on_linux do
+              on_intel do
+                url "https://github.com/candelahq/candela/releases/download/v__VERSION__/candela___VERSION___Linux_amd64.tar.gz"
+                sha256 "__LINUX_AMD_SHA__"
+              end
+              on_arm do
+                url "https://github.com/candelahq/candela/releases/download/v__VERSION__/candela___VERSION___Linux_arm64.tar.gz"
+                sha256 "__LINUX_ARM_SHA__"
+              end
+            end
+
+            def install
+              bin.install "candela"
+            end
+
+            def caveats
+              <<~EOS
+                To get started, create a config file:
+
+                  mkdir -p ~/.config/candela
+                  cat > ~/.config/candela/config.yaml <<EOF
+                  port: 8181
+                  providers:
+                    - name: google
+                      models: ["gemini-2.5-pro", "gemini-2.5-flash", "gemini-3.5-flash"]
+                    - name: anthropic
+                      models: ["claude-sonnet-4-20250514"]
+                  vertex_ai:
+                    project: YOUR_GCP_PROJECT
+                    region: us-central1
+                  EOF
+
+                Authenticate (no gcloud required):
+                  candela auth login             # GCP OAuth2 (default)
+                  candela auth login --provider aws  # AWS SSO/access keys
+
+                Then run:
+                  candela start          # background daemon
+                  candela status         # check running state
+                  candela run            # foreground (debug)
+
+                Management UI: http://127.0.0.1:8181/_local/
+
+                Or as a login service:
+                  brew services start candela
+              EOS
+            end
+
+            service do
+              run [opt_bin/"candela", "run"]
+              keep_alive true
+              log_path var/"log/candela.log"
+              error_log_path var/"log/candela.log"
+            end
+
+            test do
+              system "#{bin}/candela", "version"
+            end
+          end
+          RUBY
+
+          # Remove heredoc indentation.
+          sed -i 's/^          //' Formula/candela.rb
+
+          # Substitute placeholders.
+          sed -i "s/__VERSION__/${VERSION}/g" Formula/candela.rb
+          sed -i "s/__MAC_SHA__/${MAC_SHA}/g" Formula/candela.rb
+          sed -i "s/__LINUX_AMD_SHA__/${LINUX_AMD_SHA}/g" Formula/candela.rb
+          sed -i "s/__LINUX_ARM_SHA__/${LINUX_ARM_SHA}/g" Formula/candela.rb
+
+      - name: Verify Ruby syntax
+        run: ruby -c Formula/candela.rb
+
+      - name: Commit and push
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add Formula/candela.rb
+          git diff --cached --quiet || git commit -m "fix: patch formula for brew audit compliance"
+          git push

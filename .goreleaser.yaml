@@ -67,7 +67,7 @@ brews:
     directory: Formula
     name: candela
     homepage: "https://github.com/candelahq/candela"
-    description: "Local LLM observability proxy — traces, costs, and budgets for AI-powered dev tools"
+    description: "LLM observability proxy — traces, costs, budgets for AI dev tools"
     license: "Apache-2.0"
     skip_upload: auto   # Skip on pre-releases
     install: |

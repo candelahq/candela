@@ -7,6 +7,7 @@ package costcalc
 import (
 	"log/slog"
 	"math"
+	"sort"
 	"strings"
 	"sync"
 )
@@ -328,6 +329,40 @@ func (c *Calculator) SetGlobalDiscount(discount float64) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.globalDiscount = clampDiscount(discount)
+}
+
+// Models returns all known model pricing entries (defaults merged with overrides).
+// Overrides take priority over defaults on key conflicts. The returned slice is
+// sorted by provider, then model name. This is used to populate the /v1/models
+// endpoint so clients can discover available models.
+func (c *Calculator) Models() []ModelPricing {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	// Merge defaults and overrides into a single map (overrides win).
+	merged := make(map[string]ModelPricing, len(c.defaults)+len(c.overrides))
+	for k, v := range c.defaults {
+		merged[k] = v
+	}
+	for k, v := range c.overrides {
+		merged[k] = v
+	}
+
+	// Collect into a slice.
+	models := make([]ModelPricing, 0, len(merged))
+	for _, m := range merged {
+		models = append(models, m)
+	}
+
+	// Sort by provider, then model.
+	sort.Slice(models, func(i, j int) bool {
+		if models[i].Provider != models[j].Provider {
+			return models[i].Provider < models[j].Provider
+		}
+		return models[i].Model < models[j].Model
+	})
+
+	return models
 }
 
 // clampDiscount ensures a discount is within [0.0, 1.0].

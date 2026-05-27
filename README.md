@@ -516,9 +516,24 @@ iap_service_account: candela-server@project.iam.gserviceaccount.com  # SA to imp
 
 - Local + cloud models merged into `/v1/models`
 - Smart routing: local models stay local, cloud models route through Candela server
-- OIDC auth injected automatically via SA impersonation (IAP-compatible ID token)
+- **Dual-token IAP auth** when `iap_service_account` is configured (see below)
 - Team-wide cost tracking, budget enforcement, and centralized governance
 - Prerequisites: `candela auth login --provider gcp`
+
+#### Dual-Token Authentication (IAP)
+
+When `iap_service_account` is configured, the CLI uses a **dual-token strategy** to authenticate through Identity-Aware Proxy:
+
+| Header | Token | Consumed By |
+|--------|-------|-------------|
+| `Authorization` / `Proxy-Authorization` | IAP ID token (OIDC token from impersonated SA) | IAP at the load balancer |
+| `X-Candela-Auth` | User's ADC OAuth2 access token | `candela-server` (identifies the actual user) |
+
+This is necessary because **IAP replaces the `Authorization` header** with its own JWT before forwarding requests to the backend — the original user identity would be lost without the second token.
+
+**Server-side resolution order:**
+1. `X-Candela-Auth` header → CLI traffic behind IAP (the typical team mode flow)
+2. `Authorization` header → browser or direct traffic (no IAP in the path)
 
 > [!TIP]
 > See [docs/candela.md](docs/candela.md) for the full setup guide.

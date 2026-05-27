@@ -2,6 +2,22 @@
 
 All notable changes to Candela are documented here, organized by development phase. PRs are merged to `main`.
 
+## v0.5.6 — 2026-05-27
+
+### IAP Auth Fixes (#289)
+- Dual-token IAP authentication: OIDC identity token + OAuth2 access token
+- Add `/v1/models` endpoint for IAP-authenticated environments
+
+### Infrastructure & Ops
+- Fix Cloud Run `container_port` to 8181 (#288)
+- Gracefully handle missing `job_id` column and add backend schema migration (#287)
+- Auto-build and push `candela-server` image to GHCR on merge to `main`
+
+### Documentation (#286)
+- IAP auth documentation and sync example Terraform configuration
+
+---
+
 ## v0.5.5 — 2026-05-25
 
 ### OpenAI Model Pricing (#276)

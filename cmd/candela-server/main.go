@@ -360,6 +360,48 @@ func main() {
 
 			llmProxy.RegisterRoutes(mux)
 
+			// Build compat model list from the cost calculator's pricing table.
+			// Map pricing provider names → OpenAI-compatible proxy route names.
+			// Only include models whose compat provider is active.
+			pricingToCompat := map[string]string{
+				"google":    "gemini-oai", // Gemini via OpenAI-compat endpoint
+				"anthropic": "anthropic",  // Anthropic with FormatTranslator (OpenAI→Messages)
+				"openai":    "openai",     // Native OpenAI passthrough
+			}
+
+			// Build set of active provider names for quick lookup.
+			activeSet := make(map[string]bool, len(activeProviders))
+			for _, p := range activeProviders {
+				activeSet[p.Name] = true
+			}
+
+			// Deduplicate models: the pricing table may have both short names
+			// (e.g. "claude-sonnet-4") and dated variants ("claude-sonnet-4-20250514")
+			// that resolve to the same underlying model. Keep all of them — the
+			// compat layer's prefix-based alias resolution handles short→long mapping.
+			seen := make(map[string]bool)
+			var compatModels []proxy.CompatModel
+			for _, m := range calc.Models() {
+				compatProvider, ok := pricingToCompat[m.Provider]
+				if !ok || !activeSet[compatProvider] {
+					continue
+				}
+				key := compatProvider + "/" + m.Model
+				if seen[key] {
+					continue
+				}
+				seen[key] = true
+				compatModels = append(compatModels, proxy.CompatModel{
+					ID:       m.Model,
+					Provider: compatProvider,
+				})
+			}
+
+			if len(compatModels) > 0 {
+				llmProxy.RegisterCompatRoutes(mux, compatModels)
+				slog.Info("📋 /v1/models endpoint registered", "models", len(compatModels))
+			}
+
 			var names []string
 			for _, p := range activeProviders {
 				names = append(names, "/proxy/"+p.Name+"/")

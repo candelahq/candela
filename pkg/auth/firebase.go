@@ -251,11 +251,15 @@ func validateAccessToken(ctx context.Context, accessToken string) (*User, error)
 	}, nil
 }
 
-// extractBearerToken pulls the token from "Authorization: Bearer <token>".
+// extractBearerToken pulls the token from request headers.
+// Checks X-Candela-Auth first (set by candela-local behind IAP, carries the
+// user's ADC token), then falls back to Authorization (browser/Firebase clients).
+// When behind IAP, Authorization is replaced by IAP's own JWT — so we prefer
+// X-Candela-Auth which carries the original user identity token.
 func extractBearerToken(r *http.Request) string {
-	auth := r.Header.Get("Authorization")
+	auth := r.Header.Get("X-Candela-Auth")
 	if auth == "" {
-		auth = r.Header.Get("X-Candela-Auth")
+		auth = r.Header.Get("Authorization")
 		if auth == "" {
 			return ""
 		}

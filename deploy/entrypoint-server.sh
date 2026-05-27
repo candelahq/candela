@@ -43,6 +43,8 @@ cors:
 
 auth:
   dev_mode: ${CANDELA_DEV_MODE:-false}
+  allowed_service_accounts:
+    - "${CANDELA_SERVICE_ACCOUNT:-}"
 
 firestore:
   enabled: true

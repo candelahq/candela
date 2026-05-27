@@ -444,6 +444,7 @@ func runForeground() {
 		// a generic OIDC token without the required audience claim, which the
 		// server rejects.
 		var tokenSource oauth2.TokenSource
+		var userTokenSource oauth2.TokenSource // User's ADC token for server-side identity validation.
 
 		ts, err := idtoken.NewTokenSource(ctx, cfg.Audience)
 		if err == nil {
@@ -451,8 +452,9 @@ func runForeground() {
 			slog.Info("using service account ID token source")
 			tokenSource = ts
 		} else if cfg.IAPServiceAccount != "" {
-			// Strategy 1.5: User credentials + SA impersonation → IAP OIDC ID token.
-			// Uses IAM Credentials API to generate an ID token with the IAP audience.
+			// Strategy 1.5: User credentials + SA impersonation → dual token.
+			// - IAP token: OIDC ID token (via SA impersonation) for Proxy-Authorization
+			// - User token: ADC OAuth2 access token for Authorization (server validates via userinfo)
 			slog.Debug("idtoken.NewTokenSource unavailable, trying IAP impersonation", "reason", err)
 			baseTSr, err2 := google.DefaultTokenSource(ctx, "https://www.googleapis.com/auth/cloud-platform")
 			if err2 != nil {
@@ -465,6 +467,14 @@ func runForeground() {
 				serviceAccount: cfg.IAPServiceAccount,
 				audience:       cfg.Audience,
 			})
+			// Keep the user's ADC token source for server-side auth.
+			// The server validates this via Google's userinfo endpoint.
+			userTSr, err3 := google.DefaultTokenSource(ctx, "openid", "email")
+			if err3 != nil {
+				slog.Warn("failed to get user ADC token source — server auth may fail", "error", err3)
+			} else {
+				userTokenSource = userTSr
+			}
 			slog.Info("using IAP via service account impersonation",
 				"sa", cfg.IAPServiceAccount)
 		} else {
@@ -489,21 +499,34 @@ func runForeground() {
 				req.URL.Host = remoteURL.Host
 				req.Host = remoteURL.Host
 
-				// Inject auth token for the remote server.
-				// For service accounts, AccessToken is the audience-scoped OIDC ID token.
-				// For user credentials, AccessToken is the OAuth2 access token which
-				// the server validates via Google's userinfo endpoint.
+				// Inject auth tokens for IAP + backend server.
 				token, err := tokenSource.Token()
 				if err != nil {
 					slog.Error("failed to get auth token", "error", err)
 					return
 				}
-				// Set Proxy-Authorization so Google Cloud IAP consumes it and allows the
-				// Authorization header to flow through to the backend (where FirebaseAuthMiddleware expects it).
+
+				// Proxy-Authorization: consumed by IAP at the load balancer.
 				req.Header.Set("Proxy-Authorization", "Bearer "+token.AccessToken)
-				req.Header.Set("Authorization", "Bearer "+token.AccessToken)
-				// Set custom header as a fallback in case IAP still strips Authorization
-				req.Header.Set("X-Candela-Auth", "Bearer "+token.AccessToken)
+
+				if userTokenSource != nil {
+					// Dual-token mode (IAP impersonation):
+					// - Authorization gets the IAP ID token (IAP validates this
+					//   and replaces it with its own JWT before forwarding)
+					// - X-Candela-Auth gets the user's ADC OAuth2 access token
+					//   (the server checks this first for user identity)
+					req.Header.Set("Authorization", "Bearer "+token.AccessToken)
+					userToken, err := userTokenSource.Token()
+					if err != nil {
+						slog.Error("failed to get user auth token", "error", err)
+						return
+					}
+					req.Header.Set("X-Candela-Auth", "Bearer "+userToken.AccessToken)
+				} else {
+					// Single-token mode: same token for IAP and server.
+					req.Header.Set("Authorization", "Bearer "+token.AccessToken)
+					req.Header.Set("X-Candela-Auth", "Bearer "+token.AccessToken)
+				}
 
 				// Preserve the original path.
 				if _, ok := req.Header["User-Agent"]; !ok {

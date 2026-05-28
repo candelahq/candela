@@ -17,11 +17,13 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"net/url"
 	"os"
 	"regexp"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"log/slog"
@@ -33,6 +35,7 @@ import (
 	"github.com/candelahq/candela/pkg/cloudauth"
 	"github.com/candelahq/candela/pkg/costcalc"
 	"github.com/candelahq/candela/pkg/notify"
+	"github.com/candelahq/candela/pkg/proxy/spendoutbox"
 	"github.com/candelahq/candela/pkg/storage"
 )
 
@@ -230,6 +233,15 @@ type Proxy struct {
 	budgetCk *notify.BudgetChecker // Budget threshold notifications (nil = no alerts)
 
 	compatModels []CompatModel // configured models for per-provider /models responses
+
+	// CRIT-3: Durable outbox for failed DeductSpend calls.
+	spendOutbox *spendoutbox.Outbox
+
+	// HIGH-2: Service account spend tracking (micro-USD for precision).
+	saSpendMicroUSD atomic.Int64
+
+	// HIGH-5: Spans dropped at proxy semaphore (circuit breaker full).
+	droppedSpans atomic.Int64
 }
 
 // Config holds proxy configuration.
@@ -292,6 +304,21 @@ func (p *Proxy) SetUserStore(users storage.UserStore) {
 // SetBudgetChecker sets the optional BudgetChecker for threshold notifications.
 func (p *Proxy) SetBudgetChecker(ck *notify.BudgetChecker) {
 	p.budgetCk = ck
+}
+
+// SetSpendOutbox sets the optional spend outbox for durable DeductSpend retries (CRIT-3).
+func (p *Proxy) SetSpendOutbox(o *spendoutbox.Outbox) {
+	p.spendOutbox = o
+}
+
+// DroppedSpans returns the total number of spans dropped at the proxy semaphore (HIGH-5).
+func (p *Proxy) DroppedSpans() int64 {
+	return p.droppedSpans.Load()
+}
+
+// SASpendMicroUSD returns total service account spend in micro-USD (HIGH-2).
+func (p *Proxy) SASpendMicroUSD() int64 {
+	return p.saSpendMicroUSD.Load()
 }
 
 // SetCachingMode updates the Anthropic caching strategy at runtime.
@@ -1076,6 +1103,7 @@ func (p *Proxy) handleStandardResponse(
 			}()
 		default:
 			spanCancel()
+			p.droppedSpans.Add(1)
 			slog.Warn("span dropped: too many pending", "provider", provider.Name, "request_id", requestID)
 		}
 	} else {
@@ -1216,6 +1244,7 @@ func (p *Proxy) handleStreamingResponse(
 			}()
 		default:
 			spanCancel()
+			p.droppedSpans.Add(1)
 			slog.Warn("streaming span dropped: too many pending", "provider", provider.Name, "request_id", requestID)
 		}
 	} else {
@@ -1258,6 +1287,21 @@ func (p *Proxy) deductBudget(ctx context.Context, provider Provider, model, user
 		return
 	}
 	if strings.HasSuffix(userID, ".gserviceaccount.com") {
+		// HIGH-2: Log SA spend instead of silently skipping.
+		totalTokens := inputTokens + outputTokens
+		cost := p.calc.Calculate(provider.Name, model, inputTokens, outputTokens)
+		if cost > 0 || totalTokens > 0 {
+			p.saSpendMicroUSD.Add(int64(math.Round(cost * 1_000_000)))
+			slog.Info("sa_spend: service account usage",
+				"sa_id", userID,
+				"provider", provider.Name,
+				"model", model,
+				"cost_usd", cost,
+				"input_tokens", inputTokens,
+				"output_tokens", outputTokens,
+				"total_tokens", totalTokens,
+			)
+		}
 		return
 	}
 
@@ -1295,12 +1339,26 @@ func (p *Proxy) deductBudget(ctx context.Context, provider Provider, model, user
 		}
 	}
 	if deductErr != nil {
-		slog.Error("deduct_spend: all retries exhausted — spend not recorded",
-			"user_id", userID,
-			"cost_usd", cost,
-			"tokens", totalTokens,
-			"attempts", maxDeductAttempts,
-			"error", deductErr)
+		// CRIT-3: Queue to durable outbox instead of silently dropping.
+		if p.spendOutbox != nil {
+			if qErr := p.spendOutbox.Enqueue(ctx, spendoutbox.SpendRecord{
+				UserID:  userID,
+				CostUSD: cost,
+				Tokens:  totalTokens,
+			}); qErr != nil {
+				slog.Error("deduct_spend: CRITICAL — failed to enqueue to outbox",
+					"user_id", userID, "cost_usd", cost, "tokens", totalTokens,
+					"enqueue_error", qErr, "original_error", deductErr)
+			} else {
+				slog.Warn("deduct_spend: queued to outbox for retry",
+					"user_id", userID, "cost_usd", cost, "tokens", totalTokens,
+					"attempts", maxDeductAttempts, "error", deductErr)
+			}
+		} else {
+			slog.Error("deduct_spend: all retries exhausted — spend not recorded (no outbox)",
+				"user_id", userID, "cost_usd", cost, "tokens", totalTokens,
+				"attempts", maxDeductAttempts, "error", deductErr)
+		}
 		return
 	}
 

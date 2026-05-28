@@ -89,11 +89,10 @@ func (w *SpendSyncWorker) processRetries() {
 
 	now := time.Now()
 	var deleteIDs []string
-	var retryIDs []string
 
 	for _, rec := range records {
-		// Permanent failure: too old or too many attempts.
-		if now.Sub(rec.CreatedAt) > w.maxAge || rec.AttemptCount > 10 {
+		// Permanent failure: too old.
+		if now.Sub(rec.CreatedAt) > w.maxAge {
 			deleteIDs = append(deleteIDs, rec.ID)
 			slog.Error("SpendSyncWorker permanent failure, dropping record",
 				"id", rec.ID,
@@ -108,14 +107,15 @@ func (w *SpendSyncWorker) processRetries() {
 
 		// Attempt the DeductSpend retry.
 		if err := w.users.DeductSpend(ctx, rec.UserID, rec.CostUSD, rec.Tokens); err != nil {
-			retryIDs = append(retryIDs, rec.ID)
-			slog.Warn("SpendSyncWorker retry failed",
+			if retryErr := w.outbox.RetryLater(ctx, rec.ID, rec.AttemptCount); retryErr != nil {
+				slog.Error("SpendSyncWorker failed to schedule retry", "error", retryErr)
+			}
+			slog.Warn("spend_outbox: retry scheduled",
 				"id", rec.ID,
 				"user_id", rec.UserID,
 				"cost_usd", rec.CostUSD,
-				"tokens", rec.Tokens,
-				"attempt_count", rec.AttemptCount,
-				"error", err,
+				"attempt", rec.AttemptCount+1,
+				"next_retry_in", backoffDelay(rec.AttemptCount),
 			)
 		} else {
 			deleteIDs = append(deleteIDs, rec.ID)
@@ -125,11 +125,6 @@ func (w *SpendSyncWorker) processRetries() {
 	if len(deleteIDs) > 0 {
 		if err := w.outbox.Delete(ctx, deleteIDs); err != nil {
 			slog.Error("SpendSyncWorker failed to delete records", "error", err)
-		}
-	}
-	if len(retryIDs) > 0 {
-		if err := w.outbox.IncrementAttempt(ctx, retryIDs); err != nil {
-			slog.Error("SpendSyncWorker failed to increment attempt count", "error", err)
 		}
 	}
 }

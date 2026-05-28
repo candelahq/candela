@@ -39,9 +39,6 @@ func New(path string) (*Outbox, error) {
 	}
 
 	dsn := path
-	if dsn == ":memory:" {
-		dsn = "file::memory:?cache=shared"
-	}
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("opening sqlite: %w", err)
@@ -65,7 +62,8 @@ func New(path string) (*Outbox, error) {
 		cost_usd REAL NOT NULL,
 		tokens INTEGER NOT NULL,
 		attempt_count INTEGER DEFAULT 0,
-		created_at TEXT DEFAULT CURRENT_TIMESTAMP
+		created_at TEXT NOT NULL,
+		next_retry_at TEXT NOT NULL
 	)`)
 	if err != nil {
 		_ = db.Close()
@@ -86,14 +84,17 @@ func (o *Outbox) Enqueue(ctx context.Context, rec SpendRecord) error {
 		rec.ID = hex.EncodeToString(b)
 	}
 	if rec.CreatedAt.IsZero() {
-		rec.CreatedAt = time.Now()
+		rec.CreatedAt = time.Now().UTC()
 	}
 
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+
 	_, err := o.db.ExecContext(ctx,
-		`INSERT INTO spend_outbox (id, user_id, cost_usd, tokens, attempt_count, created_at)
-		 VALUES (?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO spend_outbox (id, user_id, cost_usd, tokens, attempt_count, created_at, next_retry_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
 		rec.ID, rec.UserID, rec.CostUSD, rec.Tokens, rec.AttemptCount,
-		rec.CreatedAt.Format(time.RFC3339Nano),
+		rec.CreatedAt.UTC().Format(time.RFC3339Nano),
+		now,
 	)
 	if err != nil {
 		return fmt.Errorf("inserting spend record: %w", err)
@@ -101,13 +102,15 @@ func (o *Outbox) Enqueue(ctx context.Context, rec SpendRecord) error {
 	return nil
 }
 
-// Peek returns up to limit records ordered by created_at ASC (oldest first).
+// Peek returns up to limit records whose next_retry_at is at or before now,
+// ordered by created_at ASC (oldest first).
 func (o *Outbox) Peek(ctx context.Context, limit int) ([]SpendRecord, error) {
-	rows, err := o.db.QueryContext(ctx, `
-		SELECT id, user_id, cost_usd, tokens, attempt_count, created_at
-		FROM spend_outbox
-		ORDER BY created_at ASC
-		LIMIT ?`, limit)
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	rows, err := o.db.QueryContext(ctx,
+		`SELECT id, user_id, cost_usd, tokens, attempt_count, created_at
+		 FROM spend_outbox
+		 WHERE next_retry_at <= ?
+		 ORDER BY created_at ASC LIMIT ?`, now, limit)
 	if err != nil {
 		return nil, fmt.Errorf("querying spend outbox: %w", err)
 	}
@@ -160,11 +163,14 @@ func (o *Outbox) Delete(ctx context.Context, ids []string) error {
 	return nil
 }
 
-// IncrementAttempt increments attempt_count for the given IDs.
+// IncrementAttempt increments attempt_count for the given IDs and sets
+// next_retry_at to now (immediate retry) for batch compatibility.
 func (o *Outbox) IncrementAttempt(ctx context.Context, ids []string) error {
 	if len(ids) == 0 {
 		return nil
 	}
+
+	now := time.Now().UTC().Format(time.RFC3339Nano)
 
 	const chunkSize = 500
 	for i := 0; i < len(ids); i += chunkSize {
@@ -175,11 +181,15 @@ func (o *Outbox) IncrementAttempt(ctx context.Context, ids []string) error {
 		chunk := ids[i:end]
 
 		placeholders := strings.TrimSuffix(strings.Repeat("?,", len(chunk)), ",")
-		query := fmt.Sprintf("UPDATE spend_outbox SET attempt_count = attempt_count + 1 WHERE id IN (%s)", placeholders)
+		query := fmt.Sprintf(
+			"UPDATE spend_outbox SET attempt_count = attempt_count + 1, next_retry_at = ? WHERE id IN (%s)",
+			placeholders,
+		)
 
-		args := make([]any, len(chunk))
-		for j, id := range chunk {
-			args[j] = id
+		args := make([]any, 0, len(chunk)+1)
+		args = append(args, now)
+		for _, id := range chunk {
+			args = append(args, id)
 		}
 
 		if _, err := o.db.ExecContext(ctx, query, args...); err != nil {
@@ -187,6 +197,29 @@ func (o *Outbox) IncrementAttempt(ctx context.Context, ids []string) error {
 		}
 	}
 	return nil
+}
+
+// backoffDelay returns the retry delay for the given attempt number.
+// Uses exponential backoff: 10s × 2^attempt, capped at 1 hour.
+func backoffDelay(attempt int) time.Duration {
+	delay := 10 * time.Second
+	for i := 0; i < attempt && i < 10; i++ {
+		delay *= 2
+	}
+	if delay > time.Hour {
+		delay = time.Hour
+	}
+	return delay
+}
+
+// RetryLater increments the attempt count and schedules the next retry
+// with exponential backoff.
+func (o *Outbox) RetryLater(ctx context.Context, id string, currentAttempt int) error {
+	nextRetry := time.Now().UTC().Add(backoffDelay(currentAttempt)).Format(time.RFC3339Nano)
+	_, err := o.db.ExecContext(ctx,
+		`UPDATE spend_outbox SET attempt_count = attempt_count + 1, next_retry_at = ? WHERE id = ?`,
+		nextRetry, id)
+	return err
 }
 
 // Pending returns the total number of records in the outbox.

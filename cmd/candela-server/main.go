@@ -407,9 +407,13 @@ func main() {
 
 				// CRIT-3: Wire durable spend outbox for DeductSpend retries.
 				home, homeErr := os.UserHomeDir()
-				if homeErr == nil {
+				if homeErr != nil {
+					slog.Warn("spend outbox disabled: failed to get user home directory", "error", homeErr)
+				} else {
 					obPath := filepath.Join(home, ".candela", "spend-outbox.db")
-					if err := os.MkdirAll(filepath.Dir(obPath), 0o700); err == nil {
+					if err := os.MkdirAll(filepath.Dir(obPath), 0o700); err != nil {
+						slog.Warn("spend outbox disabled: failed to create directory", "path", filepath.Dir(obPath), "error", err)
+					} else {
 						ob, obErr := spendoutbox.New(obPath)
 						if obErr != nil {
 							slog.Warn("spend outbox unavailable — failed DeductSpend calls will not be retried",
@@ -420,8 +424,9 @@ func main() {
 							// Start background retry worker.
 							spendWorker := spendoutbox.NewSpendSyncWorker(ob, userStore, 10*time.Second)
 							spendWorker.Start()
-							defer spendWorker.Stop()
+							// IMPORTANT: defer order is LIFO — close DB AFTER stopping worker.
 							defer func() { _ = ob.Close() }()
+							defer spendWorker.Stop()
 							slog.Info("💾 Spend outbox + retry worker enabled", "path", obPath)
 						}
 					}

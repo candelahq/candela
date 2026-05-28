@@ -17,6 +17,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"net/url"
 	"os"
@@ -1290,7 +1291,7 @@ func (p *Proxy) deductBudget(ctx context.Context, provider Provider, model, user
 		totalTokens := inputTokens + outputTokens
 		cost := p.calc.Calculate(provider.Name, model, inputTokens, outputTokens)
 		if cost > 0 || totalTokens > 0 {
-			p.saSpendMicroUSD.Add(int64(cost * 1_000_000))
+			p.saSpendMicroUSD.Add(int64(math.Round(cost * 1_000_000)))
 			slog.Info("sa_spend: service account usage",
 				"sa_id", userID,
 				"provider", provider.Name,

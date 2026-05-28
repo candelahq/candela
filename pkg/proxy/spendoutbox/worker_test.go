@@ -96,16 +96,9 @@ func TestSpendSyncWorker_RetryOnFailure(t *testing.T) {
 		t.Errorf("pending = %d, want 1 (record should remain after failure)", count)
 	}
 
-	// Attempt count should have been incremented.
-	records, err := ob.Peek(ctx, 1)
-	if err != nil {
-		t.Fatalf("Peek: %v", err)
-	}
-	if len(records) != 1 {
-		t.Fatalf("got %d records, want 1", len(records))
-	}
-	if records[0].AttemptCount < 1 {
-		t.Errorf("AttemptCount = %d, want >= 1", records[0].AttemptCount)
+	// DeductSpend should have been called at least once (first tick).
+	if got := mock.callCount(); got < 1 {
+		t.Errorf("DeductSpend called %d times, want >= 1", got)
 	}
 }
 
@@ -120,7 +113,7 @@ func TestSpendSyncWorker_MaxAgeExpiry(t *testing.T) {
 		UserID:    "user-old",
 		CostUSD:   2.50,
 		Tokens:    3000,
-		CreatedAt: time.Now().Add(-48 * time.Hour), // 2 days ago, beyond 24h maxAge
+		CreatedAt: time.Now().UTC().Add(-48 * time.Hour), // 2 days ago, beyond 24h maxAge
 	}); err != nil {
 		t.Fatalf("Enqueue: %v", err)
 	}
@@ -145,38 +138,41 @@ func TestSpendSyncWorker_MaxAgeExpiry(t *testing.T) {
 	}
 }
 
-func TestSpendSyncWorker_MaxAttempts(t *testing.T) {
+func TestSpendSyncWorker_RetryLaterUsed(t *testing.T) {
 	ob := newTestOutbox(t)
 	ctx := context.Background()
-	mock := &mockUserStore{}
+	mock := &mockUserStore{err: errors.New("transient error")}
 
-	// Enqueue a record with attempt_count already at 11 (> 10 threshold).
 	if err := ob.Enqueue(ctx, SpendRecord{
-		ID:           "maxed-1",
-		UserID:       "user-max",
-		CostUSD:      0.75,
-		Tokens:       800,
-		AttemptCount: 11,
+		ID:      "rl-1",
+		UserID:  "user-rl",
+		CostUSD: 0.50,
+		Tokens:  500,
 	}); err != nil {
 		t.Fatalf("Enqueue: %v", err)
 	}
 
 	w := NewSpendSyncWorker(ob, mock, 100*time.Millisecond)
 	w.Start()
-	time.Sleep(350 * time.Millisecond)
+	// Wait for one tick to process.
+	time.Sleep(250 * time.Millisecond)
 	w.Stop()
 
-	// DeductSpend should NOT have been called.
-	if got := mock.callCount(); got != 0 {
-		t.Errorf("DeductSpend called %d times, want 0 (should be dropped as permanent failure)", got)
-	}
-
-	// Record should be deleted.
+	// Record should still be pending (failure, not dropped).
 	count, err := ob.Pending(ctx)
 	if err != nil {
 		t.Fatalf("Pending: %v", err)
 	}
-	if count != 0 {
-		t.Errorf("pending = %d, want 0 (max-attempt record should be deleted)", count)
+	if count != 1 {
+		t.Errorf("pending = %d, want 1", count)
+	}
+
+	// After RetryLater, next_retry_at should be in the future, so Peek returns nothing.
+	records, err := ob.Peek(ctx, 10)
+	if err != nil {
+		t.Fatalf("Peek: %v", err)
+	}
+	if len(records) != 0 {
+		t.Errorf("Peek returned %d records, want 0 (next_retry_at should be in the future)", len(records))
 	}
 }

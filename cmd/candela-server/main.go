@@ -5,12 +5,14 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
@@ -30,6 +32,7 @@ import (
 	"github.com/candelahq/candela/pkg/notify"
 	"github.com/candelahq/candela/pkg/processor"
 	"github.com/candelahq/candela/pkg/proxy"
+	"github.com/candelahq/candela/pkg/proxy/spendoutbox"
 	"github.com/candelahq/candela/pkg/storage"
 	bqstore "github.com/candelahq/candela/pkg/storage/bigquery"
 	duckdbstore "github.com/candelahq/candela/pkg/storage/duckdb"
@@ -152,6 +155,53 @@ func main() {
 		_, _ = fmt.Fprintln(w, `{"status": "ok"}`)
 	})
 
+	var spendOB *spendoutbox.Outbox
+	var llmProxy *proxy.Proxy
+
+	// HIGH-5: Debug metrics endpoint (JSON, no Prometheus dependency).
+	mux.HandleFunc("/debug/metrics", func(w http.ResponseWriter, r *http.Request) {
+		type sinkMetric struct {
+			Name          string `json:"name"`
+			State         string `json:"state"`
+			TotalWrites   int64  `json:"total_writes"`
+			TotalFailures int64  `json:"total_failures"`
+			TotalDropped  int64  `json:"total_dropped"`
+		}
+		type metrics struct {
+			Proxy struct {
+				DroppedSpans       int64   `json:"dropped_spans"`
+				SASpendUSD         float64 `json:"sa_spend_usd"`
+				SpendOutboxPending int64   `json:"spend_outbox_pending"`
+			} `json:"proxy"`
+			Processor struct {
+				DroppedSpans int64        `json:"dropped_spans"`
+				Sinks        []sinkMetric `json:"sinks"`
+			} `json:"processor"`
+		}
+		var m metrics
+		if llmProxy != nil {
+			m.Proxy.DroppedSpans = llmProxy.DroppedSpans()
+			m.Proxy.SASpendUSD = float64(llmProxy.SASpendMicroUSD()) / 1_000_000
+		}
+		if spendOB != nil {
+			if pending, err := spendOB.Pending(r.Context()); err == nil {
+				m.Proxy.SpendOutboxPending = pending
+			}
+		}
+		m.Processor.DroppedSpans = proc.DroppedSpans()
+		for _, sh := range proc.SinkHealth() {
+			m.Processor.Sinks = append(m.Processor.Sinks, sinkMetric{
+				Name:          sh.Name,
+				State:         sh.State,
+				TotalWrites:   sh.TotalWrites,
+				TotalFailures: sh.TotalFailures,
+				TotalDropped:  sh.TotalDropped,
+			})
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(m)
+	})
+
 	// Register ConnectRPC service handlers.
 
 	// Initialize Firestore-backed UserStore (if enabled).
@@ -213,7 +263,6 @@ func main() {
 		"project", projectPath)
 
 	// Register LLM proxy routes (selective activation).
-	var llmProxy *proxy.Proxy
 	if cfg.Proxy.Enabled {
 		allProviders := proxy.DefaultProviders()
 
@@ -355,6 +404,29 @@ func main() {
 			if userStore != nil {
 				llmProxy.SetUserStore(userStore)
 				llmProxy.SetBudgetChecker(notify.NewBudgetChecker(&notify.LogNotifier{}))
+
+				// CRIT-3: Wire durable spend outbox for DeductSpend retries.
+				home, homeErr := os.UserHomeDir()
+				if homeErr == nil {
+					obPath := filepath.Join(home, ".candela", "spend-outbox.db")
+					if err := os.MkdirAll(filepath.Dir(obPath), 0o700); err == nil {
+						ob, obErr := spendoutbox.New(obPath)
+						if obErr != nil {
+							slog.Warn("spend outbox unavailable — failed DeductSpend calls will not be retried",
+								"error", obErr)
+						} else {
+							spendOB = ob
+							llmProxy.SetSpendOutbox(ob)
+							// Start background retry worker.
+							spendWorker := spendoutbox.NewSpendSyncWorker(ob, userStore, 10*time.Second)
+							spendWorker.Start()
+							defer spendWorker.Stop()
+							defer func() { _ = ob.Close() }()
+							slog.Info("💾 Spend outbox + retry worker enabled", "path", obPath)
+						}
+					}
+				}
+
 				slog.Info("🔔 Budget deduction + notifications wired into proxy")
 			}
 

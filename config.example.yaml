@@ -71,6 +71,21 @@ proxy:
   # only available in the local CLI (`candela`), not in candela-server.
   # See ~/.config/candela/config.yaml for local LM Studio compat settings.
 
+  # Per-request cost cap (#277) — reject single requests estimated to exceed
+  # this amount. Uses a conservative estimate from input body size × model pricing.
+  # Set to 0 or omit to disable.
+  # max_request_cost_usd: 5.00
+
+  # Per-model daily spend limits (#278) — prevent a single expensive model
+  # from consuming the entire budget in one day. Model names are matched by
+  # prefix (e.g. "claude-opus-4" matches "claude-opus-4-20250514").
+  # Limits are per-user and reset at UTC midnight.
+  # daily_limits:
+  #   - model: "claude-opus-4"
+  #     max_daily_usd: 50.00
+  #   - model: "gpt-4.1"
+  #     max_daily_usd: 25.00
+
 # Pricing overrides.
 # Built-in defaults cover all cloud models at list prices.
 # Use this section for negotiated rates or enterprise discounts.

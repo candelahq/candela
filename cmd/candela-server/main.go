@@ -64,10 +64,12 @@ type Config struct {
 		} `yaml:"bigquery"`
 	} `yaml:"storage"`
 	Proxy struct {
-		Enabled   bool     `yaml:"enabled"`
-		ProjectID string   `yaml:"project_id"`
-		Providers []string `yaml:"providers"` // e.g. ["openai", "google", "anthropic", "anthropic-direct", "gemini-oai"]
-		VertexAI  struct {
+		Enabled        bool                     `yaml:"enabled"`
+		ProjectID      string                   `yaml:"project_id"`
+		Providers      []string                 `yaml:"providers"`            // e.g. ["openai", "google", "anthropic", "anthropic-direct", "gemini-oai"]
+		MaxRequestCost float64                  `yaml:"max_request_cost_usd"` // Per-request cost cap (0 = disabled)
+		DailyLimits    []proxy.SpendLimitConfig `yaml:"daily_limits"`         // Per-model daily spend limits
+		VertexAI       struct {
 			ProjectID   string `yaml:"project_id"`   // GCP project for Vertex AI
 			Region      string `yaml:"region"`       // e.g. "us-central1"
 			CachingMode string `yaml:"caching_mode"` // off|auto|system-only (default: auto)
@@ -396,8 +398,10 @@ func main() {
 
 		if len(activeProviders) > 0 {
 			llmProxy = proxy.New(proxy.Config{
-				Providers: activeProviders,
-				ProjectID: cfg.Proxy.ProjectID,
+				Providers:      activeProviders,
+				ProjectID:      cfg.Proxy.ProjectID,
+				MaxRequestCost: cfg.Proxy.MaxRequestCost,
+				DailyLimits:    cfg.Proxy.DailyLimits,
 			}, proc, calc)
 
 			// Wire team-mode features if Firestore is available.

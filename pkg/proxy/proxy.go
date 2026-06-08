@@ -237,6 +237,10 @@ type Proxy struct {
 	// CRIT-3: Durable outbox for failed DeductSpend calls.
 	spendOutbox *spendoutbox.Outbox
 
+	// #277/#278: Per-request cost cap and per-model daily spend limits.
+	config       Config        // retained for limit config access
+	spendTracker *SpendTracker // per-user per-model daily spend tracker (nil if no limits)
+
 	// HIGH-2: Service account spend tracking (micro-USD for precision).
 	saSpendMicroUSD atomic.Int64
 
@@ -246,8 +250,10 @@ type Proxy struct {
 
 // Config holds proxy configuration.
 type Config struct {
-	Providers []Provider `yaml:"providers"`
-	ProjectID string     `yaml:"project_id"`
+	Providers      []Provider         `yaml:"providers"`
+	ProjectID      string             `yaml:"project_id"`
+	MaxRequestCost float64            `yaml:"max_request_cost_usd"` // Per-request cost cap (0 = disabled)
+	DailyLimits    []SpendLimitConfig `yaml:"daily_limits"`         // Per-model daily spend limits
 }
 
 // DefaultProviders returns the standard LLM provider configurations.
@@ -283,17 +289,25 @@ func New(cfg Config, submitter SpanSubmitter, calc *costcalc.Calculator) *Proxy 
 		breakers[p.Name] = NewCircuitBreaker(cbCfg)
 	}
 
-	return &Proxy{
+	p := &Proxy{
 		providers: providers,
 		submitter: submitter,
 		calc:      calc,
 		projectID: cfg.ProjectID,
+		config:    cfg,
 		breakers:  breakers,
 		spanSem:   make(chan struct{}, 200), // CRIT-16: cap concurrent span goroutines
 		client: &http.Client{
 			Timeout: 5 * time.Minute, // LLM calls can be slow
 		},
 	}
+
+	// Initialize spend tracker if daily limits are configured.
+	if len(cfg.DailyLimits) > 0 {
+		p.spendTracker = NewSpendTracker()
+	}
+
+	return p
 }
 
 // SetUserStore sets the optional UserStore for budget deduction.
@@ -745,6 +759,60 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// ── Per-request cost cap (#277) ──
+	// Estimates the request cost from body size and rejects if it exceeds
+	// the configured maximum. Runs for all users (solo + team mode).
+	var estimatedCost float64
+	if p.config.MaxRequestCost > 0 && requestModel != "" {
+		estimatedCost = estimateRequestCost(p.calc, providerName, requestModel, reqBody)
+		if estimatedCost > p.config.MaxRequestCost {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusPaymentRequired)
+			errBody, _ := json.Marshal(map[string]any{
+				"error": map[string]any{
+					"message": fmt.Sprintf("estimated request cost $%.2f exceeds cap $%.2f for model %s",
+						estimatedCost, p.config.MaxRequestCost, requestModel),
+					"type": "request_cost_exceeded",
+					"code": 402,
+				},
+			})
+			_, _ = w.Write(errBody)
+			slog.Info("blocked request: estimated cost exceeds cap",
+				"user_id", effectiveUserID, "provider", providerName,
+				"model", requestModel, "estimated_usd", estimatedCost,
+				"cap_usd", p.config.MaxRequestCost)
+			return
+		}
+	}
+
+	// ── Per-model daily spend limit (#278) ──
+	// Checks in-memory per-user per-model daily spend against configured limits.
+	// Uses "local" fallback for solo mode where effectiveUserID is empty.
+	if p.spendTracker != nil && requestModel != "" {
+		limitUser := effectiveUserID
+		if limitUser == "" {
+			limitUser = "local"
+		}
+		allowed, spent, limit := p.spendTracker.Check(limitUser, requestModel, p.config.DailyLimits, estimatedCost)
+		if !allowed {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusPaymentRequired)
+			errBody, _ := json.Marshal(map[string]any{
+				"error": map[string]any{
+					"message": fmt.Sprintf("daily spend limit for %s reached ($%.2f/$%.2f)",
+						requestModel, spent, limit),
+					"type": "daily_limit_exceeded",
+					"code": 402,
+				},
+			})
+			_, _ = w.Write(errBody)
+			slog.Info("blocked request: daily model spend limit exceeded",
+				"user_id", limitUser, "model", requestModel,
+				"spent_usd", spent, "limit_usd", limit)
+			return
+		}
+	}
+
 	// --- Translation layer ---
 	// If the provider has a FormatTranslator, convert the request format
 	// (e.g. OpenAI Chat Completions → Anthropic Messages).
@@ -1087,6 +1155,22 @@ func (p *Proxy) handleStandardResponse(
 		deductCtx, deductCancel := context.WithTimeout(context.WithoutCancel(r.Context()), 15*time.Second)
 		p.deductBudget(deductCtx, provider, model, effectiveUserID, inputTokens, outputTokens)
 		deductCancel()
+	} else if cbAllow && p.spendTracker != nil {
+		// Solo mode: no UserStore but spend tracker is active.
+		// Record per-model spend so daily limits work without Firestore.
+		model, _ := extractRequestInfo(provider.Name, reqBody)
+		_, inputTokens, outputTokens := extractResponseInfo(provider.Name, respBody)
+		ct := extractCacheTokens(provider.Name, respBody)
+		if model == "" {
+			model = extractModelFromResponse(provider.Name, respBody)
+		}
+		inputTokens = p.calc.NormalizeCachedInputWithTTL(provider.Name, model, inputTokens, ct.CacheReadTokens, ct.CacheCreationTokens, extendedTTL)
+		cost := p.calc.Calculate(provider.Name, model, inputTokens, outputTokens)
+		limitUser := effectiveUserID
+		if limitUser == "" {
+			limitUser = "local"
+		}
+		p.spendTracker.Record(limitUser, model, cost, p.config.DailyLimits)
 	}
 
 	// Create observability span (async — don't block the handler).
@@ -1229,6 +1313,21 @@ func (p *Proxy) handleStreamingResponse(
 		deductCtx, deductCancel := context.WithTimeout(context.WithoutCancel(r.Context()), 15*time.Second)
 		p.deductBudget(deductCtx, provider, model, effectiveUserID, inputTokens, outputTokens)
 		deductCancel()
+	} else if cbAllow && p.spendTracker != nil {
+		// Solo mode: record per-model spend for daily limits.
+		model, _ := extractRequestInfo(provider.Name, reqBody)
+		_, inputTokens, outputTokens := extractStreamingUsage(provider.Name, parseData)
+		ct := extractStreamingCacheTokens(provider.Name, parseData)
+		if model == "" {
+			model = extractModelFromStreamingResponse(provider.Name, parseData)
+		}
+		inputTokens = p.calc.NormalizeCachedInputWithTTL(provider.Name, model, inputTokens, ct.CacheReadTokens, ct.CacheCreationTokens, extendedTTL)
+		cost := p.calc.Calculate(provider.Name, model, inputTokens, outputTokens)
+		limitUser := effectiveUserID
+		if limitUser == "" {
+			limitUser = "local"
+		}
+		p.spendTracker.Record(limitUser, model, cost, p.config.DailyLimits)
 	}
 
 	// Create observability span (async — don't block the handler).
@@ -1307,6 +1406,13 @@ func (p *Proxy) deductBudget(ctx context.Context, provider Provider, model, user
 
 	totalTokens := inputTokens + outputTokens
 	cost := p.calc.Calculate(provider.Name, model, inputTokens, outputTokens)
+
+	// #278: Record per-model daily spend in the in-memory tracker.
+	// This must happen even if DeductSpend fails, since the upstream
+	// response was already forwarded (spend happened, we're tracking it).
+	if p.spendTracker != nil && cost > 0 {
+		p.spendTracker.Record(userID, model, cost, p.config.DailyLimits)
+	}
 
 	// #10: DeductSpend is called when CostUSD>0 OR TotalTokens>0.
 	// The TotalTokens>0 case handles: unknown cloud models (cost=$0 from pricing

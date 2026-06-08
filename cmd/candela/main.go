@@ -79,9 +79,11 @@ type Config struct {
 	RuntimeManage  runtime.ManagerConfig `yaml:"runtime_manage"`  // Auto-start, auto-pull, models
 
 	// Direct cloud providers (solo mode — call Gemini/Claude without a server).
-	Providers []LocalProvider `yaml:"providers"`
-	VertexAI  VertexAIConfig  `yaml:"vertex_ai"`
-	AWS       AWSConfig       `yaml:"aws"`
+	Providers      []LocalProvider          `yaml:"providers"`
+	VertexAI       VertexAIConfig           `yaml:"vertex_ai"`
+	AWS            AWSConfig                `yaml:"aws"`
+	MaxRequestCost float64                  `yaml:"max_request_cost_usd"` // Per-request cost cap (0 = disabled)
+	DailyLimits    []proxy.SpendLimitConfig `yaml:"daily_limits"`         // Per-model daily spend limits
 }
 
 // LocalProvider configures a direct cloud provider for solo mode.
@@ -1117,8 +1119,10 @@ func buildCloudProxy(cfg Config, submitter *processor.SpanProcessor) (*proxy.Pro
 
 	calc := costcalc.New()
 	cloudProxy := proxy.New(proxy.Config{
-		Providers: providers,
-		ProjectID: "local",
+		Providers:      providers,
+		ProjectID:      "local",
+		MaxRequestCost: cfg.MaxRequestCost,
+		DailyLimits:    cfg.DailyLimits,
 	}, submitter, calc)
 
 	var names []string

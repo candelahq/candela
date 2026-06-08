@@ -194,7 +194,7 @@ func TestPeek_Ordering(t *testing.T) {
 			UserID:    "user-1",
 			CostUSD:   0.01,
 			Tokens:    10,
-			CreatedAt: now.Add(time.Duration(2-i) * time.Second), // reverse order
+			CreatedAt: now.Add(-time.Duration(i) * time.Second), // ord-0=now, ord-1=now-1s, ord-2=now-2s
 		}); err != nil {
 			t.Fatalf("Enqueue: %v", err)
 		}
@@ -208,7 +208,7 @@ func TestPeek_Ordering(t *testing.T) {
 		t.Fatalf("got %d records, want 3", len(records))
 	}
 
-	// Oldest first: ord-2 (now+0s), ord-1 (now+1s), ord-0 (now+2s).
+	// Oldest first: ord-2 (now-2s), ord-1 (now-1s), ord-0 (now).
 	want := []string{"ord-2", "ord-1", "ord-0"}
 	for i, rec := range records {
 		if rec.ID != want[i] {

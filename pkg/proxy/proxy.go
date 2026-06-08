@@ -762,8 +762,9 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 	// ── Per-request cost cap (#277) ──
 	// Estimates the request cost from body size and rejects if it exceeds
 	// the configured maximum. Runs for all users (solo + team mode).
+	var estimatedCost float64
 	if p.config.MaxRequestCost > 0 && requestModel != "" {
-		estimatedCost := estimateRequestCost(p.calc, providerName, requestModel, len(reqBody))
+		estimatedCost = estimateRequestCost(p.calc, providerName, requestModel, reqBody)
 		if estimatedCost > p.config.MaxRequestCost {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusPaymentRequired)
@@ -786,8 +787,13 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 
 	// ── Per-model daily spend limit (#278) ──
 	// Checks in-memory per-user per-model daily spend against configured limits.
-	if p.spendTracker != nil && requestModel != "" && effectiveUserID != "" {
-		allowed, spent, limit := p.spendTracker.Check(effectiveUserID, requestModel, p.config.DailyLimits)
+	// Uses "local" fallback for solo mode where effectiveUserID is empty.
+	if p.spendTracker != nil && requestModel != "" {
+		limitUser := effectiveUserID
+		if limitUser == "" {
+			limitUser = "local"
+		}
+		allowed, spent, limit := p.spendTracker.Check(limitUser, requestModel, p.config.DailyLimits, estimatedCost)
 		if !allowed {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusPaymentRequired)
@@ -801,7 +807,7 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 			})
 			_, _ = w.Write(errBody)
 			slog.Info("blocked request: daily model spend limit exceeded",
-				"user_id", effectiveUserID, "model", requestModel,
+				"user_id", limitUser, "model", requestModel,
 				"spent_usd", spent, "limit_usd", limit)
 			return
 		}
@@ -1149,6 +1155,22 @@ func (p *Proxy) handleStandardResponse(
 		deductCtx, deductCancel := context.WithTimeout(context.WithoutCancel(r.Context()), 15*time.Second)
 		p.deductBudget(deductCtx, provider, model, effectiveUserID, inputTokens, outputTokens)
 		deductCancel()
+	} else if cbAllow && p.spendTracker != nil {
+		// Solo mode: no UserStore but spend tracker is active.
+		// Record per-model spend so daily limits work without Firestore.
+		model, _ := extractRequestInfo(provider.Name, reqBody)
+		_, inputTokens, outputTokens := extractResponseInfo(provider.Name, respBody)
+		ct := extractCacheTokens(provider.Name, respBody)
+		if model == "" {
+			model = extractModelFromResponse(provider.Name, respBody)
+		}
+		inputTokens = p.calc.NormalizeCachedInputWithTTL(provider.Name, model, inputTokens, ct.CacheReadTokens, ct.CacheCreationTokens, extendedTTL)
+		cost := p.calc.Calculate(provider.Name, model, inputTokens, outputTokens)
+		limitUser := effectiveUserID
+		if limitUser == "" {
+			limitUser = "local"
+		}
+		p.spendTracker.Record(limitUser, model, cost, p.config.DailyLimits)
 	}
 
 	// Create observability span (async — don't block the handler).
@@ -1291,6 +1313,21 @@ func (p *Proxy) handleStreamingResponse(
 		deductCtx, deductCancel := context.WithTimeout(context.WithoutCancel(r.Context()), 15*time.Second)
 		p.deductBudget(deductCtx, provider, model, effectiveUserID, inputTokens, outputTokens)
 		deductCancel()
+	} else if cbAllow && p.spendTracker != nil {
+		// Solo mode: record per-model spend for daily limits.
+		model, _ := extractRequestInfo(provider.Name, reqBody)
+		_, inputTokens, outputTokens := extractStreamingUsage(provider.Name, parseData)
+		ct := extractStreamingCacheTokens(provider.Name, parseData)
+		if model == "" {
+			model = extractModelFromStreamingResponse(provider.Name, parseData)
+		}
+		inputTokens = p.calc.NormalizeCachedInputWithTTL(provider.Name, model, inputTokens, ct.CacheReadTokens, ct.CacheCreationTokens, extendedTTL)
+		cost := p.calc.Calculate(provider.Name, model, inputTokens, outputTokens)
+		limitUser := effectiveUserID
+		if limitUser == "" {
+			limitUser = "local"
+		}
+		p.spendTracker.Record(limitUser, model, cost, p.config.DailyLimits)
 	}
 
 	// Create observability span (async — don't block the handler).

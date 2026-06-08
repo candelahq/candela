@@ -77,7 +77,7 @@ func TestSASpend_TracksAtomicCounter(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer tok")
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := srv.Client().Do(req)
 	if err != nil {
 		t.Fatalf("request failed: %v", err)
 	}
@@ -135,7 +135,7 @@ func TestDroppedSpans_IncrementedWhenSemaphoreFull(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer tok")
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := srv.Client().Do(req)
 	if err != nil {
 		t.Fatalf("request failed: %v", err)
 	}
@@ -146,7 +146,17 @@ func TestDroppedSpans_IncrementedWhenSemaphoreFull(t *testing.T) {
 		t.Fatalf("status = %d, want 200", resp.StatusCode)
 	}
 
-	if got := p.DroppedSpans(); got <= 0 {
+	// Poll DroppedSpans with a short timeout: the server-side
+	// droppedSpans.Add(1) runs after the response body is written,
+	// so the client may finish reading before the increment lands.
+	var got int64
+	for i := 0; i < 50; i++ {
+		if got = p.DroppedSpans(); got > 0 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if got <= 0 {
 		t.Errorf("DroppedSpans() = %d, want > 0 (span should have been dropped)", got)
 	}
 
@@ -211,7 +221,7 @@ func TestDeductBudget_EnqueuesToOutboxOnFailure(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer tok")
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := srv.Client().Do(req)
 	if err != nil {
 		t.Fatalf("request failed: %v", err)
 	}

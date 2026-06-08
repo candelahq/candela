@@ -100,7 +100,7 @@ func (h *TraceHandler) ListTraces(
 		// Default to 30 days so the list view doesn't silently exclude spans
 		// that fall outside a narrow window — GetTrace has no time filter and
 		// would otherwise show different totals for the same trace.
-		q.StartTime = time.Now().Add(-30 * 24 * time.Hour)
+		q.StartTime = time.Now().AddDate(0, 0, -30)
 	}
 	if q.EndTime.IsZero() {
 		q.EndTime = time.Now()

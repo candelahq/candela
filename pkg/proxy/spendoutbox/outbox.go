@@ -86,15 +86,18 @@ func (o *Outbox) Enqueue(ctx context.Context, rec SpendRecord) error {
 	if rec.CreatedAt.IsZero() {
 		rec.CreatedAt = time.Now().UTC()
 	}
-
-	now := time.Now().UTC().Format(time.RFC3339Nano)
+	// Use the same timestamp for both created_at and next_retry_at so that
+	// a Peek immediately after Enqueue always finds the record. A separate
+	// time.Now() call here could race with Peek's own time.Now() at
+	// nanosecond precision, causing the record to be invisible.
+	createdStr := rec.CreatedAt.UTC().Format(time.RFC3339Nano)
 
 	_, err := o.db.ExecContext(ctx,
 		`INSERT INTO spend_outbox (id, user_id, cost_usd, tokens, attempt_count, created_at, next_retry_at)
 		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
 		rec.ID, rec.UserID, rec.CostUSD, rec.Tokens, rec.AttemptCount,
-		rec.CreatedAt.UTC().Format(time.RFC3339Nano),
-		now,
+		createdStr,
+		createdStr,
 	)
 	if err != nil {
 		return fmt.Errorf("inserting spend record: %w", err)

@@ -97,15 +97,20 @@ func TestProcessor_AnomalyAttributePropagation(t *testing.T) {
 	proc.WithAnomalyDetector(detector)
 
 	ctx, cancel := context.WithCancel(context.Background())
-	go proc.Run(ctx)
+	defer cancel()
+
+	runDone := make(chan struct{})
+	go func() {
+		proc.Run(ctx)
+		close(runDone)
+	}()
 
 	// Submit a cost spike that should be flagged.
 	spike := anomalyTestSpan("spike-1", 5.00, 100)
 	proc.Submit(spike)
 
-	time.Sleep(500 * time.Millisecond)
-	cancel()
 	proc.Stop()
+	<-runDone
 
 	spans := w.allSpans()
 	if len(spans) == 0 {
@@ -137,14 +142,19 @@ func TestProcessor_AnomalyDetectorError_DoesNotBlockWrite(t *testing.T) {
 	proc.WithAnomalyDetector(detector)
 
 	ctx, cancel := context.WithCancel(context.Background())
-	go proc.Run(ctx)
+	defer cancel()
+
+	runDone := make(chan struct{})
+	go func() {
+		proc.Run(ctx)
+		close(runDone)
+	}()
 
 	span := anomalyTestSpan("s1", 0.01, 100)
 	proc.Submit(span)
 
-	time.Sleep(500 * time.Millisecond)
-	cancel()
 	proc.Stop()
+	<-runDone
 
 	spans := w.allSpans()
 	if len(spans) == 0 {
@@ -166,14 +176,19 @@ func TestProcessor_NilDetector_NoOp(t *testing.T) {
 	// Deliberately not calling WithAnomalyDetector.
 
 	ctx, cancel := context.WithCancel(context.Background())
-	go proc.Run(ctx)
+	defer cancel()
+
+	runDone := make(chan struct{})
+	go func() {
+		proc.Run(ctx)
+		close(runDone)
+	}()
 
 	span := anomalyTestSpan("no-detector", 0.01, 100)
 	proc.Submit(span)
 
-	time.Sleep(500 * time.Millisecond)
-	cancel()
 	proc.Stop()
+	<-runDone
 
 	spans := w.allSpans()
 	if len(spans) == 0 {
@@ -207,16 +222,21 @@ func TestProcessor_AnomalyNilAttributes_Initialized(t *testing.T) {
 	proc.WithAnomalyDetector(detector)
 
 	ctx, cancel := context.WithCancel(context.Background())
-	go proc.Run(ctx)
+	defer cancel()
+
+	runDone := make(chan struct{})
+	go func() {
+		proc.Run(ctx)
+		close(runDone)
+	}()
 
 	// Submit a spike with explicitly nil Attributes.
 	spike := anomalyTestSpan("nil-attrs", 5.00, 100)
 	spike.Attributes = nil
 	proc.Submit(spike)
 
-	time.Sleep(500 * time.Millisecond)
-	cancel()
 	proc.Stop()
+	<-runDone
 
 	spans := w.allSpans()
 	if len(spans) == 0 {
@@ -252,7 +272,13 @@ func TestProcessor_AnomalyPreservesExistingAttributes(t *testing.T) {
 	proc.WithAnomalyDetector(detector)
 
 	ctx, cancel := context.WithCancel(context.Background())
-	go proc.Run(ctx)
+	defer cancel()
+
+	runDone := make(chan struct{})
+	go func() {
+		proc.Run(ctx)
+		close(runDone)
+	}()
 
 	spike := anomalyTestSpan("existing-attrs", 5.00, 100)
 	spike.Attributes = map[string]string{
@@ -261,9 +287,8 @@ func TestProcessor_AnomalyPreservesExistingAttributes(t *testing.T) {
 	}
 	proc.Submit(spike)
 
-	time.Sleep(500 * time.Millisecond)
-	cancel()
 	proc.Stop()
+	<-runDone
 
 	spans := w.allSpans()
 	if len(spans) == 0 {
@@ -306,15 +331,20 @@ func TestProcessor_AnomalyNormalSpan_NoFlag(t *testing.T) {
 	proc.WithAnomalyDetector(detector)
 
 	ctx, cancel := context.WithCancel(context.Background())
-	go proc.Run(ctx)
+	defer cancel()
+
+	runDone := make(chan struct{})
+	go func() {
+		proc.Run(ctx)
+		close(runDone)
+	}()
 
 	// Submit a normal span (cost within baseline range).
 	normal := anomalyTestSpan("normal-1", 0.01, 100)
 	proc.Submit(normal)
 
-	time.Sleep(500 * time.Millisecond)
-	cancel()
 	proc.Stop()
+	<-runDone
 
 	spans := w.allSpans()
 	if len(spans) == 0 {

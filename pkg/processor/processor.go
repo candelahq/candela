@@ -12,6 +12,7 @@ import (
 
 	"log/slog"
 
+	"github.com/candelahq/candela/pkg/anomaly"
 	"github.com/candelahq/candela/pkg/costcalc"
 	"github.com/candelahq/candela/pkg/storage"
 )
@@ -23,11 +24,19 @@ import (
 type SpanProcessor struct {
 	writers      []*ResilientWriter
 	calc         *costcalc.Calculator
+	detector     *anomaly.Detector
 	batchSize    int
 	spanCh       chan storage.Span
 	done         chan struct{}
 	once         sync.Once
 	droppedSpans atomic.Int64
+}
+
+// WithAnomalyDetector attaches a Detector to the processor. When set, the
+// detector runs after cost enrichment on every flush batch and logs flagged
+// spans. Passing nil is a no-op (detector stays disabled).
+func (p *SpanProcessor) WithAnomalyDetector(d *anomaly.Detector) {
+	p.detector = d
 }
 
 // New creates a new in-process span processor with default resilience settings.
@@ -112,6 +121,43 @@ func (p *SpanProcessor) Run(ctx context.Context) {
 					batch[i].GenAI.InputTokens,
 					batch[i].GenAI.OutputTokens,
 				)
+			}
+		}
+
+		// Run anomaly detection after cost enrichment, before writing to sinks.
+		// Flagged spans get candela.anomaly=true stamped into their Attributes so
+		// the dashboard and audit trail can surface them without schema changes.
+		if p.detector != nil {
+			results, err := p.detector.Detect(ctx, batch)
+			if err != nil {
+				slog.Warn("anomaly detection error", "err", err)
+			} else if len(results) > 0 {
+				// Build a spanID-to-index map once so attribute propagation is
+				// O(N + M) instead of O(N * M).
+				spanIdx := make(map[string]int, len(batch))
+				for i := range batch {
+					spanIdx[batch[i].SpanID] = i
+				}
+				for _, r := range results {
+					slog.Warn("anomaly detected",
+						"span_id", r.Span.SpanID,
+						"metric", r.Metric,
+						"value", r.Value,
+						"mean", r.Mean,
+						"sigma", r.Sigma,
+						"tenant_id", r.Span.TenantID,
+						"model", r.Span.GenAI.Model,
+					)
+					// Propagate anomaly attributes back into the batch span so
+					// downstream sinks store the flag without a second write.
+					if idx, ok := spanIdx[r.Span.SpanID]; ok {
+						if batch[idx].Attributes == nil {
+							batch[idx].Attributes = make(map[string]string)
+						}
+						batch[idx].Attributes[anomaly.AttrAnomaly] = r.Span.Attributes[anomaly.AttrAnomaly]
+						batch[idx].Attributes[anomaly.AttrAnomalyReason] = r.Span.Attributes[anomaly.AttrAnomalyReason]
+					}
+				}
 			}
 		}
 

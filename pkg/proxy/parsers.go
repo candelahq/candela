@@ -31,6 +31,9 @@ type ProviderParser interface {
 var parserRegistry = map[string]ProviderParser{
 	"openai":            &openaiParser{},
 	"gemini-oai":        &openaiParser{}, // Gemini OpenAI-compat returns standard OpenAI format.
+	"mistral":           &openaiParser{}, // Mistral via Vertex AI rawPredict returns OpenAI format.
+	"deepseek":          &openaiParser{}, // DeepSeek via Vertex AI OpenAI-compat endpoint.
+	"qwen":              &openaiParser{}, // Qwen via Vertex AI OpenAI-compat endpoint.
 	"anthropic":         &anthropicParser{},
 	"anthropic-direct":  &anthropicParser{}, // Same wire format, just no Vertex AI translation.
 	"anthropic-vertex":  &anthropicParser{}, // Native Anthropic format routed via Vertex AI.
@@ -395,7 +398,7 @@ func extractModelFromResponse(provider string, body []byte) string {
 		if mv, ok := resp["modelVersion"].(string); ok && mv != "" {
 			return mv
 		}
-	case "openai", "gemini-oai":
+	case "openai", "gemini-oai", "mistral", "deepseek", "qwen":
 		if m, ok := resp["model"].(string); ok && m != "" {
 			return m
 		}
@@ -479,7 +482,7 @@ func extractCacheTokens(provider string, body []byte) CacheTokens {
 			}
 		}
 
-	case "openai", "gemini-oai":
+	case "openai", "gemini-oai", "mistral", "deepseek", "qwen":
 		// OpenAI reports cached tokens inside usage.prompt_tokens_details.cached_tokens
 		if usage, ok := resp["usage"].(map[string]interface{}); ok {
 			if details, ok := usage["prompt_tokens_details"].(map[string]interface{}); ok {
@@ -507,7 +510,7 @@ func extractStreamingCacheTokens(provider string, data []byte) CacheTokens {
 	case "anthropic", "anthropic-direct", "anthropic-vertex", "anthropic-bedrock":
 		return extractAnthropicStreamingCache(data)
 
-	case "openai", "gemini-oai":
+	case "openai", "gemini-oai", "mistral", "deepseek", "qwen":
 		return extractOpenAIStreamingCache(data)
 
 	case "google":
@@ -616,7 +619,7 @@ func extractGoogleStreamingCache(data []byte) CacheTokens {
 // This is a no-op if stream_options is already set or if the body is not valid JSON.
 func injectStreamUsageOption(provider string, body []byte) []byte {
 	switch provider {
-	case "openai", "gemini-oai":
+	case "openai", "gemini-oai", "mistral", "deepseek", "qwen":
 		// Only inject for OpenAI-compatible providers.
 	default:
 		return body

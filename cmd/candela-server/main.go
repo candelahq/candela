@@ -378,6 +378,56 @@ func main() {
 			allProviders = filtered
 		}
 
+		// Configure Mistral — routes through regional Vertex AI rawPredict
+		// endpoint with publisher "mistralai". Same auth pattern as Anthropic.
+		if cfg.Proxy.VertexAI.ProjectID != "" {
+			mistralRegion := cfg.Proxy.VertexAI.Region
+			if mistralRegion == "" {
+				mistralRegion = "us-central1"
+			}
+			for i, p := range allProviders {
+				switch p.Name {
+				case "mistral":
+					allProviders[i].UpstreamURL = proxy.VertexAIUpstreamURL(mistralRegion)
+					allProviders[i].PathRewriter = &proxy.VertexAIMaaSPathRewriter{
+						ProjectID: cfg.Proxy.VertexAI.ProjectID,
+						Region:    mistralRegion,
+						Publisher: "mistralai",
+					}
+					if tokenSource != nil {
+						allProviders[i].TokenSource = tokenSource
+					}
+					slog.Info("🔐 Mistral via Vertex AI configured",
+						"provider", p.Name,
+						"project", cfg.Proxy.VertexAI.ProjectID,
+						"region", mistralRegion,
+						"adc", tokenSource != nil)
+				}
+			}
+		}
+
+		// Configure DeepSeek & Qwen — route through Vertex AI's global
+		// OpenAI-compatible endpoint (same pattern as gemini-oai).
+		if geminiProjectID != "" {
+			for i, p := range allProviders {
+				switch p.Name {
+				case "deepseek", "qwen":
+					allProviders[i].UpstreamURL = proxy.VertexAIUpstreamURL("global")
+					allProviders[i].PathRewriter = &proxy.VertexAIGeminiOAIPathRewriter{
+						ProjectID: geminiProjectID,
+						Region:    "global",
+					}
+					if tokenSource != nil {
+						allProviders[i].TokenSource = tokenSource
+					}
+					slog.Info("🔐 "+p.Name+" via Vertex AI global endpoint configured",
+						"provider", p.Name,
+						"project", geminiProjectID,
+						"adc", tokenSource != nil)
+				}
+			}
+		}
+
 		var activeProviders []proxy.Provider
 
 		if len(cfg.Proxy.Providers) > 0 {
@@ -448,6 +498,9 @@ func main() {
 				"google":    "gemini-oai", // Gemini via OpenAI-compat endpoint
 				"anthropic": "anthropic",  // Anthropic with FormatTranslator (OpenAI→Messages)
 				"openai":    "openai",     // Native OpenAI passthrough
+				"mistral":   "mistral",    // Mistral via Vertex AI rawPredict
+				"deepseek":  "deepseek",   // DeepSeek via Vertex AI OpenAI-compat
+				"qwen":      "qwen",       // Qwen via Vertex AI OpenAI-compat
 			}
 
 			// Build set of active provider names for quick lookup.

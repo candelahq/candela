@@ -72,6 +72,19 @@ const PRICING_MAP: Record<string, ModelPricing> = {
   "claude-3-5-sonnet-20241022":   { inputPerMillion: 3.00,  outputPerMillion: 15.00 },
   "claude-haiku-3-5-20241022":    { inputPerMillion: 0.80,  outputPerMillion: 4.00 },
   "claude-3-opus-20240229":       { inputPerMillion: 15.00, outputPerMillion: 75.00 },
+
+  // Mistral (via Vertex AI)
+  "mistral-small-2503":            { inputPerMillion: 0.10,  outputPerMillion: 0.30 },
+  "mistral-medium-3":              { inputPerMillion: 0.40,  outputPerMillion: 2.00 },
+  "codestral-2501":                { inputPerMillion: 0.30,  outputPerMillion: 0.90 },
+
+  // DeepSeek (via Vertex AI)
+  "deepseek-v3.1-maas":            { inputPerMillion: 0.14,  outputPerMillion: 0.28 },
+  "deepseek-v3.2-maas":            { inputPerMillion: 0.14,  outputPerMillion: 0.28 },
+  "deepseek-r1-0528-maas":         { inputPerMillion: 0.14,  outputPerMillion: 0.28 },
+
+  // Qwen (via Vertex AI)
+  "qwen3-235b-a22b-instruct-2507-maas": { inputPerMillion: 0.30, outputPerMillion: 1.20 },
 };
 
 /**

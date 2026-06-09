@@ -98,6 +98,9 @@ var providerAliases = map[string]string{
 	"anthropic-vertex":  "anthropic",
 	"anthropic-bedrock": "anthropic",
 	"gemini-oai":        "google", // Gemini via OpenAI-compat shares Google cache pricing
+	"mistral":           "openai", // Mistral uses OpenAI-style token reporting
+	"deepseek":          "openai", // DeepSeek uses OpenAI-style token reporting
+	"qwen":              "openai", // Qwen uses OpenAI-style token reporting
 }
 
 // New creates a Calculator with default pricing for all supported cloud models.
@@ -607,6 +610,19 @@ func (c *Calculator) loadDefaults() {
 		// GPT-4o (legacy)
 		{Provider: "openai", Model: "gpt-4o", InputPerMillion: 2.50, OutputPerMillion: 10.00},
 		{Provider: "openai", Model: "gpt-4o-mini", InputPerMillion: 0.15, OutputPerMillion: 0.60},
+
+		// ── Mistral (via Vertex AI rawPredict) ───────────────────
+		{Provider: "mistral", Model: "mistral-small-2503", InputPerMillion: 0.10, OutputPerMillion: 0.30},
+		{Provider: "mistral", Model: "mistral-medium-3", InputPerMillion: 0.40, OutputPerMillion: 2.00},
+		{Provider: "mistral", Model: "codestral-2501", InputPerMillion: 0.30, OutputPerMillion: 0.90},
+
+		// ── DeepSeek (via Vertex AI OpenAI-compat) ──────────────
+		{Provider: "deepseek", Model: "deepseek-v3.1-maas", InputPerMillion: 0.14, OutputPerMillion: 0.28},
+		{Provider: "deepseek", Model: "deepseek-v3.2-maas", InputPerMillion: 0.14, OutputPerMillion: 0.28},
+		{Provider: "deepseek", Model: "deepseek-r1-0528-maas", InputPerMillion: 0.14, OutputPerMillion: 0.28},
+
+		// ── Qwen (via Vertex AI OpenAI-compat) ─────────────────
+		{Provider: "qwen", Model: "qwen3-235b-a22b-instruct-2507-maas", InputPerMillion: 0.30, OutputPerMillion: 1.20},
 	}
 	for _, p := range defaults {
 		c.defaults[c.key(p.Provider, p.Model)] = p

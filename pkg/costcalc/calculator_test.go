@@ -161,6 +161,42 @@ func TestCalculate(t *testing.T) {
 			wantMin:      0.006,
 			wantMax:      0.007,
 		},
+		{
+			name:         "Mistral Medium 3",
+			provider:     "mistral",
+			model:        "mistral-medium-3",
+			inputTokens:  1000,
+			outputTokens: 500,
+			wantMin:      0.001, // 1K×$0.40/M + 500×$2.00/M = $0.0004 + $0.001 = $0.0014
+			wantMax:      0.0015,
+		},
+		{
+			name:         "DeepSeek V3.2",
+			provider:     "deepseek",
+			model:        "deepseek-v3.2-maas",
+			inputTokens:  10000,
+			outputTokens: 2000,
+			wantMin:      0.001, // 10K×$0.14/M + 2K×$0.28/M = $0.0014 + $0.00056 = $0.00196
+			wantMax:      0.002,
+		},
+		{
+			name:         "Codestral 2501",
+			provider:     "mistral",
+			model:        "codestral-2501",
+			inputTokens:  1000,
+			outputTokens: 500,
+			wantMin:      0.0007, // 1K×$0.30/M + 500×$0.90/M = $0.0003 + $0.00045 = $0.00075
+			wantMax:      0.0008,
+		},
+		{
+			name:         "Qwen3 235B",
+			provider:     "qwen",
+			model:        "qwen3-235b-a22b-instruct-2507-maas",
+			inputTokens:  1000,
+			outputTokens: 500,
+			wantMin:      0.0009, // 1K×$0.30/M + 500×$1.20/M = $0.0003 + $0.0006 = $0.0009
+			wantMax:      0.001,
+		},
 	}
 
 	for _, tt := range tests {

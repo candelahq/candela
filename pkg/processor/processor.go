@@ -131,7 +131,13 @@ func (p *SpanProcessor) Run(ctx context.Context) {
 			results, err := p.detector.Detect(ctx, batch)
 			if err != nil {
 				slog.Warn("anomaly detection error", "err", err)
-			} else {
+			} else if len(results) > 0 {
+				// Build a spanID-to-index map once so attribute propagation is
+				// O(N + M) instead of O(N * M).
+				spanIdx := make(map[string]int, len(batch))
+				for i := range batch {
+					spanIdx[batch[i].SpanID] = i
+				}
 				for _, r := range results {
 					slog.Warn("anomaly detected",
 						"span_id", r.Span.SpanID,
@@ -144,14 +150,12 @@ func (p *SpanProcessor) Run(ctx context.Context) {
 					)
 					// Propagate anomaly attributes back into the batch span so
 					// downstream sinks store the flag without a second write.
-					for i := range batch {
-						if batch[i].SpanID == r.Span.SpanID {
-							if batch[i].Attributes == nil {
-								batch[i].Attributes = make(map[string]string)
-							}
-							batch[i].Attributes[anomaly.AttrAnomaly] = r.Span.Attributes[anomaly.AttrAnomaly]
-							batch[i].Attributes[anomaly.AttrAnomalyReason] = r.Span.Attributes[anomaly.AttrAnomalyReason]
+					if idx, ok := spanIdx[r.Span.SpanID]; ok {
+						if batch[idx].Attributes == nil {
+							batch[idx].Attributes = make(map[string]string)
 						}
+						batch[idx].Attributes[anomaly.AttrAnomaly] = r.Span.Attributes[anomaly.AttrAnomaly]
+						batch[idx].Attributes[anomaly.AttrAnomalyReason] = r.Span.Attributes[anomaly.AttrAnomalyReason]
 					}
 				}
 			}

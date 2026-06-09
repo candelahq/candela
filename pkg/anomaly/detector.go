@@ -18,14 +18,13 @@ const (
 	// AttrAnomaly is set to "true" on flagged spans.
 	AttrAnomaly = "candela.anomaly"
 	// AttrAnomalyReason describes which metric triggered the flag, e.g.
-	// "cost_2.5sigma" or "latency_2.5sigma".
+	// "cost_usd_2sigma" or "latency_ms_2sigma".
 	AttrAnomalyReason = "candela.anomaly_reason"
 )
 
 // Config controls detector behaviour.
 type Config struct {
 	// WindowDays is the rolling lookback used to build the baseline.
-	// Spans older than WindowDays before the evaluated span are excluded.
 	WindowDays int
 	// SigmaThreshold is the number of standard deviations above the mean
 	// required to flag a span. Lower values = more sensitive.
@@ -54,6 +53,13 @@ type Result struct {
 	Sigma  float64 // how many sigma above mean
 }
 
+// groupKey identifies a unique (tenant, model) baseline group.
+type groupKey struct {
+	tenantID  string
+	model     string
+	projectID string
+}
+
 // Detector checks incoming LLM spans against a rolling baseline.
 type Detector struct {
 	reader storage.SpanReader
@@ -66,50 +72,65 @@ func New(reader storage.SpanReader, cfg Config) *Detector {
 }
 
 // Detect checks each span in the batch against its per-(tenant, model) baseline
-// and returns anomalous spans. It also stamps anomaly attributes directly onto
-// the span copies in the returned results so callers can re-ingest or surface
-// them downstream.
+// and returns anomalous spans. It stamps anomaly attributes onto copies of
+// flagged spans so callers can re-ingest or surface them downstream.
 //
-// Only spans with Kind == SpanKindLLM and a non-zero cost or duration are
-// evaluated; all others pass through silently.
+// Spans are grouped by (tenant, model) before querying so the batch issues one
+// SearchSpans call per unique group, not one per span.
+//
+// Only spans with Kind == SpanKindLLM and a non-nil GenAI payload are evaluated.
 func (d *Detector) Detect(ctx context.Context, spans []storage.Span) ([]Result, error) {
-	var results []Result
+	// Partition LLM spans by (tenant, model, project) to avoid N+1 queries.
+	groups := make(map[groupKey][]storage.Span)
 	for _, span := range spans {
-		if span.Kind != storage.SpanKindLLM {
+		if span.Kind != storage.SpanKindLLM || span.GenAI == nil {
 			continue
 		}
-		if span.GenAI == nil {
-			continue
+		k := groupKey{tenantID: span.TenantID, model: span.GenAI.Model, projectID: span.ProjectID}
+		groups[k] = append(groups[k], span)
+	}
+
+	var results []Result
+	for key, group := range groups {
+		// Use the earliest StartTime in the group as the window anchor so all
+		// spans in the group are covered by the same historical query.
+		windowEnd := group[0].StartTime
+		for _, s := range group[1:] {
+			if s.StartTime.Before(windowEnd) {
+				windowEnd = s.StartTime
+			}
 		}
-		rs, err := d.checkSpan(ctx, span)
+		windowStart := windowEnd.UTC().Add(-time.Duration(d.cfg.WindowDays) * 24 * time.Hour)
+
+		historical, err := d.reader.SearchSpans(ctx, storage.SpanQuery{
+			ProjectID: key.projectID,
+			StartTime: windowStart,
+			EndTime:   windowEnd,
+			Kind:      storage.SpanKindLLM,
+			Model:     key.model,
+			TenantID:  key.tenantID,
+			PageSize:  10000,
+		})
 		if err != nil {
 			return nil, err
 		}
-		results = append(results, rs...)
+		if historical == nil {
+			return nil, fmt.Errorf("received nil span result from reader")
+		}
+
+		for _, span := range group {
+			rs := d.checkGroup(span, historical.Spans)
+			results = append(results, rs...)
+		}
 	}
 	return results, nil
 }
 
-// checkSpan evaluates a single span for cost and latency anomalies.
-func (d *Detector) checkSpan(ctx context.Context, span storage.Span) ([]Result, error) {
-	windowStart := span.StartTime.UTC().Add(-time.Duration(d.cfg.WindowDays) * 24 * time.Hour)
-
-	historical, err := d.reader.SearchSpans(ctx, storage.SpanQuery{
-		ProjectID: span.ProjectID,
-		StartTime: windowStart,
-		EndTime:   span.StartTime,
-		Kind:      storage.SpanKindLLM,
-		Model:     span.GenAI.Model,
-		TenantID:  span.TenantID,
-		PageSize:  10000,
-	})
-	if err != nil {
-		return nil, err
-	}
-
+// checkGroup evaluates a single span against a pre-fetched history slice.
+func (d *Detector) checkGroup(span storage.Span, history []storage.Span) []Result {
 	var results []Result
 
-	if r, ok := d.checkMetric(span, historical.Spans, "cost_usd", func(s storage.Span) float64 {
+	if r, ok := d.checkMetric(span, history, "cost_usd", func(s storage.Span) float64 {
 		if s.GenAI == nil {
 			return 0
 		}
@@ -118,18 +139,17 @@ func (d *Detector) checkSpan(ctx context.Context, span storage.Span) ([]Result, 
 		results = append(results, r)
 	}
 
-	if r, ok := d.checkMetric(span, historical.Spans, "latency_ms", func(s storage.Span) float64 {
+	if r, ok := d.checkMetric(span, history, "latency_ms", func(s storage.Span) float64 {
 		return float64(s.Duration.Milliseconds())
 	}); ok {
 		results = append(results, r)
 	}
 
-	return results, nil
+	return results
 }
 
-// checkMetric computes the rolling mean and stddev for a single metric across
-// the historical window and returns a Result if the span's value exceeds the
-// sigma threshold.
+// checkMetric computes the rolling mean and stddev for a single metric and
+// returns a Result if the span's value exceeds the sigma threshold.
 func (d *Detector) checkMetric(span storage.Span, history []storage.Span, metric string, extract func(storage.Span) float64) (Result, bool) {
 	vals := make([]float64, 0, len(history))
 	for _, h := range history {
@@ -143,7 +163,7 @@ func (d *Detector) checkMetric(span storage.Span, history []storage.Span, metric
 
 	mean, stddev := stats(vals)
 	// Treat near-zero stddev (< 0.1% of mean) as zero to avoid false positives
-	// from floating-point precision when all historical values are identical.
+	// when all historical values are identical.
 	if mean > 0 && stddev/mean < 0.001 {
 		return Result{}, false
 	}
@@ -160,8 +180,8 @@ func (d *Detector) checkMetric(span storage.Span, history []storage.Span, metric
 	if sigma < d.cfg.SigmaThreshold {
 		return Result{}, false
 	}
-	// Require the absolute delta to exceed 10% of the mean to avoid flagging
-	// noise when stddev is near-zero (all-identical history).
+	// Require the absolute delta to exceed 10% of the mean to filter noise
+	// when stddev is near-zero.
 	if mean > 0 && (observed-mean)/mean < 0.10 {
 		return Result{}, false
 	}

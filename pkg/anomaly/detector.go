@@ -94,18 +94,18 @@ func (d *Detector) Detect(ctx context.Context, spans []storage.Span) ([]Result, 
 	for key, group := range groups {
 		// Use the earliest StartTime in the group as the window anchor so all
 		// spans in the group are covered by the same historical query.
-		windowEnd := group[0].StartTime
+		anchorTime := group[0].StartTime
 		for _, s := range group[1:] {
-			if s.StartTime.Before(windowEnd) {
-				windowEnd = s.StartTime
+			if s.StartTime.Before(anchorTime) {
+				anchorTime = s.StartTime
 			}
 		}
-		windowStart := windowEnd.UTC().Add(-time.Duration(d.cfg.WindowDays) * 24 * time.Hour)
+		windowStart := anchorTime.UTC().Add(-time.Duration(d.cfg.WindowDays) * 24 * time.Hour)
 
 		historical, err := d.reader.SearchSpans(ctx, storage.SpanQuery{
 			ProjectID: key.projectID,
 			StartTime: windowStart,
-			EndTime:   windowEnd,
+			EndTime:   anchorTime,
 			Kind:      storage.SpanKindLLM,
 			Model:     key.model,
 			TenantID:  key.tenantID,

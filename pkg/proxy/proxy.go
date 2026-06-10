@@ -297,8 +297,10 @@ func DefaultProviders() []Provider {
 		{Name: "anthropic-direct", UpstreamURL: "https://api.anthropic.com"},
 		// Mistral via Vertex AI (rawPredict). Uses MaaSPathRewriter with publisher "mistralai".
 		{Name: "mistral", UpstreamURL: "https://us-central1-aiplatform.googleapis.com"},
-		// DeepSeek via Vertex AI OpenAI-compat endpoint (global). Model prefix: deepseek-ai/
-		{Name: "deepseek", UpstreamURL: "https://aiplatform.googleapis.com"},
+		// DeepSeek R1 via Vertex AI OpenAI-compat endpoint (us-central1). Model prefix: deepseek-ai/
+		{Name: "deepseek", UpstreamURL: "https://us-central1-aiplatform.googleapis.com"},
+		// DeepSeek V3 via Vertex AI OpenAI-compat endpoint (global). Model prefix: deepseek-ai/
+		{Name: "deepseek-v3", UpstreamURL: "https://aiplatform.googleapis.com"},
 		// Qwen via Vertex AI OpenAI-compat endpoint (global). Model prefix: qwen/
 		{Name: "qwen", UpstreamURL: "https://aiplatform.googleapis.com"},
 	}
@@ -1060,7 +1062,7 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 			if !strings.HasPrefix(requestModel, "google/") {
 				upstreamBody = rewriteModelField(upstreamBody, "google/"+requestModel)
 			}
-		case "deepseek":
+		case "deepseek", "deepseek-v3":
 			if !strings.HasPrefix(requestModel, "deepseek-ai/") {
 				upstreamBody = rewriteModelField(upstreamBody, "deepseek-ai/"+requestModel)
 			}
@@ -1107,7 +1109,11 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 
 	// Build the upstream request.
 	upstreamURL := provider.UpstreamURL + upstreamPath
-	if r.URL.RawQuery != "" {
+	// SECURITY: Only forward client query params for passthrough providers
+	// (openai, anthropic-direct) where the client provides their own API key.
+	// For managed-auth providers (Vertex AI, Bedrock), strip the query string
+	// to prevent parameter injection (?key=..., ?alt=media, etc.).
+	if r.URL.RawQuery != "" && provider.TokenSource == nil && provider.RequestSigner == nil {
 		upstreamURL += "?" + r.URL.RawQuery
 	}
 
@@ -1298,7 +1304,12 @@ func (p *Proxy) handleStandardResponse(
 	// latency. Previously this ran inside the async span goroutine, causing
 	// CheckBudget to read stale spend data and allowing sequential calls to
 	// overshoot the budget (e.g. $9.45 spent on a $5 limit).
-	if cbAllow && p.users != nil && effectiveUserID != "" {
+	//
+	// SECURITY: Budget deduction is decoupled from cbAllow. Even when the
+	// circuit breaker is open, we must still deduct spend and release the
+	// pending-spend reservation. Otherwise users get free LLM usage during
+	// CB open windows, and leaked reservations progressively block users.
+	if p.users != nil && effectiveUserID != "" {
 		model, _ := extractRequestInfo(provider.Name, reqBody)
 		_, inputTokens, outputTokens := extractResponseInfo(provider.Name, respBody)
 		// Normalize cached input tokens for accurate budget deduction.
@@ -1318,7 +1329,7 @@ func (p *Proxy) handleStandardResponse(
 		if budgetReserved > 0 {
 			p.pendingSpend.Release(effectiveUserID, budgetReserved)
 		}
-	} else if cbAllow && p.spendTracker != nil {
+	} else if p.spendTracker != nil {
 		// Solo mode: no UserStore but spend tracker is active.
 		// Record per-model spend so daily limits work without Firestore.
 		model, _ := extractRequestInfo(provider.Name, reqBody)
@@ -1466,7 +1477,7 @@ func (p *Proxy) handleStreamingResponse(
 		streamStatus = storage.SpanStatusError
 	}
 	// ── Budget deduction (SYNCHRONOUS) — same rationale as handleStandardResponse.
-	if cbAllow && p.users != nil && effectiveUserID != "" {
+	if p.users != nil && effectiveUserID != "" {
 		model, _ := extractRequestInfo(provider.Name, reqBody)
 		_, inputTokens, outputTokens := extractStreamingUsage(provider.Name, parseData)
 		ct := extractStreamingCacheTokens(provider.Name, parseData)
@@ -1480,7 +1491,7 @@ func (p *Proxy) handleStreamingResponse(
 		if budgetReserved > 0 {
 			p.pendingSpend.Release(effectiveUserID, budgetReserved)
 		}
-	} else if cbAllow && p.spendTracker != nil {
+	} else if p.spendTracker != nil {
 		// Solo mode: record per-model spend for daily limits.
 		model, _ := extractRequestInfo(provider.Name, reqBody)
 		_, inputTokens, outputTokens := extractStreamingUsage(provider.Name, parseData)

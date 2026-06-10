@@ -627,15 +627,14 @@ func (c *Calculator) loadDefaults() {
 		{Provider: "mistral", Model: "codestral-2501", InputPerMillion: 0.30, OutputPerMillion: 0.90},
 		{Provider: "mistral", Model: "codestral-2", InputPerMillion: 0.30, OutputPerMillion: 0.90},
 
-		// ── DeepSeek (via Vertex AI OpenAI-compat, global endpoint) ──────
-		// NOTE: V3.1 excluded — it requires regional us-west2 endpoint, not global.
-		// V3.2 supersedes V3.1 and is available on the global endpoint.
-		{Provider: "deepseek", Model: "deepseek-v3.2-maas", InputPerMillion: 0.14, OutputPerMillion: 0.28},
+		// ── DeepSeek R1 (via Vertex AI, us-central1) ──────
 		{Provider: "deepseek", Model: "deepseek-r1-0528-maas", InputPerMillion: 0.14, OutputPerMillion: 0.28},
-		// Aliases — clients (OpenCode, Cursor, etc.) often use shorter names.
 		{Provider: "deepseek", Model: "deepseek-r1", InputPerMillion: 0.14, OutputPerMillion: 0.28},
-		{Provider: "deepseek", Model: "deepseek-v3-maas", InputPerMillion: 0.14, OutputPerMillion: 0.28},
-		{Provider: "deepseek", Model: "deepseek-chat", InputPerMillion: 0.14, OutputPerMillion: 0.28},
+
+		// ── DeepSeek V3 (via Vertex AI, global) ──────
+		{Provider: "deepseek-v3", Model: "deepseek-v3.2-maas", InputPerMillion: 0.14, OutputPerMillion: 0.28},
+		{Provider: "deepseek-v3", Model: "deepseek-v3-maas", InputPerMillion: 0.14, OutputPerMillion: 0.28},
+		{Provider: "deepseek-v3", Model: "deepseek-chat", InputPerMillion: 0.14, OutputPerMillion: 0.28},
 
 		// ── Qwen (via Vertex AI OpenAI-compat) ─────────────────
 		{Provider: "qwen", Model: "qwen3-235b-a22b-instruct-2507-maas", InputPerMillion: 0.30, OutputPerMillion: 1.20},

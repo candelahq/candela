@@ -44,6 +44,18 @@ providers:
   - name: gemini-oai
     host: generativelanguage.googleapis.com
     intercept: false  # shares host with google
+  - name: gemini-vertex
+    host: us-central1-aiplatform.googleapis.com
+    intercept: false  # shares host with anthropic-vertex
+  - name: mistral
+    host: us-central1-aiplatform.googleapis.com
+    intercept: false  # shares host with anthropic-vertex
+  - name: deepseek
+    host: aiplatform.googleapis.com
+    intercept: true
+  - name: qwen
+    host: aiplatform.googleapis.com
+    intercept: false  # shares host with deepseek
 
 # ── Transparent proxy ──
 transparent:

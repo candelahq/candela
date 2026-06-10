@@ -25,7 +25,15 @@ proxy:
     - openai
     - google
     - anthropic
+    - anthropic-vertex
+    - anthropic-direct
+    - anthropic-bedrock
     - gemini-oai
+    - gemini-direct
+    - gemini-vertex
+    - mistral
+    - deepseek
+    - qwen
 
 # No CORS needed — UI and API are same-origin in combined container.
 cors:

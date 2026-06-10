@@ -674,13 +674,23 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// ── Pre-flight budget check ──
+	// Check if user is admin — admins bypass rate limits and budget gates.
+	var isAdmin bool
 	if p.users != nil && effectiveUserID != "" && !isServiceAccount {
+		if u, err := p.users.GetUser(r.Context(), effectiveUserID); err == nil && u != nil && u.Role == storage.RoleAdmin {
+			isAdmin = true
+		}
+	}
+
+	// ── Pre-flight budget check ──
+	if p.users != nil && effectiveUserID != "" && !isServiceAccount && !isAdmin {
 		// ── Rate limiting ──
 		allowed, count, limit, rlErr := p.users.CheckRateLimit(r.Context(), effectiveUserID)
 		if rlErr != nil {
-			slog.Warn("rate limit check failed, allowing request",
+			slog.Error("rate limit check failed, blocking request",
 				"user_id", effectiveUserID, "error", rlErr)
+			http.Error(w, `{"error":{"message":"rate limit check unavailable — try again shortly","type":"service_error","code":503}}`, http.StatusServiceUnavailable)
+			return
 		} else if !allowed {
 			w.Header().Set("Content-Type", "application/json")
 			w.Header().Set("Retry-After", "60")
@@ -763,14 +773,21 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 
 	// ── Budget pre-flight with model-aware floor (#7) ──
 	// Only applies in team mode (UserStore configured).
-	if p.users != nil && effectiveUserID != "" && !isServiceAccount {
+	if p.users != nil && effectiveUserID != "" && !isServiceAccount && !isAdmin {
 		// #7: Budget check with a per-call floor so even a $0.001-remaining
 		// user can't fire a $50 request. Floor = minimum meaningful API cost.
 		const budgetCheckFloor = 0.001 // $0.001 — lower than any cloud model's minimum call
 		check, err := p.users.CheckBudget(r.Context(), effectiveUserID, budgetCheckFloor)
 		if err != nil {
-			slog.Warn("budget check failed, allowing request",
+			slog.Error("budget check failed, blocking request",
 				"user_id", effectiveUserID, "error", err)
+			http.Error(w, `{"error":{"message":"budget check unavailable — try again shortly","type":"service_error","code":503}}`, http.StatusServiceUnavailable)
+			return
+		} else if check == nil {
+			slog.Error("budget check returned nil result, blocking request",
+				"user_id", effectiveUserID)
+			http.Error(w, `{"error":{"message":"budget check failed — try again shortly","type":"service_error","code":503}}`, http.StatusServiceUnavailable)
+			return
 		} else if !check.Allowed {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusPaymentRequired)
@@ -1868,8 +1885,10 @@ func extractModelFromURLPath(path string) string {
 // pricing table is authoritative.
 func pricingProvider(provider string) string {
 	switch provider {
-	case "gemini-vertex":
+	case "gemini-vertex", "gemini-oai":
 		return "google"
+	case "anthropic-vertex", "anthropic-direct", "anthropic-bedrock":
+		return "anthropic"
 	default:
 		return provider
 	}

@@ -188,11 +188,11 @@ func TestBudgetGate_AllowsWhenBudgetRemains(t *testing.T) {
 	}
 }
 
-func TestBudgetGate_CheckErrorAllowsRequest(t *testing.T) {
-	// When CheckBudget fails, the request should be allowed (fail-open).
+func TestBudgetGate_CheckErrorBlocksRequest(t *testing.T) {
+	// When CheckBudget fails, the request should be blocked (fail-closed).
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = fmt.Fprint(w, `{"content":[{"type":"text","text":"ok"}],"usage":{"input_tokens":1,"output_tokens":1}}`)
+		t.Error("upstream should NOT be called when budget check fails")
+		w.WriteHeader(500)
 	}))
 	defer upstream.Close()
 
@@ -225,10 +225,10 @@ func TestBudgetGate_CheckErrorAllowsRequest(t *testing.T) {
 	}
 	defer func() { _ = resp.Body.Close() }()
 
-	// Fail-open: should still get 200, not 5xx.
-	if resp.StatusCode != http.StatusOK {
+	// Fail-closed: should return 503 Service Unavailable.
+	if resp.StatusCode != http.StatusServiceUnavailable {
 		body, _ := io.ReadAll(resp.Body)
-		t.Errorf("status = %d, want 200 (fail-open); body = %s", resp.StatusCode, body)
+		t.Errorf("status = %d, want 503 (fail-closed); body = %s", resp.StatusCode, body)
 	}
 }
 

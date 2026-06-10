@@ -416,11 +416,11 @@ func main() {
 		} else {
 			// Without a project ID, Vertex AI providers can't route.
 			// Remove them from allProviders to prevent broken defaults.
-			slog.Warn("⚠️ Vertex AI providers require vertex_ai.project_id — gemini-oai, google, gemini-vertex, mistral, deepseek, qwen providers will be disabled")
+			slog.Warn("⚠️ Vertex AI providers require vertex_ai.project_id — gemini-oai, google, gemini-vertex, mistral, deepseek, deepseek-v3, qwen providers will be disabled")
 			var filtered []proxy.Provider
 			for _, p := range allProviders {
 				switch p.Name {
-				case "gemini-oai", "google", "gemini-vertex", "mistral", "deepseek", "qwen":
+				case "gemini-oai", "google", "gemini-vertex", "mistral", "deepseek", "deepseek-v3", "qwen":
 					// Skip — these need Vertex AI project ID
 				default:
 					filtered = append(filtered, p)
@@ -462,17 +462,20 @@ func main() {
 
 		// Configure DeepSeek & Qwen — route through Vertex AI's
 		// OpenAI-compatible endpoint (same pattern as gemini-oai).
-		// DeepSeek V3.2 is global-only; R1 works in us-central1.
-		// Qwen MaaS models require us-central1.
+		// DeepSeek R1 requires us-central1; V3.2 is global-only
+		// (override via provider_overrides if using V3.2).
+		// Qwen MaaS models (235B, Coder 480B) require us-south1.
 		// Supports per-provider region/endpoint overrides.
 		if geminiProjectID != "" {
 			for i, p := range allProviders {
 				var defaultRegion string
 				switch p.Name {
 				case "deepseek":
+					defaultRegion = "us-central1"
+				case "deepseek-v3":
 					defaultRegion = "global"
 				case "qwen":
-					defaultRegion = "us-central1"
+					defaultRegion = "us-south1"
 				default:
 					continue
 				}
@@ -501,7 +504,7 @@ func main() {
 		// Validate provider_overrides keys — warn on unknown providers.
 		if len(cfg.Proxy.VertexAI.ProviderOverrides) > 0 {
 			validOverrideProviders := map[string]bool{
-				"mistral": true, "deepseek": true, "qwen": true,
+				"mistral": true, "deepseek": true, "deepseek-v3": true, "qwen": true,
 				"anthropic": true, "anthropic-vertex": true,
 				"gemini-oai": true, "gemini-vertex": true, "google": true,
 			}
@@ -593,12 +596,13 @@ func main() {
 			// Map pricing provider names → OpenAI-compatible proxy route names.
 			// Only include models whose compat provider is active.
 			pricingToCompat := map[string]string{
-				"google":    "gemini-oai", // Gemini via OpenAI-compat endpoint
-				"anthropic": "anthropic",  // Anthropic with FormatTranslator (OpenAI→Messages)
-				"openai":    "openai",     // Native OpenAI passthrough
-				"mistral":   "mistral",    // Mistral via Vertex AI rawPredict
-				"deepseek":  "deepseek",   // DeepSeek via Vertex AI OpenAI-compat
-				"qwen":      "qwen",       // Qwen via Vertex AI OpenAI-compat
+				"google":      "gemini-oai",  // Gemini via OpenAI-compat endpoint
+				"anthropic":   "anthropic",   // Anthropic with FormatTranslator (OpenAI→Messages)
+				"openai":      "openai",      // Native OpenAI passthrough
+				"mistral":     "mistral",     // Mistral via Vertex AI rawPredict
+				"deepseek":    "deepseek",    // DeepSeek R1 via Vertex AI OpenAI-compat
+				"deepseek-v3": "deepseek-v3", // DeepSeek V3 via Vertex AI OpenAI-compat
+				"qwen":        "qwen",        // Qwen via Vertex AI OpenAI-compat
 			}
 
 			// Build set of active provider names for quick lookup.

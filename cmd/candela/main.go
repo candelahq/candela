@@ -982,7 +982,7 @@ func buildCloudProxy(cfg Config, submitter *processor.SpanProcessor) (*proxy.Pro
 	needsAWS := false
 	for _, lp := range cfg.Providers {
 		switch lp.Name {
-		case "google", "gemini", "anthropic", "anthropic-vertex", "mistral", "deepseek", "qwen":
+		case "google", "gemini", "anthropic", "anthropic-vertex", "gemini-vertex", "mistral", "deepseek", "qwen":
 			needsGCP = true
 		case "anthropic-bedrock":
 			needsAWS = true
@@ -1079,6 +1079,16 @@ func buildCloudProxy(cfg Config, submitter *processor.SpanProcessor) (*proxy.Pro
 			p.UpstreamURL = proxy.VertexAIUpstreamURL(region)
 			p.TokenSource = tokenSource
 			p.PathRewriter = &proxy.VertexAIPathRewriter{
+				ProjectID: project,
+				Region:    region,
+			}
+		case "gemini-vertex":
+			// Native Gemini API routed via Vertex AI publisher endpoint.
+			// No format translation — client speaks native Gemini (generateContent).
+			// Supports thought_signature passthrough for Gemini 3.x thinking models.
+			p.UpstreamURL = proxy.VertexAIUpstreamURL(region)
+			p.TokenSource = tokenSource
+			p.PathRewriter = &proxy.VertexAIGooglePathRewriter{
 				ProjectID: project,
 				Region:    region,
 			}

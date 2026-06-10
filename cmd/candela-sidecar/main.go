@@ -161,6 +161,23 @@ func main() {
 					"format_translation", p.Name == "anthropic")
 			}
 		}
+
+		// Configure Gemini-Vertex native provider with ADC + path rewriting.
+		for i, p := range allProviders {
+			if p.Name == "gemini-vertex" {
+				allProviders[i].UpstreamURL = proxy.VertexAIUpstreamURL(vertexRegion)
+				allProviders[i].PathRewriter = &proxy.VertexAIGooglePathRewriter{
+					ProjectID: gcpProject,
+					Region:    vertexRegion,
+				}
+				if tokenSource != nil {
+					allProviders[i].TokenSource = tokenSource
+				}
+				slog.Info("🔐 Gemini-Vertex native configured",
+					"provider", p.Name,
+					"project", gcpProject, "region", vertexRegion)
+			}
+		}
 	}
 
 	// Filter to requested providers.

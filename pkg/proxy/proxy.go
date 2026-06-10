@@ -264,6 +264,11 @@ func DefaultProviders() []Provider {
 		{Name: "google", UpstreamURL: "https://generativelanguage.googleapis.com"},
 		// Gemini via OpenAI-compatible API. Use this with Cursor and other OpenAI-compat clients.
 		{Name: "gemini-oai", UpstreamURL: "https://generativelanguage.googleapis.com/v1beta/openai"},
+		// Gemini via Vertex AI native endpoint. No format translation — client speaks
+		// native Gemini API (generateContent/streamGenerateContent). Supports thought_signature
+		// passthrough for Gemini 3.x thinking models. Candela handles GCP auth (ADC).
+		// Use with @ai-sdk/google-vertex or any native Gemini SDK.
+		{Name: "gemini-vertex", UpstreamURL: "https://us-central1-aiplatform.googleapis.com", Intercept: ptrBool(false)},
 		// Anthropic via Vertex AI. Override upstream via config for your region/project:
 		// https://{REGION}-aiplatform.googleapis.com/v1/projects/{PROJECT}/locations/{REGION}/publishers/anthropic/models
 		{Name: "anthropic", UpstreamURL: "https://us-central1-aiplatform.googleapis.com"},
@@ -284,6 +289,10 @@ func DefaultProviders() []Provider {
 		{Name: "qwen", UpstreamURL: "https://aiplatform.googleapis.com"},
 	}
 }
+
+// ptrBool returns a pointer to the given bool value.
+// Used for setting optional *bool fields in struct literals.
+func ptrBool(v bool) *bool { return &v }
 
 // New creates a new LLM proxy.
 func New(cfg Config, submitter SpanSubmitter, calc *costcalc.Calculator) *Proxy {

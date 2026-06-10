@@ -9,11 +9,18 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"fmt"
+	"log/slog"
+	"os"
 	"strings"
 	"time"
 
 	_ "modernc.org/sqlite"
 )
+
+// sqliteTimeFormat is a fixed-width RFC3339 layout with 9 fractional digits.
+// Unlike time.RFC3339Nano, this never trims trailing zeros, which ensures
+// correct lexicographical ordering in SQLite text comparisons.
+const sqliteTimeFormat = "2006-01-02T15:04:05.000000000Z"
 
 // SpendRecord represents a single failed spend deduction waiting for retry.
 type SpendRecord struct {
@@ -44,6 +51,13 @@ func New(path string) (*Outbox, error) {
 		return nil, fmt.Errorf("opening sqlite: %w", err)
 	}
 	db.SetMaxOpenConns(1)
+
+	// Harden file permissions — billing data should be owner-only.
+	if dsn != ":memory:" {
+		if err := os.Chmod(dsn, 0o600); err != nil {
+			slog.Warn("failed to set outbox DB permissions", "error", err)
+		}
+	}
 
 	for _, pragma := range []string{
 		"PRAGMA journal_mode=WAL",
@@ -83,6 +97,9 @@ func (o *Outbox) Enqueue(ctx context.Context, rec SpendRecord) error {
 		}
 		rec.ID = hex.EncodeToString(b)
 	}
+	if rec.CostUSD < 0 {
+		return fmt.Errorf("spend_outbox: rejecting negative cost: %f", rec.CostUSD)
+	}
 	if rec.CreatedAt.IsZero() {
 		rec.CreatedAt = time.Now().UTC()
 	}
@@ -90,7 +107,7 @@ func (o *Outbox) Enqueue(ctx context.Context, rec SpendRecord) error {
 	// a Peek immediately after Enqueue always finds the record. A separate
 	// time.Now() call here could race with Peek's own time.Now() at
 	// nanosecond precision, causing the record to be invisible.
-	createdStr := rec.CreatedAt.UTC().Format(time.RFC3339Nano)
+	createdStr := rec.CreatedAt.UTC().Format(sqliteTimeFormat)
 
 	_, err := o.db.ExecContext(ctx,
 		`INSERT INTO spend_outbox (id, user_id, cost_usd, tokens, attempt_count, created_at, next_retry_at)
@@ -108,7 +125,7 @@ func (o *Outbox) Enqueue(ctx context.Context, rec SpendRecord) error {
 // Peek returns up to limit records whose next_retry_at is at or before now,
 // ordered by created_at ASC (oldest first).
 func (o *Outbox) Peek(ctx context.Context, limit int) ([]SpendRecord, error) {
-	now := time.Now().UTC().Format(time.RFC3339Nano)
+	now := time.Now().UTC().Format(sqliteTimeFormat)
 	rows, err := o.db.QueryContext(ctx,
 		`SELECT id, user_id, cost_usd, tokens, attempt_count, created_at
 		 FROM spend_outbox
@@ -126,11 +143,24 @@ func (o *Outbox) Peek(ctx context.Context, limit int) ([]SpendRecord, error) {
 		if err := rows.Scan(&rec.ID, &rec.UserID, &rec.CostUSD, &rec.Tokens, &rec.AttemptCount, &createdAt); err != nil {
 			return nil, fmt.Errorf("scanning spend record: %w", err)
 		}
-		t, err := time.Parse(time.RFC3339Nano, createdAt)
+		t, err := time.Parse(sqliteTimeFormat, createdAt)
 		if err != nil {
 			t = time.Time{}
 		}
 		rec.CreatedAt = t
+
+		// Defense-in-depth: reject tampered records.
+		if rec.CostUSD < 0 {
+			slog.Error("spend_outbox: rejecting negative cost record (possible tampering)",
+				"id", rec.ID, "user_id", rec.UserID, "cost_usd", rec.CostUSD)
+			continue
+		}
+		if rec.CostUSD > 1000 { // $1000 per request is unreasonable
+			slog.Error("spend_outbox: rejecting excessive cost record (possible tampering)",
+				"id", rec.ID, "user_id", rec.UserID, "cost_usd", rec.CostUSD)
+			continue
+		}
+
 		records = append(records, rec)
 	}
 	return records, rows.Err()
@@ -173,7 +203,7 @@ func (o *Outbox) IncrementAttempt(ctx context.Context, ids []string) error {
 		return nil
 	}
 
-	now := time.Now().UTC().Format(time.RFC3339Nano)
+	now := time.Now().UTC().Format(sqliteTimeFormat)
 
 	const chunkSize = 500
 	for i := 0; i < len(ids); i += chunkSize {
@@ -218,7 +248,7 @@ func backoffDelay(attempt int) time.Duration {
 // RetryLater increments the attempt count and schedules the next retry
 // with exponential backoff.
 func (o *Outbox) RetryLater(ctx context.Context, id string, currentAttempt int) error {
-	nextRetry := time.Now().UTC().Add(backoffDelay(currentAttempt)).Format(time.RFC3339Nano)
+	nextRetry := time.Now().UTC().Add(backoffDelay(currentAttempt)).Format(sqliteTimeFormat)
 	_, err := o.db.ExecContext(ctx,
 		`UPDATE spend_outbox SET attempt_count = attempt_count + 1, next_retry_at = ? WHERE id = ?`,
 		nextRetry, id)

@@ -667,18 +667,22 @@ func TestExtractModelFromURLPath(t *testing.T) {
 
 func TestPricingProvider(t *testing.T) {
 	tests := []struct {
-		provider string
-		want     string
+		input, want string
 	}{
 		{"gemini-vertex", "google"},
-		{"google", "google"},
-		{"anthropic", "anthropic"},
+		{"gemini-oai", "google"},
+		{"anthropic-vertex", "anthropic"},
+		{"anthropic-direct", "anthropic"},
+		{"anthropic-bedrock", "anthropic"},
 		{"openai", "openai"},
+		{"mistral", "mistral"},
+		{"deepseek", "deepseek"},
+		{"qwen", "qwen"},
+		{"", ""},
 	}
 	for _, tt := range tests {
-		got := pricingProvider(tt.provider)
-		if got != tt.want {
-			t.Errorf("pricingProvider(%q) = %q, want %q", tt.provider, got, tt.want)
+		if got := pricingProvider(tt.input); got != tt.want {
+			t.Errorf("pricingProvider(%q) = %q, want %q", tt.input, got, tt.want)
 		}
 	}
 }

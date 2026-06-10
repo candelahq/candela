@@ -462,7 +462,7 @@ func TestForwardHeaders_AnthropicDirect(t *testing.T) {
 	src.Header.Set("Content-Type", "application/json")
 
 	dst, _ := http.NewRequest("POST", "https://api.anthropic.com/v1/messages", nil)
-	forwardHeaders(src, dst, "anthropic-direct")
+	forwardHeaders(src, dst, "anthropic-direct", false)
 
 	checks := map[string]string{
 		"Authorization":     "Bearer sk-ant-test",
@@ -485,7 +485,7 @@ func TestForwardHeaders_Anthropic_IncludesBeta(t *testing.T) {
 	src.Header.Set("Anthropic-Beta", "messages-2024-12-19")
 
 	dst, _ := http.NewRequest("POST", "https://vertex.ai/v1/messages", nil)
-	forwardHeaders(src, dst, "anthropic")
+	forwardHeaders(src, dst, "anthropic", true)
 
 	if got := dst.Header.Get("Anthropic-Beta"); got != "messages-2024-12-19" {
 		t.Errorf("anthropic provider: Anthropic-Beta = %q, want 'messages-2024-12-19'", got)

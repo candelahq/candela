@@ -111,12 +111,6 @@ func TestIncrementAttempt(t *testing.T) {
 		t.Fatalf("IncrementAttempt (2nd): %v", err)
 	}
 
-	// Small sleep so Peek's time.Now() is after IncrementAttempt's
-	// next_retry_at. Under the race detector on slow CI, the two
-	// time.Now() calls can be within nanoseconds of each other,
-	// causing the Peek filter (next_retry_at <= now) to miss the record.
-	time.Sleep(2 * time.Millisecond)
-
 	records, err := ob.Peek(ctx, 10)
 	if err != nil {
 		t.Fatalf("Peek: %v", err)
@@ -358,5 +352,54 @@ func TestDelete_Chunking(t *testing.T) {
 	}
 	if count != 0 {
 		t.Errorf("remaining = %d, want 0", count)
+	}
+}
+
+func TestTimestampOrdering_NoTrailingZeroIssue(t *testing.T) {
+	ob := newTestOutbox(t)
+	ctx := context.Background()
+
+	// Enqueue 100 records rapidly — some will hit trailing zero boundaries.
+	for i := 0; i < 100; i++ {
+		if err := ob.Enqueue(ctx, SpendRecord{
+			UserID:  fmt.Sprintf("user-%d", i),
+			CostUSD: 0.01,
+			Tokens:  10,
+		}); err != nil {
+			t.Fatalf("Enqueue %d: %v", i, err)
+		}
+	}
+
+	// All 100 should be visible to Peek immediately — no timing issues.
+	records, err := ob.Peek(ctx, 200)
+	if err != nil {
+		t.Fatalf("Peek: %v", err)
+	}
+	if len(records) != 100 {
+		t.Errorf("Peek returned %d records, want 100 (trailing zero bug?)", len(records))
+	}
+}
+
+func TestSqliteTimeFormat_FixedWidth(t *testing.T) {
+	// These timestamps would have different lengths with RFC3339Nano
+	// due to trailing zero stripping, but should be identical width
+	// with our fixed format.
+	testCases := []time.Time{
+		time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),         // .000000000
+		time.Date(2026, 1, 1, 0, 0, 0, 100000000, time.UTC), // .100000000
+		time.Date(2026, 1, 1, 0, 0, 0, 123456789, time.UTC), // .123456789
+		time.Date(2026, 1, 1, 0, 0, 0, 123456780, time.UTC), // .123456780 (trailing zero)
+		time.Date(2026, 1, 1, 0, 0, 0, 120000000, time.UTC), // .120000000 (many trailing zeros)
+	}
+
+	var expectedLen int
+	for i, tc := range testCases {
+		formatted := tc.Format(sqliteTimeFormat)
+		if i == 0 {
+			expectedLen = len(formatted)
+		} else if len(formatted) != expectedLen {
+			t.Errorf("case %d: len(%q) = %d, want %d (fixed width violated)",
+				i, formatted, len(formatted), expectedLen)
+		}
 	}
 }

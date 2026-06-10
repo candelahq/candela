@@ -639,6 +639,7 @@ func (c *Calculator) loadDefaults() {
 
 		// ── Qwen (via Vertex AI OpenAI-compat) ─────────────────
 		{Provider: "qwen", Model: "qwen3-235b-a22b-instruct-2507-maas", InputPerMillion: 0.30, OutputPerMillion: 1.20},
+		{Provider: "qwen", Model: "qwen3-coder-480b-a35b-instruct-maas", InputPerMillion: 0.22, OutputPerMillion: 1.80},
 		// Aliases — older/shorter model names still in client configs.
 		{Provider: "qwen", Model: "qwen-2.5-coder-32b-instruct-maas", InputPerMillion: 0.30, OutputPerMillion: 1.20},
 	}

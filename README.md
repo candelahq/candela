@@ -844,6 +844,18 @@ gcloud projects add-iam-policy-binding YOUR-PROJECT-ID \
   --role="roles/aiplatform.user"
 ```
 
+#### OpenCode
+
+If OpenCode hangs, shows stale models, or behaves unexpectedly after config changes, delete the OpenCode database:
+
+```bash
+rm -rf ~/.local/share/opencode/opencode.db*
+```
+
+Then restart OpenCode. This clears cached state and forces a fresh sync.
+
+> For more OpenCode troubleshooting tips (model not found errors, pricing issues, connection refused), see [docs/proxy.md](docs/proxy.md#-opencode-integration).
+
 ### Getting Help
 - **GitHub Issues**: [Report bugs](https://github.com/candelahq/candela/issues)
 - **Documentation**: Check `docs/` directory for detailed guides

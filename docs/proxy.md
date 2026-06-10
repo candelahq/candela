@@ -240,6 +240,30 @@ Send a message in the OpenCode TUI. You should see:
 2. Set `vertex_ai.project_id` in `config.yaml` to your GCP project
 3. Enable the Vertex AI API and request Claude model access in Model Garden
 
+### Troubleshooting
+
+#### OpenCode Hangs, Shows Stale Models, or Behaves Unexpectedly
+
+If OpenCode hangs, shows stale models, or behaves unexpectedly after config changes, delete the OpenCode database:
+
+```bash
+rm -rf ~/.local/share/opencode/opencode.db*
+```
+
+Then restart OpenCode. This clears cached state (model lists, provider connections, etc.) and forces a fresh sync.
+
+#### Model Not Found Errors
+
+Ensure the model IDs in your `opencode.json` match what the provider expects. Model versions get retired (e.g. `codestral-2501` → `codestral-2`). Check the Candela server logs for the exact model ID being sent.
+
+#### `no pricing configured for model X`
+
+The model needs a pricing entry in Candela. Contact your admin or add it to the cost calculator.
+
+#### Connection Refused on `localhost:8181`
+
+Make sure the Candela server is running (`candela server` or the Cloud Run instance).
+
 ---
 
 ## 💎 Gemini CLI Integration

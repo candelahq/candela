@@ -37,6 +37,10 @@ proxy:
     - anthropic-bedrock
     - gemini-oai
     - gemini-direct
+    - gemini-vertex
+    - mistral
+    - deepseek
+    - qwen
 
 cors:
   allowed_origins: []

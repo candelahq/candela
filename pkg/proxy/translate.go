@@ -594,6 +594,9 @@ type VertexAIMaaSPathRewriter struct {
 }
 
 func (r *VertexAIMaaSPathRewriter) RewritePath(model string, streaming bool) string {
+	if model == "" {
+		return ""
+	}
 	method := "rawPredict"
 	if streaming {
 		method = "streamRawPredict"

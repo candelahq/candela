@@ -78,8 +78,7 @@ const PRICING_MAP: Record<string, ModelPricing> = {
   "mistral-medium-3":              { inputPerMillion: 0.40,  outputPerMillion: 2.00 },
   "codestral-2501":                { inputPerMillion: 0.30,  outputPerMillion: 0.90 },
 
-  // DeepSeek (via Vertex AI)
-  "deepseek-v3.1-maas":            { inputPerMillion: 0.14,  outputPerMillion: 0.28 },
+  // DeepSeek (via Vertex AI, global endpoint — V3.1 excluded, requires regional us-west2)
   "deepseek-v3.2-maas":            { inputPerMillion: 0.14,  outputPerMillion: 0.28 },
   "deepseek-r1-0528-maas":         { inputPerMillion: 0.14,  outputPerMillion: 0.28 },
 

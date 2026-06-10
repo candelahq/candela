@@ -676,3 +676,26 @@ func TestVertexAIGeminiOAIPathRewriter_DeepSeek(t *testing.T) {
 		t.Errorf("streaming DeepSeek RewritePath = %q, want %q", got, wantPath)
 	}
 }
+
+// ====================================================================
+// Issue 2: Empty model guard
+// ====================================================================
+
+func TestVertexAIMaaSPathRewriter_EmptyModel(t *testing.T) {
+	rewriter := &VertexAIMaaSPathRewriter{
+		ProjectID: "my-project",
+		Region:    "us-central1",
+		Publisher: "mistralai",
+	}
+
+	// Empty model should return empty string, not a malformed URL.
+	got := rewriter.RewritePath("", false)
+	if got != "" {
+		t.Errorf("RewritePath(\"\", false) = %q, want empty string", got)
+	}
+
+	got = rewriter.RewritePath("", true)
+	if got != "" {
+		t.Errorf("RewritePath(\"\", true) = %q, want empty string", got)
+	}
+}

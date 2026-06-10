@@ -722,8 +722,9 @@ func TestExtractModelFromResponse_DeepSeek(t *testing.T) {
 	}`)
 
 	model := extractModelFromResponse("deepseek", body)
-	if model != "deepseek-ai/deepseek-v3.2-maas" {
-		t.Errorf("DeepSeek model = %q, want %q", model, "deepseek-ai/deepseek-v3.2-maas")
+	// Issue 3: publisher prefix should be stripped.
+	if model != "deepseek-v3.2-maas" {
+		t.Errorf("DeepSeek model = %q, want %q (prefix stripped)", model, "deepseek-v3.2-maas")
 	}
 }
 
@@ -750,6 +751,57 @@ func TestExtractModelFromResponse_Qwen(t *testing.T) {
 	model := extractModelFromResponse("qwen", body)
 	if model != "qwen3-235b-a22b-instruct-2507-maas" {
 		t.Errorf("Qwen model = %q, want %q", model, "qwen3-235b-a22b-instruct-2507-maas")
+	}
+}
+
+// ── Issue 3: extractModelFromResponse strips publisher prefixes ──────────────
+
+func TestExtractModelFromResponse_DeepSeek_StripsPrefix(t *testing.T) {
+	body := []byte(`{
+		"model": "deepseek-ai/deepseek-v3.2-maas",
+		"choices": [{"message": {"role": "assistant", "content": "hi"}}],
+		"usage": {"prompt_tokens": 100, "completion_tokens": 50}
+	}`)
+
+	model := extractModelFromResponse("deepseek", body)
+	if model != "deepseek-v3.2-maas" {
+		t.Errorf("DeepSeek model = %q, want %q (publisher prefix stripped)", model, "deepseek-v3.2-maas")
+	}
+}
+
+func TestExtractModelFromResponse_Qwen_StripsPrefix(t *testing.T) {
+	body := []byte(`{
+		"model": "qwen/qwen3-235b-a22b-instruct-2507-maas",
+		"choices": [{"message": {"role": "assistant", "content": "hello"}}],
+		"usage": {"prompt_tokens": 150, "completion_tokens": 40}
+	}`)
+
+	model := extractModelFromResponse("qwen", body)
+	if model != "qwen3-235b-a22b-instruct-2507-maas" {
+		t.Errorf("Qwen model = %q, want %q (publisher prefix stripped)", model, "qwen3-235b-a22b-instruct-2507-maas")
+	}
+}
+
+func TestExtractModelFromStreamingResponse_DeepSeek_StripsPrefix(t *testing.T) {
+	data := []byte(`data: {"model":"deepseek-ai/deepseek-v3.2-maas","choices":[{"delta":{"content":"hi"}}]}
+data: {"model":"deepseek-ai/deepseek-v3.2-maas","choices":[],"usage":{"prompt_tokens":100,"completion_tokens":50}}
+data: [DONE]
+`)
+
+	model := extractModelFromStreamingResponse("deepseek", data)
+	if model != "deepseek-v3.2-maas" {
+		t.Errorf("DeepSeek streaming model = %q, want %q (prefix stripped)", model, "deepseek-v3.2-maas")
+	}
+}
+
+func TestExtractModelFromStreamingResponse_Qwen_StripsPrefix(t *testing.T) {
+	data := []byte(`data: {"model":"qwen/qwen3-235b-a22b-instruct-2507-maas","choices":[{"delta":{"content":"hello"}}]}
+data: [DONE]
+`)
+
+	model := extractModelFromStreamingResponse("qwen", data)
+	if model != "qwen3-235b-a22b-instruct-2507-maas" {
+		t.Errorf("Qwen streaming model = %q, want %q (prefix stripped)", model, "qwen3-235b-a22b-instruct-2507-maas")
 	}
 }
 

@@ -98,9 +98,6 @@ var providerAliases = map[string]string{
 	"anthropic-vertex":  "anthropic",
 	"anthropic-bedrock": "anthropic",
 	"gemini-oai":        "google", // Gemini via OpenAI-compat shares Google cache pricing
-	"mistral":           "openai", // Mistral uses OpenAI-style token reporting
-	"deepseek":          "openai", // DeepSeek uses OpenAI-style token reporting
-	"qwen":              "openai", // Qwen uses OpenAI-style token reporting
 }
 
 // New creates a Calculator with default pricing for all supported cloud models.
@@ -451,6 +448,18 @@ func (c *Calculator) resolve(provider, model string) (ModelPricing, bool) {
 func extractBaseModel(model string) string {
 	m := strings.ToLower(model)
 
+	// Strip Vertex AI MaaS publisher prefixes (e.g. "deepseek-ai/deepseek-v3.2-maas")
+	if i := strings.LastIndex(m, "/"); i >= 0 {
+		// Return prefix-stripped only. Don't also strip -maas here,
+		// since the pricing key may include -maas (e.g. "deepseek-v3.2-maas").
+		return m[i+1:]
+	}
+
+	// Strip Vertex AI MaaS "-maas" suffix (e.g. "deepseek-v3.2-maas" → "deepseek-v3.2")
+	if strings.HasSuffix(m, "-maas") {
+		return strings.TrimSuffix(m, "-maas")
+	}
+
 	// OpenAI fine-tune format: ft:{base_model}:{org}:{name}:{id}
 	if strings.HasPrefix(m, "ft:") {
 		parts := strings.SplitN(m, ":", 3)
@@ -616,8 +625,9 @@ func (c *Calculator) loadDefaults() {
 		{Provider: "mistral", Model: "mistral-medium-3", InputPerMillion: 0.40, OutputPerMillion: 2.00},
 		{Provider: "mistral", Model: "codestral-2501", InputPerMillion: 0.30, OutputPerMillion: 0.90},
 
-		// ── DeepSeek (via Vertex AI OpenAI-compat) ──────────────
-		{Provider: "deepseek", Model: "deepseek-v3.1-maas", InputPerMillion: 0.14, OutputPerMillion: 0.28},
+		// ── DeepSeek (via Vertex AI OpenAI-compat, global endpoint) ──────
+		// NOTE: V3.1 excluded — it requires regional us-west2 endpoint, not global.
+		// V3.2 supersedes V3.1 and is available on the global endpoint.
 		{Provider: "deepseek", Model: "deepseek-v3.2-maas", InputPerMillion: 0.14, OutputPerMillion: 0.28},
 		{Provider: "deepseek", Model: "deepseek-r1-0528-maas", InputPerMillion: 0.14, OutputPerMillion: 0.28},
 

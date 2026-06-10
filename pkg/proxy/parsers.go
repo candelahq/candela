@@ -382,6 +382,15 @@ func (p *fallbackParser) ParseStreamingResponse(_ []byte) (string, int64, int64)
 // Model extraction from response body
 // ──────────────────────────────────────────
 
+// stripPublisherPrefix removes Vertex AI MaaS publisher prefixes from model names.
+// e.g. "deepseek-ai/deepseek-v3.2-maas" → "deepseek-v3.2-maas"
+func stripPublisherPrefix(model string) string {
+	if i := strings.LastIndex(model, "/"); i >= 0 {
+		return model[i+1:]
+	}
+	return model
+}
+
 // extractModelFromResponse extracts the model name from a provider's response
 // body. This is the primary source for Google (which has modelVersion in the
 // response but NOT in the request body), and a fallback for other providers.
@@ -398,9 +407,13 @@ func extractModelFromResponse(provider string, body []byte) string {
 		if mv, ok := resp["modelVersion"].(string); ok && mv != "" {
 			return mv
 		}
-	case "openai", "gemini-oai", "mistral", "deepseek", "qwen":
+	case "openai", "gemini-oai":
 		if m, ok := resp["model"].(string); ok && m != "" {
 			return m
+		}
+	case "mistral", "deepseek", "qwen":
+		if m, ok := resp["model"].(string); ok && m != "" {
+			return stripPublisherPrefix(m)
 		}
 	case "anthropic", "anthropic-direct", "anthropic-vertex", "anthropic-bedrock":
 		if m, ok := resp["model"].(string); ok && m != "" {
@@ -435,6 +448,7 @@ func extractModelFromStreamingResponse(provider string, data []byte) string {
 
 	default:
 		// OpenAI/Anthropic SSE: scan for "model" in any data line.
+		isMaaS := provider == "mistral" || provider == "deepseek" || provider == "qwen"
 		for _, line := range strings.Split(string(data), "\n") {
 			line = strings.TrimSpace(line)
 			if !strings.HasPrefix(line, "data: ") {
@@ -447,6 +461,9 @@ func extractModelFromStreamingResponse(provider string, data []byte) string {
 			var chunk map[string]interface{}
 			if json.Unmarshal([]byte(payload), &chunk) == nil {
 				if m, ok := chunk["model"].(string); ok && m != "" {
+					if isMaaS {
+						return stripPublisherPrefix(m)
+					}
 					return m
 				}
 			}

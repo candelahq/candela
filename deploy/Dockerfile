@@ -30,6 +30,14 @@ COPY --from=builder /build/candela-server /usr/local/bin/candela-server
 COPY deploy/entrypoint-server.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh
 
+# SECURITY: Run as non-root to limit blast radius if the server is compromised.
+# A root-level container escape can lead to host compromise on misconfigured
+# runtimes (no user namespaces, privileged mode). CIS Docker Benchmark 4.1.
+RUN groupadd -r candela && useradd -r -g candela -s /sbin/nologin candela \
+    && mkdir -p /etc/candela && chown candela:candela /etc/candela
+WORKDIR /etc/candela
+USER candela
+
 EXPOSE 8181
 
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]

@@ -246,3 +246,97 @@ func TestHandleProxy_GETModelsRoute(t *testing.T) {
 		t.Errorf("expected object=list, got %v", result["object"])
 	}
 }
+
+// ── Model Name Sanitization (SSRF Prevention) ───────────────────────────────
+// These tests validate safeModelNameRe which guards against path traversal
+// in Vertex AI URL construction. See the regex definition in proxy.go for
+// the full threat model.
+
+func TestSafeModelNameRe_ValidModels(t *testing.T) {
+	// All real model names the proxy handles should pass.
+	validModels := []string{
+		"gpt-4o",
+		"gpt-4o-mini",
+		"claude-sonnet-4-20250514",
+		"claude-sonnet-4@20250514",
+		"gemini-2.5-flash",
+		"gemini-2.5-pro-preview-06-05",
+		"mistral-large-2411",
+		"deepseek-ai/deepseek-chat",
+		"Qwen/Qwen2.5-Coder-32B-Instruct",
+		"meta-llama/Llama-3.1-405B",
+		"o1-preview",
+		"text-embedding-3-small",
+	}
+	for _, model := range validModels {
+		if !isSafeModelName(model) {
+			t.Errorf("safeModelNameRe rejected valid model: %q", model)
+		}
+	}
+}
+
+func TestSafeModelNameRe_PathTraversal(t *testing.T) {
+	// Path traversal attempts — all must be rejected.
+	attacks := []struct {
+		name  string
+		model string
+	}{
+		{"dot-dot-slash", "../../other-project/locations/us-central1/models/gemini-2.5-flash"},
+		{"backslash traversal", `..\..\other-project\models\gemini-2.5-flash`},
+		{"url encoded dots", "%2e%2e/evil"},
+		{"null byte", "gemini-2.5-flash\x00../../evil"},
+		{"newline injection", "gemini-2.5-flash\n../../evil"},
+		{"space injection", "gemini 2.5-flash"},
+		{"query string", "gemini-2.5-flash?param=evil"},
+		{"fragment", "gemini-2.5-flash#evil"},
+		{"html tag", "<script>alert(1)</script>"},
+		{"semicolon", "gemini-2.5-flash;rm -rf /"},
+		{"pipe", "gemini-2.5-flash|cat /etc/passwd"},
+		{"backtick", "gemini-2.5-flash`id`"},
+	}
+	for _, tc := range attacks {
+		t.Run(tc.name, func(t *testing.T) {
+			if isSafeModelName(tc.model) {
+				t.Errorf("safeModelNameRe ALLOWED dangerous model name: %q", tc.model)
+			}
+		})
+	}
+}
+
+func TestSafeModelNameRe_EmptyString(t *testing.T) {
+	// Empty model names should be rejected by the regex (the proxy handles
+	// empty separately before reaching the regex check).
+	if isSafeModelName("") {
+		t.Error("isSafeModelName should reject empty string")
+	}
+}
+
+func TestSafeModelName_DotDotWithSlash(t *testing.T) {
+	// This is the specific attack vector: ".." combined with "/" forms
+	// a path traversal. Both chars are individually valid (dots for versions,
+	// slashes for org/model), but together they're dangerous.
+	attacks := []string{
+		"../gemini-2.5-flash",
+		"deepseek-ai/../../../evil",
+		"Qwen/..%2f../../evil",
+	}
+	for _, model := range attacks {
+		if isSafeModelName(model) {
+			t.Errorf("isSafeModelName ALLOWED dot-dot attack: %q", model)
+		}
+	}
+}
+
+func TestSafeModelName_SingleDotAllowed(t *testing.T) {
+	// Single dots are fine — used in version numbers like "Qwen2.5".
+	models := []string{
+		"Qwen2.5-Coder",
+		"text-embedding-3.small",
+		"v1.0-release",
+	}
+	for _, model := range models {
+		if !isSafeModelName(model) {
+			t.Errorf("isSafeModelName rejected valid dotted model: %q", model)
+		}
+	}
+}

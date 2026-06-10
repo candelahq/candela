@@ -73,6 +73,12 @@ COPY --from=ui-builder /build/ui/public /app/ui/public
 # Entrypoint script.
 COPY deploy/entrypoint.sh /usr/local/bin/entrypoint.sh
 
+# SECURITY: Run as non-root (CIS Docker Benchmark 4.1).
+# chown /app/ui so Next.js can write to .next/cache for image optimization.
+RUN groupadd -r candela && useradd -r -g candela -s /sbin/nologin candela \
+    && chown -R candela:candela /app/ui
+USER candela
+
 # Cloud Run expects port 3000 (Next.js UI).
 # Go backend runs on 8181 (internal, proxied via rewrites).
 EXPOSE 3000

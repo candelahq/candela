@@ -65,6 +65,12 @@ COPY --from=builder /build/ui/public /app/ui/public
 
 EXPOSE 3000
 
+# SECURITY: Run as non-root (CIS Docker Benchmark 4.1).
+# chown /app/ui so Next.js can write to .next/cache for image optimization.
+RUN groupadd -r candela && useradd -r -g candela -s /sbin/nologin candela \
+    && chown -R candela:candela /app/ui
+USER candela
+
 WORKDIR /app/ui
 # BACKEND_URL can be overridden at runtime to point at the candela-server container.
 CMD ["sh", "-c", "HOSTNAME=0.0.0.0 PORT=3000 exec node server.js"]

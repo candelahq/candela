@@ -13,4 +13,8 @@ FROM alpine:3.20
 RUN apk add --no-cache ca-certificates
 COPY --from=builder /build/candela-worker /usr/local/bin/candela-worker
 
+# SECURITY: Run as non-root (CIS Docker Benchmark 4.1).
+RUN addgroup -S candela && adduser -S -G candela candela
+USER candela
+
 ENTRYPOINT ["candela-worker"]

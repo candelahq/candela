@@ -606,6 +606,32 @@ func rewriteModelField(body []byte, newModel string) []byte {
 // Also used to validate X-Session-Id and X-Candela-Tenant-Id.
 var requestIDPattern = regexp.MustCompile(`^[a-zA-Z0-9\-]{1,128}$`)
 
+// safeModelNameRe validates model names before they're interpolated into
+// Vertex AI URL paths (e.g. /v1/projects/.../models/{model}:predict).
+//
+// SECURITY: Model names come from the client request body and are passed
+// unsanitized into fmt.Sprintf URL paths in PathRewriter implementations
+// (VertexAIMaaSPathRewriter, VertexAIGeminiOAIPathRewriter, etc.).
+// Without this check, a malicious model name containing path traversal
+// characters (e.g. "../../other-project/locations/us-central1/...") could
+// redirect requests to arbitrary Vertex AI resources accessible to the
+// server's service account — an SSRF vulnerability.
+//
+// Allowed: alphanumeric, hyphens, underscores, dots, colons, @, forward slash
+// (covers model names like "gemini-2.5-flash", "claude-sonnet-4@20250514",
+// "mistral-large-2411", "deepseek-ai/deepseek-chat")
+//
+// Forward slashes are allowed for org/model names (e.g. "Qwen/Qwen2.5-Coder"),
+// but ".." sequences are explicitly blocked to prevent path traversal.
+var safeModelNameRe = regexp.MustCompile(`^[a-zA-Z0-9._@:/\-]+$`)
+
+// isSafeModelName validates a model name is safe for URL path interpolation.
+// It checks both the character set (safeModelNameRe) and rejects ".."
+// path traversal sequences that could escape the intended URL path.
+func isSafeModelName(model string) bool {
+	return safeModelNameRe.MatchString(model) && !strings.Contains(model, "..")
+}
+
 // tenantIDPattern delegates to attribution.IDPattern for backward compatibility
 // with tests in this package.
 var tenantIDPattern = attribution.IDPattern
@@ -998,6 +1024,19 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 	modelForPath := translatedModel
 	if modelForPath == "" {
 		modelForPath = requestModel
+	}
+	// SECURITY: Reject model names with path traversal characters before
+	// they're interpolated into Vertex AI URL paths. Without this, a crafted
+	// model name like "../../other-project/locations/.../models/gemini-2.5-flash"
+	// could SSRF into arbitrary Vertex AI resources the SA has access to.
+	// See safeModelNameRe definition for the full threat model.
+	if modelForPath != "" && !isSafeModelName(modelForPath) {
+		slog.Warn("blocked request: invalid model name (possible path traversal)",
+			"model", modelForPath, "provider", providerName, "user_id", effectiveUserID)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"error":{"message":"invalid model name","type":"invalid_request_error","code":400}}`))
+		return
 	}
 	if provider.PathRewriter != nil && modelForPath != "" {
 		upstreamPath = provider.PathRewriter.RewritePath(modelForPath, isStreaming)

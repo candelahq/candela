@@ -111,6 +111,12 @@ func TestIncrementAttempt(t *testing.T) {
 		t.Fatalf("IncrementAttempt (2nd): %v", err)
 	}
 
+	// Small sleep so Peek's time.Now() is after IncrementAttempt's
+	// next_retry_at. Under the race detector on slow CI, the two
+	// time.Now() calls can be within nanoseconds of each other,
+	// causing the Peek filter (next_retry_at <= now) to miss the record.
+	time.Sleep(2 * time.Millisecond)
+
 	records, err := ob.Peek(ctx, 10)
 	if err != nil {
 		t.Fatalf("Peek: %v", err)

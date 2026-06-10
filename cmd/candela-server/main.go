@@ -537,29 +537,42 @@ func main() {
 				llmProxy.SetBudgetChecker(notify.NewBudgetChecker(&notify.LogNotifier{}))
 
 				// CRIT-3: Wire durable spend outbox for DeductSpend retries.
-				home, homeErr := os.UserHomeDir()
-				if homeErr != nil {
-					slog.Warn("spend outbox disabled: failed to get user home directory", "error", homeErr)
+				// Prefer $HOME/.candela/ for local dev; fall back to /etc/candela/
+				// in containers where the non-root user has no real home directory.
+				obDir := ""
+				if home, err := os.UserHomeDir(); err == nil && home != "" && home != "/" {
+					obDir = filepath.Join(home, ".candela")
 				} else {
-					obPath := filepath.Join(home, ".candela", "spend-outbox.db")
-					if err := os.MkdirAll(filepath.Dir(obPath), 0o700); err != nil {
-						slog.Warn("spend outbox disabled: failed to create directory", "path", filepath.Dir(obPath), "error", err)
+					obDir = "/etc/candela" // Created and chown'd in Dockerfile
+				}
+				obPath := filepath.Join(obDir, "spend-outbox.db")
+				obErr := os.MkdirAll(filepath.Dir(obPath), 0o700)
+				if obErr != nil && obDir != "/etc/candela" {
+					// $HOME/.candela/ not writable (common in non-root containers
+					// where $HOME is still /root) — fall back to /etc/candela/.
+					slog.Warn("failed to create spend outbox in home dir, falling back to /etc/candela",
+						"path", filepath.Dir(obPath), "error", obErr)
+					obDir = "/etc/candela"
+					obPath = filepath.Join(obDir, "spend-outbox.db")
+					obErr = os.MkdirAll(filepath.Dir(obPath), 0o700)
+				}
+				if obErr != nil {
+					slog.Warn("spend outbox disabled: failed to create directory", "path", filepath.Dir(obPath), "error", obErr)
+				} else {
+					ob, obErr := spendoutbox.New(obPath)
+					if obErr != nil {
+						slog.Warn("spend outbox unavailable — failed DeductSpend calls will not be retried",
+							"error", obErr)
 					} else {
-						ob, obErr := spendoutbox.New(obPath)
-						if obErr != nil {
-							slog.Warn("spend outbox unavailable — failed DeductSpend calls will not be retried",
-								"error", obErr)
-						} else {
-							spendOB = ob
-							llmProxy.SetSpendOutbox(ob)
-							// Start background retry worker.
-							spendWorker := spendoutbox.NewSpendSyncWorker(ob, userStore, 10*time.Second)
-							spendWorker.Start()
-							// IMPORTANT: defer order is LIFO — close DB AFTER stopping worker.
-							defer func() { _ = ob.Close() }()
-							defer spendWorker.Stop()
-							slog.Info("💾 Spend outbox + retry worker enabled", "path", obPath)
-						}
+						spendOB = ob
+						llmProxy.SetSpendOutbox(ob)
+						// Start background retry worker.
+						spendWorker := spendoutbox.NewSpendSyncWorker(ob, userStore, 10*time.Second)
+						spendWorker.Start()
+						// IMPORTANT: defer order is LIFO — close DB AFTER stopping worker.
+						defer func() { _ = ob.Close() }()
+						defer spendWorker.Stop()
+						slog.Info("💾 Spend outbox + retry worker enabled", "path", obPath)
 					}
 				}
 

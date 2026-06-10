@@ -631,9 +631,15 @@ func (c *Calculator) loadDefaults() {
 		// V3.2 supersedes V3.1 and is available on the global endpoint.
 		{Provider: "deepseek", Model: "deepseek-v3.2-maas", InputPerMillion: 0.14, OutputPerMillion: 0.28},
 		{Provider: "deepseek", Model: "deepseek-r1-0528-maas", InputPerMillion: 0.14, OutputPerMillion: 0.28},
+		// Aliases — clients (OpenCode, Cursor, etc.) often use shorter names.
+		{Provider: "deepseek", Model: "deepseek-r1", InputPerMillion: 0.14, OutputPerMillion: 0.28},
+		{Provider: "deepseek", Model: "deepseek-v3-maas", InputPerMillion: 0.14, OutputPerMillion: 0.28},
+		{Provider: "deepseek", Model: "deepseek-chat", InputPerMillion: 0.14, OutputPerMillion: 0.28},
 
 		// ── Qwen (via Vertex AI OpenAI-compat) ─────────────────
 		{Provider: "qwen", Model: "qwen3-235b-a22b-instruct-2507-maas", InputPerMillion: 0.30, OutputPerMillion: 1.20},
+		// Aliases — older/shorter model names still in client configs.
+		{Provider: "qwen", Model: "qwen-2.5-coder-32b-instruct-maas", InputPerMillion: 0.30, OutputPerMillion: 1.20},
 	}
 	for _, p := range defaults {
 		c.defaults[c.key(p.Provider, p.Model)] = p

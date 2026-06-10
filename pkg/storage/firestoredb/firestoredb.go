@@ -822,10 +822,20 @@ func (s *Store) CheckBudget(ctx context.Context, userID string, estimatedCostUSD
 	// would still pass the budget gate and be billed.
 	user, err := s.GetUser(ctx, userID)
 	if err != nil {
-		// Non-fatal: if we can't read user status, let budget/grant checks proceed
-		// rather than blocking all traffic on a transient Firestore read error.
-		slog.Warn("CheckBudget: could not read user status, proceeding",
-			"user_id", userID, "error", err)
+		if errors.Is(err, storage.ErrNotFound) {
+			// User doc doesn't exist yet (auto-provisioning flow).
+			// This is NOT a security risk — they simply haven't been
+			// created by TouchLastSeen yet. Skip the status check;
+			// budget/grant gates below still apply.
+		} else {
+			// SECURITY: Fail closed — if we can't verify user status
+			// (transient Firestore error), block the request. Return
+			// the error so the proxy can return a 503 instead of a
+			// misleading 402.
+			slog.Error("CheckBudget: could not verify user status, blocking request",
+				"user_id", userID, "error", err)
+			return nil, err
+		}
 	} else if user != nil && user.Status == storage.StatusInactive {
 		return &storage.BudgetCheckResult{
 			Allowed:       false,
@@ -889,6 +899,14 @@ func (s *Store) CheckBudget(ctx context.Context, userID string, estimatedCostUSD
 }
 
 func (s *Store) DeductSpend(ctx context.Context, userID string, costUSD float64, tokens int64) error {
+	// SECURITY: Reject negative costs — they would credit the budget instead
+	// of deducting. Currently defended by toInt64() clamping negative token
+	// counts, but this is defense-in-depth at the storage boundary.
+	if costUSD < 0 {
+		slog.Error("DeductSpend: rejected negative cost",
+			"user_id", userID, "cost_usd", costUSD, "tokens", tokens)
+		return fmt.Errorf("firestoredb: negative cost not allowed: %f", costUSD)
+	}
 	// CRIT-5: capture time.Now() once before the transaction so retries see
 	// a consistent timestamp (avoids crossing a minute boundary on retry).
 	now := time.Now().UTC()

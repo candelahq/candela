@@ -363,16 +363,32 @@ func main() {
 						"provider", p.Name,
 						"project", geminiProjectID,
 						"adc", tokenSource != nil)
+
+				case "gemini-vertex":
+					// Native Gemini API via Vertex AI publisher endpoint.
+					// Same as "google" but with an explicit name for clarity.
+					allProviders[i].UpstreamURL = proxy.VertexAIUpstreamURL("global")
+					allProviders[i].PathRewriter = &proxy.VertexAIGooglePathRewriter{
+						ProjectID: geminiProjectID,
+						Region:    "global",
+					}
+					if tokenSource != nil {
+						allProviders[i].TokenSource = tokenSource
+					}
+					slog.Info("🔐 Gemini-Vertex native via Vertex AI configured",
+						"provider", p.Name,
+						"project", geminiProjectID,
+						"adc", tokenSource != nil)
 				}
 			}
 		} else {
 			// Without a project ID, Vertex AI providers can't route.
 			// Remove them from allProviders to prevent broken defaults.
-			slog.Warn("⚠️ Vertex AI providers require vertex_ai.project_id — gemini-oai, google, mistral, deepseek, qwen providers will be disabled")
+			slog.Warn("⚠️ Vertex AI providers require vertex_ai.project_id — gemini-oai, google, gemini-vertex, mistral, deepseek, qwen providers will be disabled")
 			var filtered []proxy.Provider
 			for _, p := range allProviders {
 				switch p.Name {
-				case "gemini-oai", "google", "mistral", "deepseek", "qwen":
+				case "gemini-oai", "google", "gemini-vertex", "mistral", "deepseek", "qwen":
 					// Skip — these need Vertex AI project ID
 				default:
 					filtered = append(filtered, p)

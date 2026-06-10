@@ -98,6 +98,7 @@ var providerAliases = map[string]string{
 	"anthropic-vertex":  "anthropic",
 	"anthropic-bedrock": "anthropic",
 	"gemini-oai":        "google", // Gemini via OpenAI-compat shares Google cache pricing
+	"gemini-vertex":     "google", // Native Gemini via Vertex AI shares Google pricing
 }
 
 // New creates a Calculator with default pricing for all supported cloud models.

@@ -21,6 +21,11 @@ proxy:
     project_id: "your-gcp-project-id"
     region: "us-east5"
     prompt_caching: true  # Inject cache_control for Anthropic prompt caching (~10x cost reduction)
+    # Per-provider region/endpoint overrides for MaaS models with limited availability.
+    provider_overrides:
+      mistral:
+        region: "us-central1"    # Mistral only in us-central1 & europe-west1
+        # endpoint: "https://custom-endpoint.example.com"  # optional full URL override
   providers:
     - openai
     - google

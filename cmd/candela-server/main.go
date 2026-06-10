@@ -71,8 +71,12 @@ type Config struct {
 		DailyLimits    []proxy.SpendLimitConfig `yaml:"daily_limits"`         // Per-model daily spend limits
 		VertexAI       struct {
 			ProjectID   string `yaml:"project_id"`   // GCP project for Vertex AI
-			Region      string `yaml:"region"`       // e.g. "us-central1"
+			Region      string `yaml:"region"`       // default region (e.g. "us-central1")
 			CachingMode string `yaml:"caching_mode"` // off|auto|system-only (default: auto)
+			// ProviderOverrides allows per-provider region and endpoint overrides.
+			// MaaS models (Mistral, DeepSeek, Qwen) have limited regional availability;
+			// this lets each provider target the correct region independently.
+			ProviderOverrides map[string]ProviderOverride `yaml:"provider_overrides"`
 		} `yaml:"vertex_ai"`
 	} `yaml:"proxy"`
 	CORS struct {
@@ -107,6 +111,12 @@ type Config struct {
 			TimeoutSec  int               `yaml:"timeout_sec"` // per-export timeout (default: 30)
 		} `yaml:"otlp"`
 	} `yaml:"sinks"`
+}
+
+// ProviderOverride holds per-provider Vertex AI configuration overrides.
+type ProviderOverride struct {
+	Region   string `yaml:"region"`   // Regional override (e.g. "us-central1" for Mistral)
+	Endpoint string `yaml:"endpoint"` // Full endpoint URL override (e.g. "https://us-central1-aiplatform.googleapis.com")
 }
 
 func main() {
@@ -399,15 +409,26 @@ func main() {
 
 		// Configure Mistral — routes through regional Vertex AI rawPredict
 		// endpoint with publisher "mistralai". Same auth pattern as Anthropic.
+		// Default to us-central1 since Mistral is only available in limited regions.
 		if cfg.Proxy.VertexAI.ProjectID != "" {
-			mistralRegion := cfg.Proxy.VertexAI.Region
-			if mistralRegion == "" {
-				mistralRegion = "us-central1"
+			mistralRegion := "us-central1" // Mistral default — not available in all regions
+			mistralEndpoint := ""
+			if ov, ok := cfg.Proxy.VertexAI.ProviderOverrides["mistral"]; ok {
+				if ov.Region != "" {
+					mistralRegion = ov.Region
+				}
+				if ov.Endpoint != "" {
+					mistralEndpoint = ov.Endpoint
+				}
 			}
 			for i, p := range allProviders {
 				switch p.Name {
 				case "mistral":
-					allProviders[i].UpstreamURL = proxy.VertexAIUpstreamURL(mistralRegion)
+					if mistralEndpoint != "" {
+						allProviders[i].UpstreamURL = mistralEndpoint
+					} else {
+						allProviders[i].UpstreamURL = proxy.VertexAIUpstreamURL(mistralRegion)
+					}
 					allProviders[i].PathRewriter = &proxy.VertexAIMaaSPathRewriter{
 						ProjectID: cfg.Proxy.VertexAI.ProjectID,
 						Region:    mistralRegion,
@@ -420,6 +441,7 @@ func main() {
 						"provider", p.Name,
 						"project", cfg.Proxy.VertexAI.ProjectID,
 						"region", mistralRegion,
+						"endpoint_override", mistralEndpoint != "",
 						"adc", tokenSource != nil)
 				}
 			}
@@ -427,21 +449,38 @@ func main() {
 
 		// Configure DeepSeek & Qwen — route through Vertex AI's global
 		// OpenAI-compatible endpoint (same pattern as gemini-oai).
+		// Supports per-provider region/endpoint overrides.
 		if geminiProjectID != "" {
 			for i, p := range allProviders {
 				switch p.Name {
 				case "deepseek", "qwen":
-					allProviders[i].UpstreamURL = proxy.VertexAIUpstreamURL("global")
+					provRegion := "global"
+					provEndpoint := ""
+					if ov, ok := cfg.Proxy.VertexAI.ProviderOverrides[p.Name]; ok {
+						if ov.Region != "" {
+							provRegion = ov.Region
+						}
+						if ov.Endpoint != "" {
+							provEndpoint = ov.Endpoint
+						}
+					}
+					if provEndpoint != "" {
+						allProviders[i].UpstreamURL = provEndpoint
+					} else {
+						allProviders[i].UpstreamURL = proxy.VertexAIUpstreamURL(provRegion)
+					}
 					allProviders[i].PathRewriter = &proxy.VertexAIGeminiOAIPathRewriter{
 						ProjectID: geminiProjectID,
-						Region:    "global",
+						Region:    provRegion,
 					}
 					if tokenSource != nil {
 						allProviders[i].TokenSource = tokenSource
 					}
-					slog.Info("🔐 "+p.Name+" via Vertex AI global endpoint configured",
+					slog.Info("🔐 "+p.Name+" via Vertex AI configured",
 						"provider", p.Name,
 						"project", geminiProjectID,
+						"region", provRegion,
+						"endpoint_override", provEndpoint != "",
 						"adc", tokenSource != nil)
 				}
 			}

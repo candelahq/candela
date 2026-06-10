@@ -580,6 +580,32 @@ func (r *VertexAIPathRewriter) RewritePath(model string, streaming bool) string 
 }
 
 // ====================================================================
+// VertexAIMaaSPathRewriter — implements PathRewriter
+// ====================================================================
+
+// VertexAIMaaSPathRewriter rewrites URL paths for any Vertex AI MaaS publisher
+// that uses the rawPredict/streamRawPredict pattern (e.g. Mistral).
+// Unlike VertexAIPathRewriter (which hardcodes "anthropic"), this takes
+// the publisher name as a parameter.
+type VertexAIMaaSPathRewriter struct {
+	ProjectID string // GCP project ID
+	Region    string // GCP region (e.g. "us-central1")
+	Publisher string // Vertex AI publisher (e.g. "mistralai")
+}
+
+func (r *VertexAIMaaSPathRewriter) RewritePath(model string, streaming bool) string {
+	if model == "" {
+		return ""
+	}
+	method := "rawPredict"
+	if streaming {
+		method = "streamRawPredict"
+	}
+	return fmt.Sprintf("/v1/projects/%s/locations/%s/publishers/%s/models/%s:%s",
+		r.ProjectID, r.Region, r.Publisher, model, method)
+}
+
+// ====================================================================
 // VertexAIGeminiOAIPathRewriter — implements PathRewriter
 // ====================================================================
 

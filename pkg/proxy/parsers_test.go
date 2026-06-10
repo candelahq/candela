@@ -274,6 +274,9 @@ func TestGetParser_AllProviders(t *testing.T) {
 	providers := map[string]string{
 		"openai":           "*proxy.openaiParser",
 		"gemini-oai":       "*proxy.openaiParser",
+		"mistral":          "*proxy.openaiParser",
+		"deepseek":         "*proxy.openaiParser",
+		"qwen":             "*proxy.openaiParser",
 		"anthropic":        "*proxy.anthropicParser",
 		"anthropic-direct": "*proxy.anthropicParser",
 		"anthropic-vertex": "*proxy.anthropicParser",
@@ -706,5 +709,162 @@ data: [DONE]
 		// Anthropic's model is nested in message, not top-level in SSE chunk.
 		// Top-level scan won't find it — this is expected.
 		t.Logf("note: found model %q in streaming data (unexpected but harmless)", model)
+	}
+}
+
+// ── MaaS provider tests (Mistral, DeepSeek, Qwen) ───────────────────────────
+
+func TestExtractModelFromResponse_DeepSeek(t *testing.T) {
+	body := []byte(`{
+		"model": "deepseek-ai/deepseek-v3.2-maas",
+		"choices": [{"message": {"role": "assistant", "content": "hi"}}],
+		"usage": {"prompt_tokens": 100, "completion_tokens": 50}
+	}`)
+
+	model := extractModelFromResponse("deepseek", body)
+	// Issue 3: publisher prefix should be stripped.
+	if model != "deepseek-v3.2-maas" {
+		t.Errorf("DeepSeek model = %q, want %q (prefix stripped)", model, "deepseek-v3.2-maas")
+	}
+}
+
+func TestExtractModelFromResponse_Mistral(t *testing.T) {
+	body := []byte(`{
+		"model": "mistral-medium-3",
+		"choices": [{"message": {"role": "assistant", "content": "bonjour"}}],
+		"usage": {"prompt_tokens": 200, "completion_tokens": 30}
+	}`)
+
+	model := extractModelFromResponse("mistral", body)
+	if model != "mistral-medium-3" {
+		t.Errorf("Mistral model = %q, want %q", model, "mistral-medium-3")
+	}
+}
+
+func TestExtractModelFromResponse_Qwen(t *testing.T) {
+	body := []byte(`{
+		"model": "qwen3-235b-a22b-instruct-2507-maas",
+		"choices": [{"message": {"role": "assistant", "content": "hello"}}],
+		"usage": {"prompt_tokens": 150, "completion_tokens": 40}
+	}`)
+
+	model := extractModelFromResponse("qwen", body)
+	if model != "qwen3-235b-a22b-instruct-2507-maas" {
+		t.Errorf("Qwen model = %q, want %q", model, "qwen3-235b-a22b-instruct-2507-maas")
+	}
+}
+
+// ── Issue 3: extractModelFromResponse strips publisher prefixes ──────────────
+
+func TestExtractModelFromResponse_DeepSeek_StripsPrefix(t *testing.T) {
+	body := []byte(`{
+		"model": "deepseek-ai/deepseek-v3.2-maas",
+		"choices": [{"message": {"role": "assistant", "content": "hi"}}],
+		"usage": {"prompt_tokens": 100, "completion_tokens": 50}
+	}`)
+
+	model := extractModelFromResponse("deepseek", body)
+	if model != "deepseek-v3.2-maas" {
+		t.Errorf("DeepSeek model = %q, want %q (publisher prefix stripped)", model, "deepseek-v3.2-maas")
+	}
+}
+
+func TestExtractModelFromResponse_Qwen_StripsPrefix(t *testing.T) {
+	body := []byte(`{
+		"model": "qwen/qwen3-235b-a22b-instruct-2507-maas",
+		"choices": [{"message": {"role": "assistant", "content": "hello"}}],
+		"usage": {"prompt_tokens": 150, "completion_tokens": 40}
+	}`)
+
+	model := extractModelFromResponse("qwen", body)
+	if model != "qwen3-235b-a22b-instruct-2507-maas" {
+		t.Errorf("Qwen model = %q, want %q (publisher prefix stripped)", model, "qwen3-235b-a22b-instruct-2507-maas")
+	}
+}
+
+func TestExtractModelFromStreamingResponse_DeepSeek_StripsPrefix(t *testing.T) {
+	data := []byte(`data: {"model":"deepseek-ai/deepseek-v3.2-maas","choices":[{"delta":{"content":"hi"}}]}
+data: {"model":"deepseek-ai/deepseek-v3.2-maas","choices":[],"usage":{"prompt_tokens":100,"completion_tokens":50}}
+data: [DONE]
+`)
+
+	model := extractModelFromStreamingResponse("deepseek", data)
+	if model != "deepseek-v3.2-maas" {
+		t.Errorf("DeepSeek streaming model = %q, want %q (prefix stripped)", model, "deepseek-v3.2-maas")
+	}
+}
+
+func TestExtractModelFromStreamingResponse_Qwen_StripsPrefix(t *testing.T) {
+	data := []byte(`data: {"model":"qwen/qwen3-235b-a22b-instruct-2507-maas","choices":[{"delta":{"content":"hello"}}]}
+data: [DONE]
+`)
+
+	model := extractModelFromStreamingResponse("qwen", data)
+	if model != "qwen3-235b-a22b-instruct-2507-maas" {
+		t.Errorf("Qwen streaming model = %q, want %q (prefix stripped)", model, "qwen3-235b-a22b-instruct-2507-maas")
+	}
+}
+
+func TestExtractCacheTokens_MaaSProviders(t *testing.T) {
+	// Mistral, DeepSeek, and Qwen all use the OpenAI cache token path:
+	// usage.prompt_tokens_details.cached_tokens
+	body := []byte(`{
+		"usage": {
+			"prompt_tokens": 5000,
+			"completion_tokens": 200,
+			"prompt_tokens_details": {
+				"cached_tokens": 3000
+			}
+		}
+	}`)
+
+	for _, provider := range []string{"mistral", "deepseek", "qwen"} {
+		ct := extractCacheTokens(provider, body)
+		if ct.CacheReadTokens != 3000 {
+			t.Errorf("%s: CacheReadTokens = %d, want 3000", provider, ct.CacheReadTokens)
+		}
+		if ct.CacheCreationTokens != 0 {
+			t.Errorf("%s: CacheCreationTokens = %d, want 0 (OpenAI has no creation concept)", provider, ct.CacheCreationTokens)
+		}
+	}
+}
+
+func TestExtractStreamingCacheTokens_MaaSProviders(t *testing.T) {
+	// MaaS providers use the OpenAI streaming cache path.
+	stream := []byte(`data: {"choices":[{"delta":{"content":"hi"}}]}
+data: {"choices":[],"usage":{"prompt_tokens":2000,"completion_tokens":100,"prompt_tokens_details":{"cached_tokens":1500}}}
+data: [DONE]
+`)
+
+	for _, provider := range []string{"mistral", "deepseek", "qwen"} {
+		ct := extractStreamingCacheTokens(provider, stream)
+		if ct.CacheReadTokens != 1500 {
+			t.Errorf("%s: streaming CacheReadTokens = %d, want 1500", provider, ct.CacheReadTokens)
+		}
+		if ct.CacheCreationTokens != 0 {
+			t.Errorf("%s: streaming CacheCreationTokens = %d, want 0", provider, ct.CacheCreationTokens)
+		}
+	}
+}
+
+func TestInjectStreamUsageOption_MaaSProviders(t *testing.T) {
+	body := []byte(`{"model":"some-model","messages":[{"role":"user","content":"hi"}],"stream":true}`)
+
+	for _, provider := range []string{"mistral", "deepseek", "qwen"} {
+		result := injectStreamUsageOption(provider, body)
+
+		var parsed map[string]interface{}
+		if err := json.Unmarshal(result, &parsed); err != nil {
+			t.Fatalf("%s: failed to unmarshal: %v", provider, err)
+		}
+
+		so, ok := parsed["stream_options"].(map[string]interface{})
+		if !ok {
+			t.Errorf("%s: stream_options not injected", provider)
+			continue
+		}
+		if so["include_usage"] != true {
+			t.Errorf("%s: include_usage = %v, want true", provider, so["include_usage"])
+		}
 	}
 }

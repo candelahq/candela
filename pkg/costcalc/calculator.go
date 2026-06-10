@@ -448,6 +448,18 @@ func (c *Calculator) resolve(provider, model string) (ModelPricing, bool) {
 func extractBaseModel(model string) string {
 	m := strings.ToLower(model)
 
+	// Strip Vertex AI MaaS publisher prefixes (e.g. "deepseek-ai/deepseek-v3.2-maas")
+	if i := strings.LastIndex(m, "/"); i >= 0 {
+		// Return prefix-stripped only. Don't also strip -maas here,
+		// since the pricing key may include -maas (e.g. "deepseek-v3.2-maas").
+		return m[i+1:]
+	}
+
+	// Strip Vertex AI MaaS "-maas" suffix (e.g. "deepseek-v3.2-maas" → "deepseek-v3.2")
+	if strings.HasSuffix(m, "-maas") {
+		return strings.TrimSuffix(m, "-maas")
+	}
+
 	// OpenAI fine-tune format: ft:{base_model}:{org}:{name}:{id}
 	if strings.HasPrefix(m, "ft:") {
 		parts := strings.SplitN(m, ":", 3)
@@ -607,6 +619,20 @@ func (c *Calculator) loadDefaults() {
 		// GPT-4o (legacy)
 		{Provider: "openai", Model: "gpt-4o", InputPerMillion: 2.50, OutputPerMillion: 10.00},
 		{Provider: "openai", Model: "gpt-4o-mini", InputPerMillion: 0.15, OutputPerMillion: 0.60},
+
+		// ── Mistral (via Vertex AI rawPredict) ───────────────────
+		{Provider: "mistral", Model: "mistral-small-2503", InputPerMillion: 0.10, OutputPerMillion: 0.30},
+		{Provider: "mistral", Model: "mistral-medium-3", InputPerMillion: 0.40, OutputPerMillion: 2.00},
+		{Provider: "mistral", Model: "codestral-2501", InputPerMillion: 0.30, OutputPerMillion: 0.90},
+
+		// ── DeepSeek (via Vertex AI OpenAI-compat, global endpoint) ──────
+		// NOTE: V3.1 excluded — it requires regional us-west2 endpoint, not global.
+		// V3.2 supersedes V3.1 and is available on the global endpoint.
+		{Provider: "deepseek", Model: "deepseek-v3.2-maas", InputPerMillion: 0.14, OutputPerMillion: 0.28},
+		{Provider: "deepseek", Model: "deepseek-r1-0528-maas", InputPerMillion: 0.14, OutputPerMillion: 0.28},
+
+		// ── Qwen (via Vertex AI OpenAI-compat) ─────────────────
+		{Provider: "qwen", Model: "qwen3-235b-a22b-instruct-2507-maas", InputPerMillion: 0.30, OutputPerMillion: 1.20},
 	}
 	for _, p := range defaults {
 		c.defaults[c.key(p.Provider, p.Model)] = p

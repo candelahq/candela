@@ -982,7 +982,7 @@ func buildCloudProxy(cfg Config, submitter *processor.SpanProcessor) (*proxy.Pro
 	needsAWS := false
 	for _, lp := range cfg.Providers {
 		switch lp.Name {
-		case "google", "gemini", "anthropic", "anthropic-vertex":
+		case "google", "gemini", "anthropic", "anthropic-vertex", "mistral", "deepseek", "qwen":
 			needsGCP = true
 		case "anthropic-bedrock":
 			needsAWS = true
@@ -1102,6 +1102,31 @@ func buildCloudProxy(cfg Config, submitter *processor.SpanProcessor) (*proxy.Pro
 				Credentials: awsCfg.Credentials,
 			}
 			p.PathRewriter = &proxy.BedrockPathRewriter{}
+		case "mistral":
+			// Mistral via Vertex AI rawPredict (publisher: mistralai).
+			p.UpstreamURL = proxy.VertexAIUpstreamURL(region)
+			p.TokenSource = tokenSource
+			p.PathRewriter = &proxy.VertexAIMaaSPathRewriter{
+				ProjectID: project,
+				Region:    region,
+				Publisher: "mistralai",
+			}
+		case "deepseek":
+			// DeepSeek via Vertex AI OpenAI-compat endpoint (global).
+			p.UpstreamURL = proxy.VertexAIUpstreamURL("global")
+			p.TokenSource = tokenSource
+			p.PathRewriter = &proxy.VertexAIGeminiOAIPathRewriter{
+				ProjectID: project,
+				Region:    "global",
+			}
+		case "qwen":
+			// Qwen via Vertex AI OpenAI-compat endpoint (global).
+			p.UpstreamURL = proxy.VertexAIUpstreamURL("global")
+			p.TokenSource = tokenSource
+			p.PathRewriter = &proxy.VertexAIGeminiOAIPathRewriter{
+				ProjectID: project,
+				Region:    "global",
+			}
 		default:
 			slog.Warn("unknown provider — skipping", "name", lp.Name)
 			continue

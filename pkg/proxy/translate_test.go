@@ -614,3 +614,88 @@ func TestVertexAIUpstreamURL(t *testing.T) {
 		})
 	}
 }
+
+// ====================================================================
+// MaaS Path Rewriters
+// ====================================================================
+
+func TestVertexAIMaaSPathRewriter(t *testing.T) {
+	rewriter := &VertexAIMaaSPathRewriter{
+		ProjectID: "my-project",
+		Region:    "us-central1",
+		Publisher: "mistralai",
+	}
+
+	tests := []struct {
+		name      string
+		model     string
+		streaming bool
+		want      string
+	}{
+		{
+			name:      "non-streaming Mistral",
+			model:     "mistral-medium-3",
+			streaming: false,
+			want:      "/v1/projects/my-project/locations/us-central1/publishers/mistralai/models/mistral-medium-3:rawPredict",
+		},
+		{
+			name:      "streaming Mistral",
+			model:     "mistral-medium-3",
+			streaming: true,
+			want:      "/v1/projects/my-project/locations/us-central1/publishers/mistralai/models/mistral-medium-3:streamRawPredict",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := rewriter.RewritePath(tt.model, tt.streaming)
+			if got != tt.want {
+				t.Errorf("RewritePath = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestVertexAIGeminiOAIPathRewriter_DeepSeek(t *testing.T) {
+	rewriter := &VertexAIGeminiOAIPathRewriter{
+		ProjectID: "my-project",
+		Region:    "global",
+	}
+
+	wantPath := "/v1/projects/my-project/locations/global/endpoints/openapi/chat/completions"
+
+	// Non-streaming
+	got := rewriter.RewritePath("deepseek-v3.2-maas", false)
+	if got != wantPath {
+		t.Errorf("non-streaming DeepSeek RewritePath = %q, want %q", got, wantPath)
+	}
+
+	// Streaming — same path for OpenAI-compat (model is in body, not URL)
+	got = rewriter.RewritePath("deepseek-v3.2-maas", true)
+	if got != wantPath {
+		t.Errorf("streaming DeepSeek RewritePath = %q, want %q", got, wantPath)
+	}
+}
+
+// ====================================================================
+// Issue 2: Empty model guard
+// ====================================================================
+
+func TestVertexAIMaaSPathRewriter_EmptyModel(t *testing.T) {
+	rewriter := &VertexAIMaaSPathRewriter{
+		ProjectID: "my-project",
+		Region:    "us-central1",
+		Publisher: "mistralai",
+	}
+
+	// Empty model should return empty string, not a malformed URL.
+	got := rewriter.RewritePath("", false)
+	if got != "" {
+		t.Errorf("RewritePath(\"\", false) = %q, want empty string", got)
+	}
+
+	got = rewriter.RewritePath("", true)
+	if got != "" {
+		t.Errorf("RewritePath(\"\", true) = %q, want empty string", got)
+	}
+}

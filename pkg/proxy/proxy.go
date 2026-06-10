@@ -276,6 +276,12 @@ func DefaultProviders() []Provider {
 		// No format translation, no Vertex AI, no ADC. Client provides its own API key.
 		// Use this for Claude Code, pencil.dev, and other tools that speak native Anthropic.
 		{Name: "anthropic-direct", UpstreamURL: "https://api.anthropic.com"},
+		// Mistral via Vertex AI (rawPredict). Uses MaaSPathRewriter with publisher "mistralai".
+		{Name: "mistral", UpstreamURL: "https://us-central1-aiplatform.googleapis.com"},
+		// DeepSeek via Vertex AI OpenAI-compat endpoint (global). Model prefix: deepseek-ai/
+		{Name: "deepseek", UpstreamURL: "https://aiplatform.googleapis.com"},
+		// Qwen via Vertex AI OpenAI-compat endpoint (global). Model prefix: qwen/
+		{Name: "qwen", UpstreamURL: "https://aiplatform.googleapis.com"},
 	}
 }
 
@@ -930,8 +936,25 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 	// the "google/" prefix so clients can send bare model names.
 	// Uses requestModel (extracted once above) to avoid redundant JSON parsing.
 	// Uses rewriteModelField (regex) to avoid expensive JSON round-trip.
-	if providerName == "gemini-oai" && provider.PathRewriter != nil && requestModel != "" && !strings.HasPrefix(requestModel, "google/") {
-		upstreamBody = rewriteModelField(upstreamBody, "google/"+requestModel)
+	// --- Vertex AI publisher prefix injection ---
+	// Vertex AI's OpenAI-compat endpoint requires model names to include the
+	// publisher prefix (e.g. "google/gemini-2.5-flash"). Transparently inject
+	// the prefix so clients can send bare model names.
+	if provider.PathRewriter != nil && requestModel != "" {
+		switch providerName {
+		case "gemini-oai":
+			if !strings.HasPrefix(requestModel, "google/") {
+				upstreamBody = rewriteModelField(upstreamBody, "google/"+requestModel)
+			}
+		case "deepseek":
+			if !strings.HasPrefix(requestModel, "deepseek-ai/") {
+				upstreamBody = rewriteModelField(upstreamBody, "deepseek-ai/"+requestModel)
+			}
+		case "qwen":
+			if !strings.HasPrefix(requestModel, "qwen/") {
+				upstreamBody = rewriteModelField(upstreamBody, "qwen/"+requestModel)
+			}
+		}
 	}
 
 	// --- Path rewriting ---

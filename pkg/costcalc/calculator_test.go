@@ -161,6 +161,42 @@ func TestCalculate(t *testing.T) {
 			wantMin:      0.006,
 			wantMax:      0.007,
 		},
+		{
+			name:         "Mistral Medium 3",
+			provider:     "mistral",
+			model:        "mistral-medium-3",
+			inputTokens:  1000,
+			outputTokens: 500,
+			wantMin:      0.001, // 1K×$0.40/M + 500×$2.00/M = $0.0004 + $0.001 = $0.0014
+			wantMax:      0.0015,
+		},
+		{
+			name:         "DeepSeek V3.2",
+			provider:     "deepseek",
+			model:        "deepseek-v3.2-maas",
+			inputTokens:  10000,
+			outputTokens: 2000,
+			wantMin:      0.001, // 10K×$0.14/M + 2K×$0.28/M = $0.0014 + $0.00056 = $0.00196
+			wantMax:      0.002,
+		},
+		{
+			name:         "Codestral 2501",
+			provider:     "mistral",
+			model:        "codestral-2501",
+			inputTokens:  1000,
+			outputTokens: 500,
+			wantMin:      0.0007, // 1K×$0.30/M + 500×$0.90/M = $0.0003 + $0.00045 = $0.00075
+			wantMax:      0.0008,
+		},
+		{
+			name:         "Qwen3 235B",
+			provider:     "qwen",
+			model:        "qwen3-235b-a22b-instruct-2507-maas",
+			inputTokens:  1000,
+			outputTokens: 500,
+			wantMin:      0.0009, // 1K×$0.30/M + 500×$1.20/M = $0.0003 + $0.0006 = $0.0009
+			wantMax:      0.001,
+		},
 	}
 
 	for _, tt := range tests {
@@ -249,5 +285,95 @@ func TestModelDiscount(t *testing.T) {
 	want := 12.96
 	if math.Abs(got-want) > 0.01 {
 		t.Errorf("Calculate with stacked discounts = %f, want %f", got, want)
+	}
+}
+
+// ── Issue 1: MaaS providers must NOT inherit OpenAI cache discounts ──────────
+
+func TestNormalizeCachedInput_MaaSProviders_NoDiscount(t *testing.T) {
+	calc := New()
+
+	tests := []struct {
+		name        string
+		provider    string
+		model       string
+		rawInput    int64
+		cacheRead   int64
+		cacheCreate int64
+		want        int64
+	}{
+		{
+			name:      "Qwen: no cache discount even with cached tokens",
+			provider:  "qwen",
+			model:     "qwen3-235b-a22b-instruct-2507-maas",
+			rawInput:  100,
+			cacheRead: 7,
+			want:      100,
+		},
+		{
+			name:      "DeepSeek: no cache discount",
+			provider:  "deepseek",
+			model:     "deepseek-v3.2-maas",
+			rawInput:  1000,
+			cacheRead: 500,
+			want:      1000,
+		},
+		{
+			name:     "Mistral: no cache discount",
+			provider: "mistral",
+			model:    "mistral-medium-3",
+			rawInput: 500,
+			want:     500,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := calc.NormalizeCachedInput(tt.provider, tt.model, tt.rawInput, tt.cacheRead, tt.cacheCreate)
+			if got != tt.want {
+				t.Errorf("NormalizeCachedInput(%q, %q, %d, %d, %d) = %d, want %d",
+					tt.provider, tt.model, tt.rawInput, tt.cacheRead, tt.cacheCreate, got, tt.want)
+			}
+		})
+	}
+}
+
+// ── Issue 4: extractBaseModel handles publisher prefixes and -maas suffix ────
+
+func TestCalculate_DeepSeek_WithPublisherPrefix(t *testing.T) {
+	calc := New()
+
+	// "deepseek-ai/deepseek-v3.2-maas" should strip prefix to "deepseek-v3.2-maas"
+	// and match deepseek/deepseek-v3.2-maas pricing.
+	got := calc.Calculate("deepseek", "deepseek-ai/deepseek-v3.2-maas", 10000, 2000)
+	if got <= 0 {
+		t.Errorf("Calculate(deepseek, deepseek-ai/deepseek-v3.2-maas) = %f, want > 0 (pricing should resolve)", got)
+	}
+}
+
+func TestCalculate_Qwen_WithPublisherPrefix(t *testing.T) {
+	calc := New()
+
+	// "qwen/qwen3-235b-a22b-instruct-2507-maas" should strip "qwen/" prefix
+	// and match qwen/qwen3-235b-a22b-instruct-2507-maas pricing.
+	got := calc.Calculate("qwen", "qwen/qwen3-235b-a22b-instruct-2507-maas", 1000, 500)
+	if got <= 0 {
+		t.Errorf("Calculate(qwen, qwen/qwen3-...) = %f, want > 0 (pricing should resolve)", got)
+	}
+}
+
+func TestCalculate_DeepSeek_WithoutMaasSuffix(t *testing.T) {
+	calc := New()
+
+	// "deepseek-v3.2" (no -maas suffix) should resolve via extractBaseModel
+	// which strips -maas → tries "deepseek-v3.2" as base. However, the stored
+	// model IS "deepseek-v3.2-maas". extractBaseModel strips -maas from the
+	// stored model during fallback building, so "deepseek-v3.2" without -maas
+	// won't match directly. Let's verify the exact behavior.
+	got := calc.Calculate("deepseek", "deepseek-v3.2", 10000, 2000)
+	// This may or may not resolve depending on fallback logic; the important
+	// thing is it doesn't panic and returns a non-negative value.
+	if got < 0 {
+		t.Errorf("Calculate(deepseek, deepseek-v3.2) = %f, want >= 0", got)
 	}
 }

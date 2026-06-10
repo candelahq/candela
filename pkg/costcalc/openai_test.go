@@ -282,6 +282,9 @@ func TestAllProviders_HaveAtLeastOneModel(t *testing.T) {
 		"google":    "gemini-2.5-pro",
 		"anthropic": "claude-sonnet-4",
 		"openai":    "gpt-4.1",
+		"mistral":   "mistral-medium-3",
+		"deepseek":  "deepseek-v3.2-maas",
+		"qwen":      "qwen3-235b-a22b-instruct-2507-maas",
 	}
 	for provider, model := range providers {
 		if !c.HasPricing(provider, model) {

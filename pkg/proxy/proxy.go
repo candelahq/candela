@@ -244,6 +244,15 @@ type Proxy struct {
 	// HIGH-2: Service account spend tracking (micro-USD for precision).
 	saSpendMicroUSD atomic.Int64
 
+	// Per-service-account in-process rate limiter.
+	// SAs bypass user budget/rate-limit checks, so this is their only throttle.
+	saRL *saRateLimiter
+
+	// TOCTOU mitigation: tracks in-flight spend between CheckBudget and
+	// DeductSpend. Without this, concurrent requests all pass CheckBudget
+	// because none have been recorded in Firestore yet.
+	pendingSpend *pendingSpendTracker
+
 	// HIGH-5: Spans dropped at proxy semaphore (circuit breaker full).
 	droppedSpans atomic.Int64
 }
@@ -305,13 +314,15 @@ func New(cfg Config, submitter SpanSubmitter, calc *costcalc.Calculator) *Proxy 
 	}
 
 	p := &Proxy{
-		providers: providers,
-		submitter: submitter,
-		calc:      calc,
-		projectID: cfg.ProjectID,
-		config:    cfg,
-		breakers:  breakers,
-		spanSem:   make(chan struct{}, 200), // CRIT-16: cap concurrent span goroutines
+		providers:    providers,
+		submitter:    submitter,
+		calc:         calc,
+		projectID:    cfg.ProjectID,
+		config:       cfg,
+		breakers:     breakers,
+		spanSem:      make(chan struct{}, 200), // CRIT-16: cap concurrent span goroutines
+		saRL:         newSARateLimiter(0),      // default 120 RPM per SA
+		pendingSpend: newPendingSpendTracker(),
 		client: &http.Client{
 			Timeout: 5 * time.Minute, // LLM calls can be slow
 		},
@@ -685,6 +696,22 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 		isServiceAccount = strings.HasSuffix(effectiveUserID, ".gserviceaccount.com")
 	}
 
+	// ── Service account rate limiting ──
+	// SAs bypass user-level rate limits and budget checks, so they need their
+	// own throttle to prevent runaway automation from burning through quota.
+	if isServiceAccount && p.saRL != nil {
+		allowed, count, limit := p.saRL.Allow(effectiveUserID)
+		if !allowed {
+			w.Header().Set("Content-Type", "application/json")
+			w.Header().Set("Retry-After", "60")
+			w.WriteHeader(http.StatusTooManyRequests)
+			_, _ = fmt.Fprintf(w, `{"error":{"message":"service account rate limit exceeded (%d/%d requests/min)","type":"rate_limit_exceeded","code":429}}`, count, limit)
+			slog.Info("blocked SA request: rate limit exceeded",
+				"sa", effectiveUserID, "count", count, "limit", limit)
+			return
+		}
+	}
+
 	// Extract provider from path: /proxy/{provider}/v1/...
 	parts := strings.SplitN(strings.TrimPrefix(r.URL.Path, "/proxy/"), "/", 2)
 	if len(parts) < 2 {
@@ -799,6 +826,7 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 
 	// ── Budget pre-flight with model-aware floor (#7) ──
 	// Only applies in team mode (UserStore configured).
+	var budgetReserved float64 // track reservation for Release in deductBudget
 	if p.users != nil && effectiveUserID != "" && !isServiceAccount && !isAdmin {
 		// #7: Budget check with a per-call floor so even a $0.001-remaining
 		// user can't fire a $50 request. Floor = minimum meaningful API cost.
@@ -822,6 +850,28 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 				"user_id", effectiveUserID, "remaining_usd", check.RemainingUSD)
 			return
 		}
+
+		// TOCTOU mitigation: Firestore says remaining=$X, but other in-flight
+		// requests may have already passed CheckBudget without DeductSpend yet.
+		// Subtract their pending spend from the effective remaining balance.
+		effectiveRemaining := check.RemainingUSD - p.pendingSpend.Get(effectiveUserID)
+		if effectiveRemaining < budgetCheckFloor {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusPaymentRequired)
+			_, _ = w.Write([]byte(`{"error":{"message":"budget exhausted (concurrent requests in flight) — try again shortly","type":"insufficient_budget","code":402}}`))
+			slog.Info("blocked request: budget exhausted after pending spend",
+				"user_id", effectiveUserID,
+				"firestore_remaining", check.RemainingUSD,
+				"pending_spend", p.pendingSpend.Get(effectiveUserID))
+			return
+		}
+
+		// Reserve a conservative estimate so concurrent requests see lower balance.
+		// We use the floor ($0.001) because we don't know actual cost yet.
+		// This is a lower bound — the real cost will be higher, but even a
+		// small reservation prevents unlimited concurrent overdraft.
+		budgetReserved = budgetCheckFloor
+		p.pendingSpend.Reserve(effectiveUserID, budgetReserved)
 	}
 
 	// ── Per-request cost cap (#277) ──
@@ -1056,7 +1106,13 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 		upstreamURL += "?" + r.URL.RawQuery
 	}
 
-	upstreamReq, err := http.NewRequestWithContext(r.Context(), r.Method, upstreamURL, bytes.NewReader(upstreamBody))
+	// SECURITY: Use a detached context for the upstream request so that a
+	// client disconnect doesn't cancel the upstream call. This ensures we
+	// always receive the final usage chunk (with token counts) from the
+	// upstream provider, preventing cost evasion by aborting mid-stream.
+	// The 5-minute client timeout on p.client still applies.
+	upstreamCtx := context.WithoutCancel(r.Context())
+	upstreamReq, err := http.NewRequestWithContext(upstreamCtx, r.Method, upstreamURL, bytes.NewReader(upstreamBody))
 	if err != nil {
 		http.Error(w, "failed to create upstream request", http.StatusInternalServerError)
 		return
@@ -1146,9 +1202,9 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if isStreaming && resp.StatusCode == http.StatusOK {
-		p.handleStreamingResponse(w, r, resp, provider, reqBody, startTime, ttfb, requestID, sessionID, effectiveUserID, tenantID, jobID, cbAllow, traceCtx, proxySpanID, extendedTTL)
+		p.handleStreamingResponse(w, r, resp, provider, reqBody, startTime, ttfb, requestID, sessionID, effectiveUserID, tenantID, jobID, cbAllow, traceCtx, proxySpanID, extendedTTL, budgetReserved)
 	} else {
-		p.handleStandardResponse(w, r, resp, provider, reqBody, startTime, ttfb, requestID, sessionID, effectiveUserID, tenantID, jobID, cbAllow, traceCtx, proxySpanID, extendedTTL)
+		p.handleStandardResponse(w, r, resp, provider, reqBody, startTime, ttfb, requestID, sessionID, effectiveUserID, tenantID, jobID, cbAllow, traceCtx, proxySpanID, extendedTTL, budgetReserved)
 	}
 }
 
@@ -1184,6 +1240,7 @@ func (p *Proxy) handleStandardResponse(
 	traceCtx *traceContext,
 	proxySpanID string,
 	extendedTTL bool, // true = Anthropic 1h TTL (2.0× cache creation rate)
+	budgetReserved float64, // pending-spend reservation to release after DeductSpend
 ) {
 	// Read the full response (reject if over 10MB to prevent OOM under concurrent load).
 	// CRIT-15: Previously 50MB — with 100 concurrent requests that's 5GB of heap.
@@ -1250,6 +1307,11 @@ func (p *Proxy) handleStandardResponse(
 		deductCtx, deductCancel := context.WithTimeout(context.WithoutCancel(r.Context()), 15*time.Second)
 		p.deductBudget(deductCtx, provider, model, effectiveUserID, inputTokens, outputTokens)
 		deductCancel()
+		// Release the pending-spend reservation now that DeductSpend has
+		// recorded the actual cost in Firestore.
+		if budgetReserved > 0 {
+			p.pendingSpend.Release(effectiveUserID, budgetReserved)
+		}
 	} else if cbAllow && p.spendTracker != nil {
 		// Solo mode: no UserStore but spend tracker is active.
 		// Record per-model spend so daily limits work without Firestore.
@@ -1304,6 +1366,7 @@ func (p *Proxy) handleStreamingResponse(
 	traceCtx *traceContext,
 	proxySpanID string,
 	extendedTTL bool, // true = Anthropic 1h TTL (2.0× cache creation rate)
+	budgetReserved float64, // pending-spend reservation to release after DeductSpend
 ) {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
@@ -1408,6 +1471,9 @@ func (p *Proxy) handleStreamingResponse(
 		deductCtx, deductCancel := context.WithTimeout(context.WithoutCancel(r.Context()), 15*time.Second)
 		p.deductBudget(deductCtx, provider, model, effectiveUserID, inputTokens, outputTokens)
 		deductCancel()
+		if budgetReserved > 0 {
+			p.pendingSpend.Release(effectiveUserID, budgetReserved)
+		}
 	} else if cbAllow && p.spendTracker != nil {
 		// Solo mode: record per-model spend for daily limits.
 		model, _ := extractRequestInfo(provider.Name, reqBody)

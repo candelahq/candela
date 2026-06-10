@@ -467,7 +467,7 @@ func main() {
 			for i, p := range allProviders {
 				switch p.Name {
 				case "deepseek", "qwen":
-					provRegion, provEndpoint := getProviderOverride(cfg.Proxy.VertexAI.ProviderOverrides, p.Name, "global")
+					provRegion, provEndpoint := getProviderOverride(cfg.Proxy.VertexAI.ProviderOverrides, p.Name, "us-central1")
 					if provEndpoint != "" {
 						allProviders[i].UpstreamURL = provEndpoint
 					} else {

@@ -625,6 +625,7 @@ func (c *Calculator) loadDefaults() {
 		{Provider: "mistral", Model: "mistral-small-2503", InputPerMillion: 0.10, OutputPerMillion: 0.30},
 		{Provider: "mistral", Model: "mistral-medium-3", InputPerMillion: 0.40, OutputPerMillion: 2.00},
 		{Provider: "mistral", Model: "codestral-2501", InputPerMillion: 0.30, OutputPerMillion: 0.90},
+		{Provider: "mistral", Model: "codestral-2", InputPerMillion: 0.30, OutputPerMillion: 0.90},
 
 		// ── DeepSeek (via Vertex AI OpenAI-compat, global endpoint) ──────
 		// NOTE: V3.1 excluded — it requires regional us-west2 endpoint, not global.

@@ -982,7 +982,7 @@ func buildCloudProxy(cfg Config, submitter *processor.SpanProcessor) (*proxy.Pro
 	needsAWS := false
 	for _, lp := range cfg.Providers {
 		switch lp.Name {
-		case "google", "gemini", "anthropic", "anthropic-vertex":
+		case "google", "gemini", "anthropic", "anthropic-vertex", "mistral", "deepseek", "qwen":
 			needsGCP = true
 		case "anthropic-bedrock":
 			needsAWS = true

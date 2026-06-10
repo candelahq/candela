@@ -70,9 +70,11 @@ type Config struct {
 		MaxRequestCost float64                  `yaml:"max_request_cost_usd"` // Per-request cost cap (0 = disabled)
 		DailyLimits    []proxy.SpendLimitConfig `yaml:"daily_limits"`         // Per-model daily spend limits
 		VertexAI       struct {
-			ProjectID   string `yaml:"project_id"`   // GCP project for Vertex AI
-			Region      string `yaml:"region"`       // default region (e.g. "us-central1")
-			CachingMode string `yaml:"caching_mode"` // off|auto|system-only (default: auto)
+			ProjectID     string `yaml:"project_id"`     // GCP project for Vertex AI
+			Region        string `yaml:"region"`         // default region (e.g. "us-central1")
+			CachingMode   string `yaml:"caching_mode"`   // off|auto|system-only (default: auto)
+			PromptCaching bool   `yaml:"prompt_caching"` // enable prompt caching (maps to CachingMode: auto)
+			CacheTTL      string `yaml:"cache_ttl"`      // Vertex AI cache TTL ("5m" or "1h")
 			// ProviderOverrides allows per-provider region and endpoint overrides.
 			// MaaS models (Mistral, DeepSeek, Qwen) have limited regional availability;
 			// this lets each provider target the correct region independently.
@@ -117,6 +119,19 @@ type Config struct {
 type ProviderOverride struct {
 	Region   string `yaml:"region"`   // Regional override (e.g. "us-central1" for Mistral)
 	Endpoint string `yaml:"endpoint"` // Full endpoint URL override (e.g. "https://us-central1-aiplatform.googleapis.com")
+}
+
+// getProviderOverride extracts region and endpoint from provider overrides.
+// Returns the defaultRegion if no override is set or region is empty.
+func getProviderOverride(overrides map[string]ProviderOverride, provider, defaultRegion string) (region, endpoint string) {
+	region = defaultRegion
+	if ov, ok := overrides[provider]; ok {
+		if ov.Region != "" {
+			region = ov.Region
+		}
+		endpoint = ov.Endpoint
+	}
+	return
 }
 
 func main() {
@@ -320,6 +335,13 @@ func main() {
 						if cfg.Proxy.VertexAI.CachingMode != "" {
 							ft.SetCachingMode(proxy.ParseCachingMode(cfg.Proxy.VertexAI.CachingMode))
 						}
+						// prompt_caching: true is a shorthand for caching_mode: auto
+						if cfg.Proxy.VertexAI.CachingMode == "" && cfg.Proxy.VertexAI.PromptCaching {
+							ft.SetCachingMode(proxy.CachingAuto)
+						}
+						if cfg.Proxy.VertexAI.CacheTTL != "" {
+							ft.SetCacheTTL(proxy.ParseCacheTTL(cfg.Proxy.VertexAI.CacheTTL))
+						}
 						allProviders[i].FormatTranslator = ft
 					}
 					slog.Info("🔐 Anthropic via Vertex AI configured",
@@ -411,16 +433,7 @@ func main() {
 		// endpoint with publisher "mistralai". Same auth pattern as Anthropic.
 		// Default to us-central1 since Mistral is only available in limited regions.
 		if cfg.Proxy.VertexAI.ProjectID != "" {
-			mistralRegion := "us-central1" // Mistral default — not available in all regions
-			mistralEndpoint := ""
-			if ov, ok := cfg.Proxy.VertexAI.ProviderOverrides["mistral"]; ok {
-				if ov.Region != "" {
-					mistralRegion = ov.Region
-				}
-				if ov.Endpoint != "" {
-					mistralEndpoint = ov.Endpoint
-				}
-			}
+			mistralRegion, mistralEndpoint := getProviderOverride(cfg.Proxy.VertexAI.ProviderOverrides, "mistral", "us-central1")
 			for i, p := range allProviders {
 				switch p.Name {
 				case "mistral":
@@ -454,16 +467,7 @@ func main() {
 			for i, p := range allProviders {
 				switch p.Name {
 				case "deepseek", "qwen":
-					provRegion := "global"
-					provEndpoint := ""
-					if ov, ok := cfg.Proxy.VertexAI.ProviderOverrides[p.Name]; ok {
-						if ov.Region != "" {
-							provRegion = ov.Region
-						}
-						if ov.Endpoint != "" {
-							provEndpoint = ov.Endpoint
-						}
-					}
+					provRegion, provEndpoint := getProviderOverride(cfg.Proxy.VertexAI.ProviderOverrides, p.Name, "global")
 					if provEndpoint != "" {
 						allProviders[i].UpstreamURL = provEndpoint
 					} else {
@@ -482,6 +486,21 @@ func main() {
 						"region", provRegion,
 						"endpoint_override", provEndpoint != "",
 						"adc", tokenSource != nil)
+				}
+			}
+		}
+
+		// Validate provider_overrides keys — warn on unknown providers.
+		if len(cfg.Proxy.VertexAI.ProviderOverrides) > 0 {
+			validOverrideProviders := map[string]bool{
+				"mistral": true, "deepseek": true, "qwen": true,
+				"anthropic": true, "anthropic-vertex": true,
+				"gemini-oai": true, "gemini-vertex": true, "google": true,
+			}
+			for name := range cfg.Proxy.VertexAI.ProviderOverrides {
+				if !validOverrideProviders[name] {
+					slog.Warn("⚠️ unknown provider in provider_overrides — will be ignored",
+						"provider", name)
 				}
 			}
 		}

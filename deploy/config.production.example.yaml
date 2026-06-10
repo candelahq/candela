@@ -20,7 +20,9 @@ proxy:
   vertex_ai:
     project_id: "your-gcp-project-id"
     region: "us-east5"
-    prompt_caching: true  # Inject cache_control for Anthropic prompt caching (~10x cost reduction)
+    prompt_caching: true  # Shorthand for caching_mode: auto (~10x cost reduction)
+    # caching_mode: auto  # Explicit alternative: off|auto|system-only
+    # cache_ttl: "5m"     # Vertex AI cache TTL ("5m" or "1h")
     # Per-provider region/endpoint overrides for MaaS models with limited availability.
     provider_overrides:
       mistral:
@@ -34,7 +36,6 @@ proxy:
     - anthropic-direct
     - anthropic-bedrock
     - gemini-oai
-    - gemini-direct
     - gemini-vertex
     - mistral
     - deepseek

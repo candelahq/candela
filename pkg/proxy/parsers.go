@@ -39,6 +39,7 @@ var parserRegistry = map[string]ProviderParser{
 	"anthropic-vertex":  &anthropicParser{}, // Native Anthropic format routed via Vertex AI.
 	"anthropic-bedrock": &anthropicParser{}, // Same wire format, routed via AWS Bedrock + SigV4.
 	"google":            &googleParser{},
+	"gemini-vertex":     &googleParser{}, // Native Gemini via Vertex AI — same wire format as google.
 }
 
 // getParser returns the parser for a provider, or a no-op fallback.
@@ -401,7 +402,7 @@ func extractModelFromResponse(provider string, body []byte) string {
 	}
 
 	switch provider {
-	case "google":
+	case "google", "gemini-vertex":
 		// Google returns modelVersion at the response top level.
 		// e.g. "gemini-2.0-flash-lite-001" or "gemini-2.5-pro-preview-05-06"
 		if mv, ok := resp["modelVersion"].(string); ok && mv != "" {
@@ -427,7 +428,7 @@ func extractModelFromResponse(provider string, body []byte) string {
 // response data. Scans SSE lines for the model field in any chunk.
 func extractModelFromStreamingResponse(provider string, data []byte) string {
 	switch provider {
-	case "google":
+	case "google", "gemini-vertex":
 		// Google streaming: look for modelVersion in any JSON chunk.
 		// It's typically in the last chunk alongside usageMetadata.
 		var arr []map[string]interface{}
@@ -509,7 +510,7 @@ func extractCacheTokens(provider string, body []byte) CacheTokens {
 			}
 		}
 
-	case "google":
+	case "google", "gemini-vertex":
 		// Google reports cached tokens in usageMetadata.cachedContentTokenCount
 		if meta, ok := resp["usageMetadata"].(map[string]interface{}); ok {
 			return CacheTokens{
@@ -530,7 +531,7 @@ func extractStreamingCacheTokens(provider string, data []byte) CacheTokens {
 	case "openai", "gemini-oai", "mistral", "deepseek", "qwen":
 		return extractOpenAIStreamingCache(data)
 
-	case "google":
+	case "google", "gemini-vertex":
 		return extractGoogleStreamingCache(data)
 	}
 

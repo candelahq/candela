@@ -384,7 +384,7 @@ func main() {
 		} else {
 			// Without a project ID, Vertex AI providers can't route.
 			// Remove them from allProviders to prevent broken defaults.
-			slog.Warn("⚠️ Vertex AI providers require vertex_ai.project_id — gemini-oai, google, mistral, deepseek, qwen providers will be disabled")
+			slog.Warn("⚠️ Vertex AI providers require vertex_ai.project_id — gemini-oai, google, gemini-vertex, mistral, deepseek, qwen providers will be disabled")
 			var filtered []proxy.Provider
 			for _, p := range allProviders {
 				switch p.Name {

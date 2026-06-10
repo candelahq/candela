@@ -726,6 +726,13 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 	// Check if this is a streaming request (check BEFORE translation).
 	isStreaming := isStreamingRequest(providerName, reqBody)
 
+	// Native Google/Gemini providers determine streaming from the URL path
+	// (:streamGenerateContent) rather than a body parameter. Detect this so
+	// the PathRewriter generates the correct upstream action.
+	if !isStreaming && (providerName == "google" || providerName == "gemini-vertex") {
+		isStreaming = strings.Contains(upstreamPath, "streamGenerateContent")
+	}
+
 	// Extract model from request once — reused for pricing gate, body
 	// enrichment, and path rewriting. For most providers the model is in
 	// the request body; for "google" it's in the URL path
@@ -738,7 +745,7 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 	// ── Pricing gate (#6) — blocks unpriced cloud models universally ──
 	// This runs for ALL requests (solo, team, local) to prevent untracked
 	// API calls that would show $0 cost. Only "local" provider is exempt.
-	if requestModel != "" && strings.ToLower(providerName) != "local" && !p.calc.HasPricing(providerName, requestModel) {
+	if requestModel != "" && strings.ToLower(providerName) != "local" && !p.calc.HasPricing(pricingProvider(providerName), requestModel) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusPaymentRequired)
 		errBody, _ := json.Marshal(map[string]any{
@@ -1197,7 +1204,7 @@ func (p *Proxy) handleStandardResponse(
 			model = extractModelFromResponse(provider.Name, respBody)
 		}
 		inputTokens = p.calc.NormalizeCachedInputWithTTL(provider.Name, model, inputTokens, ct.CacheReadTokens, ct.CacheCreationTokens, extendedTTL)
-		cost := p.calc.Calculate(provider.Name, model, inputTokens, outputTokens)
+		cost := p.calc.Calculate(pricingProvider(provider.Name), model, inputTokens, outputTokens)
 		limitUser := effectiveUserID
 		if limitUser == "" {
 			limitUser = "local"
@@ -1354,7 +1361,7 @@ func (p *Proxy) handleStreamingResponse(
 			model = extractModelFromStreamingResponse(provider.Name, parseData)
 		}
 		inputTokens = p.calc.NormalizeCachedInputWithTTL(provider.Name, model, inputTokens, ct.CacheReadTokens, ct.CacheCreationTokens, extendedTTL)
-		cost := p.calc.Calculate(provider.Name, model, inputTokens, outputTokens)
+		cost := p.calc.Calculate(pricingProvider(provider.Name), model, inputTokens, outputTokens)
 		limitUser := effectiveUserID
 		if limitUser == "" {
 			limitUser = "local"
@@ -1420,7 +1427,7 @@ func (p *Proxy) deductBudget(ctx context.Context, provider Provider, model, user
 	if strings.HasSuffix(userID, ".gserviceaccount.com") {
 		// HIGH-2: Log SA spend instead of silently skipping.
 		totalTokens := inputTokens + outputTokens
-		cost := p.calc.Calculate(provider.Name, model, inputTokens, outputTokens)
+		cost := p.calc.Calculate(pricingProvider(provider.Name), model, inputTokens, outputTokens)
 		if cost > 0 || totalTokens > 0 {
 			p.saSpendMicroUSD.Add(int64(math.Round(cost * 1_000_000)))
 			slog.Info("sa_spend: service account usage",
@@ -1437,7 +1444,7 @@ func (p *Proxy) deductBudget(ctx context.Context, provider Provider, model, user
 	}
 
 	totalTokens := inputTokens + outputTokens
-	cost := p.calc.Calculate(provider.Name, model, inputTokens, outputTokens)
+	cost := p.calc.Calculate(pricingProvider(provider.Name), model, inputTokens, outputTokens)
 
 	// #278: Record per-model daily spend in the in-memory tracker.
 	// This must happen even if DeductSpend fails, since the upstream
@@ -1536,7 +1543,7 @@ func (p *Proxy) deductBudget(ctx context.Context, provider Provider, model, user
 // in the request handler) — buildSpan only handles span creation and storage.
 func (p *Proxy) buildSpan(ctx context.Context, params spanParams) {
 	totalTokens := params.inputTokens + params.outputTokens
-	cost := p.calc.Calculate(params.provider.Name, params.model, params.inputTokens, params.outputTokens)
+	cost := p.calc.Calculate(pricingProvider(params.provider.Name), params.model, params.inputTokens, params.outputTokens)
 
 	attrs := map[string]string{
 		"proxy.upstream":  params.provider.UpstreamURL,
@@ -1853,4 +1860,17 @@ func extractModelFromURLPath(path string) string {
 		rest = rest[:colon]
 	}
 	return rest
+}
+
+// pricingProvider maps proxy provider names to their cost calculator
+// provider key. Most providers use their own name; aliases like
+// "gemini-vertex" map to the canonical provider ("google") whose
+// pricing table is authoritative.
+func pricingProvider(provider string) string {
+	switch provider {
+	case "gemini-vertex":
+		return "google"
+	default:
+		return provider
+	}
 }

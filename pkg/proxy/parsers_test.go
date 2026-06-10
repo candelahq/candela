@@ -281,6 +281,7 @@ func TestGetParser_AllProviders(t *testing.T) {
 		"anthropic-direct": "*proxy.anthropicParser",
 		"anthropic-vertex": "*proxy.anthropicParser",
 		"google":           "*proxy.googleParser",
+		"gemini-vertex":    "*proxy.googleParser",
 	}
 
 	for name, wantType := range providers {
@@ -866,5 +867,38 @@ func TestInjectStreamUsageOption_MaaSProviders(t *testing.T) {
 		if so["include_usage"] != true {
 			t.Errorf("%s: include_usage = %v, want true", provider, so["include_usage"])
 		}
+	}
+}
+
+// ── Gemini-Vertex provider tests ────────────────────────────────────────────
+
+func TestGetParserGeminiVertex(t *testing.T) {
+	p := getParser("gemini-vertex")
+	if _, ok := p.(*googleParser); !ok {
+		t.Errorf("getParser(\"gemini-vertex\") returned %T, want *googleParser", p)
+	}
+}
+
+func TestExtractModelFromResponseGeminiVertex(t *testing.T) {
+	body := []byte(`{"modelVersion":"gemini-2.5-pro-preview-05-06","candidates":[],"usageMetadata":{}}`)
+	model := extractModelFromResponse("gemini-vertex", body)
+	if model != "gemini-2.5-pro-preview-05-06" {
+		t.Errorf("extractModelFromResponse(gemini-vertex) = %q, want gemini-2.5-pro-preview-05-06", model)
+	}
+}
+
+func TestExtractCacheTokensGeminiVertex(t *testing.T) {
+	body := []byte(`{"usageMetadata":{"promptTokenCount":100,"cachedContentTokenCount":50,"candidatesTokenCount":20}}`)
+	ct := extractCacheTokens("gemini-vertex", body)
+	if ct.CacheReadTokens != 50 {
+		t.Errorf("extractCacheTokens(gemini-vertex).CacheReadTokens = %d, want 50", ct.CacheReadTokens)
+	}
+}
+
+func TestGeminiVertexStreamingDetection(t *testing.T) {
+	// googleParser.IsStreaming always returns false (streaming is URL-based)
+	p := getParser("gemini-vertex")
+	if p.IsStreaming([]byte(`{"contents":[{"parts":[{"text":"hello"}]}]}`)) {
+		t.Error("gemini-vertex IsStreaming should return false (streaming is URL-based)")
 	}
 }

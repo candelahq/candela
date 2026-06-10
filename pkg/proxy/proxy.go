@@ -73,6 +73,11 @@ type PathRewriter interface {
 // introduces a newer version.
 const DefaultVertexAnthropicVersion = "vertex-2023-10-16"
 
+// maxStreamDuration is the maximum duration for a streaming upstream request,
+// even when using a detached context (context.WithoutCancel). This prevents
+// unbounded goroutine/connection leaks if upstream goes silent.
+const maxStreamDuration = 15 * time.Minute
+
 // Provider defines an LLM API provider configuration.
 type Provider struct {
 	Name        string `yaml:"name"`     // "openai", "google", "anthropic", "gemini-oai", "anthropic-bedrock"
@@ -1111,7 +1116,8 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 	// always receive the final usage chunk (with token counts) from the
 	// upstream provider, preventing cost evasion by aborting mid-stream.
 	// The 5-minute client timeout on p.client still applies.
-	upstreamCtx := context.WithoutCancel(r.Context())
+	upstreamCtx, streamCancel := context.WithTimeout(context.WithoutCancel(r.Context()), maxStreamDuration)
+	defer streamCancel()
 	upstreamReq, err := http.NewRequestWithContext(upstreamCtx, r.Method, upstreamURL, bytes.NewReader(upstreamBody))
 	if err != nil {
 		http.Error(w, "failed to create upstream request", http.StatusInternalServerError)
@@ -1119,7 +1125,7 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Forward headers (auth, content-type, etc).
-	forwardHeaders(r, upstreamReq, providerName)
+	forwardHeaders(r, upstreamReq, providerName, provider.TokenSource != nil || provider.RequestSigner != nil)
 
 	// Pre-generate the span ID that buildSpan will use for this proxy span.
 	// We need it now so the outgoing traceparent to the upstream LLM
@@ -1865,9 +1871,18 @@ func (p *Proxy) createStreamingSpan(
 
 // --- Header forwarding ---
 
-func forwardHeaders(src *http.Request, dst *http.Request, provider string) {
+func forwardHeaders(src *http.Request, dst *http.Request, provider string, managedAuth bool) {
+	// Only forward client Authorization for passthrough providers.
+	// For providers where the proxy manages auth (TokenSource/RequestSigner),
+	// skip forwarding to prevent client auth leaking if token fetch fails.
+	if !managedAuth {
+		if auth := src.Header.Get("Authorization"); auth != "" {
+			dst.Header.Set("Authorization", auth)
+		}
+	}
+
 	// Always forward these.
-	for _, h := range []string{"Authorization", "Content-Type", "Accept"} {
+	for _, h := range []string{"Content-Type", "Accept"} {
 		if v := src.Header.Get(h); v != "" {
 			dst.Header.Set(h, v)
 		}

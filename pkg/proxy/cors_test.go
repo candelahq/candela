@@ -22,7 +22,7 @@ func TestCORS_TraceparentHeader(t *testing.T) {
 	src.Header.Set("Content-Type", "application/json")
 
 	dst, _ := http.NewRequest("POST", "http://upstream/v1/chat", nil)
-	forwardHeaders(src, dst, "openai")
+	forwardHeaders(src, dst, "openai", false)
 
 	if got := dst.Header.Get("Tracestate"); got != "vendor1=value1" {
 		t.Errorf("Tracestate not forwarded: got %q, want %q", got, "vendor1=value1")

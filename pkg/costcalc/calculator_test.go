@@ -377,3 +377,12 @@ func TestCalculate_DeepSeek_WithoutMaasSuffix(t *testing.T) {
 		t.Errorf("Calculate(deepseek, deepseek-v3.2) = %f, want >= 0", got)
 	}
 }
+
+func TestQwen3CoderPricing(t *testing.T) {
+	c := New()
+	cost := c.Calculate("qwen", "qwen3-coder-480b-a35b-instruct-maas", 1000000, 1000000)
+	// $0.22 input + $1.80 output = $2.02
+	if cost < 2.01 || cost > 2.03 {
+		t.Errorf("qwen3-coder cost for 1M in + 1M out = %f, want ~2.02", cost)
+	}
+}

@@ -460,33 +460,41 @@ func main() {
 			}
 		}
 
-		// Configure DeepSeek & Qwen — route through Vertex AI's global
+		// Configure DeepSeek & Qwen — route through Vertex AI's
 		// OpenAI-compatible endpoint (same pattern as gemini-oai).
+		// DeepSeek V3.2 is global-only; R1 works in us-central1.
+		// Qwen MaaS models require us-central1.
 		// Supports per-provider region/endpoint overrides.
 		if geminiProjectID != "" {
 			for i, p := range allProviders {
+				var defaultRegion string
 				switch p.Name {
-				case "deepseek", "qwen":
-					provRegion, provEndpoint := getProviderOverride(cfg.Proxy.VertexAI.ProviderOverrides, p.Name, "us-central1")
-					if provEndpoint != "" {
-						allProviders[i].UpstreamURL = provEndpoint
-					} else {
-						allProviders[i].UpstreamURL = proxy.VertexAIUpstreamURL(provRegion)
-					}
-					allProviders[i].PathRewriter = &proxy.VertexAIGeminiOAIPathRewriter{
-						ProjectID: geminiProjectID,
-						Region:    provRegion,
-					}
-					if tokenSource != nil {
-						allProviders[i].TokenSource = tokenSource
-					}
-					slog.Info("🔐 "+p.Name+" via Vertex AI configured",
-						"provider", p.Name,
-						"project", geminiProjectID,
-						"region", provRegion,
-						"endpoint_override", provEndpoint != "",
-						"adc", tokenSource != nil)
+				case "deepseek":
+					defaultRegion = "global"
+				case "qwen":
+					defaultRegion = "us-central1"
+				default:
+					continue
 				}
+				provRegion, provEndpoint := getProviderOverride(cfg.Proxy.VertexAI.ProviderOverrides, p.Name, defaultRegion)
+				if provEndpoint != "" {
+					allProviders[i].UpstreamURL = provEndpoint
+				} else {
+					allProviders[i].UpstreamURL = proxy.VertexAIUpstreamURL(provRegion)
+				}
+				allProviders[i].PathRewriter = &proxy.VertexAIGeminiOAIPathRewriter{
+					ProjectID: geminiProjectID,
+					Region:    provRegion,
+				}
+				if tokenSource != nil {
+					allProviders[i].TokenSource = tokenSource
+				}
+				slog.Info("🔐 "+p.Name+" via Vertex AI configured",
+					"provider", p.Name,
+					"project", geminiProjectID,
+					"region", provRegion,
+					"endpoint_override", provEndpoint != "",
+					"adc", tokenSource != nil)
 			}
 		}
 

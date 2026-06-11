@@ -33,8 +33,6 @@ proxy:
     provider_overrides:
       mistral:
         region: "${CANDELA_MISTRAL_REGION:-us-central1}"
-      deepseek:
-        region: "${CANDELA_DEEPSEEK_REGION:-us-south1}"
       deepseek-v3:
         region: "${CANDELA_DEEPSEEK_V3_REGION:-global}"
       qwen:

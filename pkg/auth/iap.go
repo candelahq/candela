@@ -19,8 +19,8 @@ import (
 // Header: x-goog-iap-jwt-assertion (set by IAP automatically)
 func IAPMiddleware(next http.Handler, audience string, devMode bool) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Skip auth for health checks.
-		if r.URL.Path == "/healthz" {
+		// Skip auth for health checks (liveness + readiness).
+		if r.URL.Path == "/healthz" || r.URL.Path == "/readyz" {
 			next.ServeHTTP(w, r)
 			return
 		}

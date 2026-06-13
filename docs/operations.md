@@ -64,19 +64,32 @@ See [docs/env-vars.md](env-vars.md) for the full reference.
 
 ### Backend Health
 
+Two endpoints are available for health checking:
+
+- **`/healthz`** (liveness): Always returns `200 OK` if the process is alive. No external dependencies are checked. Used by container runtimes to decide whether to restart a container.
+- **`/readyz`** (readiness): Pings the storage backend (BigQuery/DuckDB). Used by load balancers (Cloud Run, Kubernetes) for traffic routing decisions.
+
 ```bash
-# Local
+# Local — liveness
 curl http://localhost:8181/healthz
+
+# Local — readiness (checks storage)
+curl http://localhost:8181/readyz
 
 # Production (requires auth)
 curl -H "Authorization: Bearer $(gcloud auth print-identity-token)" \
-  https://candela-xxx.a.run.app/healthz
+  https://candela-xxx.a.run.app/readyz
 ```
 
-Response:
+Liveness response:
 ```json
-{"status": "ok"}        // healthy
-{"status": "error", "detail": "..."} // storage unreachable
+{"status": "ok"}
+```
+
+Readiness responses:
+```json
+{"status": "ready"}                                          // storage reachable
+{"status": "not_ready", "reason": "storage_unavailable"}     // storage unreachable
 ```
 
 ### Cloud Run Health

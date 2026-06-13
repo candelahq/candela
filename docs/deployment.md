@@ -71,6 +71,7 @@ Next.js rewrites:
   /proxy/*         → localhost:8181
   /candela.v1.*    → localhost:8181
   /healthz         → localhost:8181
+  /readyz          → localhost:8181
 ```
 
 ## candela Setup

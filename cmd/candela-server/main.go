@@ -170,16 +170,26 @@ func main() {
 	// Build the HTTP mux for ConnectRPC handlers.
 	mux := http.NewServeMux()
 
-	// Health check.
+	// Liveness probe: returns 200 if the process is alive.
+	// No external dependency checks — a failing DB should not cause restarts.
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = fmt.Fprintln(w, `{"status": "ok"}`)
+	})
+
+	// Readiness probe: checks that the server can serve traffic.
+	// Used by Cloud Run / Kubernetes for traffic routing decisions.
+	mux.HandleFunc("/readyz", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
 		if err := reader.Ping(r.Context()); err != nil {
-			slog.Error("healthz: storage ping failed", "error", err)
+			slog.Error("readyz: storage ping failed", "error", err)
 			w.WriteHeader(http.StatusServiceUnavailable)
-			_, _ = fmt.Fprintln(w, `{"status": "unhealthy"}`)
+			_, _ = fmt.Fprintln(w, `{"status": "not_ready", "reason": "storage_unavailable"}`)
 			return
 		}
 		w.WriteHeader(http.StatusOK)
-		_, _ = fmt.Fprintln(w, `{"status": "ok"}`)
+		_, _ = fmt.Fprintln(w, `{"status": "ready"}`)
 	})
 
 	var spendOB *spendoutbox.Outbox

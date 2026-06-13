@@ -6,7 +6,7 @@ Candela uses a **multi-strategy authentication** system designed to securely ser
 
 ```mermaid
 flowchart TD
-    REQ[Incoming Request] --> SKIP{Path = /healthz?}
+    REQ[Incoming Request] --> SKIP{Path = /healthz or /readyz?}
     SKIP -->|yes| PASS[Pass through]
     SKIP -->|no| DEV{Dev Mode?}
     DEV -->|yes| SYNTH["Inject synthetic admin\n(admin@localhost)"]
@@ -39,7 +39,8 @@ The middleware (`pkg/auth/firebase.go`) tries three strategies in sequence. The 
 ### Auth Bypass
 
 These paths skip authentication entirely:
-- `/healthz` — health check endpoint (Cloud Run readiness probe)
+- `/healthz` — liveness probe (always returns 200 if process is alive)
+- `/readyz` — readiness probe (pings storage backend for traffic routing)
 
 ---
 

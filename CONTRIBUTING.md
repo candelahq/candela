@@ -217,7 +217,7 @@ buf format -d
 - Use **table-driven tests** where applicable.
 - Place tests in the same package as the code they test (e.g., `proxy_test.go` alongside `proxy.go`).
 - Every new feature **must** include tests.
-- Use `go.uber.org/zap` for structured logging.
+- Use `log/slog` for structured logging (the standard library's structured logger).
 
 ### Protobuf
 

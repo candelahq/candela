@@ -16,8 +16,10 @@ type ProxyMetrics struct {
 }
 
 // NewProxyMetrics creates OTel metric instruments for the proxy.
-func NewProxyMetrics() (*ProxyMetrics, error) {
-	m := Meter("candela.proxy")
+// It requires an explicit MeterProvider so callers control the lifecycle
+// and tests can use isolated providers instead of the global default.
+func NewProxyMetrics(mp metric.MeterProvider) (*ProxyMetrics, error) {
+	m := mp.Meter("candela.proxy")
 
 	duration, err := m.Float64Histogram("candela.proxy.request.duration",
 		metric.WithDescription("Proxy request duration in seconds"),

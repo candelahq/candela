@@ -338,12 +338,18 @@ func newUpstreamHTTPClient(cfg Config) *http.Client {
 		maxConnsPerHost = 100
 	}
 
+	slog.Info("proxy: upstream HTTP transport configured",
+		"max_idle_conns", maxIdleConns,
+		"max_idle_conns_per_host", maxIdlePerHost,
+		"max_conns_per_host", maxConnsPerHost,
+	)
+
 	return &http.Client{
 		Timeout: 5 * time.Minute, // LLM calls can be slow
 		Transport: &http.Transport{
 			DialContext:           (&net.Dialer{Timeout: 10 * time.Second}).DialContext,
 			TLSHandshakeTimeout:   10 * time.Second,
-			ResponseHeaderTimeout: 30 * time.Second,
+			ResponseHeaderTimeout: 2 * time.Minute, // reasoning models can take 60s+ before first byte
 			MaxIdleConns:          maxIdleConns,
 			MaxIdleConnsPerHost:   maxIdlePerHost,
 			MaxConnsPerHost:       maxConnsPerHost,

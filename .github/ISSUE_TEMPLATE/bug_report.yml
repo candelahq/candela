@@ -39,6 +39,7 @@ body:
       options:
         - Proxy (pkg/proxy)
         - Cost Calculator (pkg/costcalc)
+        - Model Catalog (pkg/catalog)
         - Storage (pkg/storage)
         - Auth (pkg/auth)
         - Desktop App

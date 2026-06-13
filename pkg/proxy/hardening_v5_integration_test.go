@@ -301,8 +301,8 @@ type trackingUserStore struct {
 }
 
 func (t *trackingUserStore) TouchLastActive(_ context.Context, id string) error {
+	t.lastUserID.Store(id) // store ID before incrementing counter — test polls counter then asserts ID
 	t.touchCalls.Add(1)
-	t.lastUserID.Store(id)
 	return nil
 }
 

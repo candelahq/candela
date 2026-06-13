@@ -3,6 +3,7 @@ package catalog
 import (
 	"context"
 	"fmt"
+	"net/url"
 	"time"
 
 	"cloud.google.com/go/firestore"
@@ -75,9 +76,10 @@ func firestoreToEntry(fe *firestoreEntry) Entry {
 }
 
 // docID returns the deterministic Firestore document ID for a model entry.
-// Format: {provider}_{model_id} (e.g. "google_gemini-2.5-pro").
+// URL-encodes provider and modelID to handle slashes in names
+// (e.g., HuggingFace models like "meta-llama/Llama-3").
 func docID(provider, modelID string) string {
-	return provider + "_" + modelID
+	return url.PathEscape(provider) + "_" + url.PathEscape(modelID)
 }
 
 // FirestoreStore is a read-write ModelCatalogStore backed by Cloud Firestore.
@@ -113,7 +115,7 @@ func (s *FirestoreStore) List(ctx context.Context, includeDisabled bool) ([]Entr
 	}
 	defer iter.Stop()
 
-	var entries []Entry
+	entries := make([]Entry, 0)
 	for {
 		snap, err := iter.Next()
 		if err == iterator.Done {
@@ -150,12 +152,12 @@ func (s *FirestoreStore) Get(ctx context.Context, provider, modelID string) (*En
 	return &e, nil
 }
 
-// Update creates or replaces an entry using Set with MergeAll (upsert).
+// Update creates or replaces an entry using Set (full document replacement).
 func (s *FirestoreStore) Update(ctx context.Context, entry Entry) error {
 	entry.UpdatedAt = time.Now()
 	id := docID(entry.Provider, entry.ModelID)
 	ref := s.client.Collection(s.collection).Doc(id)
-	_, err := ref.Set(ctx, entryToFirestore(&entry), firestore.MergeAll)
+	_, err := ref.Set(ctx, entryToFirestore(&entry))
 	if err != nil {
 		return fmt.Errorf("catalog: updating doc %s: %w", id, err)
 	}

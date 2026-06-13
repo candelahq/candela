@@ -217,7 +217,7 @@ func (c *Calculator) LoadFromCatalog(entries []catalog.Entry) {
 			Provider:             e.Provider,
 			InputPerMillion:      e.InputPerMillion,
 			OutputPerMillion:     e.OutputPerMillion,
-			DiscountPercent:      e.DiscountPercent,
+			DiscountPercent:      clampDiscount(e.DiscountPercent),
 			InputPerMillionHigh:  e.InputPerMillionHigh,
 			OutputPerMillionHigh: e.OutputPerMillionHigh,
 			TierThresholdTokens:  e.TierThresholdTokens,

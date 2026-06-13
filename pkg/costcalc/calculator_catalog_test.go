@@ -108,3 +108,23 @@ func TestLoadFromCatalog_PreservesConfigOverrides(t *testing.T) {
 		t.Errorf("catalog model: expected 5.0, got %f", cost)
 	}
 }
+
+func TestLoadFromCatalog_ClampsDiscount(t *testing.T) {
+	c := costcalc.New()
+
+	entries := []catalog.Entry{{
+		ModelID:          "test-model",
+		Provider:         "test",
+		InputPerMillion:  10.0,
+		OutputPerMillion: 20.0,
+		DiscountPercent:  1.5, // invalid: > 1.0
+		Enabled:          true,
+	}}
+	c.LoadFromCatalog(entries)
+
+	// With clamped discount of 1.0, cost should be 0.
+	cost := c.Calculate("test", "test-model", 1_000_000, 0)
+	if cost != 0 {
+		t.Errorf("expected 0 with 100%% discount, got %f", cost)
+	}
+}

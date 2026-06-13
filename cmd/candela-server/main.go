@@ -128,8 +128,9 @@ type CatalogConfig struct {
 
 // FirestoreCatalogConfig holds Firestore-specific catalog settings.
 type FirestoreCatalogConfig struct {
-	Collection string `yaml:"collection"` // Firestore collection name (default: "model_catalog")
-	ProjectID  string `yaml:"project_id"` // GCP project (defaults to server's project_id)
+	Collection string `yaml:"collection"`  // Firestore collection name (default: "model_catalog")
+	ProjectID  string `yaml:"project_id"`  // GCP project (defaults to server's project_id)
+	DatabaseID string `yaml:"database_id"` // Firestore database ID (default: "(default)")
 }
 
 // ProviderOverride holds per-provider Vertex AI configuration overrides.
@@ -192,7 +193,17 @@ func main() {
 		if projectID == "" {
 			projectID = cfg.Firestore.ProjectID
 		}
-		fsClient, err := firestore.NewClient(context.Background(), projectID)
+		databaseID := cfg.Catalog.Firestore.DatabaseID
+		if databaseID == "" {
+			databaseID = cfg.Firestore.DatabaseID
+		}
+		var fsClient *firestore.Client
+		var err error
+		if databaseID != "" && databaseID != "(default)" {
+			fsClient, err = firestore.NewClientWithDatabase(context.Background(), projectID, databaseID)
+		} else {
+			fsClient, err = firestore.NewClient(context.Background(), projectID)
+		}
 		if err != nil {
 			slog.Error("failed to create Firestore client for catalog", "error", err)
 			slog.Warn("falling back to config-based catalog")
@@ -217,7 +228,7 @@ func main() {
 	// If the catalog is backed by a real store (not config), load entries into Calculator.
 	if catalogStore.Source() != "config" {
 		ctx := context.Background()
-		entries, err := catalogStore.List(ctx, true) // include disabled for admin visibility
+		entries, err := catalogStore.List(ctx, false) // only enabled models needed for pricing
 		if err != nil {
 			slog.Error("failed to load catalog entries", "error", err)
 			slog.Warn("using built-in default pricing (catalog unavailable)")

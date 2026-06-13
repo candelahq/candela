@@ -1726,7 +1726,7 @@ func (p *Proxy) deductBudget(ctx context.Context, provider Provider, model, user
 				if err == nil && budget != nil && budget.LimitUSD > 0 {
 					var email string
 					user, uerr := p.users.GetUser(bgCtx, userID)
-					if uerr == nil {
+					if uerr == nil && user != nil {
 						email = user.Email
 					}
 					p.budgetCk.CheckAndNotify(bgCtx, userID, email, budget.PeriodKey,

@@ -18,6 +18,7 @@ import (
 
 	_ "go.uber.org/automaxprocs" // automatically sets GOMAXPROCS from container CPU quota
 
+	"cloud.google.com/go/firestore"
 	firebase "firebase.google.com/go/v4"
 	fbauth "firebase.google.com/go/v4/auth"
 	"golang.org/x/net/http2"
@@ -29,6 +30,7 @@ import (
 	"connectrpc.com/validate"
 	"github.com/candelahq/candela/gen/go/candela/v1/candelav1connect"
 	"github.com/candelahq/candela/pkg/auth"
+	"github.com/candelahq/candela/pkg/catalog"
 	"github.com/candelahq/candela/pkg/connecthandlers"
 	"github.com/candelahq/candela/pkg/costcalc"
 	"github.com/candelahq/candela/pkg/notify"
@@ -175,6 +177,53 @@ func main() {
 	calc := costcalc.New()
 	if cfg.Pricing.DiscountPercent > 0 || len(cfg.Pricing.Models) > 0 {
 		calc.LoadFromConfig(cfg.Pricing)
+	}
+
+	// Initialize model catalog store.
+	var catalogStore catalog.ModelCatalogStore
+	var catalogClosers []func()
+	switch cfg.Catalog.Backend {
+	case "firestore":
+		collection := cfg.Catalog.Firestore.Collection
+		if collection == "" {
+			collection = "model_catalog"
+		}
+		projectID := cfg.Catalog.Firestore.ProjectID
+		if projectID == "" {
+			projectID = cfg.Firestore.ProjectID
+		}
+		fsClient, err := firestore.NewClient(context.Background(), projectID)
+		if err != nil {
+			slog.Error("failed to create Firestore client for catalog", "error", err)
+			slog.Warn("falling back to config-based catalog")
+			catalogStore = catalog.NewConfigStore(nil) // falls back to built-in defaults
+		} else {
+			catalogStore = catalog.NewFirestoreStore(fsClient, collection)
+			catalogClosers = append(catalogClosers, func() { _ = fsClient.Close() })
+		}
+	case "config", "":
+		catalogStore = catalog.NewConfigStore(nil) // uses Calculator's built-in defaults
+	default:
+		slog.Error("unknown catalog backend", "backend", cfg.Catalog.Backend)
+		os.Exit(1)
+	}
+	defer func() {
+		for _, fn := range catalogClosers {
+			fn()
+		}
+	}()
+	slog.Info("catalog store initialized", "backend", catalogStore.Source(), "writable", catalogStore.Writable())
+
+	// If the catalog is backed by a real store (not config), load entries into Calculator.
+	if catalogStore.Source() != "config" {
+		ctx := context.Background()
+		entries, err := catalogStore.List(ctx, true) // include disabled for admin visibility
+		if err != nil {
+			slog.Error("failed to load catalog entries", "error", err)
+			slog.Warn("using built-in default pricing (catalog unavailable)")
+		} else {
+			calc.LoadFromCatalog(entries)
+		}
 	}
 
 	// Start the in-process span processor (fan-out to all writers).

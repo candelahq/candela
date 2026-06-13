@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -268,6 +269,11 @@ type Config struct {
 	ProjectID      string             `yaml:"project_id"`
 	MaxRequestCost float64            `yaml:"max_request_cost_usd"` // Per-request cost cap (0 = disabled)
 	DailyLimits    []SpendLimitConfig `yaml:"daily_limits"`         // Per-model daily spend limits
+
+	// HTTP transport tuning for upstream LLM provider connections.
+	MaxIdleConns        int `yaml:"max_idle_conns"`          // default: 200
+	MaxIdleConnsPerHost int `yaml:"max_idle_conns_per_host"` // default: 50
+	MaxConnsPerHost     int `yaml:"max_conns_per_host"`      // default: 100
 }
 
 // DefaultProviders returns the standard LLM provider configurations.
@@ -310,6 +316,43 @@ func DefaultProviders() []Provider {
 // Used for setting optional *bool fields in struct literals.
 func ptrBool(v bool) *bool { return &v }
 
+// newUpstreamHTTPClient builds a production-tuned HTTP client for upstream LLM
+// provider connections. The default http.DefaultTransport has MaxIdleConnsPerHost=2,
+// which causes constant TCP/TLS connection churn under concurrent load to Vertex AI
+// (*.aiplatform.googleapis.com). Each new connection requires a full TLS handshake
+// (~100ms) instead of reusing an existing one.
+//
+// Follows the pattern established in pkg/runtime/helpers.go but tuned for
+// cloud provider traffic rather than local runtimes.
+func newUpstreamHTTPClient(cfg Config) *http.Client {
+	maxIdleConns := cfg.MaxIdleConns
+	if maxIdleConns <= 0 {
+		maxIdleConns = 200
+	}
+	maxIdlePerHost := cfg.MaxIdleConnsPerHost
+	if maxIdlePerHost <= 0 {
+		maxIdlePerHost = 50
+	}
+	maxConnsPerHost := cfg.MaxConnsPerHost
+	if maxConnsPerHost <= 0 {
+		maxConnsPerHost = 100
+	}
+
+	return &http.Client{
+		Timeout: 5 * time.Minute, // LLM calls can be slow
+		Transport: &http.Transport{
+			DialContext:           (&net.Dialer{Timeout: 10 * time.Second}).DialContext,
+			TLSHandshakeTimeout:   10 * time.Second,
+			ResponseHeaderTimeout: 30 * time.Second,
+			MaxIdleConns:          maxIdleConns,
+			MaxIdleConnsPerHost:   maxIdlePerHost,
+			MaxConnsPerHost:       maxConnsPerHost,
+			IdleConnTimeout:       120 * time.Second,
+			ForceAttemptHTTP2:     true,
+		},
+	}
+}
+
 // New creates a new LLM proxy.
 func New(cfg Config, submitter SpanSubmitter, calc *costcalc.Calculator) *Proxy {
 	providers := make(map[string]Provider)
@@ -330,9 +373,7 @@ func New(cfg Config, submitter SpanSubmitter, calc *costcalc.Calculator) *Proxy 
 		spanSem:      make(chan struct{}, 200), // CRIT-16: cap concurrent span goroutines
 		saRL:         newSARateLimiter(0),      // default 120 RPM per SA
 		pendingSpend: newPendingSpendTracker(),
-		client: &http.Client{
-			Timeout: 5 * time.Minute, // LLM calls can be slow
-		},
+		client:       newUpstreamHTTPClient(cfg),
 	}
 
 	// Initialize spend tracker if daily limits are configured.

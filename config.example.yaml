@@ -86,6 +86,11 @@ proxy:
   #   - model: "gpt-4.1"
   #     max_daily_usd: 25.00
 
+  # HTTP transport tuning (advanced). Defaults are tuned for production.
+  # max_idle_conns: 200         # Total idle connections across all hosts
+  # max_idle_conns_per_host: 50 # Idle connections per upstream host
+  # max_conns_per_host: 100     # Hard cap per upstream host
+
 # Pricing overrides.
 # Built-in defaults cover all cloud models at list prices.
 # Use this section for negotiated rates or enterprise discounts.

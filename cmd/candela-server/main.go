@@ -81,7 +81,8 @@ type Config struct {
 			ProviderOverrides map[string]ProviderOverride `yaml:"provider_overrides"`
 		} `yaml:"vertex_ai"`
 	} `yaml:"proxy"`
-	CORS struct {
+	Catalog CatalogConfig `yaml:"catalog"`
+	CORS    struct {
 		AllowedOrigins []string `yaml:"allowed_origins"` // e.g. ["http://localhost:3000"]
 	} `yaml:"cors"`
 	Worker struct {
@@ -113,6 +114,18 @@ type Config struct {
 			TimeoutSec  int               `yaml:"timeout_sec"` // per-export timeout (default: 30)
 		} `yaml:"otlp"`
 	} `yaml:"sinks"`
+}
+
+// CatalogConfig holds model catalog configuration.
+type CatalogConfig struct {
+	Backend   string                 `yaml:"backend"` // "config" (default), "firestore"
+	Firestore FirestoreCatalogConfig `yaml:"firestore"`
+}
+
+// FirestoreCatalogConfig holds Firestore-specific catalog settings.
+type FirestoreCatalogConfig struct {
+	Collection string `yaml:"collection"` // Firestore collection name (default: "model_catalog")
+	ProjectID  string `yaml:"project_id"` // GCP project (defaults to server's project_id)
 }
 
 // ProviderOverride holds per-provider Vertex AI configuration overrides.
@@ -853,6 +866,14 @@ func loadConfig() (*Config, error) {
 	}
 	if cfg.Storage.Backend == "" {
 		cfg.Storage.Backend = "duckdb"
+	}
+
+	// Catalog backend: env var override, then default to "config".
+	if env := os.Getenv("CANDELA_CATALOG_BACKEND"); env != "" {
+		cfg.Catalog.Backend = env
+	}
+	if cfg.Catalog.Backend == "" {
+		cfg.Catalog.Backend = "config"
 	}
 
 	return &cfg, nil

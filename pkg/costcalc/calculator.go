@@ -10,6 +10,8 @@ import (
 	"sort"
 	"strings"
 	"sync"
+
+	"github.com/candelahq/candela/pkg/catalog"
 )
 
 // ModelPricing defines the per-token pricing for a model.
@@ -195,6 +197,34 @@ func (c *Calculator) LoadFromConfig(cfg PricingConfig) {
 		slog.Info("💰 pricing overrides loaded",
 			"count", len(cfg.Models))
 	}
+}
+
+// LoadFromCatalog loads pricing from a ModelCatalogStore.
+// This replaces the built-in defaults with catalog entries,
+// preserving any config overrides that were loaded separately.
+func (c *Calculator) LoadFromCatalog(entries []catalog.Entry) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	// Clear and rebuild defaults from catalog entries.
+	c.defaults = make(map[string]ModelPricing)
+	for _, e := range entries {
+		if !e.Enabled {
+			continue
+		}
+		c.defaults[c.key(e.Provider, e.ModelID)] = ModelPricing{
+			Model:                e.ModelID,
+			Provider:             e.Provider,
+			InputPerMillion:      e.InputPerMillion,
+			OutputPerMillion:     e.OutputPerMillion,
+			DiscountPercent:      clampDiscount(e.DiscountPercent),
+			InputPerMillionHigh:  e.InputPerMillionHigh,
+			OutputPerMillionHigh: e.OutputPerMillionHigh,
+			TierThresholdTokens:  e.TierThresholdTokens,
+		}
+	}
+	c.rebuildFallback()
+	slog.Info("📦 catalog pricing loaded", "models", len(c.defaults))
 }
 
 // SetPricing adds or updates pricing for a model (runtime override).

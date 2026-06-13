@@ -60,8 +60,8 @@ func FirebaseAuthMiddleware(next http.Handler, fbAuth *fbauth.Client, cloudRunAu
 		slog.Info("🔐 service account allowlist empty — all SAs will be denied")
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Skip auth for health checks.
-		if r.URL.Path == "/healthz" {
+		// Skip auth for health checks (liveness + readiness).
+		if r.URL.Path == "/healthz" || r.URL.Path == "/readyz" {
 			next.ServeHTTP(w, r)
 			return
 		}

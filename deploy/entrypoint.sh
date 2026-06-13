@@ -76,7 +76,7 @@ GO_PID=$!
 # Wait for backend to be ready (up to 10s).
 echo "Waiting for backend..."
 for i in $(seq 1 20); do
-  if wget -q -O /dev/null http://localhost:8181/healthz 2>/dev/null; then
+  if wget -q -O /dev/null http://localhost:8181/readyz 2>/dev/null; then
     echo "Backend ready."
     break
   fi

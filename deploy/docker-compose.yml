@@ -27,7 +27,7 @@ services:
     volumes:
       - candela_data:/data
     healthcheck:
-      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://localhost:8181/healthz"]
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://localhost:8181/readyz"]
       interval: 10s
       timeout: 5s
       retries: 5

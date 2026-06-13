@@ -1,0 +1,74 @@
+name: 🐛 Bug Report
+description: Report a bug or unexpected behavior
+labels: ["bug", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting! Please fill out the details below.
+  - type: textarea
+    id: description
+    attributes:
+      label: Bug Description
+      description: A clear description of the bug.
+      placeholder: When I do X, Y happens instead of Z.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to Reproduce
+      description: Minimal steps to reproduce the behavior.
+      placeholder: |
+        1. Configure candela with ...
+        2. Send a request to ...
+        3. Observe ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected Behavior
+      description: What you expected to happen.
+    validations:
+      required: true
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      options:
+        - Proxy (pkg/proxy)
+        - Cost Calculator (pkg/costcalc)
+        - Model Catalog (pkg/catalog)
+        - Storage (pkg/storage)
+        - Auth (pkg/auth)
+        - Desktop App
+        - Web UI
+        - CLI
+        - Deployment/Docker
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Candela Version
+      description: Output of `candela version` or Docker image tag.
+      placeholder: v0.4.0
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant Logs
+      description: Paste relevant log output (will be auto-formatted as code).
+      render: shell
+  - type: dropdown
+    id: deployment
+    attributes:
+      label: Deployment Type
+      options:
+        - Docker / Docker Compose
+        - Cloud Run
+        - Kubernetes
+        - Local (go run)
+        - Desktop App
+        - Other

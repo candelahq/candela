@@ -1,0 +1,42 @@
+name: ✨ Feature Request
+description: Suggest a new feature or improvement
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem Statement
+      description: What problem does this solve? Why is it needed?
+      placeholder: I'm always frustrated when ...
+    validations:
+      required: true
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed Solution
+      description: How should this work? Include API design, config examples, or UI mockups.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives Considered
+      description: What other approaches did you consider?
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      options:
+        - Proxy (pkg/proxy)
+        - Cost Calculator (pkg/costcalc)
+        - Model Catalog
+        - Storage (pkg/storage)
+        - Auth (pkg/auth)
+        - Desktop App
+        - Web UI
+        - CLI
+        - Deployment/Docker
+        - Documentation
+        - Other
+    validations:
+      required: true

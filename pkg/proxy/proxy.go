@@ -233,6 +233,7 @@ type Proxy struct {
 	projectID string
 	breakers  map[string]*CircuitBreaker
 	spanSem   chan struct{} // bounds concurrent async span-creation goroutines
+	asyncSem  chan struct{} // bounds best-effort async goroutines (touch-active, budget notify)
 
 	// Optional dependencies for team-mode features.
 	users    storage.UserStore     // Budget deduction (nil = no budget tracking)
@@ -261,6 +262,9 @@ type Proxy struct {
 
 	// HIGH-5: Spans dropped at proxy semaphore (circuit breaker full).
 	droppedSpans atomic.Int64
+
+	// #333: Best-effort async ops dropped when asyncSem is full.
+	droppedAsync atomic.Int64
 }
 
 // Config holds proxy configuration.
@@ -377,6 +381,7 @@ func New(cfg Config, submitter SpanSubmitter, calc *costcalc.Calculator) *Proxy 
 		config:       cfg,
 		breakers:     breakers,
 		spanSem:      make(chan struct{}, 200), // CRIT-16: cap concurrent span goroutines
+		asyncSem:     make(chan struct{}, 50),  // #333: cap best-effort async goroutines
 		saRL:         newSARateLimiter(0),      // default 120 RPM per SA
 		pendingSpend: newPendingSpendTracker(),
 		client:       newUpstreamHTTPClient(cfg),
@@ -1694,33 +1699,47 @@ func (p *Proxy) deductBudget(ctx context.Context, provider Provider, model, user
 	}
 
 	// Best-effort: update the user's last-active timestamp (proxy usage).
-	go func() {
-		bgCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		if err := p.users.TouchLastActive(bgCtx, userID); err != nil {
-			slog.Warn("touch_last_active failed", "user_id", userID, "error", err)
-		}
-	}()
+	select {
+	case p.asyncSem <- struct{}{}:
+		go func() {
+			defer func() { <-p.asyncSem }()
+			bgCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			if err := p.users.TouchLastActive(bgCtx, userID); err != nil {
+				slog.Warn("touch_last_active failed", "user_id", userID, "error", err)
+			}
+		}()
+	default:
+		p.droppedAsync.Add(1)
+		slog.Debug("async op dropped: too many pending", "op", "touch_last_active", "user_id", userID)
+	}
 
 	// Async: threshold notification is best-effort.
 	if p.budgetCk != nil {
-		go func() {
-			bgCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-			defer cancel()
-			budget, err := p.users.GetBudget(bgCtx, userID)
-			if err == nil && budget != nil && budget.LimitUSD > 0 {
-				var email string
-				user, uerr := p.users.GetUser(bgCtx, userID)
-				if uerr == nil {
-					email = user.Email
+		select {
+		case p.asyncSem <- struct{}{}:
+			go func() {
+				defer func() { <-p.asyncSem }()
+				bgCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+				defer cancel()
+				budget, err := p.users.GetBudget(bgCtx, userID)
+				if err == nil && budget != nil && budget.LimitUSD > 0 {
+					var email string
+					user, uerr := p.users.GetUser(bgCtx, userID)
+					if uerr == nil && user != nil {
+						email = user.Email
+					}
+					p.budgetCk.CheckAndNotify(bgCtx, userID, email, budget.PeriodKey,
+						notify.DeductResult{
+							SpentUSD: budget.SpentUSD,
+							LimitUSD: budget.LimitUSD,
+						})
 				}
-				p.budgetCk.CheckAndNotify(bgCtx, userID, email, budget.PeriodKey,
-					notify.DeductResult{
-						SpentUSD: budget.SpentUSD,
-						LimitUSD: budget.LimitUSD,
-					})
-			}
-		}()
+			}()
+		default:
+			p.droppedAsync.Add(1)
+			slog.Debug("async op dropped: too many pending", "op", "budget_notify", "user_id", userID)
+		}
 	}
 }
 

@@ -396,6 +396,25 @@ func (c *Calculator) Models() []ModelPricing {
 	return models
 }
 
+// Defaults returns a copy of the built-in default pricing table.
+// This does not include config overrides — only the compiled-in list prices.
+// The returned slice is sorted by provider, then model name for deterministic output.
+func (c *Calculator) Defaults() []ModelPricing {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	result := make([]ModelPricing, 0, len(c.defaults))
+	for _, p := range c.defaults {
+		result = append(result, p)
+	}
+	sort.Slice(result, func(i, j int) bool {
+		if result[i].Provider != result[j].Provider {
+			return result[i].Provider < result[j].Provider
+		}
+		return result[i].Model < result[j].Model
+	})
+	return result
+}
+
 // clampDiscount ensures a discount is within [0.0, 1.0].
 func clampDiscount(d float64) float64 {
 	if d < 0 {

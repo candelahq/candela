@@ -9,6 +9,7 @@ package catalog
 import (
 	"context"
 	"errors"
+	"time"
 )
 
 // Sentinel errors returned by ModelCatalogStore implementations.
@@ -57,7 +58,8 @@ type Entry struct {
 	AllowedTenants []string `json:"allowed_tenants,omitempty"`
 
 	// DiscountPercent is a model-specific discount (0.0–1.0).
-	DiscountPercent float64 `json:"discount_percent,omitempty"`
+	DiscountPercent float64   `json:"discount_percent,omitempty"`
+	UpdatedAt       time.Time `json:"updated_at,omitempty"` // last modification timestamp
 }
 
 // ModelCatalogStore is the core abstraction for the model catalog.

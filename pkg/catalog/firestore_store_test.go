@@ -48,10 +48,10 @@ func TestFirestoreStore_FieldMapping(t *testing.T) {
 	// field count. If Entry gains a field and firestoreEntry doesn't, the
 	// conformance test will catch data loss. This test guards the field count.
 	entryType := reflect.TypeOf(catalog.Entry{})
-	expectedFields := 14 // ModelID, Provider, DisplayName, InputPerMillion,
+	expectedFields := 15 // ModelID, Provider, DisplayName, InputPerMillion,
 	// OutputPerMillion, Enabled, Category, ContextWindow,
 	// InputPerMillionHigh, OutputPerMillionHigh, TierThresholdTokens,
-	// Aliases, AllowedTenants, DiscountPercent
+	// Aliases, AllowedTenants, DiscountPercent, UpdatedAt
 
 	if got := entryType.NumField(); got != expectedFields {
 		t.Errorf("Entry has %d fields, expected %d — "+

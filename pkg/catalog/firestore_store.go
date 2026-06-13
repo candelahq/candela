@@ -3,6 +3,7 @@ package catalog
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"cloud.google.com/go/firestore"
 	"google.golang.org/api/iterator"
@@ -16,20 +17,21 @@ const defaultCatalogCollection = "model_catalog"
 // It owns the firestore:" struct tags so the shared Entry type remains
 // database-agnostic (no Firestore-specific annotations).
 type firestoreEntry struct {
-	ModelID              string   `firestore:"model_id"`
-	Provider             string   `firestore:"provider"`
-	DisplayName          string   `firestore:"display_name,omitempty"`
-	InputPerMillion      float64  `firestore:"input_per_million"`
-	OutputPerMillion     float64  `firestore:"output_per_million"`
-	Enabled              bool     `firestore:"enabled"`
-	Category             string   `firestore:"category,omitempty"`
-	ContextWindow        int64    `firestore:"context_window,omitempty"`
-	InputPerMillionHigh  float64  `firestore:"input_per_million_high,omitempty"`
-	OutputPerMillionHigh float64  `firestore:"output_per_million_high,omitempty"`
-	TierThresholdTokens  int64    `firestore:"tier_threshold_tokens,omitempty"`
-	Aliases              []string `firestore:"aliases,omitempty"`
-	AllowedTenants       []string `firestore:"allowed_tenants,omitempty"`
-	DiscountPercent      float64  `firestore:"discount_percent,omitempty"`
+	ModelID              string    `firestore:"model_id"`
+	Provider             string    `firestore:"provider"`
+	DisplayName          string    `firestore:"display_name,omitempty"`
+	InputPerMillion      float64   `firestore:"input_per_million"`
+	OutputPerMillion     float64   `firestore:"output_per_million"`
+	Enabled              bool      `firestore:"enabled"`
+	Category             string    `firestore:"category,omitempty"`
+	ContextWindow        int64     `firestore:"context_window,omitempty"`
+	InputPerMillionHigh  float64   `firestore:"input_per_million_high,omitempty"`
+	OutputPerMillionHigh float64   `firestore:"output_per_million_high,omitempty"`
+	TierThresholdTokens  int64     `firestore:"tier_threshold_tokens,omitempty"`
+	Aliases              []string  `firestore:"aliases,omitempty"`
+	AllowedTenants       []string  `firestore:"allowed_tenants,omitempty"`
+	DiscountPercent      float64   `firestore:"discount_percent,omitempty"`
+	UpdatedAt            time.Time `firestore:"updated_at,serverTimestamp"`
 }
 
 func entryToFirestore(e *Entry) *firestoreEntry {
@@ -48,6 +50,7 @@ func entryToFirestore(e *Entry) *firestoreEntry {
 		Aliases:              e.Aliases,
 		AllowedTenants:       e.AllowedTenants,
 		DiscountPercent:      e.DiscountPercent,
+		UpdatedAt:            e.UpdatedAt,
 	}
 }
 
@@ -67,6 +70,7 @@ func firestoreToEntry(fe *firestoreEntry) Entry {
 		Aliases:              fe.Aliases,
 		AllowedTenants:       fe.AllowedTenants,
 		DiscountPercent:      fe.DiscountPercent,
+		UpdatedAt:            fe.UpdatedAt,
 	}
 }
 
@@ -103,6 +107,8 @@ func (s *FirestoreStore) List(ctx context.Context, includeDisabled bool) ([]Entr
 	if includeDisabled {
 		iter = col.Documents(ctx)
 	} else {
+		// Note: this query uses a single-field index on "enabled" which Firestore
+		// creates automatically. No composite index needed unless ordering is added.
 		iter = col.Where("enabled", "==", true).Documents(ctx)
 	}
 	defer iter.Stop()
@@ -146,6 +152,7 @@ func (s *FirestoreStore) Get(ctx context.Context, provider, modelID string) (*En
 
 // Update creates or replaces an entry using Set with MergeAll (upsert).
 func (s *FirestoreStore) Update(ctx context.Context, entry Entry) error {
+	entry.UpdatedAt = time.Now()
 	id := docID(entry.Provider, entry.ModelID)
 	ref := s.client.Collection(s.collection).Doc(id)
 	_, err := ref.Set(ctx, entryToFirestore(&entry), firestore.MergeAll)

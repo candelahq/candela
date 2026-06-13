@@ -16,6 +16,8 @@ import (
 	"syscall"
 	"time"
 
+	_ "go.uber.org/automaxprocs" // automatically sets GOMAXPROCS from container CPU quota
+
 	firebase "firebase.google.com/go/v4"
 	fbauth "firebase.google.com/go/v4/auth"
 	"golang.org/x/net/http2"

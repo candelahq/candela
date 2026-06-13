@@ -386,3 +386,19 @@ func TestQwen3CoderPricing(t *testing.T) {
 		t.Errorf("qwen3-coder cost for 1M in + 1M out = %f, want ~2.02", cost)
 	}
 }
+
+func TestDefaults_Deterministic(t *testing.T) {
+	c := New()
+	d1 := c.Defaults()
+	d2 := c.Defaults()
+
+	if len(d1) != len(d2) {
+		t.Fatalf("lengths differ: %d vs %d", len(d1), len(d2))
+	}
+	for i := range d1 {
+		if d1[i].Provider != d2[i].Provider || d1[i].Model != d2[i].Model {
+			t.Errorf("index %d differs: %s/%s vs %s/%s",
+				i, d1[i].Provider, d1[i].Model, d2[i].Provider, d2[i].Model)
+		}
+	}
+}

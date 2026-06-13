@@ -17,7 +17,7 @@ import (
 	"flag"
 	"fmt"
 	"log"
-	"sort"
+	"log/slog"
 
 	"cloud.google.com/go/firestore"
 
@@ -37,15 +37,7 @@ func main() {
 
 	// Build the default pricing table from the Calculator.
 	calc := costcalc.New()
-	defaults := calc.Defaults()
-
-	// Sort for deterministic output.
-	sort.Slice(defaults, func(i, j int) bool {
-		if defaults[i].Provider != defaults[j].Provider {
-			return defaults[i].Provider < defaults[j].Provider
-		}
-		return defaults[i].Model < defaults[j].Model
-	})
+	defaults := calc.Defaults() // Already sorted by provider/model.
 
 	// Convert ModelPricing → catalog.Entry.
 	entries := make([]catalog.Entry, 0, len(defaults))
@@ -97,6 +89,10 @@ func main() {
 		errCount int
 	)
 	for _, e := range entries {
+		if err := ctx.Err(); err != nil {
+			slog.Error("seeding cancelled", "error", err)
+			break
+		}
 		fmt.Printf("  [SEED] %s/%s — in=$%.4f/M out=$%.4f/M",
 			e.Provider, e.ModelID, e.InputPerMillion, e.OutputPerMillion)
 		if e.TierThresholdTokens > 0 {

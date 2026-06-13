@@ -18,7 +18,7 @@ COPY go.mod go.sum ./
 RUN go mod download
 
 COPY . .
-RUN go build -o candela-server ./cmd/candela-server
+RUN CGO_ENABLED=1 go build -trimpath -ldflags='-s -w' -o candela-server ./cmd/candela-server
 
 # ── Stage 2: Runtime ──
 # Debian slim for glibc compatibility with DuckDB Go binary.

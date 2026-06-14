@@ -203,25 +203,18 @@ describe('useCatalog', () => {
   // ---------------------------------------------------------------------------
 
   it('aborts in-flight request on unmount', async () => {
-    let rejectFn: (err: Error) => void;
+    let capturedSignal: AbortSignal | null = null;
     mockListModelCatalog.mockImplementation((_req: unknown, opts: { signal: AbortSignal }) => {
-      return new Promise((_resolve, reject) => {
-        rejectFn = reject;
-        opts.signal.addEventListener('abort', () => {
-          reject(new DOMException('Aborted', 'AbortError'));
-        });
-      });
+      capturedSignal = opts?.signal ?? null;
+      return new Promise(() => {}); // Never resolves
     });
 
-    const { result, unmount } = renderHook(() => useCatalog());
-    expect(result.current.loading).toBe(true);
+    const { unmount } = renderHook(() => useCatalog());
+    await waitFor(() => expect(mockListModelCatalog).toHaveBeenCalled());
 
     unmount();
 
-    // After unmount the hook should have called abort on its controller.
-    // The key assertion is that no error state is set (the catch guard checks signal.aborted).
-    // We can't easily assert on the aborted state after unmount (component gone),
-    // but we verify the test doesn't throw/hang — confirming the cleanup ran.
-    expect(true).toBe(true);
+    expect(capturedSignal).not.toBeNull();
+    expect(capturedSignal!.aborted).toBe(true);
   });
 });

@@ -25,61 +25,68 @@ describe('getCacheEfficiency', () => {
   // Excellent: rate >= 0.5
   it('returns "Excellent" tier for rate >= 0.5', () => {
     const result = getCacheEfficiency(600, 1000);
-    expect(result).not.toBeNull();
-    expect(result!.label).toBe('Excellent');
-    expect(result!.tier).toBe('excellent');
-    expect(result!.rate).toBe(0.6);
+    expect(result).toEqual(expect.objectContaining({
+      label: 'Excellent',
+      tier: 'excellent',
+      rate: 0.6,
+    }));
   });
 
   it('returns "Excellent" at exactly 50% boundary', () => {
     const result = getCacheEfficiency(500, 1000);
-    expect(result).not.toBeNull();
-    expect(result!.label).toBe('Excellent');
-    expect(result!.tier).toBe('excellent');
-    expect(result!.rate).toBe(0.5);
+    expect(result).toEqual(expect.objectContaining({
+      label: 'Excellent',
+      tier: 'excellent',
+      rate: 0.5,
+    }));
   });
 
   // Good: 0.2 <= rate < 0.5
   it('returns "Good" tier for rate in [0.2, 0.5)', () => {
     const result = getCacheEfficiency(300, 1000);
-    expect(result).not.toBeNull();
-    expect(result!.label).toBe('Good');
-    expect(result!.tier).toBe('good');
-    expect(result!.rate).toBe(0.3);
+    expect(result).toEqual(expect.objectContaining({
+      label: 'Good',
+      tier: 'good',
+      rate: 0.3,
+    }));
   });
 
   it('returns "Good" at exactly 20% boundary', () => {
     const result = getCacheEfficiency(200, 1000);
-    expect(result).not.toBeNull();
-    expect(result!.label).toBe('Good');
-    expect(result!.tier).toBe('good');
-    expect(result!.rate).toBe(0.2);
+    expect(result).toEqual(expect.objectContaining({
+      label: 'Good',
+      tier: 'good',
+      rate: 0.2,
+    }));
   });
 
   // Low: rate < 0.2
   it('returns "Low" tier for rate < 0.2', () => {
     const result = getCacheEfficiency(50, 1000);
-    expect(result).not.toBeNull();
-    expect(result!.label).toBe('Low');
-    expect(result!.tier).toBe('low');
-    expect(result!.rate).toBe(0.05);
+    expect(result).toEqual(expect.objectContaining({
+      label: 'Low',
+      tier: 'low',
+      rate: 0.05,
+    }));
   });
 
   it('returns "Low" for very small rate', () => {
     const result = getCacheEfficiency(1, 10000);
-    expect(result).not.toBeNull();
-    expect(result!.label).toBe('Low');
-    expect(result!.tier).toBe('low');
+    expect(result).toEqual(expect.objectContaining({
+      label: 'Low',
+      tier: 'low',
+    }));
     expect(result!.rate).toBeCloseTo(0.0001);
   });
 
   // Edge: cacheReadTokens > inputTokens is clamped to 1.0
   it('clamps rate to 1.0 when cacheReadTokens exceeds inputTokens', () => {
     const result = getCacheEfficiency(2000, 1000);
-    expect(result).not.toBeNull();
-    expect(result!.rate).toBe(1);
-    expect(result!.label).toBe('Excellent');
-    expect(result!.tier).toBe('excellent');
+    expect(result).toEqual(expect.objectContaining({
+      rate: 1,
+      label: 'Excellent',
+      tier: 'excellent',
+    }));
   });
 
   // Color is always a string

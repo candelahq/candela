@@ -1242,12 +1242,16 @@ func buildCloudProxy(cfg Config, submitter *processor.SpanProcessor) (*proxy.Pro
 	}
 
 	calc := costcalc.New()
-	cloudProxy := proxy.New(proxy.Config{
+	cloudProxy, err := proxy.New(proxy.Config{
 		Providers:      providers,
 		ProjectID:      "local",
 		MaxRequestCost: cfg.MaxRequestCost,
 		DailyLimits:    cfg.DailyLimits,
 	}, submitter, calc)
+	if err != nil {
+		slog.Error("invalid proxy configuration", "error", err)
+		return nil, nil
+	}
 
 	var names []string
 	for _, p := range providers {

@@ -539,12 +539,15 @@ func TestLMHandler_CloudChatRouting(t *testing.T) {
 
 	// Create a proxy.Proxy with the mock upstream.
 	calc := costcalc.New()
-	cp := proxy.New(proxy.Config{
+	cp, err := proxy.New(proxy.Config{
 		Providers: []proxy.Provider{
 			{Name: "gemini-oai", UpstreamURL: cloudUpstream.URL},
 		},
 		ProjectID: "local",
 	}, nil, calc)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	h := newLMHandler(nil, nil, nil, nil, cp, cloudModels, calc)
 	srv := httptest.NewServer(h)
@@ -919,10 +922,13 @@ func TestLMHandler_ModelAlias_CloudModel(t *testing.T) {
 		Provider: "gemini-oai", Model: "gemini-2.5-pro-preview-05-06",
 		InputPerMillion: 1.25, OutputPerMillion: 10.00,
 	})
-	cp := proxy.New(proxy.Config{
+	cp, err := proxy.New(proxy.Config{
 		Providers: []proxy.Provider{{Name: "gemini-oai", UpstreamURL: cloudUpstream.URL}},
 		ProjectID: "local",
 	}, nil, calc)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	h := newLMHandler(nil, nil, nil, nil, cp, cloudModels, calc)
 	srv := httptest.NewServer(h)

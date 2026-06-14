@@ -91,6 +91,20 @@ proxy:
   # max_idle_conns_per_host: 50 # Idle connections per upstream host
   # max_conns_per_host: 100     # Hard cap per upstream host
 
+  # Model allowlist policy (#207) — restrict which models users can access.
+  # When configured, only models matching the allowlist are permitted.
+  # Requests to unlisted models get 403 Forbidden with an audit log entry.
+  # Supports glob patterns (e.g. "claude-sonnet-4-*" matches all dated variants).
+  # Omit or leave empty to allow all models (backward compatible).
+  # policy:
+  #   allowed_models:
+  #     - provider: openai
+  #       models: ["gpt-4o", "gpt-4o-mini"]
+  #     - provider: anthropic
+  #       models: ["claude-sonnet-4-*"]
+  #     - provider: gemini-oai
+  #       models: ["gemini-2.5-flash-*", "gemini-2.5-pro-*"]
+
 # Model catalog configuration.
 # Controls how the server discovers available models and their pricing.
 catalog:

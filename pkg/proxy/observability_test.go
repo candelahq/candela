@@ -47,7 +47,7 @@ func TestSASpend_TracksAtomicCounter(t *testing.T) {
 	submitter := &mockSubmitter{}
 	calc := costcalc.New()
 
-	p := New(Config{
+	p, _ := New(Config{
 		Providers: []Provider{{Name: "anthropic", UpstreamURL: upstream.URL}},
 		ProjectID: "test",
 	}, submitter, calc)
@@ -114,7 +114,7 @@ func TestDroppedSpans_IncrementedWhenSemaphoreFull(t *testing.T) {
 	submitter := &mockSubmitter{}
 	calc := costcalc.New()
 
-	p := New(Config{
+	p, _ := New(Config{
 		Providers: []Provider{{Name: "anthropic", UpstreamURL: upstream.URL}},
 		ProjectID: "test",
 	}, submitter, calc)
@@ -186,7 +186,7 @@ func TestDeductBudget_EnqueuesToOutboxOnFailure(t *testing.T) {
 	submitter := &mockSubmitter{}
 	calc := costcalc.New()
 
-	p := New(Config{
+	p, _ := New(Config{
 		Providers: []Provider{{Name: "anthropic", UpstreamURL: upstream.URL}},
 		ProjectID: "test",
 	}, submitter, calc)
@@ -258,7 +258,7 @@ func TestDeductBudget_EnqueuesToOutboxOnFailure(t *testing.T) {
 func TestProxyMetrics_Accessors(t *testing.T) {
 	submitter := &mockSubmitter{}
 	calc := costcalc.New()
-	p := New(Config{
+	p, _ := New(Config{
 		Providers: []Provider{{Name: "anthropic", UpstreamURL: "http://localhost"}},
 		ProjectID: "test",
 	}, submitter, calc)

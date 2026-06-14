@@ -260,7 +260,7 @@ func TestProxy_CostCalculation_E2E(t *testing.T) {
 	submitter := &mockSubmitter{}
 	calc := costcalc.New()
 
-	p := New(Config{
+	p, _ := New(Config{
 		Providers: []Provider{{Name: "anthropic", UpstreamURL: upstream.URL}},
 		ProjectID: "test",
 	}, submitter, calc)
@@ -335,7 +335,7 @@ func TestProxy_ServiceAccountBypassesBudget(t *testing.T) {
 	submitter := &mockSubmitter{}
 	calc := costcalc.New()
 
-	p := New(Config{
+	p, _ := New(Config{
 		Providers: []Provider{{Name: "anthropic", UpstreamURL: upstream.URL}},
 		ProjectID: "test",
 	}, submitter, calc)
@@ -400,7 +400,7 @@ func TestProxy_PricingGate_PrefixMatch(t *testing.T) {
 			submitter := &mockSubmitter{}
 			calc := costcalc.New()
 
-			p := New(Config{
+			p, _ := New(Config{
 				Providers: []Provider{{Name: tt.provider, UpstreamURL: upstream.URL}},
 				ProjectID: "test",
 			}, submitter, calc)
@@ -444,7 +444,7 @@ func TestDeductBudget_SkipsZeroCostZeroTokens(t *testing.T) {
 		},
 	}
 	calc := costcalc.New()
-	p := New(Config{ProjectID: "test"}, &mockSubmitter{}, calc)
+	p, _ := New(Config{ProjectID: "test"}, &mockSubmitter{}, calc)
 	p.SetUserStore(store)
 
 	// Zero tokens + zero cost → should skip DeductSpend.
@@ -462,7 +462,7 @@ func TestDeductBudget_CallsForPositiveTokens(t *testing.T) {
 		},
 	}
 	calc := costcalc.New()
-	p := New(Config{ProjectID: "test"}, &mockSubmitter{}, calc)
+	p, _ := New(Config{ProjectID: "test"}, &mockSubmitter{}, calc)
 	p.SetUserStore(store)
 
 	// Positive tokens → should call DeductSpend.
@@ -480,7 +480,7 @@ func TestDeductBudget_SkipsServiceAccount(t *testing.T) {
 		},
 	}
 	calc := costcalc.New()
-	p := New(Config{ProjectID: "test"}, &mockSubmitter{}, calc)
+	p, _ := New(Config{ProjectID: "test"}, &mockSubmitter{}, calc)
 	p.SetUserStore(store)
 
 	p.deductBudget(context.Background(), Provider{Name: "anthropic"}, "claude-sonnet-4-20250514",
@@ -498,7 +498,7 @@ func TestDeductBudget_SkipsEmptyUserID(t *testing.T) {
 		},
 	}
 	calc := costcalc.New()
-	p := New(Config{ProjectID: "test"}, &mockSubmitter{}, calc)
+	p, _ := New(Config{ProjectID: "test"}, &mockSubmitter{}, calc)
 	p.SetUserStore(store)
 
 	p.deductBudget(context.Background(), Provider{Name: "anthropic"}, "claude-sonnet-4-20250514", "", 1000, 500)

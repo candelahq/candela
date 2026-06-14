@@ -198,10 +198,14 @@ func main() {
 		os.Exit(1)
 	}
 
-	llmProxy := proxy.New(proxy.Config{
+	llmProxy, err := proxy.New(proxy.Config{
 		Providers: activeProviders,
 		ProjectID: projectID,
 	}, proc, calc)
+	if err != nil {
+		slog.Error("invalid proxy configuration", "error", err)
+		os.Exit(1)
+	}
 
 	// ── HTTP server ──
 	mux := http.NewServeMux()

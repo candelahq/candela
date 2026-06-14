@@ -38,7 +38,7 @@ func TestCORS_ModelsEndpointReturnsJSON(t *testing.T) {
 	submitter := &mockSubmitter{}
 	calc := newCalcWithTestModels()
 
-	p := New(Config{
+	p, _ := New(Config{
 		Providers: []Provider{{Name: "openai", UpstreamURL: "http://localhost:1"}},
 		ProjectID: "test",
 	}, submitter, calc)

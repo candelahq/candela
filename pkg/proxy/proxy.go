@@ -259,6 +259,9 @@ type Proxy struct {
 	config       Config        // retained for limit config access
 	spendTracker *SpendTracker // per-user per-model daily spend tracker (nil if no limits)
 
+	// #207: Model allowlist policy gate.
+	policy *ModelPolicy
+
 	// HIGH-2: Service account spend tracking (micro-USD for precision).
 	saSpendMicroUSD atomic.Int64
 
@@ -284,6 +287,7 @@ type Config struct {
 	ProjectID      string             `yaml:"project_id"`
 	MaxRequestCost float64            `yaml:"max_request_cost_usd"` // Per-request cost cap (0 = disabled)
 	DailyLimits    []SpendLimitConfig `yaml:"daily_limits"`         // Per-model daily spend limits
+	Policy         *PolicyConfig      `yaml:"policy"`               // Model allowlist policy (nil = all allowed)
 
 	// HTTP transport tuning for upstream LLM provider connections.
 	MaxIdleConns        int `yaml:"max_idle_conns"`          // default: 200
@@ -375,7 +379,7 @@ func newUpstreamHTTPClient(cfg Config) *http.Client {
 }
 
 // New creates a new LLM proxy.
-func New(cfg Config, submitter SpanSubmitter, calc *costcalc.Calculator) *Proxy {
+func New(cfg Config, submitter SpanSubmitter, calc *costcalc.Calculator) (*Proxy, error) {
 	providers := make(map[string]Provider)
 	breakers := make(map[string]*CircuitBreaker)
 	cbCfg := DefaultCircuitBreakerConfig()
@@ -403,7 +407,14 @@ func New(cfg Config, submitter SpanSubmitter, calc *costcalc.Calculator) *Proxy 
 		p.spendTracker = NewSpendTracker()
 	}
 
-	return p
+	// #207: Initialize model allowlist policy.
+	policy, err := NewModelPolicy(cfg.Policy)
+	if err != nil {
+		return nil, fmt.Errorf("proxy: %w", err)
+	}
+	p.policy = policy
+
+	return p, nil
 }
 
 // SetUserStore sets the optional UserStore for budget deduction.
@@ -893,6 +904,25 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write(errBody)
 		slog.Warn("blocked request: no pricing for model",
 			"user_id", effectiveUserID, "provider", providerName, "model", requestModel)
+		return
+	}
+
+	// ── Model allowlist policy gate (#207) ──
+	// Blocks models not in the configured allowlist. Runs after pricing gate
+	// and before budget checks. Empty/missing policy = all models allowed.
+	if requestModel != "" && !p.policy.IsAllowed(providerName, requestModel) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusForbidden)
+		errBody, _ := json.Marshal(map[string]any{
+			"error": map[string]any{
+				"message": "model not allowed by policy",
+				"type":    "forbidden",
+				"code":    403,
+			},
+		})
+		_, _ = w.Write(errBody)
+		slog.Warn("model blocked by policy",
+			"provider", providerName, "model", requestModel, "user", effectiveUserID)
 		return
 	}
 

@@ -165,6 +165,41 @@ func getProviderOverride(overrides map[string]ProviderOverride, provider, defaul
 	return
 }
 
+// buildCustomProviders converts ProviderConfig entries into proxy.Provider
+// values, applying validation (skip empty name/upstream_url) and wiring
+// AuthEnvVar / AuthHeader into the Provider's APIKey / AuthHeader fields.
+// envLookup is typically os.Getenv but can be swapped for testing.
+func buildCustomProviders(cfgs []ProviderConfig, envLookup func(string) string) []proxy.Provider {
+	var out []proxy.Provider
+	for _, cp := range cfgs {
+		if cp.Enabled != nil && !*cp.Enabled {
+			continue
+		}
+		if cp.Name == "" {
+			slog.Warn("skipping custom provider with empty name")
+			continue
+		}
+		if cp.UpstreamURL == "" {
+			slog.Warn("skipping custom provider with empty upstream_url", "name", cp.Name)
+			continue
+		}
+		p := proxy.Provider{
+			Name:        cp.Name,
+			UpstreamURL: cp.UpstreamURL,
+		}
+		if cp.AuthEnvVar != "" {
+			if key := envLookup(cp.AuthEnvVar); key != "" {
+				p.APIKey = key
+				if cp.AuthHeader != "" {
+					p.AuthHeader = cp.AuthHeader
+				}
+			}
+		}
+		out = append(out, p)
+	}
+	return out
+}
+
 func main() {
 	// Set up structured logging to stderr.
 	logger := slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{
@@ -437,17 +472,12 @@ func main() {
 		}
 
 		// Add custom providers (from config YAML).
-		for _, cp := range cfg.CustomProviders {
-			if cp.Enabled != nil && !*cp.Enabled {
-				continue
-			}
-			p := proxy.Provider{
-				Name:        cp.Name,
-				UpstreamURL: cp.UpstreamURL,
-			}
-			allProviders = append(allProviders, p)
-			slog.Info("added custom provider", "name", cp.Name, "upstream", cp.UpstreamURL)
+		customProviders := buildCustomProviders(cfg.CustomProviders, os.Getenv)
+		for _, p := range customProviders {
+			slog.Info("added custom provider", "name", p.Name, "upstream", p.UpstreamURL,
+				"has_api_key", p.APIKey != "", "auth_header", p.AuthHeader)
 		}
+		allProviders = append(allProviders, customProviders...)
 
 		// Get ADC token source for automatic GCP auth.
 		// Used by Anthropic (Vertex AI), Gemini, and Google providers so the

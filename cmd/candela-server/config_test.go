@@ -529,3 +529,173 @@ proxy:
 		t.Errorf("disabled providers should be empty, got %d", len(cfg.DisabledProviders))
 	}
 }
+
+// ── buildCustomProviders Tests ───────────────────────────────────────────────
+
+func TestCustomProviderEmptyNameSkipped(t *testing.T) {
+	cfgs := []ProviderConfig{
+		{Name: "", UpstreamURL: "https://api.example.com"},
+		{Name: "valid", UpstreamURL: "https://api.valid.com"},
+	}
+	got := buildCustomProviders(cfgs, func(string) string { return "" })
+	if len(got) != 1 {
+		t.Fatalf("expected 1 provider, got %d", len(got))
+	}
+	if got[0].Name != "valid" {
+		t.Errorf("expected 'valid', got %q", got[0].Name)
+	}
+}
+
+func TestCustomProviderEmptyURLSkipped(t *testing.T) {
+	cfgs := []ProviderConfig{
+		{Name: "no-url", UpstreamURL: ""},
+		{Name: "valid", UpstreamURL: "https://api.valid.com"},
+	}
+	got := buildCustomProviders(cfgs, func(string) string { return "" })
+	if len(got) != 1 {
+		t.Fatalf("expected 1 provider, got %d", len(got))
+	}
+	if got[0].Name != "valid" {
+		t.Errorf("expected 'valid', got %q", got[0].Name)
+	}
+}
+
+func TestCustomProviderDisabledSkipped(t *testing.T) {
+	disabled := false
+	cfgs := []ProviderConfig{
+		{Name: "off", UpstreamURL: "https://api.off.com", Enabled: &disabled},
+		{Name: "on", UpstreamURL: "https://api.on.com"},
+	}
+	got := buildCustomProviders(cfgs, func(string) string { return "" })
+	if len(got) != 1 {
+		t.Fatalf("expected 1 provider, got %d", len(got))
+	}
+	if got[0].Name != "on" {
+		t.Errorf("expected 'on', got %q", got[0].Name)
+	}
+}
+
+func TestCustomProviderAuthHeaderWired(t *testing.T) {
+	cfgs := []ProviderConfig{
+		{
+			Name:        "custom-llm",
+			UpstreamURL: "https://api.custom-llm.com",
+			AuthHeader:  "x-api-key",
+			AuthEnvVar:  "CUSTOM_LLM_KEY",
+		},
+	}
+	envLookup := func(key string) string {
+		if key == "CUSTOM_LLM_KEY" {
+			return "secret-123"
+		}
+		return ""
+	}
+	got := buildCustomProviders(cfgs, envLookup)
+	if len(got) != 1 {
+		t.Fatalf("expected 1 provider, got %d", len(got))
+	}
+	if got[0].APIKey != "secret-123" {
+		t.Errorf("APIKey = %q, want %q", got[0].APIKey, "secret-123")
+	}
+	if got[0].AuthHeader != "x-api-key" {
+		t.Errorf("AuthHeader = %q, want %q", got[0].AuthHeader, "x-api-key")
+	}
+}
+
+func TestCustomProviderAuthDefaultHeader(t *testing.T) {
+	// When AuthHeader is empty, APIKey should be set but AuthHeader left empty
+	// (the proxy defaults to "Authorization: Bearer <key>").
+	cfgs := []ProviderConfig{
+		{
+			Name:        "openai-compat",
+			UpstreamURL: "https://api.openai-compat.com",
+			AuthEnvVar:  "COMPAT_KEY",
+		},
+	}
+	envLookup := func(key string) string {
+		if key == "COMPAT_KEY" {
+			return "bearer-key"
+		}
+		return ""
+	}
+	got := buildCustomProviders(cfgs, envLookup)
+	if len(got) != 1 {
+		t.Fatalf("expected 1 provider, got %d", len(got))
+	}
+	if got[0].APIKey != "bearer-key" {
+		t.Errorf("APIKey = %q, want %q", got[0].APIKey, "bearer-key")
+	}
+	if got[0].AuthHeader != "" {
+		t.Errorf("AuthHeader = %q, want empty (default to Bearer)", got[0].AuthHeader)
+	}
+}
+
+func TestCustomProviderEnvVarMissing(t *testing.T) {
+	// When the env var is set but empty, APIKey should remain empty.
+	cfgs := []ProviderConfig{
+		{
+			Name:        "needs-key",
+			UpstreamURL: "https://api.needs-key.com",
+			AuthEnvVar:  "MISSING_KEY",
+		},
+	}
+	got := buildCustomProviders(cfgs, func(string) string { return "" })
+	if len(got) != 1 {
+		t.Fatalf("expected 1 provider, got %d", len(got))
+	}
+	if got[0].APIKey != "" {
+		t.Errorf("APIKey should be empty when env var is missing, got %q", got[0].APIKey)
+	}
+}
+
+func TestCustomProviderAllInvalid(t *testing.T) {
+	cfgs := []ProviderConfig{
+		{Name: "", UpstreamURL: "https://api.example.com"},
+		{Name: "no-url", UpstreamURL: ""},
+	}
+	got := buildCustomProviders(cfgs, func(string) string { return "" })
+	if len(got) != 0 {
+		t.Errorf("expected 0 providers, got %d", len(got))
+	}
+}
+
+func TestCustomProviderAuthHeaderYAMLParsing(t *testing.T) {
+	yamlData := `
+custom_providers:
+  - name: custom-llm
+    upstream_url: https://api.custom-llm.com
+    auth_header: x-api-key
+    auth_env_var: CUSTOM_LLM_KEY
+`
+	var cfg Config
+	if err := yaml.Unmarshal([]byte(yamlData), &cfg); err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.CustomProviders) != 1 {
+		t.Fatalf("expected 1 custom provider, got %d", len(cfg.CustomProviders))
+	}
+	cp := cfg.CustomProviders[0]
+	if cp.AuthHeader != "x-api-key" {
+		t.Errorf("auth_header = %q, want %q", cp.AuthHeader, "x-api-key")
+	}
+	if cp.AuthEnvVar != "CUSTOM_LLM_KEY" {
+		t.Errorf("auth_env_var = %q, want %q", cp.AuthEnvVar, "CUSTOM_LLM_KEY")
+	}
+
+	// Verify buildCustomProviders wires it correctly.
+	providers := buildCustomProviders(cfg.CustomProviders, func(key string) string {
+		if key == "CUSTOM_LLM_KEY" {
+			return "test-secret"
+		}
+		return ""
+	})
+	if len(providers) != 1 {
+		t.Fatalf("expected 1 provider, got %d", len(providers))
+	}
+	if providers[0].APIKey != "test-secret" {
+		t.Errorf("APIKey = %q, want %q", providers[0].APIKey, "test-secret")
+	}
+	if providers[0].AuthHeader != "x-api-key" {
+		t.Errorf("AuthHeader = %q, want %q", providers[0].AuthHeader, "x-api-key")
+	}
+}

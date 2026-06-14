@@ -115,6 +115,17 @@ type Provider struct {
 	// AnthropicVersion overrides the anthropic_version injected into Vertex AI
 	// rawPredict bodies. Empty = DefaultVertexAnthropicVersion.
 	AnthropicVersion string `yaml:"-"`
+
+	// APIKey is a static API key for authenticating with the upstream provider.
+	// Used by custom providers configured via YAML (populated from AuthEnvVar).
+	// When set, injected as "Authorization: Bearer <key>" unless AuthHeader
+	// is specified, in which case it is injected as "<AuthHeader>: <key>".
+	APIKey string `yaml:"-"`
+
+	// AuthHeader overrides the header name used to send APIKey.
+	// If empty, defaults to "Authorization" with "Bearer " prefix.
+	// Examples: "x-api-key", "X-Auth-Token".
+	AuthHeader string `yaml:"-"`
 }
 
 // EffectiveHost returns the hostname used for SNI matching.
@@ -1183,7 +1194,7 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Forward headers (auth, content-type, etc).
-	forwardHeaders(r, upstreamReq, providerName, provider.TokenSource != nil || provider.RequestSigner != nil)
+	forwardHeaders(r, upstreamReq, providerName, provider.TokenSource != nil || provider.RequestSigner != nil || provider.APIKey != "")
 
 	// Pre-generate the span ID that buildSpan will use for this proxy span.
 	// We need it now so the outgoing traceparent to the upstream LLM
@@ -1213,6 +1224,13 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		upstreamReq.Header.Set("Authorization", "Bearer "+token.AccessToken)
+	} else if provider.APIKey != "" {
+		// Static API key auth (custom providers configured via YAML).
+		if provider.AuthHeader != "" {
+			upstreamReq.Header.Set(provider.AuthHeader, provider.APIKey)
+		} else {
+			upstreamReq.Header.Set("Authorization", "Bearer "+provider.APIKey)
+		}
 	}
 
 	// Propagate request ID to upstream.

@@ -267,6 +267,21 @@ func main() {
 		_, _ = fmt.Fprintln(w, `{"status": "ready"}`)
 	})
 
+	// Catalog health check: returns backend, model count, latency, writable flag.
+	// 503 when catalog is unhealthy (e.g. Firestore unavailable).
+	mux.HandleFunc("/catalog/healthz", func(w http.ResponseWriter, r *http.Request) {
+		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+		defer cancel()
+
+		status := catalog.CheckHealth(ctx, catalogStore)
+
+		w.Header().Set("Content-Type", "application/json")
+		if !status.Healthy {
+			w.WriteHeader(http.StatusServiceUnavailable)
+		}
+		_ = json.NewEncoder(w).Encode(status)
+	})
+
 	var spendOB *spendoutbox.Outbox
 	var llmProxy *proxy.Proxy
 

@@ -2,6 +2,7 @@ package costcalc
 
 import (
 	"math"
+	"sync"
 	"testing"
 )
 
@@ -401,4 +402,112 @@ func TestDefaults_Deterministic(t *testing.T) {
 				i, d1[i].Provider, d1[i].Model, d2[i].Provider, d2[i].Model)
 		}
 	}
+}
+
+func TestResolve(t *testing.T) {
+	c := New()
+
+	// Known model should resolve
+	p, ok := c.Resolve("openai", "gpt-4o")
+	if !ok {
+		t.Fatal("expected gpt-4o to resolve")
+	}
+	if p.InputPerMillion == 0 {
+		t.Error("expected non-zero input rate")
+	}
+	if p.OutputPerMillion == 0 {
+		t.Error("expected non-zero output rate")
+	}
+
+	// Unknown model should not resolve
+	_, ok = c.Resolve("unknown", "unknown-model")
+	if ok {
+		t.Error("expected unknown model to not resolve")
+	}
+
+	// Config override should take priority
+	c.LoadFromConfig(PricingConfig{
+		Models: []ModelPricing{{
+			Provider: "openai", Model: "gpt-4o",
+			InputPerMillion: 999.0, OutputPerMillion: 999.0,
+		}},
+	})
+	p, ok = c.Resolve("openai", "gpt-4o")
+	if !ok || p.InputPerMillion != 999.0 {
+		t.Errorf("expected override rate 999.0, got %f", p.InputPerMillion)
+	}
+}
+
+func TestResolveEffective_TieredPricing(t *testing.T) {
+	c := New()
+
+	// gemini-2.5-pro has tiered pricing: threshold 200K tokens,
+	// base $1.25/$10.00, high $2.50/$15.00.
+	pBase, ok := c.ResolveEffective("google", "gemini-2.5-pro", 100_000)
+	if !ok {
+		t.Fatal("expected resolve")
+	}
+
+	// Above threshold: high rates
+	pHigh, ok := c.ResolveEffective("google", "gemini-2.5-pro", 500_000)
+	if !ok {
+		t.Fatal("expected resolve")
+	}
+
+	if pBase.InputPerMillion == pHigh.InputPerMillion {
+		t.Errorf("expected different input rates: base=%f, high=%f",
+			pBase.InputPerMillion, pHigh.InputPerMillion)
+	}
+	if pBase.OutputPerMillion == pHigh.OutputPerMillion {
+		t.Errorf("expected different output rates: base=%f, high=%f",
+			pBase.OutputPerMillion, pHigh.OutputPerMillion)
+	}
+
+	// Verify the exact high-tier rates match what Calculate would use.
+	if pHigh.InputPerMillion != 2.50 {
+		t.Errorf("expected high input rate 2.50, got %f", pHigh.InputPerMillion)
+	}
+	if pHigh.OutputPerMillion != 15.00 {
+		t.Errorf("expected high output rate 15.00, got %f", pHigh.OutputPerMillion)
+	}
+}
+
+func TestResolveEffective_BelowThreshold(t *testing.T) {
+	c := New()
+	pBase, _ := c.Resolve("google", "gemini-2.5-pro")
+	pEff, _ := c.ResolveEffective("google", "gemini-2.5-pro", 100)
+	if pBase.InputPerMillion != pEff.InputPerMillion {
+		t.Errorf("below threshold should use base input rate: base=%f, effective=%f",
+			pBase.InputPerMillion, pEff.InputPerMillion)
+	}
+	if pBase.OutputPerMillion != pEff.OutputPerMillion {
+		t.Errorf("below threshold should use base output rate: base=%f, effective=%f",
+			pBase.OutputPerMillion, pEff.OutputPerMillion)
+	}
+}
+
+func TestGlobalDiscount_Accessor(t *testing.T) {
+	c := New()
+	if c.GlobalDiscount() != 0 {
+		t.Errorf("default global discount should be 0, got %f", c.GlobalDiscount())
+	}
+	c.LoadFromConfig(PricingConfig{DiscountPercent: 0.15})
+	if c.GlobalDiscount() != 0.15 {
+		t.Errorf("expected 0.15, got %f", c.GlobalDiscount())
+	}
+}
+
+func TestResolve_ConcurrentSafe(t *testing.T) {
+	c := New()
+	var wg sync.WaitGroup
+	for i := 0; i < 100; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			c.Resolve("openai", "gpt-4o")
+			c.ResolveEffective("google", "gemini-2.5-pro", 500_000)
+			c.GlobalDiscount()
+		}()
+	}
+	wg.Wait()
 }

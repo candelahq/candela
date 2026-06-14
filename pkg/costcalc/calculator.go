@@ -439,6 +439,45 @@ func (c *Calculator) HasPricing(provider, model string) bool {
 	return ok
 }
 
+// Resolve returns the resolved pricing for a model without calculating cost.
+// Returns the resolved ModelPricing and true if found, or zero value and false.
+// This is used to snapshot pricing at request time for cost auditing.
+func (c *Calculator) Resolve(provider, model string) (ModelPricing, bool) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.resolve(provider, model)
+}
+
+// ResolveEffective returns the pricing that would be used for the given token counts,
+// accounting for tiered pricing. This captures the actual rates for cost auditing.
+// When the input context exceeds the tier threshold, the high-tier rates are returned
+// in InputPerMillion/OutputPerMillion so the snapshot reflects what was actually charged.
+func (c *Calculator) ResolveEffective(provider, model string, inputTokens int64) (ModelPricing, bool) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	p, ok := c.resolve(provider, model)
+	if !ok {
+		return p, false
+	}
+	// Apply tiered pricing selection (same logic as Calculate).
+	if p.TierThresholdTokens > 0 && inputTokens > p.TierThresholdTokens {
+		if p.InputPerMillionHigh > 0 {
+			p.InputPerMillion = p.InputPerMillionHigh
+		}
+		if p.OutputPerMillionHigh > 0 {
+			p.OutputPerMillion = p.OutputPerMillionHigh
+		}
+	}
+	return p, true
+}
+
+// GlobalDiscount returns the current global discount percentage (0.0–1.0).
+func (c *Calculator) GlobalDiscount() float64 {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.globalDiscount
+}
+
 // resolve looks up pricing: config overrides first, then built-in defaults,
 // then precomputed provider-agnostic fallback, then prefix-based fuzzy match.
 // Provider aliases (e.g. "anthropic-direct" → "anthropic") are resolved before

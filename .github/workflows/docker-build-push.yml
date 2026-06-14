@@ -1,0 +1,106 @@
+name: Docker Build & Push
+
+on:
+  workflow_call:
+    inputs:
+      image_name:
+        required: true
+        type: string
+        description: 'Image name (e.g., candela-server)'
+      dockerfile:
+        required: true
+        type: string
+        description: 'Path to Dockerfile'
+      context:
+        required: false
+        type: string
+        default: '.'
+        description: 'Docker build context'
+      setup_go:
+        required: false
+        type: boolean
+        default: false
+        description: 'Whether to set up Go before building'
+      go_test_packages:
+        required: false
+        type: string
+        default: ''
+        description: 'Go packages to test before building (space-separated). Skipped if empty.'
+      platforms:
+        required: false
+        type: string
+        default: ''
+        description: 'Platforms for multi-arch build (e.g., linux/amd64,linux/arm64). Omit for single-platform.'
+      tag_prefix_strip:
+        required: false
+        type: string
+        default: ''
+        description: 'Prefix to strip from GITHUB_REF_NAME for version tag (e.g., sidecar-). If set, uses explicit version+latest tags instead of metadata-action.'
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    env:
+      REGISTRY: ghcr.io
+      IMAGE_NAME: ${{ github.repository_owner }}/${{ inputs.image_name }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        if: inputs.setup_go
+        with:
+          go-version-file: go.mod
+
+      - name: Test
+        if: inputs.go_test_packages != ''
+        run: go test ${{ inputs.go_test_packages }} -count=1 -timeout 60s
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Compute version tags
+        if: inputs.tag_prefix_strip != ''
+        id: version
+        env:
+          FULL_IMAGE: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+        run: |
+          ver="${GITHUB_REF_NAME#${{ inputs.tag_prefix_strip }}}"
+          {
+            echo "tags<<EOF"
+            echo "${FULL_IMAGE}:${ver}"
+            echo "${FULL_IMAGE}:latest"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Extract metadata
+        if: inputs.tag_prefix_strip == ''
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=sha,prefix=
+            type=ref,event=branch
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ inputs.context }}
+          file: ${{ inputs.dockerfile }}
+          push: true
+          platforms: ${{ inputs.platforms || '' }}
+          tags: ${{ steps.version.outputs.tags || steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

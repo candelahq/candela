@@ -25,11 +25,21 @@ func TestSidecar_CIWorkflow_References_SidecarTag(t *testing.T) {
 	if !strings.Contains(content, "sidecar-v*") {
 		t.Error("sidecar.yml does not trigger on sidecar-v* tags")
 	}
-	if !strings.Contains(content, "ghcr.io") {
-		t.Error("sidecar.yml does not publish to GHCR")
-	}
 	if !strings.Contains(content, "Dockerfile.sidecar") {
 		t.Error("sidecar.yml does not reference Dockerfile.sidecar")
+	}
+	// After deduplication, sidecar.yml delegates to the reusable workflow
+	if !strings.Contains(content, "docker-build-push.yml") {
+		t.Error("sidecar.yml does not use the reusable docker-build-push workflow")
+	}
+
+	// Verify the reusable workflow publishes to GHCR
+	reusable, err := os.ReadFile("../../.github/workflows/docker-build-push.yml")
+	if err != nil {
+		t.Fatalf("reusable workflow missing: %v", err)
+	}
+	if !strings.Contains(string(reusable), "ghcr.io") {
+		t.Error("docker-build-push.yml does not publish to GHCR")
 	}
 }
 

@@ -24,8 +24,8 @@ func TestCalculate(t *testing.T) {
 			model:        "claude-opus-4.7",
 			inputTokens:  1000,
 			outputTokens: 500,
-			wantMin:      0.017, // 1K×$5.00/M + 500×$25.00/M = $0.005 + $0.0125 = $0.0175
-			wantMax:      0.018,
+			wantMin:      0.052, // 1K×$15.00/M + 500×$75.00/M = $0.015 + $0.0375 = $0.0525
+			wantMax:      0.053,
 		},
 		{
 			name:         "Gemini 2.0 Flash",
@@ -510,4 +510,95 @@ func TestResolve_ConcurrentSafe(t *testing.T) {
 		}()
 	}
 	wg.Wait()
+}
+
+// ── Regression tests for Issue #146: Opus pricing + dot/hyphen model IDs ─────
+
+func TestOpusPricing(t *testing.T) {
+	c := New()
+	tests := []struct {
+		model     string
+		wantInput float64
+	}{
+		{"claude-opus-4.7", 15.00},
+		{"claude-opus-4-7", 15.00}, // hyphen variant (Vertex AI format)
+		{"claude-opus-4.6", 15.00},
+		{"claude-opus-4-6", 15.00},
+		{"claude-opus-4", 15.00},
+		{"claude-opus-4-20250514", 15.00},
+	}
+	for _, tt := range tests {
+		t.Run(tt.model, func(t *testing.T) {
+			cost := c.Calculate("anthropic", tt.model, 1_000_000, 0)
+			if math.Abs(cost-tt.wantInput) > 0.01 {
+				t.Errorf("%s: got input cost %v, want %v", tt.model, cost, tt.wantInput)
+			}
+		})
+	}
+}
+
+func TestSonnetPricing(t *testing.T) {
+	c := New()
+	// Verify Sonnet is NOT affected by the Opus fix.
+	tests := []struct {
+		model     string
+		wantInput float64
+	}{
+		{"claude-sonnet-4.6", 3.00},
+		{"claude-sonnet-4-6", 3.00},
+		{"claude-sonnet-4", 3.00},
+		{"claude-sonnet-4-20250514", 3.00},
+	}
+	for _, tt := range tests {
+		t.Run(tt.model, func(t *testing.T) {
+			cost := c.Calculate("anthropic", tt.model, 1_000_000, 0)
+			if math.Abs(cost-tt.wantInput) > 0.01 {
+				t.Errorf("%s: got input cost %v, want %v", tt.model, cost, tt.wantInput)
+			}
+		})
+	}
+}
+
+func TestModelIDNormalization(t *testing.T) {
+	c := New()
+	// Dot and hyphen variants should produce the same cost.
+	pairs := []struct {
+		dotModel    string
+		hyphenModel string
+	}{
+		{"claude-opus-4.7", "claude-opus-4-7"},
+		{"claude-opus-4.6", "claude-opus-4-6"},
+		{"claude-sonnet-4.6", "claude-sonnet-4-6"},
+		{"claude-haiku-4.5", "claude-haiku-4-5"},
+	}
+	for _, tt := range pairs {
+		t.Run(tt.dotModel, func(t *testing.T) {
+			dotCost := c.Calculate("anthropic", tt.dotModel, 1_000_000, 0)
+			hyphenCost := c.Calculate("anthropic", tt.hyphenModel, 1_000_000, 0)
+			if dotCost != hyphenCost {
+				t.Errorf("dot/hyphen mismatch for %s: %v vs %v", tt.dotModel, dotCost, hyphenCost)
+			}
+			if dotCost == 0 {
+				t.Errorf("%s resolved to $0.00 — missing pricing entry", tt.dotModel)
+			}
+		})
+	}
+}
+
+func TestNormalizeModelID(t *testing.T) {
+	tests := []struct {
+		input, want string
+	}{
+		{"claude-opus-4-7", "claude-opus-4.7"},
+		{"claude-sonnet-4-6", "claude-sonnet-4.6"},
+		{"claude-3-opus-20240229", "claude-3-opus-20240229"}, // date suffix, no change
+		{"gpt-4o", "gpt-4o"},                                 // no version suffix
+		{"claude-opus-4", "claude-opus-4"},                   // no trailing version
+	}
+	for _, tt := range tests {
+		got := normalizeModelID(tt.input)
+		if got != tt.want {
+			t.Errorf("normalizeModelID(%q) = %q, want %q", tt.input, got, tt.want)
+		}
+	}
 }

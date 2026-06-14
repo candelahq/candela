@@ -52,7 +52,12 @@ function compare(a: EnrichedModelRow, b: EnrichedModelRow, key: ModelSortKey): n
  */
 export function useModels(options?: { includeBudget?: boolean }) {
   const dashboard = useDashboard(options);
-  const catalog = useCatalog();
+  const {
+    getPricing,
+    loading: catalogLoading,
+    error: catalogError,
+    source: catalogSource,
+  } = useCatalog();
   const [sort, setSort] = useState<SortState>({ key: "costUsd", desc: true });
   const [search, setSearch] = useState("");
 
@@ -65,7 +70,7 @@ export function useModels(options?: { includeBudget?: boolean }) {
   // Enrich rows with catalog pricing and cache efficiency
   const enriched: EnrichedModelRow[] = useMemo(() => {
     return dashboard.models.map((m) => {
-      const pricing = catalog.getPricing(m.provider, m.model);
+      const pricing = getPricing(m.provider, m.model);
       return {
         ...m,
         inputPricePerMillion: pricing?.inputPerMillion ?? null,
@@ -73,7 +78,7 @@ export function useModels(options?: { includeBudget?: boolean }) {
         cacheEfficiency: getCacheEfficiency(m.cacheReadTokens, m.inputTokens),
       };
     });
-  }, [dashboard.models, catalog.getPricing]);
+  }, [dashboard.models, getPricing]);
 
   const filtered = useMemo(() => {
     let rows = [...enriched];
@@ -116,8 +121,9 @@ export function useModels(options?: { includeBudget?: boolean }) {
   return {
     models: filtered,
     totals,
-    loading: dashboard.loading,
-    error: dashboard.error,
+    loading: dashboard.loading || catalogLoading,
+    error: dashboard.error ?? catalogError,
+    catalogSource,
     timeRange: dashboard.timeRange,
     setTimeRange: dashboard.setTimeRange,
     refresh: dashboard.refresh,

@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
-import type { ModelUsageRow } from '../useDashboard';
+import type { ModelUsageRow, TimeRange, DashboardSummary, RecentTrace, BudgetContext } from '../useDashboard';
 import type { CacheEfficiency } from '@/lib/cacheUtils';
 
 // ---------------------------------------------------------------------------
@@ -13,12 +13,12 @@ const mockRefresh = vi.fn();
 /** Default useDashboard return value — overridden per-test. */
 let dashboardReturn: {
   models: ModelUsageRow[];
-  summary: null;
-  recentTraces: never[];
-  budgetContext: null;
+  summary: DashboardSummary | null;
+  recentTraces: RecentTrace[];
+  budgetContext: BudgetContext | null;
   loading: boolean;
   error: string | null;
-  timeRange: '24h' | '7d' | '30d';
+  timeRange: TimeRange;
   setTimeRange: typeof mockSetTimeRange;
   refresh: typeof mockRefresh;
 };
@@ -57,7 +57,7 @@ function resetCatalog(overrides?: {
   pricingMap = new Map();
   catalogReturn = {
     getPricing: vi.fn((provider: string, model: string) => {
-      const key = `${provider.toLowerCase()}:${model.toLowerCase()}`;
+      const key = `${provider.toLowerCase()}/${model.toLowerCase()}`;
       return pricingMap.get(key) ?? null;
     }),
     loading: overrides?.loading ?? false,
@@ -127,7 +127,7 @@ describe('useModels', () => {
       modelRow({ model: 'gemini-2.5-pro', provider: 'google' }),
     ];
     resetDashboard({ models });
-    pricingMap.set('google:gemini-2.5-pro', {
+    pricingMap.set('google/gemini-2.5-pro', {
       inputPerMillion: 1.25,
       outputPerMillion: 10,
     });

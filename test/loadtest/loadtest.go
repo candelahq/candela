@@ -21,7 +21,6 @@ import (
 	"sort"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 )
 
@@ -97,29 +96,33 @@ func Run(ctx context.Context, cfg Config) (*Result, error) {
 	results := make(chan requestResult, cfg.Concurrency*100)
 
 	// Rate limiter: simple token-bucket using a ticker.
-	var ticker *time.Ticker
-	var tokenCh <-chan time.Time
+	var limiter <-chan time.Time
 	if cfg.RequestsPerSec > 0 {
 		interval := time.Second / time.Duration(cfg.RequestsPerSec)
-		ticker = time.NewTicker(interval)
-		tokenCh = ticker.C
+		if interval <= 0 {
+			interval = time.Millisecond // minimum 1ms between requests
+		}
+		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
+		limiter = ticker.C
 	}
 
 	// Shared HTTP client with keep-alive.
+	transport := &http.Transport{
+		MaxIdleConns:        cfg.Concurrency * 2,
+		MaxIdleConnsPerHost: cfg.Concurrency * 2,
+		IdleConnTimeout:     90 * time.Second,
+	}
+	defer transport.CloseIdleConnections()
+
 	client := &http.Client{
-		Timeout: 30 * time.Second,
-		Transport: &http.Transport{
-			MaxIdleConns:        cfg.Concurrency * 2,
-			MaxIdleConnsPerHost: cfg.Concurrency * 2,
-			IdleConnTimeout:     90 * time.Second,
-		},
+		Timeout:   30 * time.Second,
+		Transport: transport,
 	}
 
 	body := buildRequestBody(cfg)
 
 	var wg sync.WaitGroup
-	var totalSent atomic.Int64
 
 	startTime := time.Now()
 
@@ -137,16 +140,15 @@ func Run(ctx context.Context, cfg Config) (*Result, error) {
 				}
 
 				// Rate limiting: wait for a token if configured.
-				if tokenCh != nil {
+				if limiter != nil {
 					select {
-					case <-tokenCh:
+					case <-limiter:
 					case <-runCtx.Done():
 						return
 					}
 				}
 
 				rr := sendRequest(runCtx, client, cfg, body)
-				totalSent.Add(1)
 
 				select {
 				case results <- rr:

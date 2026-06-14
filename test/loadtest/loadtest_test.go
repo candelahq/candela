@@ -162,11 +162,46 @@ func TestLoadTestRateLimited(t *testing.T) {
 	}
 
 	// With 50 RPS cap over 2 seconds, expect roughly 100 requests (±margin).
+	targetRPS := 50
+	duration := 2 * time.Second
 	maxExpected := int64(150) // generous upper bound
 	if result.TotalRequests > maxExpected {
 		t.Errorf("rate limiter not effective: got %d requests, expected at most ~%d",
 			result.TotalRequests, maxExpected)
 	}
+	minExpected := int64(float64(targetRPS) * duration.Seconds() * 0.5) // at least 50% of target
+	if result.TotalRequests < minExpected {
+		t.Errorf("expected at least %d requests at %d RPS, got %d", minExpected, targetRPS, result.TotalRequests)
+	}
 	t.Logf("Rate-limited results: %d requests, %.1f RPS (target: 50)",
+		result.TotalRequests, result.RequestsPerSec)
+}
+
+func TestLoadTestUnlimitedRPS(t *testing.T) {
+	// Verify that RPS=0 means unlimited (no ticker panic).
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+	server := httptest.NewServer(handler)
+	defer server.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
+	defer cancel()
+
+	result, err := Run(ctx, Config{
+		TargetURL:   server.URL,
+		Concurrency: 2,
+		Duration:    500 * time.Millisecond,
+		Provider:    "test",
+		Model:       "test",
+		Prompt:      "Hi",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.TotalRequests == 0 {
+		t.Error("expected requests with unlimited RPS")
+	}
+	t.Logf("Unlimited RPS results: %d requests, %.1f RPS",
 		result.TotalRequests, result.RequestsPerSec)
 }

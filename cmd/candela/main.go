@@ -145,7 +145,12 @@ func main() {
 	case "status":
 		cmdStatus()
 	case "auth":
-		handleAuth(os.Args[2:])
+		// Guard: os.Args[2:] is safe (returns [] when len==2), but be explicit.
+		var authArgs []string
+		if len(os.Args) > 2 {
+			authArgs = os.Args[2:]
+		}
+		handleAuth(authArgs)
 	case "version":
 		fmt.Printf("candela %s\n", version)
 	default:

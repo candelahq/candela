@@ -416,8 +416,11 @@ func (c *Calculator) Defaults() []ModelPricing {
 }
 
 // clampDiscount ensures a discount is within [0.0, 1.0].
+// NaN is treated as 0 (no discount) — NaN compares false for all ordered
+// comparisons, so without this check it would pass through and corrupt
+// every cost calculation downstream (baseCost *= (1 - NaN) → NaN).
 func clampDiscount(d float64) float64 {
-	if d < 0 {
+	if math.IsNaN(d) || d < 0 {
 		return 0
 	}
 	if d > 1 {
@@ -570,7 +573,7 @@ func extractBaseModel(model string) string {
 	// OpenAI fine-tune format: ft:{base_model}:{org}:{name}:{id}
 	if strings.HasPrefix(m, "ft:") {
 		parts := strings.SplitN(m, ":", 3)
-		if len(parts) >= 2 {
+		if len(parts) >= 2 && parts[1] != "" {
 			return parts[1]
 		}
 	}

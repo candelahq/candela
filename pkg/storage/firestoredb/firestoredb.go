@@ -777,6 +777,7 @@ func (s *Store) ListGrants(ctx context.Context, userID string, activeOnly bool) 
 		return nil, fmt.Errorf("firestoredb: listing grants: %w", err)
 	}
 
+	now := time.Now().UTC()
 	grants := make([]*storage.GrantRecord, 0, len(snaps))
 	for _, snap := range snaps {
 		g, err := snapToGrant(snap)
@@ -784,9 +785,16 @@ func (s *Store) ListGrants(ctx context.Context, userID string, activeOnly bool) 
 			slog.Warn("skipping malformed grant", "id", snap.Ref.ID, "error", err)
 			continue
 		}
-		// For active only, also filter out fully-spent grants.
-		if activeOnly && g.Remaining() <= 0 {
-			continue
+		if activeOnly {
+			// Filter out fully-spent grants.
+			if g.Remaining() <= 0 {
+				continue
+			}
+			// Filter out grants that haven't started yet — a grant
+			// scheduled to start tomorrow must not be consumed today.
+			if !g.StartsAt.IsZero() && g.StartsAt.After(now) {
+				continue
+			}
 		}
 		grants = append(grants, g)
 	}
@@ -960,7 +968,7 @@ func (s *Store) DeductSpend(ctx context.Context, userID string, costUSD float64,
 				periodType = pt
 			}
 		}
-		periodKey := currentPeriodKey(periodType, s.budgetLocation, time.Now())
+		periodKey := currentPeriodKey(periodType, s.budgetLocation, now)
 
 		// Read 3: Load budget period spend doc using the correct period key.
 		budgetRef := userRef.Collection(budgetsCol).Doc(periodKey)

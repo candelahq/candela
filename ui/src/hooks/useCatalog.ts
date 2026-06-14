@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useReducer, useMemo } from "react";
+import { useCallback, useEffect, useReducer, useMemo, useRef } from "react";
 import { catalogClient } from "@/lib/api";
 import type { ModelCatalogEntry } from "@/gen/candela/types/model_catalog_pb";
 
@@ -56,30 +56,44 @@ export function useCatalog() {
     error: null,
   });
 
-  const fetch = useCallback(async () => {
+  const fetchRef = useRef<AbortController | null>(null);
+
+  const refresh = useCallback(async () => {
+    fetchRef.current?.abort();
+    const controller = new AbortController();
+    fetchRef.current = controller;
+
     dispatch({ type: "LOADING" });
     try {
-      const resp = await catalogClient.listModelCatalog({});
-      dispatch({
-        type: "SUCCESS",
-        models: resp.models,
-        source: resp.source,
-        adminEditable: resp.adminEditable,
-      });
+      const resp = await catalogClient.listModelCatalog({}, { signal: controller.signal });
+      if (!controller.signal.aborted) {
+        dispatch({
+          type: "SUCCESS",
+          models: resp.models,
+          source: resp.source,
+          adminEditable: resp.adminEditable,
+        });
+      }
     } catch (err) {
-      dispatch({ type: "ERROR", error: err instanceof Error ? err.message : "Failed to load catalog" });
+      if (!controller.signal.aborted) {
+        dispatch({ type: "ERROR", error: err instanceof Error ? err.message : "Failed to load catalog" });
+      }
     }
   }, []);
 
-  useEffect(() => { fetch(); }, [fetch]);
+  useEffect(() => {
+    refresh();
+    return () => fetchRef.current?.abort();
+  }, [refresh]);
 
   // Build a pricing lookup map indexed by provider/model and model-only (fallback).
   const pricingMap = useMemo(() => {
     const map = new Map<string, CatalogPricing>();
     for (const m of state.models) {
+      if (!m.provider || !m.modelId) continue; // skip invalid entries
       const pricing: CatalogPricing = {
-        inputPerMillion: m.inputPerMillion,
-        outputPerMillion: m.outputPerMillion,
+        inputPerMillion: m.inputPerMillion ?? 0,
+        outputPerMillion: m.outputPerMillion ?? 0,
       };
       // Primary key: provider/modelId
       map.set(`${m.provider}/${m.modelId}`.toLowerCase(), pricing);
@@ -104,7 +118,7 @@ export function useCatalog() {
     adminEditable: state.adminEditable,
     loading: state.loading,
     error: state.error,
-    refresh: fetch,
+    refresh,
     getPricing,
   };
 }

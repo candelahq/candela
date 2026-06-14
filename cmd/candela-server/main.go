@@ -87,6 +87,7 @@ type Config struct {
 		Providers      []string                 `yaml:"providers"`            // e.g. ["openai", "google", "anthropic", "anthropic-direct", "gemini-oai"]
 		MaxRequestCost float64                  `yaml:"max_request_cost_usd"` // Per-request cost cap (0 = disabled)
 		DailyLimits    []proxy.SpendLimitConfig `yaml:"daily_limits"`         // Per-model daily spend limits
+		Policy         *proxy.PolicyConfig      `yaml:"policy"`               // Model allowlist policy (#207)
 		VertexAI       struct {
 			ProjectID     string `yaml:"project_id"`     // GCP project for Vertex AI
 			Region        string `yaml:"region"`         // default region (e.g. "us-central1")
@@ -742,6 +743,7 @@ func main() {
 				ProjectID:      cfg.Proxy.ProjectID,
 				MaxRequestCost: cfg.Proxy.MaxRequestCost,
 				DailyLimits:    cfg.Proxy.DailyLimits,
+				Policy:         cfg.Proxy.Policy,
 			}, proc, calc)
 
 			// Wire team-mode features if Firestore is available.

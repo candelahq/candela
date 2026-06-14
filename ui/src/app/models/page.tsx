@@ -93,7 +93,12 @@ export default function ModelsPage() {
       </header>
 
       <div className="main-body">
-        {activeTab === "catalog" ? <CatalogTab /> : <UsageTab />}
+        <div style={{ display: activeTab === "catalog" ? "block" : "none" }}>
+          <CatalogTab />
+        </div>
+        <div style={{ display: activeTab === "usage" ? "block" : "none" }}>
+          <UsageTab />
+        </div>
       </div>
     </>
   );
@@ -106,6 +111,7 @@ export default function ModelsPage() {
 function CatalogTab() {
   const { models, source, adminEditable, loading, error, refresh } = useCatalog();
   const [search, setSearch] = useState("");
+  // NOTE: toggle is local-only in v1. Persistence via UpdateCatalogEntry comes in a follow-up.
   const [enabledOverrides, setEnabledOverrides] = useState<Record<string, boolean>>({});
 
   const filtered = useMemo(() => {
@@ -114,9 +120,9 @@ function CatalogTab() {
     return models.filter(
       (m) =>
         m.modelId.toLowerCase().includes(q) ||
-        m.provider.toLowerCase().includes(q) ||
-        m.displayName.toLowerCase().includes(q) ||
-        m.category.toLowerCase().includes(q),
+        (m.provider ?? "").toLowerCase().includes(q) ||
+        (m.displayName ?? "").toLowerCase().includes(q) ||
+        (m.category ?? "").toLowerCase().includes(q),
     );
   }, [models, search]);
 
@@ -150,13 +156,15 @@ function CatalogTab() {
           </div>
           <div className="card">
             <div className="card-title">Active</div>
-            <div className="card-value">{models.filter((m) => m.enabled).length}</div>
+            <div className="card-value">
+              {models.filter((m) => m.enabled).length}
+            </div>
             <div className="card-subtitle">Enabled models</div>
           </div>
           <div className="card">
             <div className="card-title">Providers</div>
             <div className="card-value">
-              {new Set(models.map((m) => m.provider)).size}
+              {new Set(models.filter((m) => m.provider).map((m) => m.provider)).size}
             </div>
             <div className="card-subtitle">Unique providers</div>
           </div>
@@ -207,7 +215,11 @@ function CatalogTab() {
             )}
           </span>
         </div>
-        {filtered.length === 0 ? (
+        {loading && filtered.length === 0 ? (
+          <div className="stats-grid animate-in">
+            <SkeletonCard /><SkeletonCard /><SkeletonCard />
+          </div>
+        ) : filtered.length === 0 ? (
           <div className="empty-state" style={{ minHeight: 200 }}>
             <div className="empty-state-icon">📋</div>
             <div className="empty-state-title">
@@ -283,7 +295,7 @@ function CatalogTab() {
                     </td>
                     <td style={{ textAlign: "right" }}>
                       <span className="context-window">
-                        {fmtContextWindow(entry.contextWindow)}
+                        {entry.contextWindow ? fmtContextWindow(entry.contextWindow) : "—"}
                       </span>
                     </td>
                     <td style={{ textAlign: "center" }}>

@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -46,9 +47,21 @@ import (
 	sqlitestore "github.com/candelahq/candela/pkg/storage/sqlite"
 )
 
+// ProviderConfig defines a custom LLM provider added via YAML config.
+// This allows adding new providers without code changes.
+type ProviderConfig struct {
+	Name        string `yaml:"name"`
+	UpstreamURL string `yaml:"upstream_url"`
+	AuthHeader  string `yaml:"auth_header"`  // e.g., "Authorization", "x-api-key"
+	AuthEnvVar  string `yaml:"auth_env_var"` // env var for API key
+	Enabled     *bool  `yaml:"enabled"`      // nil = default (enabled)
+}
+
 // Config holds the server configuration.
 type Config struct {
-	Server struct {
+	CustomProviders   []ProviderConfig `yaml:"custom_providers"`
+	DisabledProviders []string         `yaml:"disabled_providers"`
+	Server            struct {
 		Host string `yaml:"host"`
 		Port int    `yaml:"port"`
 	} `yaml:"server"`
@@ -406,6 +419,35 @@ func main() {
 	// Register LLM proxy routes (selective activation).
 	if cfg.Proxy.Enabled {
 		allProviders := proxy.DefaultProviders()
+
+		// Remove disabled providers (from config YAML).
+		if len(cfg.DisabledProviders) > 0 {
+			disabled := make(map[string]bool, len(cfg.DisabledProviders))
+			for _, name := range cfg.DisabledProviders {
+				disabled[strings.ToLower(name)] = true
+			}
+			filtered := allProviders[:0]
+			for _, p := range allProviders {
+				if !disabled[strings.ToLower(p.Name)] {
+					filtered = append(filtered, p)
+				}
+			}
+			allProviders = filtered
+			slog.Info("disabled providers from config", "count", len(cfg.DisabledProviders), "names", cfg.DisabledProviders)
+		}
+
+		// Add custom providers (from config YAML).
+		for _, cp := range cfg.CustomProviders {
+			if cp.Enabled != nil && !*cp.Enabled {
+				continue
+			}
+			p := proxy.Provider{
+				Name:        cp.Name,
+				UpstreamURL: cp.UpstreamURL,
+			}
+			allProviders = append(allProviders, p)
+			slog.Info("added custom provider", "name", cp.Name, "upstream", cp.UpstreamURL)
+		}
 
 		// Get ADC token source for automatic GCP auth.
 		// Used by Anthropic (Vertex AI), Gemini, and Google providers so the

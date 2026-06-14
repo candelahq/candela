@@ -6,6 +6,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 )
 
 var updateSnapshot = flag.Bool("update-snapshot", false, "update pricing snapshot")
@@ -77,8 +79,8 @@ func TestDefaultsModelCount(t *testing.T) {
 	defaults := c.Defaults()
 
 	// Sanity check: we should have a reasonable number of models.
-	if len(defaults) < 20 {
-		t.Errorf("only %d default models, expected at least 20", len(defaults))
+	if len(defaults) < 30 {
+		t.Errorf("only %d default models, expected at least 30", len(defaults))
 	}
 
 	// Check for duplicate entries (provider + model key).
@@ -97,5 +99,37 @@ func TestDefaultsModelCount(t *testing.T) {
 			t.Errorf("duplicate default pricing: %s", key)
 		}
 		seen[key] = true
+	}
+}
+
+func TestPricingYAMLValid(t *testing.T) {
+	var pf pricingFile
+	if err := yaml.Unmarshal(defaultPricingYAML, &pf); err != nil {
+		t.Fatalf("pricing.yaml parse error: %v", err)
+	}
+	if len(pf.Models) == 0 {
+		t.Fatal("pricing.yaml has zero models")
+	}
+	for i, m := range pf.Models {
+		if m.Provider == "" {
+			t.Errorf("entry %d: empty provider", i)
+		}
+		if m.Model == "" {
+			t.Errorf("entry %d: empty model", i)
+		}
+		if m.InputPerMillion <= 0 {
+			t.Errorf("entry %d (%s/%s): input_per_million must be > 0", i, m.Provider, m.Model)
+		}
+		if m.OutputPerMillion <= 0 {
+			t.Errorf("entry %d (%s/%s): output_per_million must be > 0", i, m.Provider, m.Model)
+		}
+	}
+}
+
+func TestPricingYAMLModelCount(t *testing.T) {
+	c := New()
+	defaults := c.Defaults()
+	if len(defaults) < 30 {
+		t.Errorf("expected at least 30 models, got %d", len(defaults))
 	}
 }

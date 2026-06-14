@@ -5,6 +5,8 @@
 package costcalc
 
 import (
+	_ "embed"
+	"fmt"
 	"log/slog"
 	"math"
 	"sort"
@@ -12,6 +14,7 @@ import (
 	"sync"
 
 	"github.com/candelahq/candela/pkg/catalog"
+	"gopkg.in/yaml.v3"
 )
 
 // ModelPricing defines the per-token pricing for a model.
@@ -90,6 +93,23 @@ type Calculator struct {
 	cacheDiscounts map[string]CacheDiscountConfig // key: canonical provider name
 	globalDiscount float64                        // 0.0–1.0
 	loggedUnknown  sync.Map                       // key: "provider/model" — track logged warnings
+}
+
+//go:embed pricing.yaml
+var defaultPricingYAML []byte
+
+// pricingFile is the schema for pricing.yaml, used only during YAML unmarshalling.
+type pricingFile struct {
+	Models []struct {
+		Provider             string  `yaml:"provider"`
+		Model                string  `yaml:"model"`
+		InputPerMillion      float64 `yaml:"input_per_million"`
+		OutputPerMillion     float64 `yaml:"output_per_million"`
+		InputPerMillionHigh  float64 `yaml:"input_per_million_high,omitempty"`
+		OutputPerMillionHigh float64 `yaml:"output_per_million_high,omitempty"`
+		TierThresholdTokens  int64   `yaml:"tier_threshold_tokens,omitempty"`
+		DiscountPercent      float64 `yaml:"discount_percent,omitempty"`
+	} `yaml:"models"`
 }
 
 // providerAliases maps proxy route names to their canonical pricing provider.
@@ -694,88 +714,35 @@ func (c *Calculator) key(provider, model string) string {
 	return strings.ToLower(provider + "/" + model)
 }
 
-// loadDefaults populates built-in list prices for all cloud models reachable
-// through the Candela proxy. This should be exhaustive — every model a user
-// can call through Google or Anthropic must have a price here.
+// loadDefaults populates built-in list prices from the embedded pricing.yaml.
+// This should be exhaustive — every model a user can call through the Candela
+// proxy must have a price in pricing.yaml.
 //
 // Prices are list prices in USD per 1 million tokens (as of May 2026).
 // For negotiated or discounted rates, use config overrides.
 func (c *Calculator) loadDefaults() {
-	defaults := []ModelPricing{
-		// ── Google Gemini ─────────────────────────────────────────
-		// Gemini 3.5 (latest, May 2026)
-		{Provider: "google", Model: "gemini-3.5-flash", InputPerMillion: 1.50, OutputPerMillion: 9.00},
-		// Gemini 3.1
-		{Provider: "google", Model: "gemini-3.1-pro", InputPerMillion: 2.00, OutputPerMillion: 12.00,
-			InputPerMillionHigh: 4.00, OutputPerMillionHigh: 18.00, TierThresholdTokens: 200_000},
-		{Provider: "google", Model: "gemini-3.1-flash-lite", InputPerMillion: 0.25, OutputPerMillion: 1.50},
-		// Gemini 3
-		{Provider: "google", Model: "gemini-3-flash", InputPerMillion: 0.50, OutputPerMillion: 3.00},
-		{Provider: "google", Model: "gemini-3-flash-lite", InputPerMillion: 0.02, OutputPerMillion: 0.10},
-		// Gemini 2.5
-		{Provider: "google", Model: "gemini-2.5-pro", InputPerMillion: 1.25, OutputPerMillion: 10.00,
-			InputPerMillionHigh: 2.50, OutputPerMillionHigh: 15.00, TierThresholdTokens: 200_000},
-		{Provider: "google", Model: "gemini-2.5-flash", InputPerMillion: 0.30, OutputPerMillion: 2.50},
-		{Provider: "google", Model: "gemini-2.5-flash-lite", InputPerMillion: 0.10, OutputPerMillion: 0.40},
-		// Gemini 2.0
-		{Provider: "google", Model: "gemini-2.0-flash", InputPerMillion: 0.10, OutputPerMillion: 0.40},
-		// Gemini 1.5 (legacy)
-		{Provider: "google", Model: "gemini-1.5-flash", InputPerMillion: 0.075, OutputPerMillion: 0.30},
-		{Provider: "google", Model: "gemini-1.5-pro", InputPerMillion: 1.25, OutputPerMillion: 5.00},
-
-		// ── Anthropic (via Vertex AI or direct) ──────────────────
-		// Claude 4.6/4.7 (latest) — canonical dotted format.
-		// Hyphenated variants (e.g. claude-opus-4-7 from Vertex AI) are
-		// resolved via normalizeModelID in resolve(), not duplicated here.
-		{Provider: "anthropic", Model: "claude-opus-4.7", InputPerMillion: 15.00, OutputPerMillion: 75.00},
-		{Provider: "anthropic", Model: "claude-opus-4.6", InputPerMillion: 15.00, OutputPerMillion: 75.00},
-		{Provider: "anthropic", Model: "claude-sonnet-4.6", InputPerMillion: 3.00, OutputPerMillion: 15.00},
-		{Provider: "anthropic", Model: "claude-haiku-4.5", InputPerMillion: 1.00, OutputPerMillion: 5.00},
-		// Claude 4 (short names — used by editors and Claude Code)
-		{Provider: "anthropic", Model: "claude-sonnet-4", InputPerMillion: 3.00, OutputPerMillion: 15.00},
-		{Provider: "anthropic", Model: "claude-opus-4", InputPerMillion: 15.00, OutputPerMillion: 75.00},
-		// Claude 4 (Vertex AI model IDs with date suffix)
-		{Provider: "anthropic", Model: "claude-sonnet-4-20250514", InputPerMillion: 3.00, OutputPerMillion: 15.00},
-		{Provider: "anthropic", Model: "claude-opus-4-20250514", InputPerMillion: 15.00, OutputPerMillion: 75.00},
-		// Claude 3.5 (legacy)
-		{Provider: "anthropic", Model: "claude-3-5-sonnet-20241022", InputPerMillion: 3.00, OutputPerMillion: 15.00},
-		{Provider: "anthropic", Model: "claude-haiku-3-5-20241022", InputPerMillion: 0.80, OutputPerMillion: 4.00},
-		{Provider: "anthropic", Model: "claude-3-opus-20240229", InputPerMillion: 15.00, OutputPerMillion: 75.00},
-
-		// ── OpenAI ───────────────────────────────────────────────
-		// GPT-4.1 family (current flagship, 1M context)
-		{Provider: "openai", Model: "gpt-4.1", InputPerMillion: 2.00, OutputPerMillion: 8.00},
-		{Provider: "openai", Model: "gpt-4.1-mini", InputPerMillion: 0.40, OutputPerMillion: 1.60},
-		{Provider: "openai", Model: "gpt-4.1-nano", InputPerMillion: 0.10, OutputPerMillion: 0.40},
-		// o-series reasoning models
-		{Provider: "openai", Model: "o3", InputPerMillion: 2.00, OutputPerMillion: 8.00},
-		{Provider: "openai", Model: "o4-mini", InputPerMillion: 1.10, OutputPerMillion: 4.40},
-		// GPT-4o (legacy)
-		{Provider: "openai", Model: "gpt-4o", InputPerMillion: 2.50, OutputPerMillion: 10.00},
-		{Provider: "openai", Model: "gpt-4o-mini", InputPerMillion: 0.15, OutputPerMillion: 0.60},
-
-		// ── Mistral (via Vertex AI rawPredict) ───────────────────
-		{Provider: "mistral", Model: "mistral-small-2503", InputPerMillion: 0.10, OutputPerMillion: 0.30},
-		{Provider: "mistral", Model: "mistral-medium-3", InputPerMillion: 0.40, OutputPerMillion: 2.00},
-		{Provider: "mistral", Model: "codestral-2501", InputPerMillion: 0.30, OutputPerMillion: 0.90},
-		{Provider: "mistral", Model: "codestral-2", InputPerMillion: 0.30, OutputPerMillion: 0.90},
-
-		// ── DeepSeek R1 (via Vertex AI, us-central1) ──────
-		{Provider: "deepseek", Model: "deepseek-r1-0528-maas", InputPerMillion: 0.14, OutputPerMillion: 0.28},
-		{Provider: "deepseek", Model: "deepseek-r1", InputPerMillion: 0.14, OutputPerMillion: 0.28},
-
-		// ── DeepSeek V3 (via Vertex AI, global) ──────
-		{Provider: "deepseek-v3", Model: "deepseek-v3.2-maas", InputPerMillion: 0.14, OutputPerMillion: 0.28},
-		{Provider: "deepseek-v3", Model: "deepseek-v3-maas", InputPerMillion: 0.14, OutputPerMillion: 0.28},
-		{Provider: "deepseek-v3", Model: "deepseek-chat", InputPerMillion: 0.14, OutputPerMillion: 0.28},
-
-		// ── Qwen (via Vertex AI OpenAI-compat) ─────────────────
-		{Provider: "qwen", Model: "qwen3-235b-a22b-instruct-2507-maas", InputPerMillion: 0.30, OutputPerMillion: 1.20},
-		{Provider: "qwen", Model: "qwen3-coder-480b-a35b-instruct-maas", InputPerMillion: 0.22, OutputPerMillion: 1.80},
-		// Aliases — older/shorter model names still in client configs.
-		{Provider: "qwen", Model: "qwen-2.5-coder-32b-instruct-maas", InputPerMillion: 0.30, OutputPerMillion: 1.20},
+	var pf pricingFile
+	if err := yaml.Unmarshal(defaultPricingYAML, &pf); err != nil {
+		panic(fmt.Sprintf("costcalc: failed to parse embedded pricing.yaml: %v", err))
 	}
-	for _, p := range defaults {
-		c.defaults[c.key(p.Provider, p.Model)] = p
+	for i, m := range pf.Models {
+		if m.Provider == "" || m.Model == "" {
+			panic(fmt.Sprintf("costcalc: pricing.yaml entry %d: provider and model are required", i))
+		}
+		if m.InputPerMillion <= 0 || m.OutputPerMillion <= 0 {
+			panic(fmt.Sprintf("costcalc: pricing.yaml entry %d (%s/%s): prices must be > 0", i, m.Provider, m.Model))
+		}
+	}
+	for _, m := range pf.Models {
+		c.defaults[c.key(m.Provider, m.Model)] = ModelPricing{
+			Provider:             m.Provider,
+			Model:                m.Model,
+			InputPerMillion:      m.InputPerMillion,
+			OutputPerMillion:     m.OutputPerMillion,
+			InputPerMillionHigh:  m.InputPerMillionHigh,
+			OutputPerMillionHigh: m.OutputPerMillionHigh,
+			TierThresholdTokens:  m.TierThresholdTokens,
+			DiscountPercent:      m.DiscountPercent,
+		}
 	}
 }

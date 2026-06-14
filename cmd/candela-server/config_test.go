@@ -1,8 +1,10 @@
 package main
 
 import (
+	"strings"
 	"testing"
 
+	"github.com/candelahq/candela/pkg/proxy"
 	"gopkg.in/yaml.v3"
 )
 
@@ -370,5 +372,330 @@ func TestProviderOverride_YAMLRoundTrip(t *testing.T) {
 	}
 	if decoded.Endpoint != original.Endpoint {
 		t.Errorf("round-trip Endpoint = %q, want %q", decoded.Endpoint, original.Endpoint)
+	}
+}
+
+// ── Custom Provider Config Tests ─────────────────────────────────────────────
+
+func TestConfigParsesCustomProviders(t *testing.T) {
+	yamlData := `
+custom_providers:
+  - name: my-provider
+    upstream_url: https://api.example.com
+    auth_env_var: MY_API_KEY
+disabled_providers:
+  - anthropic-direct
+`
+	var cfg Config
+	if err := yaml.Unmarshal([]byte(yamlData), &cfg); err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.CustomProviders) != 1 {
+		t.Fatalf("expected 1 custom provider, got %d", len(cfg.CustomProviders))
+	}
+	if cfg.CustomProviders[0].Name != "my-provider" {
+		t.Errorf("expected 'my-provider', got %q", cfg.CustomProviders[0].Name)
+	}
+	if cfg.CustomProviders[0].UpstreamURL != "https://api.example.com" {
+		t.Errorf("upstream_url = %q, want %q", cfg.CustomProviders[0].UpstreamURL, "https://api.example.com")
+	}
+	if cfg.CustomProviders[0].AuthEnvVar != "MY_API_KEY" {
+		t.Errorf("auth_env_var = %q, want %q", cfg.CustomProviders[0].AuthEnvVar, "MY_API_KEY")
+	}
+	if cfg.CustomProviders[0].Enabled != nil {
+		t.Errorf("enabled should be nil when not set, got %v", *cfg.CustomProviders[0].Enabled)
+	}
+	if len(cfg.DisabledProviders) != 1 {
+		t.Fatalf("expected 1 disabled provider, got %d", len(cfg.DisabledProviders))
+	}
+	if cfg.DisabledProviders[0] != "anthropic-direct" {
+		t.Errorf("disabled provider = %q, want %q", cfg.DisabledProviders[0], "anthropic-direct")
+	}
+}
+
+func TestCustomProviderExplicitlyDisabled(t *testing.T) {
+	yamlData := `
+custom_providers:
+  - name: skip-me
+    upstream_url: https://api.skip.com
+    enabled: false
+  - name: keep-me
+    upstream_url: https://api.keep.com
+`
+	var cfg Config
+	if err := yaml.Unmarshal([]byte(yamlData), &cfg); err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.CustomProviders) != 2 {
+		t.Fatalf("expected 2 custom providers parsed, got %d", len(cfg.CustomProviders))
+	}
+	if cfg.CustomProviders[0].Enabled == nil || *cfg.CustomProviders[0].Enabled {
+		t.Error("first provider should be explicitly disabled")
+	}
+	if cfg.CustomProviders[1].Enabled != nil {
+		t.Errorf("second provider enabled should be nil, got %v", *cfg.CustomProviders[1].Enabled)
+	}
+}
+
+func TestCustomProviderWithAuthHeader(t *testing.T) {
+	yamlData := `
+custom_providers:
+  - name: custom-llm
+    upstream_url: https://api.custom-llm.com
+    auth_header: x-api-key
+    auth_env_var: CUSTOM_LLM_KEY
+`
+	var cfg Config
+	if err := yaml.Unmarshal([]byte(yamlData), &cfg); err != nil {
+		t.Fatal(err)
+	}
+	if cfg.CustomProviders[0].AuthHeader != "x-api-key" {
+		t.Errorf("auth_header = %q, want %q", cfg.CustomProviders[0].AuthHeader, "x-api-key")
+	}
+}
+
+func TestDisabledProvidersFiltering(t *testing.T) {
+	// Simulate the filtering logic from main.go.
+	allProviders := proxy.DefaultProviders()
+	disabledNames := []string{"anthropic-direct", "OpenAI"} // mixed case to test case-insensitivity
+
+	disabled := make(map[string]bool, len(disabledNames))
+	for _, name := range disabledNames {
+		disabled[strings.ToLower(name)] = true
+	}
+	var filtered []proxy.Provider
+	for _, p := range allProviders {
+		if !disabled[strings.ToLower(p.Name)] {
+			filtered = append(filtered, p)
+		}
+	}
+
+	// Verify the disabled providers are removed.
+	for _, p := range filtered {
+		lower := strings.ToLower(p.Name)
+		if lower == "anthropic-direct" || lower == "openai" {
+			t.Errorf("provider %q should have been filtered out", p.Name)
+		}
+	}
+
+	// Verify count is reduced by 2.
+	if len(filtered) != len(allProviders)-2 {
+		t.Errorf("expected %d providers after filtering, got %d",
+			len(allProviders)-2, len(filtered))
+	}
+}
+
+func TestDisabledAndCustomCombined(t *testing.T) {
+	yamlData := `
+custom_providers:
+  - name: my-llm
+    upstream_url: https://api.my-llm.com
+    auth_env_var: MY_LLM_KEY
+disabled_providers:
+  - anthropic-direct
+  - openai
+proxy:
+  enabled: true
+`
+	var cfg Config
+	if err := yaml.Unmarshal([]byte(yamlData), &cfg); err != nil {
+		t.Fatal(err)
+	}
+
+	if len(cfg.CustomProviders) != 1 {
+		t.Errorf("custom providers = %d, want 1", len(cfg.CustomProviders))
+	}
+	if len(cfg.DisabledProviders) != 2 {
+		t.Errorf("disabled providers = %d, want 2", len(cfg.DisabledProviders))
+	}
+	if !cfg.Proxy.Enabled {
+		t.Error("proxy should be enabled")
+	}
+}
+
+func TestEmptyCustomAndDisabled(t *testing.T) {
+	yamlData := `
+proxy:
+  enabled: true
+`
+	var cfg Config
+	if err := yaml.Unmarshal([]byte(yamlData), &cfg); err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.CustomProviders) != 0 {
+		t.Errorf("custom providers should be empty, got %d", len(cfg.CustomProviders))
+	}
+	if len(cfg.DisabledProviders) != 0 {
+		t.Errorf("disabled providers should be empty, got %d", len(cfg.DisabledProviders))
+	}
+}
+
+// ── buildCustomProviders Tests ───────────────────────────────────────────────
+
+func TestCustomProviderEmptyNameSkipped(t *testing.T) {
+	cfgs := []ProviderConfig{
+		{Name: "", UpstreamURL: "https://api.example.com"},
+		{Name: "valid", UpstreamURL: "https://api.valid.com"},
+	}
+	got := buildCustomProviders(cfgs, func(string) string { return "" })
+	if len(got) != 1 {
+		t.Fatalf("expected 1 provider, got %d", len(got))
+	}
+	if got[0].Name != "valid" {
+		t.Errorf("expected 'valid', got %q", got[0].Name)
+	}
+}
+
+func TestCustomProviderEmptyURLSkipped(t *testing.T) {
+	cfgs := []ProviderConfig{
+		{Name: "no-url", UpstreamURL: ""},
+		{Name: "valid", UpstreamURL: "https://api.valid.com"},
+	}
+	got := buildCustomProviders(cfgs, func(string) string { return "" })
+	if len(got) != 1 {
+		t.Fatalf("expected 1 provider, got %d", len(got))
+	}
+	if got[0].Name != "valid" {
+		t.Errorf("expected 'valid', got %q", got[0].Name)
+	}
+}
+
+func TestCustomProviderDisabledSkipped(t *testing.T) {
+	disabled := false
+	cfgs := []ProviderConfig{
+		{Name: "off", UpstreamURL: "https://api.off.com", Enabled: &disabled},
+		{Name: "on", UpstreamURL: "https://api.on.com"},
+	}
+	got := buildCustomProviders(cfgs, func(string) string { return "" })
+	if len(got) != 1 {
+		t.Fatalf("expected 1 provider, got %d", len(got))
+	}
+	if got[0].Name != "on" {
+		t.Errorf("expected 'on', got %q", got[0].Name)
+	}
+}
+
+func TestCustomProviderAuthHeaderWired(t *testing.T) {
+	cfgs := []ProviderConfig{
+		{
+			Name:        "custom-llm",
+			UpstreamURL: "https://api.custom-llm.com",
+			AuthHeader:  "x-api-key",
+			AuthEnvVar:  "CUSTOM_LLM_KEY",
+		},
+	}
+	envLookup := func(key string) string {
+		if key == "CUSTOM_LLM_KEY" {
+			return "secret-123"
+		}
+		return ""
+	}
+	got := buildCustomProviders(cfgs, envLookup)
+	if len(got) != 1 {
+		t.Fatalf("expected 1 provider, got %d", len(got))
+	}
+	if got[0].APIKey != "secret-123" {
+		t.Errorf("APIKey = %q, want %q", got[0].APIKey, "secret-123")
+	}
+	if got[0].AuthHeader != "x-api-key" {
+		t.Errorf("AuthHeader = %q, want %q", got[0].AuthHeader, "x-api-key")
+	}
+}
+
+func TestCustomProviderAuthDefaultHeader(t *testing.T) {
+	// When AuthHeader is empty, APIKey should be set but AuthHeader left empty
+	// (the proxy defaults to "Authorization: Bearer <key>").
+	cfgs := []ProviderConfig{
+		{
+			Name:        "openai-compat",
+			UpstreamURL: "https://api.openai-compat.com",
+			AuthEnvVar:  "COMPAT_KEY",
+		},
+	}
+	envLookup := func(key string) string {
+		if key == "COMPAT_KEY" {
+			return "bearer-key"
+		}
+		return ""
+	}
+	got := buildCustomProviders(cfgs, envLookup)
+	if len(got) != 1 {
+		t.Fatalf("expected 1 provider, got %d", len(got))
+	}
+	if got[0].APIKey != "bearer-key" {
+		t.Errorf("APIKey = %q, want %q", got[0].APIKey, "bearer-key")
+	}
+	if got[0].AuthHeader != "" {
+		t.Errorf("AuthHeader = %q, want empty (default to Bearer)", got[0].AuthHeader)
+	}
+}
+
+func TestCustomProviderEnvVarMissing(t *testing.T) {
+	// When the env var is set but empty, APIKey should remain empty.
+	cfgs := []ProviderConfig{
+		{
+			Name:        "needs-key",
+			UpstreamURL: "https://api.needs-key.com",
+			AuthEnvVar:  "MISSING_KEY",
+		},
+	}
+	got := buildCustomProviders(cfgs, func(string) string { return "" })
+	if len(got) != 1 {
+		t.Fatalf("expected 1 provider, got %d", len(got))
+	}
+	if got[0].APIKey != "" {
+		t.Errorf("APIKey should be empty when env var is missing, got %q", got[0].APIKey)
+	}
+}
+
+func TestCustomProviderAllInvalid(t *testing.T) {
+	cfgs := []ProviderConfig{
+		{Name: "", UpstreamURL: "https://api.example.com"},
+		{Name: "no-url", UpstreamURL: ""},
+	}
+	got := buildCustomProviders(cfgs, func(string) string { return "" })
+	if len(got) != 0 {
+		t.Errorf("expected 0 providers, got %d", len(got))
+	}
+}
+
+func TestCustomProviderAuthHeaderYAMLParsing(t *testing.T) {
+	yamlData := `
+custom_providers:
+  - name: custom-llm
+    upstream_url: https://api.custom-llm.com
+    auth_header: x-api-key
+    auth_env_var: CUSTOM_LLM_KEY
+`
+	var cfg Config
+	if err := yaml.Unmarshal([]byte(yamlData), &cfg); err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.CustomProviders) != 1 {
+		t.Fatalf("expected 1 custom provider, got %d", len(cfg.CustomProviders))
+	}
+	cp := cfg.CustomProviders[0]
+	if cp.AuthHeader != "x-api-key" {
+		t.Errorf("auth_header = %q, want %q", cp.AuthHeader, "x-api-key")
+	}
+	if cp.AuthEnvVar != "CUSTOM_LLM_KEY" {
+		t.Errorf("auth_env_var = %q, want %q", cp.AuthEnvVar, "CUSTOM_LLM_KEY")
+	}
+
+	// Verify buildCustomProviders wires it correctly.
+	providers := buildCustomProviders(cfg.CustomProviders, func(key string) string {
+		if key == "CUSTOM_LLM_KEY" {
+			return "test-secret"
+		}
+		return ""
+	})
+	if len(providers) != 1 {
+		t.Fatalf("expected 1 provider, got %d", len(providers))
+	}
+	if providers[0].APIKey != "test-secret" {
+		t.Errorf("APIKey = %q, want %q", providers[0].APIKey, "test-secret")
+	}
+	if providers[0].AuthHeader != "x-api-key" {
+		t.Errorf("AuthHeader = %q, want %q", providers[0].AuthHeader, "x-api-key")
 	}
 }

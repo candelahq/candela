@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -46,9 +47,21 @@ import (
 	sqlitestore "github.com/candelahq/candela/pkg/storage/sqlite"
 )
 
+// ProviderConfig defines a custom LLM provider added via YAML config.
+// This allows adding new providers without code changes.
+type ProviderConfig struct {
+	Name        string `yaml:"name"`
+	UpstreamURL string `yaml:"upstream_url"`
+	AuthHeader  string `yaml:"auth_header"`  // e.g., "Authorization", "x-api-key"
+	AuthEnvVar  string `yaml:"auth_env_var"` // env var for API key
+	Enabled     *bool  `yaml:"enabled"`      // nil = default (enabled)
+}
+
 // Config holds the server configuration.
 type Config struct {
-	Server struct {
+	CustomProviders   []ProviderConfig `yaml:"custom_providers"`
+	DisabledProviders []string         `yaml:"disabled_providers"`
+	Server            struct {
 		Host string `yaml:"host"`
 		Port int    `yaml:"port"`
 	} `yaml:"server"`
@@ -150,6 +163,41 @@ func getProviderOverride(overrides map[string]ProviderOverride, provider, defaul
 		endpoint = ov.Endpoint
 	}
 	return
+}
+
+// buildCustomProviders converts ProviderConfig entries into proxy.Provider
+// values, applying validation (skip empty name/upstream_url) and wiring
+// AuthEnvVar / AuthHeader into the Provider's APIKey / AuthHeader fields.
+// envLookup is typically os.Getenv but can be swapped for testing.
+func buildCustomProviders(cfgs []ProviderConfig, envLookup func(string) string) []proxy.Provider {
+	var out []proxy.Provider
+	for _, cp := range cfgs {
+		if cp.Enabled != nil && !*cp.Enabled {
+			continue
+		}
+		if cp.Name == "" {
+			slog.Warn("skipping custom provider with empty name")
+			continue
+		}
+		if cp.UpstreamURL == "" {
+			slog.Warn("skipping custom provider with empty upstream_url", "name", cp.Name)
+			continue
+		}
+		p := proxy.Provider{
+			Name:        cp.Name,
+			UpstreamURL: cp.UpstreamURL,
+		}
+		if cp.AuthEnvVar != "" {
+			if key := envLookup(cp.AuthEnvVar); key != "" {
+				p.APIKey = key
+				if cp.AuthHeader != "" {
+					p.AuthHeader = cp.AuthHeader
+				}
+			}
+		}
+		out = append(out, p)
+	}
+	return out
 }
 
 func main() {
@@ -406,6 +454,30 @@ func main() {
 	// Register LLM proxy routes (selective activation).
 	if cfg.Proxy.Enabled {
 		allProviders := proxy.DefaultProviders()
+
+		// Remove disabled providers (from config YAML).
+		if len(cfg.DisabledProviders) > 0 {
+			disabled := make(map[string]bool, len(cfg.DisabledProviders))
+			for _, name := range cfg.DisabledProviders {
+				disabled[strings.ToLower(name)] = true
+			}
+			filtered := allProviders[:0]
+			for _, p := range allProviders {
+				if !disabled[strings.ToLower(p.Name)] {
+					filtered = append(filtered, p)
+				}
+			}
+			allProviders = filtered
+			slog.Info("disabled providers from config", "count", len(cfg.DisabledProviders), "names", cfg.DisabledProviders)
+		}
+
+		// Add custom providers (from config YAML).
+		customProviders := buildCustomProviders(cfg.CustomProviders, os.Getenv)
+		for _, p := range customProviders {
+			slog.Info("added custom provider", "name", p.Name, "upstream", p.UpstreamURL,
+				"has_api_key", p.APIKey != "", "auth_header", p.AuthHeader)
+		}
+		allProviders = append(allProviders, customProviders...)
 
 		// Get ADC token source for automatic GCP auth.
 		// Used by Anthropic (Vertex AI), Gemini, and Google providers so the

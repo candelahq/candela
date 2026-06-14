@@ -104,6 +104,12 @@ type GenAIAttributes struct {
 	// that were active, enabling cost auditing and re-derivation.
 	InputRate  float64 `json:"input_rate,omitempty"`
 	OutputRate float64 `json:"output_rate,omitempty"`
+
+	// Discount snapshot: records the discounts that were active at request time.
+	// DiscountPercent is the model-specific discount (0.0–1.0).
+	// GlobalDiscount is the org-wide discount (0.0–1.0).
+	DiscountPercent float64 `json:"discount_percent,omitempty" firestore:"discount_percent,omitempty" bigquery:"discount_percent"`
+	GlobalDiscount  float64 `json:"global_discount,omitempty" firestore:"global_discount,omitempty" bigquery:"global_discount"`
 }
 
 // Span represents a single span in the storage layer.

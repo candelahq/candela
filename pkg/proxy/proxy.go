@@ -1753,11 +1753,15 @@ func (p *Proxy) buildSpan(ctx context.Context, params spanParams) {
 
 	// Snapshot point-in-time pricing so historical spans retain the rates
 	// that were active at request time (enables cost auditing, #321).
-	var inputRate, outputRate float64
-	if pricing, ok := p.calc.Resolve(pprov, params.model); ok {
+	// Use ResolveEffective to capture the tier-adjusted rates that were
+	// actually used for cost calculation (e.g. Gemini 2.5 Pro >200K tokens).
+	var inputRate, outputRate, discountPct, globalDisc float64
+	if pricing, ok := p.calc.ResolveEffective(pprov, params.model, params.inputTokens); ok {
 		inputRate = pricing.InputPerMillion
 		outputRate = pricing.OutputPerMillion
+		discountPct = pricing.DiscountPercent
 	}
+	globalDisc = p.calc.GlobalDiscount()
 
 	attrs := map[string]string{
 		"proxy.upstream":  params.provider.UpstreamURL,
@@ -1809,6 +1813,8 @@ func (p *Proxy) buildSpan(ctx context.Context, params spanParams) {
 			CacheCreationTokens: params.cacheTokens.CacheCreationTokens,
 			InputRate:           inputRate,
 			OutputRate:          outputRate,
+			DiscountPercent:     discountPct,
+			GlobalDiscount:      globalDisc,
 		},
 		Attributes: attrs,
 	}

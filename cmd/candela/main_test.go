@@ -2,9 +2,9 @@ package main
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
-	"strings"
 	"syscall"
 	"testing"
 )
@@ -243,72 +243,135 @@ runtime_manage:
 	}
 }
 
-func TestCmdRestart_NotRunning_NoPIDFile(t *testing.T) {
-	// When there is no PID file, cmdRestart should proceed to start.
-	// We can't easily test the full start (it execs a binary), but we can
-	// verify that the restart path doesn't panic or error when no PID file exists.
-
+func TestStopProcess_NoPIDFile(t *testing.T) {
 	dir := t.TempDir()
 	pidPath := filepath.Join(dir, "candela.pid")
 
-	// Verify PID file does not exist.
-	if _, err := os.Stat(pidPath); err == nil {
-		t.Fatal("expected PID file to not exist before test")
-	}
-
-	// Simulate the restart logic for the "not running" path.
-	data, err := os.ReadFile(pidPath)
-	if err != nil {
-		// This is the expected path — no PID file means not running.
-		t.Logf("no PID file found (expected): %v", err)
-	} else {
-		t.Errorf("unexpected PID data: %s", string(data))
+	// No PID file → stopProcess should return nil (nothing to stop).
+	if err := stopProcess(pidPath); err != nil {
+		t.Fatalf("stopProcess returned error for missing PID file: %v", err)
 	}
 }
 
-func TestCmdRestart_StalePIDFile(t *testing.T) {
-	// When a stale PID file exists (process is dead), restart should
-	// clean it up and proceed to start.
-
+func TestStopProcess_InvalidPIDFile(t *testing.T) {
 	dir := t.TempDir()
 	pidPath := filepath.Join(dir, "candela.pid")
 
-	// Write a PID that definitely doesn't exist (use a very high PID).
-	// PID 99999999 is extremely unlikely to be a real process.
-	err := os.WriteFile(pidPath, []byte("99999999"), 0o644)
-	if err != nil {
+	if err := os.WriteFile(pidPath, []byte("not-a-number"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
-	// Read the PID file — simulating the restart logic.
-	data, readErr := os.ReadFile(pidPath)
-	if readErr != nil {
-		t.Fatal("expected PID file to be readable")
+	if err := stopProcess(pidPath); err != nil {
+		t.Fatalf("stopProcess returned error for invalid PID file: %v", err)
 	}
 
-	pid, parseErr := strconv.Atoi(strings.TrimSpace(string(data)))
-	if parseErr != nil {
-		t.Fatalf("expected valid PID, got parse error: %v", parseErr)
-	}
-	if pid != 99999999 {
-		t.Fatalf("expected PID 99999999, got %d", pid)
-	}
-
-	// The process should not be alive.
-	process, findErr := os.FindProcess(pid)
-	if findErr != nil {
-		t.Logf("FindProcess returned error (expected on some OS): %v", findErr)
-	} else {
-		// Signal(0) should fail for a non-existent process.
-		if process.Signal(syscall.Signal(0)) == nil {
-			t.Skip("PID 99999999 unexpectedly exists — skipping")
-		}
-	}
-
-	// Clean up stale PID file (as cmdRestart would).
-	_ = os.Remove(pidPath)
-
+	// PID file should be cleaned up.
 	if _, err := os.Stat(pidPath); err == nil {
-		t.Error("expected PID file to be removed after stale cleanup")
+		t.Error("expected invalid PID file to be removed")
+	}
+}
+
+func TestStopProcess_StalePID(t *testing.T) {
+	dir := t.TempDir()
+	pidPath := filepath.Join(dir, "candela.pid")
+
+	// PID 99999999 is extremely unlikely to be a real process.
+	if err := os.WriteFile(pidPath, []byte("99999999"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Verify the PID is indeed not running before proceeding.
+	proc, err := os.FindProcess(99999999)
+	if err == nil && proc.Signal(syscall.Signal(0)) == nil {
+		t.Skip("PID 99999999 unexpectedly exists — skipping")
+	}
+
+	if err := stopProcess(pidPath); err != nil {
+		t.Fatalf("stopProcess returned error for stale PID: %v", err)
+	}
+
+	// PID file should be cleaned up.
+	if _, err := os.Stat(pidPath); err == nil {
+		t.Error("expected stale PID file to be removed")
+	}
+}
+
+func TestStopProcess_LiveProcess(t *testing.T) {
+	dir := t.TempDir()
+	pidPath := filepath.Join(dir, "candela.pid")
+
+	// Start a subprocess that responds to SIGTERM.
+	// Use bash with trap so SIGTERM causes a clean exit.
+	cmd := exec.Command("bash", "-c", `trap 'exit 0' TERM; while true; do sleep 1; done`)
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("failed to start process: %v", err)
+	}
+
+	pid := cmd.Process.Pid
+
+	// Reap the child in background so the zombie is cleaned up and
+	// Signal(0) correctly returns an error for a dead process.
+	waitDone := make(chan struct{})
+	go func() {
+		_ = cmd.Wait()
+		close(waitDone)
+	}()
+	t.Cleanup(func() {
+		_ = cmd.Process.Kill()
+		<-waitDone
+	})
+
+	if err := os.WriteFile(pidPath, []byte(strconv.Itoa(pid)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// stopProcess should SIGTERM it and wait for exit.
+	if err := stopProcess(pidPath); err != nil {
+		t.Fatalf("stopProcess returned error for live process: %v", err)
+	}
+
+	// Wait for the child to be reaped.
+	<-waitDone
+
+	// Process should be dead now.
+	proc, _ := os.FindProcess(pid)
+	if proc.Signal(syscall.Signal(0)) == nil {
+		t.Error("expected process to be dead after stopProcess")
+	}
+
+	// PID file should be cleaned up.
+	if _, err := os.Stat(pidPath); err == nil {
+		t.Error("expected PID file to be removed after stopping")
+	}
+}
+
+func TestStopProcess_VerifiesExitBeforeReturn(t *testing.T) {
+	dir := t.TempDir()
+	pidPath := filepath.Join(dir, "candela.pid")
+
+	// Start a short-lived process that will exit on its own before
+	// the SIGTERM wait loop completes, testing the "dies mid-wait" path.
+	cmd := exec.Command("sleep", "0.1")
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("failed to start process: %v", err)
+	}
+	pid := cmd.Process.Pid
+
+	// Reap in background.
+	go func() { _ = cmd.Wait() }()
+
+	if err := os.WriteFile(pidPath, []byte(strconv.Itoa(pid)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// stopProcess should handle the process dying mid-wait gracefully.
+	if err := stopProcess(pidPath); err != nil {
+		t.Fatalf("stopProcess returned error: %v", err)
+	}
+
+	// PID file must be gone — this is the key invariant that prevents
+	// the race condition (cmdStart checks for existing PID files).
+	if _, err := os.Stat(pidPath); err == nil {
+		t.Error("PID file must be removed before stopProcess returns")
 	}
 }

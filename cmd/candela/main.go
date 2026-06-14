@@ -294,6 +294,66 @@ func cmdStop() {
 	fmt.Printf("🛑 candela stopped (PID %d)\n", pid)
 }
 
+// stopProcess reads the PID file at pidPath, sends SIGTERM to the process,
+// waits for it to exit, and cleans up the PID file. If the process does not
+// exit within 5 seconds, it sends SIGKILL. Returns nil if the process was
+// stopped (or was not running). Returns an error only if a running process
+// could not be stopped.
+func stopProcess(pidPath string) error {
+	data, err := os.ReadFile(pidPath)
+	if err != nil {
+		// No PID file — nothing to stop.
+		return nil
+	}
+
+	pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
+	if err != nil || pid <= 0 {
+		// Invalid PID file — clean up and move on.
+		_ = os.Remove(pidPath)
+		return nil
+	}
+
+	proc, err := os.FindProcess(pid)
+	if err != nil || proc.Signal(syscall.Signal(0)) != nil {
+		// Process not running — clean up stale PID file.
+		_ = os.Remove(pidPath)
+		return nil
+	}
+
+	// Process is alive — send SIGTERM for graceful shutdown.
+	fmt.Printf("⏹  Stopping process %d...\n", pid)
+	if err := proc.Signal(syscall.SIGTERM); err != nil {
+		return fmt.Errorf("failed to send SIGTERM to PID %d: %w", pid, err)
+	}
+
+	// Wait for process to fully exit (up to 5 seconds).
+	exited := false
+	for i := 0; i < 50; i++ {
+		time.Sleep(100 * time.Millisecond)
+		if err := proc.Signal(syscall.Signal(0)); err != nil {
+			exited = true
+			break
+		}
+	}
+	if !exited {
+		// Force kill if graceful shutdown timed out.
+		fmt.Println("⚠  Graceful shutdown timed out, force killing...")
+		_ = proc.Signal(syscall.SIGKILL)
+		// Wait for SIGKILL to take effect (up to 3 seconds).
+		for i := 0; i < 30; i++ {
+			time.Sleep(100 * time.Millisecond)
+			if err := proc.Signal(syscall.Signal(0)); err != nil {
+				break
+			}
+		}
+	}
+
+	// Clean up PID file.
+	_ = os.Remove(pidPath)
+	fmt.Printf("🛑 Stopped (PID %d)\n", pid)
+	return nil
+}
+
 // cmdRestart gracefully stops the running proxy (if any) and starts it again.
 // If the proxy is not running, it simply starts it.
 func cmdRestart() {
@@ -305,31 +365,9 @@ func cmdRestart() {
 
 	fmt.Println("🔄 Restarting Candela...")
 
-	// Check if proxy is currently running.
-	data, err := os.ReadFile(pidPath)
-	if err == nil {
-		pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
-		if err == nil && pid > 0 {
-			process, err := os.FindProcess(pid)
-			if err == nil && process.Signal(syscall.Signal(0)) == nil {
-				// Process is alive — send SIGTERM.
-				fmt.Printf("⏹  Stopping process %d...\n", pid)
-				if err := process.Signal(syscall.SIGTERM); err != nil {
-					slog.Error("failed to stop candela", "pid", pid, "error", err)
-					os.Exit(1)
-				}
-				// Wait for process to exit (up to 5 seconds).
-				for i := 0; i < 50; i++ {
-					time.Sleep(100 * time.Millisecond)
-					if process.Signal(syscall.Signal(0)) != nil {
-						break
-					}
-				}
-				fmt.Printf("🛑 Stopped (PID %d)\n", pid)
-			}
-		}
-		// Remove stale/old PID file before starting.
-		_ = os.Remove(pidPath)
+	if err := stopProcess(pidPath); err != nil {
+		slog.Error("failed to stop candela", "error", err)
+		os.Exit(1)
 	}
 
 	fmt.Println("▶  Starting Candela...")

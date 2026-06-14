@@ -432,7 +432,9 @@ func (p *Proxy) SASpendMicroUSD() int64 {
 }
 
 // SetCachingMode updates the Anthropic caching strategy at runtime.
-// This is safe to call concurrently from any goroutine.
+// Safe to call concurrently: p.providers is immutable after New() returns,
+// so iteration requires no synchronization. The FormatTranslator.SetCachingMode
+// method itself uses atomic operations.
 func (p *Proxy) SetCachingMode(mode CachingMode) {
 	for _, provider := range p.providers {
 		if ft, ok := provider.FormatTranslator.(*AnthropicFormatTranslator); ok {
@@ -624,7 +626,7 @@ func buildModelsResponse(models []CompatModel) []byte {
 		Data   []modelEntry `json:"data"`
 	}
 
-	resp := modelsResponse{Object: "list"}
+	resp := modelsResponse{Object: "list", Data: make([]modelEntry, 0, len(models))}
 	for _, m := range models {
 		resp.Data = append(resp.Data, modelEntry{
 			ID:                m.ID,

@@ -166,6 +166,13 @@ func (s *FirestoreStore) Update(ctx context.Context, entry Entry) error {
 
 // Delete removes an entry by provider and model ID.
 // Returns ErrNotFound if the document does not exist.
+//
+// NOTE: There is a TOCTOU window between the Get (existence check) and the
+// Delete call — another process could delete the same document in between.
+// Firestore Delete is idempotent (no-op for missing docs), so this does
+// not cause data corruption, but the caller may not see ErrNotFound when
+// the doc was deleted concurrently. A transactional delete could close
+// this window but the operational impact is negligible for catalog entries.
 func (s *FirestoreStore) Delete(ctx context.Context, provider, modelID string) error {
 	id := docID(provider, modelID)
 	ref := s.client.Collection(s.collection).Doc(id)

@@ -1,5 +1,11 @@
 /**
- * Static per-model pricing registry.
+ * @deprecated Use `useCatalog()` hook for pricing and `@/lib/cacheUtils` for
+ * CacheEfficiency utilities. This file will be removed once all consumers
+ * migrate to catalog-based pricing.
+ * See: https://github.com/candelahq/candela/issues/325
+ *
+ * ---
+ * Static per-model pricing registry (LEGACY).
  *
  * SOURCE OF TRUTH: pkg/costcalc/calculator.go → loadDefaults()
  * Keep this file in sync whenever model pricing is added or changed.

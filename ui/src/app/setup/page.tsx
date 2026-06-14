@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useCallback, useRef, useSyncExternalStore } from "react";
 
 // ──────────────────────────────────────────
 // Config snippets
@@ -86,23 +86,31 @@ export OPENAI_API_KEY=YOUR_CANDELA_API_KEY`,
 // Page
 // ──────────────────────────────────────────
 
+function getOrigin() {
+  return typeof window === "undefined" ? "https://your-candela-host" : window.location.origin;
+}
+
+const subscribe = () => () => {};
+
 export default function SetupPage() {
   const [activeTab, setActiveTab] = useState(CONFIG_TABS[0].id);
-  const [proxyUrl, setProxyUrl] = useState("https://your-candela-host");
+  const proxyUrl = useSyncExternalStore(subscribe, getOrigin, () => "https://your-candela-host");
   const [copied, setCopied] = useState(false);
+  const copyTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
-  useEffect(() => {
-    setProxyUrl(window.location.origin);
-  }, []);
-
-  const currentTab = CONFIG_TABS.find((t) => t.id === activeTab)!;
+  const currentTab = CONFIG_TABS.find((t) => t.id === activeTab) ?? CONFIG_TABS[0];
   const snippetText = currentTab.snippet(proxyUrl);
+
+  const scheduleCopyReset = useCallback(() => {
+    if (copyTimeoutRef.current) clearTimeout(copyTimeoutRef.current);
+    copyTimeoutRef.current = setTimeout(() => setCopied(false), 2000);
+  }, []);
 
   const handleCopy = useCallback(async () => {
     try {
       await navigator.clipboard.writeText(snippetText);
       setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
+      scheduleCopyReset();
     } catch {
       // Fallback for older browsers
       const textarea = document.createElement("textarea");
@@ -112,14 +120,18 @@ export default function SetupPage() {
       document.execCommand("copy");
       document.body.removeChild(textarea);
       setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
+      scheduleCopyReset();
     }
-  }, [snippetText]);
+  }, [snippetText, scheduleCopyReset]);
 
-  // Reset copied state on tab switch
-  useEffect(() => {
+  const handleTabSwitch = useCallback((tabId: string) => {
+    setActiveTab(tabId);
     setCopied(false);
-  }, [activeTab]);
+    if (copyTimeoutRef.current) {
+      clearTimeout(copyTimeoutRef.current);
+      copyTimeoutRef.current = null;
+    }
+  }, []);
 
   return (
     <>
@@ -162,7 +174,7 @@ export default function SetupPage() {
               <button
                 key={tab.id}
                 className={`setup-tab ${activeTab === tab.id ? "setup-tab-active" : ""}`}
-                onClick={() => setActiveTab(tab.id)}
+                onClick={() => handleTabSwitch(tab.id)}
               >
                 <span className="setup-tab-icon">{tab.icon}</span>
                 <span className="setup-tab-label">{tab.label}</span>

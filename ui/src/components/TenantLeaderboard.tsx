@@ -1,5 +1,6 @@
 "use client";
 
+import { useMemo } from "react";
 import { useTenantLeaderboard, type SortField } from "@/hooks/useTenantLeaderboard";
 import { TimeRangeSelector } from "@/components/TimeRangeSelector";
 import { ErrorBanner } from "@/components/ErrorBanner";
@@ -16,6 +17,7 @@ const COLUMNS: { label: string; field: SortField; style?: React.CSSProperties }[
 export function TenantLeaderboard() {
   const {
     tenants,
+    sortedTenants,
     loading,
     error,
     timeRange,
@@ -25,6 +27,15 @@ export function TenantLeaderboard() {
     setSort,
     refresh,
   } = useTenantLeaderboard();
+
+  // Pre-compute from unsorted data so these stay stable regardless of sort column
+  const { totalCost, topTenant } = useMemo(() => {
+    const total = tenants.reduce((sum, t) => sum + t.costUsd, 0);
+    const top = tenants.length > 0
+      ? tenants.reduce((best, t) => t.costUsd > best.costUsd ? t : best)
+      : null;
+    return { totalCost: total, topTenant: top };
+  }, [tenants]);
 
   const sortIndicator = (field: SortField) => {
     if (sortField !== field) return "";
@@ -37,7 +48,7 @@ export function TenantLeaderboard() {
         <div>
           <span className="table-title">Tenant Cost Leaderboard</span>
           <span style={{ marginLeft: 8, fontSize: 12, color: "var(--text-muted)" }}>
-            {tenants.length} tenant{tenants.length !== 1 ? "s" : ""}
+          {sortedTenants.length} tenant{sortedTenants.length !== 1 ? "s" : ""}
           </span>
         </div>
         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
@@ -59,9 +70,9 @@ export function TenantLeaderboard() {
         <div className="stats-grid animate-in" style={{ marginBottom: 20 }}>
           <div className="card">
             <div className="card-title">Top Tenant</div>
-            <div className="card-value">{tenants[0]?.tenantId ?? "—"}</div>
+            <div className="card-value">{topTenant?.tenantId ?? "—"}</div>
             <div className="card-subtitle">
-              {tenants[0] ? `$${tenants[0].costUsd.toFixed(2)} total` : "No data"}
+              {topTenant ? `$${topTenant.costUsd.toFixed(2)} total` : "No data"}
             </div>
           </div>
           <div className="card">
@@ -72,7 +83,7 @@ export function TenantLeaderboard() {
           <div className="card">
             <div className="card-title">Total Tenant Cost</div>
             <div className="card-value">
-              ${tenants.reduce((acc, t) => acc + t.costUsd, 0).toFixed(2)}
+              ${totalCost.toFixed(2)}
             </div>
             <div className="card-subtitle">Across all tenants</div>
           </div>
@@ -80,7 +91,7 @@ export function TenantLeaderboard() {
       )}
 
       <div className="table-container animate-in" style={{ animationDelay: "0.05s" }}>
-        {tenants.length === 0 && !loading ? (
+        {sortedTenants.length === 0 && !loading ? (
           <div className="empty-state">
             <div className="empty-state-icon">🏢</div>
             <div className="empty-state-title">No tenant data yet</div>
@@ -119,8 +130,7 @@ export function TenantLeaderboard() {
                   </tr>
                 ))
               ) : (
-                tenants.map((t) => {
-                  const totalCost = tenants.reduce((acc, x) => acc + x.costUsd, 0);
+                sortedTenants.map((t) => {
                   const percent = totalCost > 0 ? (t.costUsd / totalCost) * 100 : 0;
                   return (
                     <tr key={t.tenantId}>

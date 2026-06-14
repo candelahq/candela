@@ -5,6 +5,14 @@ import { API_BASE_URL } from "@/lib/constants";
 import { firebaseAuth } from "@/lib/firebase";
 import type { TimeRange } from "./useDashboard";
 
+function timeRangeToMs(range: TimeRange): number {
+  switch (range) {
+    case "24h": return 24 * 60 * 60 * 1000;
+    case "7d": return 7 * 24 * 60 * 60 * 1000;
+    case "30d": return 30 * 24 * 60 * 60 * 1000;
+  }
+}
+
 export interface TenantUsageRow {
   tenantId: string;
   callCount: number;
@@ -81,9 +89,14 @@ export function useTenantLeaderboard() {
           headers["Authorization"] = `Bearer ${token}`;
         }
 
-        const res = await fetch(`${API_BASE_URL}/_local/api/leaderboard?limit=50`, {
-          headers,
-        });
+        const now = Date.now();
+        const start = new Date(now - timeRangeToMs(state.timeRange)).toISOString();
+        const end = new Date(now).toISOString();
+
+        const res = await fetch(
+          `${API_BASE_URL}/_local/api/leaderboard?limit=50&startTime=${encodeURIComponent(start)}&endTime=${encodeURIComponent(end)}`,
+          { headers },
+        );
 
         if (!res.ok) {
           throw new Error(`HTTP ${res.status}: ${res.statusText}`);
@@ -141,7 +154,8 @@ export function useTenantLeaderboard() {
   );
 
   return {
-    tenants: sorted,
+    tenants: state.tenants,
+    sortedTenants: sorted,
     loading: state.loading,
     error: state.error,
     timeRange: state.timeRange,

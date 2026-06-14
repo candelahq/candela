@@ -6,6 +6,7 @@ package costcalc
 
 import (
 	_ "embed"
+	"fmt"
 	"log/slog"
 	"math"
 	"sort"
@@ -136,7 +137,6 @@ func New() *Calculator {
 		c.cacheDiscounts[k] = v
 	}
 	c.loadDefaults()
-	slog.Warn("using embedded default pricing — consider configuring catalog backend")
 	c.rebuildFallback()
 	return c
 }
@@ -720,9 +720,15 @@ func (c *Calculator) key(provider, model string) string {
 func (c *Calculator) loadDefaults() {
 	var pf pricingFile
 	if err := yaml.Unmarshal(defaultPricingYAML, &pf); err != nil {
-		// Fall back to empty — this should never happen with embedded YAML.
-		slog.Error("failed to parse embedded pricing.yaml", "error", err)
-		return
+		panic(fmt.Sprintf("costcalc: failed to parse embedded pricing.yaml: %v", err))
+	}
+	for i, m := range pf.Models {
+		if m.Provider == "" || m.Model == "" {
+			panic(fmt.Sprintf("costcalc: pricing.yaml entry %d: provider and model are required", i))
+		}
+		if m.InputPerMillion <= 0 || m.OutputPerMillion <= 0 {
+			panic(fmt.Sprintf("costcalc: pricing.yaml entry %d (%s/%s): prices must be > 0", i, m.Provider, m.Model))
+		}
 	}
 	for _, m := range pf.Models {
 		c.defaults[c.key(m.Provider, m.Model)] = ModelPricing{

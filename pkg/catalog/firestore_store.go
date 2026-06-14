@@ -164,6 +164,28 @@ func (s *FirestoreStore) Update(ctx context.Context, entry Entry) error {
 	return nil
 }
 
+// Delete removes an entry by provider and model ID.
+// Returns ErrNotFound if the document does not exist.
+func (s *FirestoreStore) Delete(ctx context.Context, provider, modelID string) error {
+	id := docID(provider, modelID)
+	ref := s.client.Collection(s.collection).Doc(id)
+
+	// Check existence first — Firestore Delete is a no-op for missing docs.
+	_, err := ref.Get(ctx)
+	if err != nil {
+		if status.Code(err) == codes.NotFound {
+			return ErrNotFound
+		}
+		return fmt.Errorf("catalog: checking doc %s before delete: %w", id, err)
+	}
+
+	_, err = ref.Delete(ctx)
+	if err != nil {
+		return fmt.Errorf("catalog: deleting doc %s: %w", id, err)
+	}
+	return nil
+}
+
 // Source returns "firestore".
 func (s *FirestoreStore) Source() string { return "firestore" }
 

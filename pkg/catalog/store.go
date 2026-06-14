@@ -77,9 +77,14 @@ type ModelCatalogStore interface {
 	// Update creates or replaces an entry. Read-only stores return ErrReadOnly.
 	Update(ctx context.Context, entry Entry) error
 
+	// Delete removes an entry by provider and model ID.
+	// Returns ErrNotFound if no matching entry exists.
+	// Read-only stores return ErrReadOnly.
+	Delete(ctx context.Context, provider, modelID string) error
+
 	// Source returns a human-readable label for this store (e.g. "config", "firestore").
 	Source() string
 
-	// Writable reports whether this store supports Update.
+	// Writable reports whether this store supports Update/Delete.
 	Writable() bool
 }

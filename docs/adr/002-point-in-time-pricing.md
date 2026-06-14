@@ -11,6 +11,8 @@ When model pricing changes, historical cost calculations become inaccurate. Audi
 
 Record `InputPricePerMillion` and `OutputPricePerMillion` on every span at the time of cost calculation. This creates a permanent audit trail.
 
+> **Note:** The `InputPricePerMillion` and `OutputPricePerMillion` proto fields were added to the span message in PR #356 and are already in production.
+
 ## Consequences
 
 - **Audit-safe**: each span is self-contained with the exact rates used

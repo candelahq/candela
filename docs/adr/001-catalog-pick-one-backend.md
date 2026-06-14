@@ -19,5 +19,6 @@ Use a **pick-one backend** pattern: `catalog.backend` selects exactly one of `co
 
 - **Simpler debugging**: one source of truth, no precedence ambiguity
 - **Clean interface**: `List`, `Get`, `Update`, `Source()`, `Writable()` — each backend implements all or returns `ErrReadOnly`
+- **No `Delete` by design**: catalog entries are soft-disabled (via `Update`) rather than hard-deleted, preserving referential integrity for historical spans and audit trails
 - **Migration path**: switch backends by changing one config field
 - **Limitation**: can't mix config-based models with database-managed ones in the same deployment

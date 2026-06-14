@@ -6,9 +6,9 @@ This directory contains Architecture Decision Records (ADRs) documenting signifi
 
 | # | Title | Status | Date |
 |---|-------|--------|------|
-| 001 | Catalog: pick-one backend | Accepted | 2024-06-14 |
-| 002 | Point-in-time pricing on spans | Accepted | 2024-06-14 |
-| 003 | Database-agnostic storage interface | Accepted | 2024-06-14 |
+| 001 | [Catalog: pick-one backend](001-catalog-pick-one-backend.md) | Accepted | 2024-06-14 |
+| 002 | [Point-in-time pricing on spans](002-point-in-time-pricing.md) | Accepted | 2024-06-14 |
+| 003 | [Database-agnostic storage interface](003-database-agnostic-interface.md) | Accepted | 2024-06-14 |
 
 ## Format
 

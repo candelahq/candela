@@ -1,6 +1,8 @@
 "use client";
 
-import { useModels, type ModelSortKey, type EnrichedModelRow } from "@/hooks/useModels";
+import { useState, useMemo } from "react";
+import { useModels, type ModelSortKey } from "@/hooks/useModels";
+import { useCatalog } from "@/hooks/useCatalog";
 import { type CacheEfficiency } from "@/lib/cacheUtils";
 import { TimeRangeSelector } from "@/components/TimeRangeSelector";
 import { ScopeToggle } from "@/components/ScopeToggle";
@@ -18,8 +20,16 @@ function fmtTokens(n: number): string {
   return n.toLocaleString();
 }
 
+function fmtContextWindow(n: bigint): string {
+  if (n <= BigInt(0)) return "—";
+  const num = Number(n);
+  if (num >= 1_000_000) return `${(num / 1_000_000).toFixed(1)}M`;
+  if (num >= 1_000) return `${(num / 1_000).toFixed(0)}k`;
+  return num.toLocaleString();
+}
+
 // ──────────────────────────────────────────
-// Sort header
+// Sort header (shared)
 // ──────────────────────────────────────────
 
 function SortTh({
@@ -57,7 +67,259 @@ function SortTh({
 // Page
 // ──────────────────────────────────────────
 
+type Tab = "catalog" | "usage";
+
 export default function ModelsPage() {
+  const [activeTab, setActiveTab] = useState<Tab>("catalog");
+
+  return (
+    <>
+      <header className="main-header">
+        <h1>Models</h1>
+        <div className="tab-bar">
+          <button
+            className={`tab-btn ${activeTab === "catalog" ? "tab-active" : ""}`}
+            onClick={() => setActiveTab("catalog")}
+          >
+            📋 Catalog
+          </button>
+          <button
+            className={`tab-btn ${activeTab === "usage" ? "tab-active" : ""}`}
+            onClick={() => setActiveTab("usage")}
+          >
+            📊 Usage
+          </button>
+        </div>
+      </header>
+
+      <div className="main-body">
+        {activeTab === "catalog" ? <CatalogTab /> : <UsageTab />}
+      </div>
+    </>
+  );
+}
+
+// ──────────────────────────────────────────
+// Catalog Tab
+// ──────────────────────────────────────────
+
+function CatalogTab() {
+  const { models, source, adminEditable, loading, error, refresh } = useCatalog();
+  const [search, setSearch] = useState("");
+  const [enabledOverrides, setEnabledOverrides] = useState<Record<string, boolean>>({});
+
+  const filtered = useMemo(() => {
+    if (!search) return models;
+    const q = search.toLowerCase();
+    return models.filter(
+      (m) =>
+        m.modelId.toLowerCase().includes(q) ||
+        m.provider.toLowerCase().includes(q) ||
+        m.displayName.toLowerCase().includes(q) ||
+        m.category.toLowerCase().includes(q),
+    );
+  }, [models, search]);
+
+  const getEnabled = (modelId: string, provider: string, defaultEnabled: boolean) => {
+    const key = `${provider}/${modelId}`;
+    return enabledOverrides[key] ?? defaultEnabled;
+  };
+
+  const toggleEnabled = (modelId: string, provider: string, currentEnabled: boolean) => {
+    const key = `${provider}/${modelId}`;
+    setEnabledOverrides((prev) => ({ ...prev, [key]: !currentEnabled }));
+  };
+
+  return (
+    <>
+      {error && <ErrorBanner title="Catalog Error">{error}</ErrorBanner>}
+
+      {/* Summary cards */}
+      {loading && models.length === 0 ? (
+        <div className="stats-grid animate-in">
+          <SkeletonCard />
+          <SkeletonCard />
+          <SkeletonCard />
+        </div>
+      ) : (
+        <div className="stats-grid animate-in">
+          <div className="card">
+            <div className="card-title">Total Models</div>
+            <div className="card-value">{models.length}</div>
+            <div className="card-subtitle">In catalog</div>
+          </div>
+          <div className="card">
+            <div className="card-title">Active</div>
+            <div className="card-value">{models.filter((m) => m.enabled).length}</div>
+            <div className="card-subtitle">Enabled models</div>
+          </div>
+          <div className="card">
+            <div className="card-title">Providers</div>
+            <div className="card-value">
+              {new Set(models.map((m) => m.provider)).size}
+            </div>
+            <div className="card-subtitle">Unique providers</div>
+          </div>
+        </div>
+      )}
+
+      {/* Search + source */}
+      <div
+        className="animate-in"
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 12,
+          marginBottom: 16,
+          animationDelay: "0.05s",
+        }}
+      >
+        <div className="models-search" style={{ flex: 1 }}>
+          <input
+            type="text"
+            className="models-search-input"
+            placeholder="Search models, providers, categories…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
+        </div>
+        {source && (
+          <span className="catalog-source">
+            <span className="catalog-source-dot" />
+            Source: {source}
+          </span>
+        )}
+        <button className="btn" onClick={refresh}>
+          🔄
+        </button>
+      </div>
+
+      {/* Catalog table */}
+      <div className="table-container animate-in" style={{ animationDelay: "0.08s" }}>
+        <div className="table-header">
+          <span className="table-title">Model Catalog</span>
+          <span style={{ fontSize: 12, color: "var(--text-muted)" }}>
+            {filtered.length} model{filtered.length !== 1 ? "s" : ""}
+            {adminEditable && (
+              <span style={{ marginLeft: 8, color: "var(--accent)", fontWeight: 500 }}>
+                • Admin editable
+              </span>
+            )}
+          </span>
+        </div>
+        {filtered.length === 0 ? (
+          <div className="empty-state" style={{ minHeight: 200 }}>
+            <div className="empty-state-icon">📋</div>
+            <div className="empty-state-title">
+              {search ? "No matching models" : "No catalog data"}
+            </div>
+            <div className="empty-state-desc">
+              {search
+                ? "Try a different search term."
+                : "The model catalog is empty."}
+            </div>
+          </div>
+        ) : (
+          <table>
+            <thead>
+              <tr>
+                <th>Model</th>
+                <th>Provider</th>
+                <th>Category</th>
+                <th style={{ textAlign: "right" }}>Input $/M</th>
+                <th style={{ textAlign: "right" }}>Output $/M</th>
+                <th style={{ textAlign: "right" }}>Context Window</th>
+                <th style={{ textAlign: "center" }}>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.map((entry) => {
+                const enabled = getEnabled(entry.modelId, entry.provider, entry.enabled);
+                return (
+                  <tr key={`${entry.provider}/${entry.modelId}`}>
+                    <td>
+                      <div>
+                        <span className="mono" style={{ fontSize: 12 }}>
+                          {entry.modelId}
+                        </span>
+                        {entry.displayName && entry.displayName !== entry.modelId && (
+                          <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2 }}>
+                            {entry.displayName}
+                          </div>
+                        )}
+                      </div>
+                    </td>
+                    <td>
+                      <span className="badge badge-info">{entry.provider}</span>
+                    </td>
+                    <td>
+                      {entry.category ? (
+                        <span style={{ fontSize: 12, color: "var(--text-secondary)" }}>
+                          {entry.category}
+                        </span>
+                      ) : (
+                        <span style={{ color: "var(--text-muted)", fontSize: 11 }}>—</span>
+                      )}
+                    </td>
+                    <td
+                      style={{
+                        textAlign: "right",
+                        fontFamily: "monospace",
+                        fontSize: 11,
+                        color: "var(--text-secondary)",
+                      }}
+                    >
+                      {entry.inputPerMillion > 0 ? `$${entry.inputPerMillion.toFixed(3)}` : "—"}
+                    </td>
+                    <td
+                      style={{
+                        textAlign: "right",
+                        fontFamily: "monospace",
+                        fontSize: 11,
+                        color: "var(--text-secondary)",
+                      }}
+                    >
+                      {entry.outputPerMillion > 0 ? `$${entry.outputPerMillion.toFixed(3)}` : "—"}
+                    </td>
+                    <td style={{ textAlign: "right" }}>
+                      <span className="context-window">
+                        {fmtContextWindow(entry.contextWindow)}
+                      </span>
+                    </td>
+                    <td style={{ textAlign: "center" }}>
+                      {adminEditable ? (
+                        <button
+                          className={`badge ${enabled ? "badge-success" : "badge-warning"}`}
+                          style={{ cursor: "pointer", border: "none" }}
+                          onClick={() => toggleEnabled(entry.modelId, entry.provider, enabled)}
+                          title={enabled ? "Click to disable" : "Click to enable"}
+                        >
+                          {enabled ? "Active" : "Disabled"}
+                        </button>
+                      ) : (
+                        <span
+                          className={`badge ${entry.enabled ? "badge-success" : "badge-warning"}`}
+                        >
+                          {entry.enabled ? "Active" : "Disabled"}
+                        </span>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        )}
+      </div>
+    </>
+  );
+}
+
+// ──────────────────────────────────────────
+// Usage Tab (existing page content)
+// ──────────────────────────────────────────
+
+function UsageTab() {
   const { includeBudget } = useScope();
   const {
     models,
@@ -76,207 +338,203 @@ export default function ModelsPage() {
 
   return (
     <>
-      <header className="main-header">
-        <h1>Models</h1>
-        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-          <ScopeToggle />
-          <TimeRangeSelector value={timeRange} onChange={setTimeRange} />
-          <button className="btn" onClick={refresh}>🔄</button>
+      {/* Controls */}
+      <div className="animate-in" style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 16 }}>
+        <ScopeToggle />
+        <TimeRangeSelector value={timeRange} onChange={setTimeRange} />
+        <button className="btn" onClick={refresh}>🔄</button>
+      </div>
+
+      {error && <ErrorBanner title="Models Error">{error}</ErrorBanner>}
+
+      {/* Summary cards */}
+      {loading && models.length === 0 ? (
+        <div className="stats-grid animate-in">
+          <SkeletonCard />
+          <SkeletonCard />
+          <SkeletonCard />
+          <SkeletonCard />
         </div>
-      </header>
+      ) : (
+        <div className="stats-grid animate-in">
+          <div className="card">
+            <div className="card-title">Models Used</div>
+            <div className="card-value">{models.length}</div>
+            <div className="card-subtitle">Unique models</div>
+          </div>
+          <div className="card">
+            <div className="card-title">Total Calls</div>
+            <div className="card-value">{totals.totalCalls.toLocaleString()}</div>
+            <div className="card-subtitle">Across all models</div>
+          </div>
+          <div className="card">
+            <div className="card-title">Total Tokens</div>
+            <div className="card-value">
+              {fmtTokens(totals.totalInputTokens + totals.totalOutputTokens)}
+            </div>
+            <div className="card-subtitle">
+              {fmtTokens(totals.totalInputTokens)} in / {fmtTokens(totals.totalOutputTokens)} out
+            </div>
+          </div>
+          <div className="card">
+            <div className="card-title">Total Cost</div>
+            <div className="card-value">${totals.totalCost.toFixed(2)}</div>
+            <div className="card-subtitle">
+              {budgetContext?.budget
+                ? `$${budgetContext.totalRemainingUsd.toFixed(2)} remaining`
+                : "Estimated USD"}
+            </div>
+          </div>
+        </div>
+      )}
 
-      <div className="main-body">
-        {error && <ErrorBanner title="Models Error">{error}</ErrorBanner>}
+      {/* Budget bar (if available) */}
+      {budgetContext?.budget && (
+        <div className="card animate-in" style={{ marginBottom: 16, animationDelay: "0.03s" }}>
+          <div className="card-title">Budget</div>
+          <div className="budget-bar-container">
+            <div className="budget-bar-track">
+              <div
+                className="budget-bar-fill"
+                style={{
+                  width: `${(totals.totalCost + budgetContext.totalRemainingUsd) > 0 ? Math.min(100, (totals.totalCost / (totals.totalCost + budgetContext.totalRemainingUsd)) * 100) : 0}%`,
+                }}
+              />
+            </div>
+            <div className="budget-bar-labels">
+              <span>${totals.totalCost.toFixed(2)} spent</span>
+              <span>${budgetContext.totalRemainingUsd.toFixed(2)} remaining</span>
+            </div>
+          </div>
+        </div>
+      )}
 
-        {/* Summary cards */}
-        {loading && models.length === 0 ? (
-          <div className="stats-grid animate-in">
-            <SkeletonCard />
-            <SkeletonCard />
-            <SkeletonCard />
-            <SkeletonCard />
+      {/* Search */}
+      <div className="models-search animate-in" style={{ animationDelay: "0.05s" }}>
+        <input
+          type="text"
+          className="models-search-input"
+          placeholder="Search models or providers…"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+        />
+      </div>
+
+      {/* Models table */}
+      <div className="table-container animate-in" style={{ animationDelay: "0.08s" }}>
+        <div className="table-header">
+          <span className="table-title">Model Breakdown</span>
+          <span style={{ fontSize: 12, color: "var(--text-muted)" }}>
+            {models.length} model{models.length !== 1 ? "s" : ""}
+          </span>
+        </div>
+        {models.length === 0 ? (
+          <div className="empty-state" style={{ minHeight: 200 }}>
+            <div className="empty-state-icon">🤖</div>
+            <div className="empty-state-title">
+              {search ? "No matching models" : "No model data"}
+            </div>
+            <div className="empty-state-desc">
+              {search
+                ? "Try a different search term."
+                : "Send requests through Candela to see model usage analytics."}
+            </div>
           </div>
         ) : (
-          <div className="stats-grid animate-in">
-            <div className="card">
-              <div className="card-title">Models Used</div>
-              <div className="card-value">{models.length}</div>
-              <div className="card-subtitle">Unique models</div>
-            </div>
-            <div className="card">
-              <div className="card-title">Total Calls</div>
-              <div className="card-value">{totals.totalCalls.toLocaleString()}</div>
-              <div className="card-subtitle">Across all models</div>
-            </div>
-            <div className="card">
-              <div className="card-title">Total Tokens</div>
-              <div className="card-value">
-                {fmtTokens(totals.totalInputTokens + totals.totalOutputTokens)}
-              </div>
-              <div className="card-subtitle">
-                {fmtTokens(totals.totalInputTokens)} in / {fmtTokens(totals.totalOutputTokens)} out
-              </div>
-            </div>
-            <div className="card">
-              <div className="card-title">Total Cost</div>
-              <div className="card-value">${totals.totalCost.toFixed(2)}</div>
-              <div className="card-subtitle">
-                {budgetContext?.budget
-                  ? `$${budgetContext.totalRemainingUsd.toFixed(2)} remaining`
-                  : "Estimated USD"}
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Budget bar (if available) */}
-        {budgetContext?.budget && (
-          <div className="card animate-in" style={{ marginBottom: 16, animationDelay: "0.03s" }}>
-            <div className="card-title">Budget</div>
-            <div className="budget-bar-container">
-              <div className="budget-bar-track">
-                <div
-                  className="budget-bar-fill"
-                  style={{
-                    width: `${(totals.totalCost + budgetContext.totalRemainingUsd) > 0 ? Math.min(100, (totals.totalCost / (totals.totalCost + budgetContext.totalRemainingUsd)) * 100) : 0}%`,
-                  }}
-                />
-              </div>
-              <div className="budget-bar-labels">
-                <span>${totals.totalCost.toFixed(2)} spent</span>
-                <span>${budgetContext.totalRemainingUsd.toFixed(2)} remaining</span>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Search */}
-        <div className="models-search animate-in" style={{ animationDelay: "0.05s" }}>
-          <input
-            type="text"
-            className="models-search-input"
-            placeholder="Search models or providers…"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-          />
-        </div>
-
-        {/* Models table */}
-        <div className="table-container animate-in" style={{ animationDelay: "0.08s" }}>
-          <div className="table-header">
-            <span className="table-title">Model Breakdown</span>
-            <span style={{ fontSize: 12, color: "var(--text-muted)" }}>
-              {models.length} model{models.length !== 1 ? "s" : ""}
-            </span>
-          </div>
-          {models.length === 0 ? (
-            <div className="empty-state" style={{ minHeight: 200 }}>
-              <div className="empty-state-icon">🤖</div>
-              <div className="empty-state-title">
-                {search ? "No matching models" : "No model data"}
-              </div>
-              <div className="empty-state-desc">
-                {search
-                  ? "Try a different search term."
-                  : "Send requests through Candela to see model usage analytics."}
-              </div>
-            </div>
-          ) : (
-            <table>
-              <thead>
-                <tr>
-                  <SortTh label="Model" sortKey="model" {...sort} currentKey={sort.key} onSort={toggleSort} />
-                  <SortTh label="Provider" sortKey="provider" {...sort} currentKey={sort.key} onSort={toggleSort} />
-                  <SortTh label="In $/M" sortKey="inputPrice" {...sort} currentKey={sort.key} onSort={toggleSort} align="right" />
-                  <SortTh label="Out $/M" sortKey="outputPrice" {...sort} currentKey={sort.key} onSort={toggleSort} align="right" />
-                  <SortTh label="Calls" sortKey="callCount" {...sort} currentKey={sort.key} onSort={toggleSort} align="right" />
-                  <SortTh label="Input Tokens" sortKey="inputTokens" {...sort} currentKey={sort.key} onSort={toggleSort} align="right" />
-                  <SortTh label="Output Tokens" sortKey="outputTokens" {...sort} currentKey={sort.key} onSort={toggleSort} align="right" />
-                  <SortTh label="Cost" sortKey="costUsd" {...sort} currentKey={sort.key} onSort={toggleSort} align="right" />
-                  <SortTh label="Avg Latency" sortKey="avgLatencyMs" {...sort} currentKey={sort.key} onSort={toggleSort} align="right" />
-                  <th style={{ textAlign: "center" }}>Cache</th>
-                  <th style={{ textAlign: "right" }}>Cost %</th>
-                </tr>
-              </thead>
-              <tbody>
-                {models.map((m) => {
-                  const pct = totals.totalCost > 0 ? (m.costUsd / totals.totalCost) * 100 : 0;
-                  return (
-                    <tr key={`${m.model}-${m.provider}`}>
-                      <td>
-                        <span className="mono" style={{ fontSize: 12 }}>{m.model}</span>
-                      </td>
-                      <td>
-                        <span className="badge badge-info">{m.provider}</span>
-                      </td>
-                      <td style={{ textAlign: "right", fontFamily: "monospace", fontSize: 11, color: "var(--text-secondary)" }}>
-                        {m.inputPricePerMillion != null ? `$${m.inputPricePerMillion.toFixed(3)}` : "—"}
-                      </td>
-                      <td style={{ textAlign: "right", fontFamily: "monospace", fontSize: 11, color: "var(--text-secondary)" }}>
-                        {m.outputPricePerMillion != null ? `$${m.outputPricePerMillion.toFixed(3)}` : "—"}
-                      </td>
-                      <td style={{ textAlign: "right" }}>{m.callCount.toLocaleString()}</td>
-                      <td style={{ textAlign: "right" }}>{fmtTokens(m.inputTokens)}</td>
-                      <td style={{ textAlign: "right" }}>{fmtTokens(m.outputTokens)}</td>
-                      <td style={{ textAlign: "right" }}>${m.costUsd.toFixed(4)}</td>
-                      <td style={{ textAlign: "right" }}>{m.avgLatencyMs.toFixed(0)}ms</td>
-                      <td style={{ textAlign: "center" }}>
-                        {m.cacheEfficiency ? (
-                          <CacheBadge eff={m.cacheEfficiency} />
-                        ) : (
-                          <span style={{ color: "var(--text-muted)", fontSize: 11 }}>—</span>
-                        )}
-                      </td>
-                      <td style={{ textAlign: "right" }}>
-                        <div style={{ display: "flex", alignItems: "center", gap: 8, justifyContent: "flex-end" }}>
-                          <div style={{ width: 60, height: 4, background: "var(--bg-tertiary)", borderRadius: 2 }}>
-                            <div
-                              style={{
-                                height: "100%",
-                                width: `${Math.min(100, pct)}%`,
-                                background: "var(--accent)",
-                                borderRadius: 2,
-                              }}
-                            />
-                          </div>
-                          <span style={{ fontSize: 11, color: "var(--text-muted)", minWidth: 32 }}>
-                            {pct.toFixed(1)}%
-                          </span>
+          <table>
+            <thead>
+              <tr>
+                <SortTh label="Model" sortKey="model" {...sort} currentKey={sort.key} onSort={toggleSort} />
+                <SortTh label="Provider" sortKey="provider" {...sort} currentKey={sort.key} onSort={toggleSort} />
+                <SortTh label="In $/M" sortKey="inputPrice" {...sort} currentKey={sort.key} onSort={toggleSort} align="right" />
+                <SortTh label="Out $/M" sortKey="outputPrice" {...sort} currentKey={sort.key} onSort={toggleSort} align="right" />
+                <SortTh label="Calls" sortKey="callCount" {...sort} currentKey={sort.key} onSort={toggleSort} align="right" />
+                <SortTh label="Input Tokens" sortKey="inputTokens" {...sort} currentKey={sort.key} onSort={toggleSort} align="right" />
+                <SortTh label="Output Tokens" sortKey="outputTokens" {...sort} currentKey={sort.key} onSort={toggleSort} align="right" />
+                <SortTh label="Cost" sortKey="costUsd" {...sort} currentKey={sort.key} onSort={toggleSort} align="right" />
+                <SortTh label="Avg Latency" sortKey="avgLatencyMs" {...sort} currentKey={sort.key} onSort={toggleSort} align="right" />
+                <th style={{ textAlign: "center" }}>Cache</th>
+                <th style={{ textAlign: "right" }}>Cost %</th>
+              </tr>
+            </thead>
+            <tbody>
+              {models.map((m) => {
+                const pct = totals.totalCost > 0 ? (m.costUsd / totals.totalCost) * 100 : 0;
+                return (
+                  <tr key={`${m.model}-${m.provider}`}>
+                    <td>
+                      <span className="mono" style={{ fontSize: 12 }}>{m.model}</span>
+                    </td>
+                    <td>
+                      <span className="badge badge-info">{m.provider}</span>
+                    </td>
+                    <td style={{ textAlign: "right", fontFamily: "monospace", fontSize: 11, color: "var(--text-secondary)" }}>
+                      {m.inputPricePerMillion != null ? `$${m.inputPricePerMillion.toFixed(3)}` : "—"}
+                    </td>
+                    <td style={{ textAlign: "right", fontFamily: "monospace", fontSize: 11, color: "var(--text-secondary)" }}>
+                      {m.outputPricePerMillion != null ? `$${m.outputPricePerMillion.toFixed(3)}` : "—"}
+                    </td>
+                    <td style={{ textAlign: "right" }}>{m.callCount.toLocaleString()}</td>
+                    <td style={{ textAlign: "right" }}>{fmtTokens(m.inputTokens)}</td>
+                    <td style={{ textAlign: "right" }}>{fmtTokens(m.outputTokens)}</td>
+                    <td style={{ textAlign: "right" }}>${m.costUsd.toFixed(4)}</td>
+                    <td style={{ textAlign: "right" }}>{m.avgLatencyMs.toFixed(0)}ms</td>
+                    <td style={{ textAlign: "center" }}>
+                      {m.cacheEfficiency ? (
+                        <CacheBadge eff={m.cacheEfficiency} />
+                      ) : (
+                        <span style={{ color: "var(--text-muted)", fontSize: 11 }}>—</span>
+                      )}
+                    </td>
+                    <td style={{ textAlign: "right" }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8, justifyContent: "flex-end" }}>
+                        <div style={{ width: 60, height: 4, background: "var(--bg-tertiary)", borderRadius: 2 }}>
+                          <div
+                            style={{
+                              height: "100%",
+                              width: `${Math.min(100, pct)}%`,
+                              background: "var(--accent)",
+                              borderRadius: 2,
+                            }}
+                          />
                         </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          )}
-        </div>
-
-        {/* Cache stats */}
-        {(totals.totalCacheRead > 0 || totals.totalCacheCreation > 0) && (
-          <div className="card animate-in" style={{ marginTop: 16, animationDelay: "0.12s" }}>
-            <div className="card-title">Cache Performance</div>
-            <div className="settings-grid">
-              <div className="settings-row">
-                <span className="settings-label">Cache Read Tokens</span>
-                <span className="settings-value">{fmtTokens(totals.totalCacheRead)}</span>
-              </div>
-              <div className="settings-row">
-                <span className="settings-label">Cache Creation Tokens</span>
-                <span className="settings-value">{fmtTokens(totals.totalCacheCreation)}</span>
-              </div>
-              <div className="settings-row">
-                <span className="settings-label">Effective Hit Rate</span>
-                <span className="settings-value">
-                  {totals.totalInputTokens > 0
-                    ? `${((totals.totalCacheRead / totals.totalInputTokens) * 100).toFixed(1)}%`
-                    : "—"}
-                </span>
-              </div>
-            </div>
-          </div>
+                        <span style={{ fontSize: 11, color: "var(--text-muted)", minWidth: 32 }}>
+                          {pct.toFixed(1)}%
+                        </span>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
         )}
       </div>
+
+      {/* Cache stats */}
+      {(totals.totalCacheRead > 0 || totals.totalCacheCreation > 0) && (
+        <div className="card animate-in" style={{ marginTop: 16, animationDelay: "0.12s" }}>
+          <div className="card-title">Cache Performance</div>
+          <div className="settings-grid">
+            <div className="settings-row">
+              <span className="settings-label">Cache Read Tokens</span>
+              <span className="settings-value">{fmtTokens(totals.totalCacheRead)}</span>
+            </div>
+            <div className="settings-row">
+              <span className="settings-label">Cache Creation Tokens</span>
+              <span className="settings-value">{fmtTokens(totals.totalCacheCreation)}</span>
+            </div>
+            <div className="settings-row">
+              <span className="settings-label">Effective Hit Rate</span>
+              <span className="settings-value">
+                {totals.totalInputTokens > 0
+                  ? `${((totals.totalCacheRead / totals.totalInputTokens) * 100).toFixed(1)}%`
+                  : "—"}
+              </span>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 }

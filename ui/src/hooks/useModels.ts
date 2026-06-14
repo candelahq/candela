@@ -2,7 +2,8 @@
 
 import { useCallback, useMemo, useState } from "react";
 import { useDashboard, type ModelUsageRow } from "@/hooks/useDashboard";
-import { getModelPricing, getCacheEfficiency, type CacheEfficiency } from "@/lib/modelPricing";
+import { getCacheEfficiency, type CacheEfficiency } from "@/lib/cacheUtils";
+import { useCatalog } from "@/hooks/useCatalog";
 
 // ──────────────────────────────────────────
 // Sort logic
@@ -46,10 +47,17 @@ function compare(a: EnrichedModelRow, b: EnrichedModelRow, key: ModelSortKey): n
  * Hook for the Models page.
  *
  * Re-uses useDashboard() to get model breakdown from GetDashboardData,
- * and adds client-side sort + search.
+ * and adds client-side sort + search. Pricing is sourced from the backend
+ * catalog via useCatalog().
  */
 export function useModels(options?: { includeBudget?: boolean }) {
   const dashboard = useDashboard(options);
+  const {
+    getPricing,
+    loading: catalogLoading,
+    error: catalogError,
+    source: catalogSource,
+  } = useCatalog();
   const [sort, setSort] = useState<SortState>({ key: "costUsd", desc: true });
   const [search, setSearch] = useState("");
 
@@ -59,10 +67,10 @@ export function useModels(options?: { includeBudget?: boolean }) {
     );
   }, []);
 
-  // Enrich rows with static pricing and cache efficiency
+  // Enrich rows with catalog pricing and cache efficiency
   const enriched: EnrichedModelRow[] = useMemo(() => {
     return dashboard.models.map((m) => {
-      const pricing = getModelPricing(m.model);
+      const pricing = getPricing(m.provider, m.model);
       return {
         ...m,
         inputPricePerMillion: pricing?.inputPerMillion ?? null,
@@ -70,7 +78,7 @@ export function useModels(options?: { includeBudget?: boolean }) {
         cacheEfficiency: getCacheEfficiency(m.cacheReadTokens, m.inputTokens),
       };
     });
-  }, [dashboard.models]);
+  }, [dashboard.models, getPricing]);
 
   const filtered = useMemo(() => {
     let rows = [...enriched];
@@ -113,8 +121,9 @@ export function useModels(options?: { includeBudget?: boolean }) {
   return {
     models: filtered,
     totals,
-    loading: dashboard.loading,
-    error: dashboard.error,
+    loading: dashboard.loading || catalogLoading,
+    error: dashboard.error ?? catalogError,
+    catalogSource,
     timeRange: dashboard.timeRange,
     setTimeRange: dashboard.setTimeRange,
     refresh: dashboard.refresh,

@@ -1,7 +1,7 @@
 "use client";
 
 import { useModels, type ModelSortKey, type EnrichedModelRow } from "@/hooks/useModels";
-import { type CacheEfficiency } from "@/lib/modelPricing";
+import { type CacheEfficiency } from "@/lib/cacheUtils";
 import { TimeRangeSelector } from "@/components/TimeRangeSelector";
 import { ScopeToggle } from "@/components/ScopeToggle";
 import { useScope } from "@/components/UserScopeProvider";

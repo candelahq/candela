@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useReducer } from "react";
+import { useEffect, useReducer, useRef } from "react";
 import { dashboardClient } from "@/lib/api";
 import { useCurrentUser } from "@/hooks/useCurrentUser";
 import { timestampFromDate } from "@bufbuild/protobuf/wkt";
@@ -72,7 +72,14 @@ export default function SettingsPage() {
     providers: [],
   });
 
+  const controllerRef = useRef<AbortController | null>(null);
+
   useEffect(() => {
+    controllerRef.current?.abort();
+    const controller = new AbortController();
+    controllerRef.current = controller;
+    const { signal } = controller;
+
     dispatch({ type: "checking" });
 
     const now = new Date();
@@ -85,10 +92,11 @@ export default function SettingsPage() {
           end: timestampFromDate(now),
         },
         includeBudget: true,
-      })
+      }, { signal })
       .then((res) => {
+        if (signal.aborted) return;
         const uniqueProviders = [
-          ...new Set((res.models || []).map((m) => m.provider).filter(Boolean)),
+          ...new Set((res.models ?? []).map((m) => m.provider).filter(Boolean)),
         ];
         dispatch({
           type: "connected",
@@ -96,12 +104,14 @@ export default function SettingsPage() {
           llmCalls: Number(res.summary?.totalLlmCalls ?? 0),
           totalCost: res.summary?.totalCostUsd ?? 0,
           providers: uniqueProviders.length > 0 ? uniqueProviders : ["OpenAI", "Google (Gemini)", "Anthropic"],
-          modelCount: (res.models || []).length,
+          modelCount: (res.models ?? []).length,
         });
       })
       .catch(() => {
-        dispatch({ type: "offline" });
+        if (!signal.aborted) dispatch({ type: "offline" });
       });
+
+    return () => controller.abort();
   }, []);
 
   const healthDot =

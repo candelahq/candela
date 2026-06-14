@@ -1,11 +1,11 @@
 "use client";
 
-import { useCallback, useEffect, useReducer } from "react";
+import { useCallback, useEffect, useReducer, useRef } from "react";
 import { dashboardClient, traceClient } from "@/lib/api";
 import { DEFAULT_PROJECT_ID } from "@/lib/constants";
 import { timestampFromDate } from "@bufbuild/protobuf/wkt";
 import type { DataPoint } from "@/components/chart";
-import type { GetJobLeaderboardResponse, JobUsage, ModelUsage } from "@/gen/candela/v1/dashboard_service_pb";
+import type { JobUsage, ModelUsage } from "@/gen/candela/v1/dashboard_service_pb";
 import type { UserBudget, BudgetGrant } from "@/gen/candela/types/user_pb";
 
 // ──────────────────────────────────────────
@@ -159,13 +159,10 @@ function mapModelUsage(m: ModelUsage): ModelUsageRow {
 // ──────────────────────────────────────────
 
 /**
- * Hook for fetching the consolidated dashboard data via GetDashboardData RPC.
+ * Hook for fetching dashboard data via GetDashboardData + ListTraces RPCs.
  *
- * This replaces the previous fan-out of GetUsageSummary + GetModelBreakdown + GetMyUsage
- * with a single round-trip. When `includeBudget` is true (the default when authenticated),
- * the response includes per-user budget/grant context.
- *
- * Recent traces are still fetched separately via ListTraces.
+ * When `includeBudget` is true (the default), the response includes
+ * per-user budget/grant context.
  */
 export function useDashboard(options?: { includeBudget?: boolean }) {
   const includeBudget = options?.includeBudget ?? true;
@@ -181,8 +178,14 @@ export function useDashboard(options?: { includeBudget?: boolean }) {
     fetchCount: 0,
   });
 
+  const controllerRef = useRef<AbortController | null>(null);
+
   useEffect(() => {
-    let cancelled = false;
+    controllerRef.current?.abort();
+    const controller = new AbortController();
+    controllerRef.current = controller;
+    const { signal } = controller;
+
     dispatch({ type: "fetch" });
 
     const now = new Date();
@@ -192,42 +195,39 @@ export function useDashboard(options?: { includeBudget?: boolean }) {
       end: timestampFromDate(now),
     };
 
-    // ── Primary RPC: GetDashboardData (replaces GetUsageSummary + GetModelBreakdown) ──
     const dashboardPromise = dashboardClient.getDashboardData({
       projectId: DEFAULT_PROJECT_ID,
       timeRange,
       includeBudget,
-    });
+    }, { signal });
 
-    // ── Recent traces (still separate — no equivalent in GetDashboardData) ──
     const tracesPromise = traceClient.listTraces({
       projectId: DEFAULT_PROJECT_ID,
       orderBy: "start_time",
       descending: true,
       pagination: { pageSize: 5 },
-    });
+    }, { signal });
 
-    // ── Job leaderboard (still separate) ──
+    // Degrade gracefully if job_id column missing
     const jobLeaderboardPromise = dashboardClient.getJobLeaderboard({
       projectId: DEFAULT_PROJECT_ID,
       timeRange,
       limit: 10,
-    }).catch(() => ({ jobs: [] })); // Degrade gracefully if job_id column missing
+    }, { signal }).catch(() => ({ jobs: [] }));
 
     Promise.all([dashboardPromise, tracesPromise, jobLeaderboardPromise])
       .then(([dashRes, tracesRes, jobRes]) => {
-        if (cancelled) return;
+        if (signal.aborted) return;
 
         const res = dashRes.summary;
-        const models = (dashRes.models || []).map(mapModelUsage);
+        const models = (dashRes.models ?? []).map(mapModelUsage);
 
-        // Map budget context from the consolidated response
         let budgetCtx: BudgetContext | null = null;
         if (dashRes.budgetContext) {
           budgetCtx = {
             budget: dashRes.budgetContext.budget ?? null,
             totalRemainingUsd: dashRes.budgetContext.totalRemainingUsd,
-            activeGrants: dashRes.budgetContext.activeGrants,
+            activeGrants: dashRes.budgetContext.activeGrants ?? [],
           };
         }
 
@@ -254,16 +254,16 @@ export function useDashboard(options?: { includeBudget?: boolean }) {
               costUsd: j.costUsd,
             })),
           },
-          recentTraces: (tracesRes.traces || []).map((t) => {
+          recentTraces: (tracesRes.traces ?? []).map((t) => {
             const durSeconds = Number(t.duration?.seconds ?? 0);
             const durNanos = Number(t.duration?.nanos ?? 0);
             return {
               traceId: t.traceId,
               rootSpanName: t.rootSpanName || "unknown",
               primaryModel: t.primaryModel || "—",
-              spanCount: t.spanCount || 0,
-              totalTokens: Number(t.totalTokens) || 0,
-              totalCostUsd: t.totalCostUsd || 0,
+              spanCount: t.spanCount ?? 0,
+              totalTokens: Number(t.totalTokens ?? 0),
+              totalCostUsd: t.totalCostUsd ?? 0,
               durationMs: durSeconds * 1000 + durNanos / 1e6,
               status: t.status,
               startTime: t.startTime
@@ -279,10 +279,10 @@ export function useDashboard(options?: { includeBudget?: boolean }) {
         });
       })
       .catch((err) => {
-        if (!cancelled) dispatch({ type: "error", message: err.message });
+        if (!signal.aborted) dispatch({ type: "error", message: err.message });
       });
 
-    return () => { cancelled = true; };
+    return () => controller.abort();
   }, [state.fetchCount, state.timeRange, includeBudget]);
 
   const refresh = useCallback(() => dispatch({ type: "refresh" }), []);

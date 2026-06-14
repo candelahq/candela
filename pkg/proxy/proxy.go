@@ -1867,14 +1867,18 @@ func (p *Proxy) createSpan(
 	outputContent, inputTokens, outputTokens := extractResponseInfo(provider.Name, respBody)
 	ct := extractCacheTokens(provider.Name, respBody)
 
-	// Extract <think> tags from output content (#312).
-	// Models like DeepSeek R1 wrap reasoning in <think> tags inline.
-	outputContent, reasoningContent := extractThinking(outputContent)
-
 	// For Google native, model is in the URL path, not the body.
 	// Fall back to the response's modelVersion field.
 	if model == "" {
 		model = extractModelFromResponse(provider.Name, respBody)
+	}
+
+	// Extract <think> tags from output content (#312).
+	// Only for known reasoning models — prevents corrupting legitimate
+	// <think> content in non-reasoning model output (e.g. code examples).
+	var reasoningContent string
+	if isReasoningModel(model) {
+		outputContent, reasoningContent = extractThinking(outputContent)
 	}
 
 	// Normalize cached input tokens via the calculator (handles all providers).
@@ -1933,13 +1937,18 @@ func (p *Proxy) createStreamingSpan(
 	outputContent, inputTokens, outputTokens := extractStreamingUsage(provider.Name, streamData)
 	ct := extractStreamingCacheTokens(provider.Name, streamData)
 
-	// Extract <think> tags from output content (#312).
-	outputContent, reasoningContent := extractThinking(outputContent)
-
 	// For Google native, model is in the URL path, not the body.
 	// Fall back to the response's modelVersion field.
 	if model == "" {
 		model = extractModelFromStreamingResponse(provider.Name, streamData)
+	}
+
+	// Extract <think> tags from streaming output content (#312).
+	// Only for known reasoning models — prevents corrupting legitimate
+	// <think> content in non-reasoning model output (e.g. code examples).
+	var reasoningContent string
+	if isReasoningModel(model) {
+		outputContent, reasoningContent = extractThinking(outputContent)
 	}
 
 	// Normalize cached input tokens via the calculator (handles all providers).

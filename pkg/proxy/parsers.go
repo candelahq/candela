@@ -3,35 +3,76 @@ package proxy
 import (
 	"bytes"
 	"encoding/json"
-	"regexp"
 	"strings"
 )
-
-// thinkTagRe matches <think>...</think> blocks (including multiline content).
-// Used to extract reasoning/thinking content from model responses that inline
-// it in the content field (e.g. DeepSeek R1, QwQ).
-var thinkTagRe = regexp.MustCompile(`(?s)<think>(.*?)</think>`)
 
 // extractThinking extracts content between <think> tags and returns
 // the cleaned content and the extracted thinking/reasoning content.
 // Models like DeepSeek R1 wrap chain-of-thought reasoning in <think> tags
 // inline in the content field. This function strips those tags and returns
 // the reasoning separately for storage in GenAIAttributes.ReasoningContent.
+//
+// Handles unclosed <think> tags (common when streaming responses are truncated,
+// e.g. DeepSeek R1): everything after the unclosed tag is treated as reasoning.
 func extractThinking(content string) (cleaned, reasoning string) {
-	matches := thinkTagRe.FindAllStringSubmatch(content, -1)
-	if len(matches) == 0 {
+	// Fast path: no think tags at all.
+	if !strings.Contains(content, "<think>") {
 		return content, ""
 	}
-	var thinkParts []string
-	for _, m := range matches {
-		part := strings.TrimSpace(m[1])
-		if part != "" {
-			thinkParts = append(thinkParts, part)
+
+	var cleanBuf, thinkBuf strings.Builder
+	remaining := content
+
+	for {
+		openIdx := strings.Index(remaining, "<think>")
+		if openIdx == -1 {
+			cleanBuf.WriteString(remaining)
+			break
+		}
+		// Content before <think>
+		cleanBuf.WriteString(remaining[:openIdx])
+		remaining = remaining[openIdx+len("<think>"):]
+
+		closeIdx := strings.Index(remaining, "</think>")
+		if closeIdx == -1 {
+			// Unclosed tag — treat rest as reasoning.
+			if thinkBuf.Len() > 0 {
+				thinkBuf.WriteByte('\n')
+			}
+			thinkBuf.WriteString(strings.TrimSpace(remaining))
+			remaining = ""
+			break
+		}
+
+		// Matched pair.
+		if thinkBuf.Len() > 0 {
+			thinkBuf.WriteByte('\n')
+		}
+		thinkBuf.WriteString(strings.TrimSpace(remaining[:closeIdx]))
+		remaining = remaining[closeIdx+len("</think>"):]
+	}
+
+	return strings.TrimSpace(cleanBuf.String()), thinkBuf.String()
+}
+
+// isReasoningModel returns true if the model is known to use <think> tags.
+// This prevents stripping legitimate <think> content from non-reasoning models
+// (e.g. a code generation model outputting <think> in example code).
+func isReasoningModel(model string) bool {
+	model = strings.ToLower(model)
+	// Models known to use inline <think> tags.
+	reasoningPrefixes := []string{
+		"deepseek-r1",
+		"deepseek-reasoner",
+		"qwq",
+		"qwen3", // Qwen3 uses thinking by default
+	}
+	for _, prefix := range reasoningPrefixes {
+		if strings.HasPrefix(model, prefix) || strings.Contains(model, prefix) {
+			return true
 		}
 	}
-	reasoning = strings.Join(thinkParts, "\n")
-	cleaned = strings.TrimSpace(thinkTagRe.ReplaceAllString(content, ""))
-	return cleaned, reasoning
+	return false
 }
 
 // NOTE: All cache normalization has been moved to costcalc.Calculator.

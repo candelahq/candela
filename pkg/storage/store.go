@@ -98,6 +98,12 @@ type GenAIAttributes struct {
 	// Showing both lets developers see their cache hit rate and optimize prompts.
 	CacheReadTokens     int64 `json:"cache_read_tokens,omitempty"`
 	CacheCreationTokens int64 `json:"cache_creation_tokens,omitempty"`
+
+	// Point-in-time pricing snapshot (USD per 1M tokens).
+	// Recorded at request time so historical spans retain the rates
+	// that were active, enabling cost auditing and re-derivation.
+	InputRate  float64 `json:"input_rate,omitempty"`
+	OutputRate float64 `json:"output_rate,omitempty"`
 }
 
 // Span represents a single span in the storage layer.

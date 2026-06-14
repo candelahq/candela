@@ -402,3 +402,37 @@ func TestDefaults_Deterministic(t *testing.T) {
 		}
 	}
 }
+
+func TestResolve(t *testing.T) {
+	c := New()
+
+	// Known model should resolve
+	p, ok := c.Resolve("openai", "gpt-4o")
+	if !ok {
+		t.Fatal("expected gpt-4o to resolve")
+	}
+	if p.InputPerMillion == 0 {
+		t.Error("expected non-zero input rate")
+	}
+	if p.OutputPerMillion == 0 {
+		t.Error("expected non-zero output rate")
+	}
+
+	// Unknown model should not resolve
+	_, ok = c.Resolve("unknown", "unknown-model")
+	if ok {
+		t.Error("expected unknown model to not resolve")
+	}
+
+	// Config override should take priority
+	c.LoadFromConfig(PricingConfig{
+		Models: []ModelPricing{{
+			Provider: "openai", Model: "gpt-4o",
+			InputPerMillion: 999.0, OutputPerMillion: 999.0,
+		}},
+	})
+	p, ok = c.Resolve("openai", "gpt-4o")
+	if !ok || p.InputPerMillion != 999.0 {
+		t.Errorf("expected override rate 999.0, got %f", p.InputPerMillion)
+	}
+}

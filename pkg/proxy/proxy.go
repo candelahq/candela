@@ -1748,7 +1748,16 @@ func (p *Proxy) deductBudget(ctx context.Context, provider Provider, model, user
 // in the request handler) — buildSpan only handles span creation and storage.
 func (p *Proxy) buildSpan(ctx context.Context, params spanParams) {
 	totalTokens := params.inputTokens + params.outputTokens
-	cost := p.calc.Calculate(pricingProvider(params.provider.Name), params.model, params.inputTokens, params.outputTokens)
+	pprov := pricingProvider(params.provider.Name)
+	cost := p.calc.Calculate(pprov, params.model, params.inputTokens, params.outputTokens)
+
+	// Snapshot point-in-time pricing so historical spans retain the rates
+	// that were active at request time (enables cost auditing, #321).
+	var inputRate, outputRate float64
+	if pricing, ok := p.calc.Resolve(pprov, params.model); ok {
+		inputRate = pricing.InputPerMillion
+		outputRate = pricing.OutputPerMillion
+	}
 
 	attrs := map[string]string{
 		"proxy.upstream":  params.provider.UpstreamURL,
@@ -1798,6 +1807,8 @@ func (p *Proxy) buildSpan(ctx context.Context, params spanParams) {
 			OutputContent:       params.outputContent,
 			CacheReadTokens:     params.cacheTokens.CacheReadTokens,
 			CacheCreationTokens: params.cacheTokens.CacheCreationTokens,
+			InputRate:           inputRate,
+			OutputRate:          outputRate,
 		},
 		Attributes: attrs,
 	}

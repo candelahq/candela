@@ -439,6 +439,15 @@ func (c *Calculator) HasPricing(provider, model string) bool {
 	return ok
 }
 
+// Resolve returns the resolved pricing for a model without calculating cost.
+// Returns the resolved ModelPricing and true if found, or zero value and false.
+// This is used to snapshot pricing at request time for cost auditing.
+func (c *Calculator) Resolve(provider, model string) (ModelPricing, bool) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.resolve(provider, model)
+}
+
 // resolve looks up pricing: config overrides first, then built-in defaults,
 // then precomputed provider-agnostic fallback, then prefix-based fuzzy match.
 // Provider aliases (e.g. "anthropic-direct" → "anthropic") are resolved before

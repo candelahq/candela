@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useReducer, useRef } from "react";
+import { useCallback, useEffect, useReducer } from "react";
 import { dashboardClient, traceClient } from "@/lib/api";
 import { DEFAULT_PROJECT_ID } from "@/lib/constants";
 import { timestampFromDate } from "@bufbuild/protobuf/wkt";
@@ -178,12 +178,8 @@ export function useDashboard(options?: { includeBudget?: boolean }) {
     fetchCount: 0,
   });
 
-  const controllerRef = useRef<AbortController | null>(null);
-
   useEffect(() => {
-    controllerRef.current?.abort();
     const controller = new AbortController();
-    controllerRef.current = controller;
     const { signal } = controller;
 
     dispatch({ type: "fetch" });

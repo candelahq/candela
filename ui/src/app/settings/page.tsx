@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useReducer, useRef } from "react";
+import { useEffect, useReducer } from "react";
 import { dashboardClient } from "@/lib/api";
 import { useCurrentUser } from "@/hooks/useCurrentUser";
 import { timestampFromDate } from "@bufbuild/protobuf/wkt";
@@ -72,12 +72,8 @@ export default function SettingsPage() {
     providers: [],
   });
 
-  const controllerRef = useRef<AbortController | null>(null);
-
   useEffect(() => {
-    controllerRef.current?.abort();
     const controller = new AbortController();
-    controllerRef.current = controller;
     const { signal } = controller;
 
     dispatch({ type: "checking" });

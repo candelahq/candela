@@ -368,8 +368,10 @@ func main() {
 		connecthandlers.NewProjectHandler(projectStore))
 	mux.Handle(projectPath, projectH)
 
+	catalogValidateInterceptor := validate.NewInterceptor()
 	catalogPath, catalogH := candelav1connect.NewModelCatalogServiceHandler(
-		connecthandlers.NewCatalogHandler(catalogStore, userStore))
+		connecthandlers.NewCatalogHandler(catalogStore, userStore),
+		connect.WithInterceptors(catalogValidateInterceptor))
 	mux.Handle(catalogPath, catalogH)
 
 	slog.Info("ConnectRPC services registered",

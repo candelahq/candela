@@ -78,6 +78,21 @@ func (h *CatalogHandler) UpdateModelCatalogEntry(
 	}
 
 	entry := protoToEntry(pbEntry)
+
+	// Apply field mask: if the caller specified which fields to update,
+	// merge only those fields onto the existing entry to avoid data loss.
+	if mask := req.Msg.UpdateMask; mask != nil && len(mask.Paths) > 0 {
+		existing, err := h.store.Get(ctx, entry.Provider, entry.ModelID)
+		if err != nil {
+			if err == catalog.ErrNotFound {
+				return nil, connect.NewError(connect.CodeNotFound,
+					fmt.Errorf("model %s/%s not found", entry.Provider, entry.ModelID))
+			}
+			return nil, internalError("failed to fetch existing entry for field mask", err)
+		}
+		entry = applyFieldMask(*existing, entry, mask.Paths)
+	}
+
 	if err := h.store.Update(ctx, entry); err != nil {
 		return nil, internalError("failed to update catalog entry", err)
 	}
@@ -126,6 +141,41 @@ func (h *CatalogHandler) DeleteModelCatalogEntry(
 	}
 
 	return connect.NewResponse(&v1.DeleteModelCatalogEntryResponse{}), nil
+}
+
+// applyFieldMask merges only the specified fields from src into dst.
+// Unrecognised paths are silently ignored (the proto validator should
+// catch invalid paths before they reach here).
+func applyFieldMask(dst, src catalog.Entry, paths []string) catalog.Entry {
+	for _, path := range paths {
+		switch path {
+		case "enabled":
+			dst.Enabled = src.Enabled
+		case "display_name":
+			dst.DisplayName = src.DisplayName
+		case "input_per_million":
+			dst.InputPerMillion = src.InputPerMillion
+		case "output_per_million":
+			dst.OutputPerMillion = src.OutputPerMillion
+		case "input_per_million_high":
+			dst.InputPerMillionHigh = src.InputPerMillionHigh
+		case "output_per_million_high":
+			dst.OutputPerMillionHigh = src.OutputPerMillionHigh
+		case "tier_threshold_tokens":
+			dst.TierThresholdTokens = src.TierThresholdTokens
+		case "discount_percent":
+			dst.DiscountPercent = src.DiscountPercent
+		case "category":
+			dst.Category = src.Category
+		case "context_window":
+			dst.ContextWindow = src.ContextWindow
+		case "aliases":
+			dst.Aliases = src.Aliases
+		case "allowed_tenants":
+			dst.AllowedTenants = src.AllowedTenants
+		}
+	}
+	return dst
 }
 
 // --- Proto converters ---

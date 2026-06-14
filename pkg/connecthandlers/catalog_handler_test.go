@@ -10,6 +10,7 @@ import (
 	"github.com/candelahq/candela/pkg/auth"
 	"github.com/candelahq/candela/pkg/catalog"
 	"github.com/candelahq/candela/pkg/storage"
+	"google.golang.org/protobuf/types/known/fieldmaskpb"
 )
 
 // testCatalogEntries is the fixture set for catalog handler tests.
@@ -306,3 +307,281 @@ func (m *mockWritableCatalogStore) Delete(_ context.Context, provider, modelID s
 
 func (m *mockWritableCatalogStore) Source() string { return "mock" }
 func (m *mockWritableCatalogStore) Writable() bool { return true }
+
+// TestCatalogHandler_UpdateWithFieldMask verifies that a field mask update
+// only modifies the specified fields and preserves all others.
+func TestCatalogHandler_UpdateWithFieldMask(t *testing.T) {
+	store := newMockWritableCatalogStore(testCatalogEntries)
+	handler := NewCatalogHandler(store, nil) // nil users = dev mode = admin
+
+	// Update only "enabled" to false on gemini-2.5-pro.
+	_, err := handler.UpdateModelCatalogEntry(context.Background(),
+		connect.NewRequest(&v1.UpdateModelCatalogEntryRequest{
+			Entry: &types.ModelCatalogEntry{
+				ModelId:  "gemini-2.5-pro",
+				Provider: "google",
+				Enabled:  false,
+			},
+			UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"enabled"}},
+		}))
+	if err != nil {
+		t.Fatalf("UpdateModelCatalogEntry: %v", err)
+	}
+
+	// Re-fetch and verify only enabled changed.
+	got, err := store.Get(context.Background(), "google", "gemini-2.5-pro")
+	if err != nil {
+		t.Fatalf("Get after update: %v", err)
+	}
+	if got.Enabled {
+		t.Error("expected enabled=false after masked update")
+	}
+	// All other fields should be preserved from the original fixture.
+	if got.DisplayName != "Gemini 2.5 Pro" {
+		t.Errorf("display_name changed: got %q, want %q", got.DisplayName, "Gemini 2.5 Pro")
+	}
+	if got.InputPerMillion != 1.25 {
+		t.Errorf("input_per_million changed: got %v, want 1.25", got.InputPerMillion)
+	}
+	if got.OutputPerMillion != 10.00 {
+		t.Errorf("output_per_million changed: got %v, want 10.00", got.OutputPerMillion)
+	}
+	if got.Category != "flagship" {
+		t.Errorf("category changed: got %q, want %q", got.Category, "flagship")
+	}
+	if got.ContextWindow != 1_000_000 {
+		t.Errorf("context_window changed: got %d, want 1000000", got.ContextWindow)
+	}
+}
+
+// TestCatalogHandler_UpdateMultipleFieldMask verifies that multiple fields
+// in the mask are all applied correctly.
+func TestCatalogHandler_UpdateMultipleFieldMask(t *testing.T) {
+	store := newMockWritableCatalogStore(testCatalogEntries)
+	handler := NewCatalogHandler(store, nil)
+
+	_, err := handler.UpdateModelCatalogEntry(context.Background(),
+		connect.NewRequest(&v1.UpdateModelCatalogEntryRequest{
+			Entry: &types.ModelCatalogEntry{
+				ModelId:         "gemini-2.5-pro",
+				Provider:        "google",
+				InputPerMillion: 2.50,
+				DiscountPercent: 0.10,
+			},
+			UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{
+				"input_per_million", "discount_percent",
+			}},
+		}))
+	if err != nil {
+		t.Fatalf("UpdateModelCatalogEntry: %v", err)
+	}
+
+	got, err := store.Get(context.Background(), "google", "gemini-2.5-pro")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got.InputPerMillion != 2.50 {
+		t.Errorf("input_per_million: got %v, want 2.50", got.InputPerMillion)
+	}
+	if got.DiscountPercent != 0.10 {
+		t.Errorf("discount_percent: got %v, want 0.10", got.DiscountPercent)
+	}
+	// Unmasked fields preserved.
+	if got.OutputPerMillion != 10.00 {
+		t.Errorf("output_per_million: got %v, want 10.00 (should be preserved)", got.OutputPerMillion)
+	}
+	if got.DisplayName != "Gemini 2.5 Pro" {
+		t.Errorf("display_name: got %q, want %q (should be preserved)", got.DisplayName, "Gemini 2.5 Pro")
+	}
+}
+
+// TestCatalogHandler_UpdateEmptyMask_FullReplace verifies that when no field mask
+// is provided, all fields are overwritten (full replace semantics).
+func TestCatalogHandler_UpdateEmptyMask_FullReplace(t *testing.T) {
+	store := newMockWritableCatalogStore(testCatalogEntries)
+	handler := NewCatalogHandler(store, nil)
+
+	// Full replace: no update_mask.
+	_, err := handler.UpdateModelCatalogEntry(context.Background(),
+		connect.NewRequest(&v1.UpdateModelCatalogEntryRequest{
+			Entry: &types.ModelCatalogEntry{
+				ModelId:         "gemini-2.5-pro",
+				Provider:        "google",
+				DisplayName:     "Replaced Model",
+				InputPerMillion: 99.99,
+				Enabled:         false,
+			},
+		}))
+	if err != nil {
+		t.Fatalf("UpdateModelCatalogEntry: %v", err)
+	}
+
+	got, err := store.Get(context.Background(), "google", "gemini-2.5-pro")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got.DisplayName != "Replaced Model" {
+		t.Errorf("display_name: got %q, want %q", got.DisplayName, "Replaced Model")
+	}
+	if got.InputPerMillion != 99.99 {
+		t.Errorf("input_per_million: got %v, want 99.99", got.InputPerMillion)
+	}
+	// Zero values expected since no mask = full replace.
+	if got.OutputPerMillion != 0 {
+		t.Errorf("output_per_million: got %v, want 0 (full replace)", got.OutputPerMillion)
+	}
+	if got.ContextWindow != 0 {
+		t.Errorf("context_window: got %d, want 0 (full replace)", got.ContextWindow)
+	}
+}
+
+// TestCatalogHandler_UpdateFieldMask_NotFound verifies that a masked update
+// on a non-existent entry returns CodeNotFound.
+func TestCatalogHandler_UpdateFieldMask_NotFound(t *testing.T) {
+	store := newMockWritableCatalogStore(nil)
+	handler := NewCatalogHandler(store, nil)
+
+	_, err := handler.UpdateModelCatalogEntry(context.Background(),
+		connect.NewRequest(&v1.UpdateModelCatalogEntryRequest{
+			Entry: &types.ModelCatalogEntry{
+				ModelId:  "nonexistent",
+				Provider: "nowhere",
+				Enabled:  true,
+			},
+			UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"enabled"}},
+		}))
+	if err == nil {
+		t.Fatal("expected error for masked update on non-existent entry")
+	}
+	connectErr, ok := err.(*connect.Error)
+	if !ok {
+		t.Fatalf("expected *connect.Error, got %T", err)
+	}
+	if connectErr.Code() != connect.CodeNotFound {
+		t.Errorf("expected CodeNotFound, got %v", connectErr.Code())
+	}
+}
+
+// TestCatalogHandler_DeleteNonExistent tests that deleting a model that doesn't
+// exist returns CodeNotFound.
+func TestCatalogHandler_DeleteNonExistent(t *testing.T) {
+	store := newMockWritableCatalogStore(testCatalogEntries)
+	handler := NewCatalogHandler(store, nil)
+
+	_, err := handler.DeleteModelCatalogEntry(context.Background(),
+		connect.NewRequest(&v1.DeleteModelCatalogEntryRequest{
+			Provider: "google",
+			ModelId:  "nonexistent-model",
+		}))
+	if err == nil {
+		t.Fatal("expected error for deleting non-existent model")
+	}
+	connectErr, ok := err.(*connect.Error)
+	if !ok {
+		t.Fatalf("expected *connect.Error, got %T", err)
+	}
+	if connectErr.Code() != connect.CodeNotFound {
+		t.Errorf("expected CodeNotFound, got %v", connectErr.Code())
+	}
+}
+
+// TestCatalogHandler_DeleteNonAdmin verifies non-admin callers are denied delete.
+func TestCatalogHandler_DeleteNonAdmin(t *testing.T) {
+	store := newMockWritableCatalogStore(testCatalogEntries)
+	handler := NewCatalogHandler(store, newDeveloperUserStore())
+
+	_, err := handler.DeleteModelCatalogEntry(developerContext(),
+		connect.NewRequest(&v1.DeleteModelCatalogEntryRequest{
+			Provider: "google",
+			ModelId:  "gemini-2.5-pro",
+		}))
+	if err == nil {
+		t.Fatal("expected permission denied for non-admin delete")
+	}
+	connectErr, ok := err.(*connect.Error)
+	if !ok {
+		t.Fatalf("expected *connect.Error, got %T", err)
+	}
+	if connectErr.Code() != connect.CodePermissionDenied {
+		t.Errorf("expected CodePermissionDenied, got %v", connectErr.Code())
+	}
+}
+
+// TestCatalogHandler_ListEmpty tests that listing on an empty store returns
+// an empty list, not an error.
+func TestCatalogHandler_ListEmpty(t *testing.T) {
+	store := newMockWritableCatalogStore(nil) // empty store
+	handler := NewCatalogHandler(store, nil)
+
+	resp, err := handler.ListModelCatalog(context.Background(),
+		connect.NewRequest(&v1.ListModelCatalogRequest{}))
+	if err != nil {
+		t.Fatalf("ListModelCatalog on empty store: %v", err)
+	}
+	if len(resp.Msg.Models) != 0 {
+		t.Errorf("expected 0 models from empty store, got %d", len(resp.Msg.Models))
+	}
+}
+
+// TestCatalogHandler_UpdateNilEntry tests that Update with nil entry returns
+// CodeInvalidArgument.
+func TestCatalogHandler_UpdateNilEntry(t *testing.T) {
+	store := newMockWritableCatalogStore(testCatalogEntries)
+	handler := NewCatalogHandler(store, nil)
+
+	_, err := handler.UpdateModelCatalogEntry(context.Background(),
+		connect.NewRequest(&v1.UpdateModelCatalogEntryRequest{
+			Entry: nil,
+		}))
+	if err == nil {
+		t.Fatal("expected error for nil entry")
+	}
+	connectErr, ok := err.(*connect.Error)
+	if !ok {
+		t.Fatalf("expected *connect.Error, got %T", err)
+	}
+	if connectErr.Code() != connect.CodeInvalidArgument {
+		t.Errorf("expected CodeInvalidArgument, got %v", connectErr.Code())
+	}
+}
+
+// TestApplyFieldMask is a unit test for the applyFieldMask helper.
+func TestApplyFieldMask(t *testing.T) {
+	dst := catalog.Entry{
+		ModelID:         "model-1",
+		Provider:        "prov",
+		DisplayName:     "Original Name",
+		InputPerMillion: 1.00,
+		Enabled:         true,
+		Category:        "flagship",
+		ContextWindow:   100_000,
+	}
+	src := catalog.Entry{
+		ModelID:         "model-1",
+		Provider:        "prov",
+		DisplayName:     "New Name",
+		InputPerMillion: 5.00,
+		Enabled:         false,
+		Category:        "lite",
+		ContextWindow:   200_000,
+	}
+
+	result := applyFieldMask(dst, src, []string{"enabled", "display_name"})
+
+	if result.Enabled != false {
+		t.Error("enabled should be false")
+	}
+	if result.DisplayName != "New Name" {
+		t.Errorf("display_name: got %q, want %q", result.DisplayName, "New Name")
+	}
+	// Unmasked fields should be from dst.
+	if result.InputPerMillion != 1.00 {
+		t.Errorf("input_per_million should be 1.00 (from dst), got %v", result.InputPerMillion)
+	}
+	if result.Category != "flagship" {
+		t.Errorf("category should be 'flagship' (from dst), got %q", result.Category)
+	}
+	if result.ContextWindow != 100_000 {
+		t.Errorf("context_window should be 100000 (from dst), got %d", result.ContextWindow)
+	}
+}

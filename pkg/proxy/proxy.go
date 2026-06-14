@@ -379,7 +379,7 @@ func newUpstreamHTTPClient(cfg Config) *http.Client {
 }
 
 // New creates a new LLM proxy.
-func New(cfg Config, submitter SpanSubmitter, calc *costcalc.Calculator) *Proxy {
+func New(cfg Config, submitter SpanSubmitter, calc *costcalc.Calculator) (*Proxy, error) {
 	providers := make(map[string]Provider)
 	breakers := make(map[string]*CircuitBreaker)
 	cbCfg := DefaultCircuitBreakerConfig()
@@ -408,9 +408,13 @@ func New(cfg Config, submitter SpanSubmitter, calc *costcalc.Calculator) *Proxy 
 	}
 
 	// #207: Initialize model allowlist policy.
-	p.policy = NewModelPolicy(cfg.Policy)
+	policy, err := NewModelPolicy(cfg.Policy)
+	if err != nil {
+		return nil, fmt.Errorf("proxy: %w", err)
+	}
+	p.policy = policy
 
-	return p
+	return p, nil
 }
 
 // SetUserStore sets the optional UserStore for budget deduction.

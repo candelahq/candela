@@ -167,7 +167,7 @@ func TestProxyEndToEndAnthropic(t *testing.T) {
 	submitter := &mockSubmitter{}
 	calc := costcalc.New()
 
-	p := New(Config{
+	p, _ := New(Config{
 		Providers: []Provider{{Name: "anthropic", UpstreamURL: upstream.URL}},
 		ProjectID: "test-project",
 	}, submitter, calc)
@@ -272,7 +272,7 @@ func TestRequestID_GeneratedWhenAbsent(t *testing.T) {
 	submitter := &mockSubmitter{}
 	calc := costcalc.New()
 
-	p := New(Config{
+	p, _ := New(Config{
 		Providers: []Provider{{Name: "anthropic", UpstreamURL: upstream.URL}},
 		ProjectID: "test",
 	}, submitter, calc)
@@ -338,7 +338,7 @@ func TestRequestID_AcceptedWhenProvided(t *testing.T) {
 	submitter := &mockSubmitter{}
 	calc := costcalc.New()
 
-	p := New(Config{
+	p, _ := New(Config{
 		Providers: []Provider{{Name: "anthropic", UpstreamURL: upstream.URL}},
 		ProjectID: "test",
 	}, submitter, calc)
@@ -397,7 +397,7 @@ func TestCircuitBreaker_SkipsSpanOnOpen(t *testing.T) {
 	submitter := &mockSubmitter{}
 	calc := costcalc.New()
 
-	p := New(Config{
+	p, _ := New(Config{
 		Providers: []Provider{{Name: "anthropic", UpstreamURL: upstream.URL}},
 		ProjectID: "test",
 	}, submitter, calc)
@@ -457,7 +457,7 @@ func TestUserID_FromAuthContext(t *testing.T) {
 	submitter := &mockSubmitter{}
 	calc := costcalc.New()
 
-	p := New(Config{
+	p, _ := New(Config{
 		Providers: []Provider{{Name: "anthropic", UpstreamURL: upstream.URL}},
 		ProjectID: "test",
 	}, submitter, calc)
@@ -517,7 +517,7 @@ func TestUserID_XUserIdHeaderIgnored(t *testing.T) {
 	submitter := &mockSubmitter{}
 	calc := costcalc.New()
 
-	p := New(Config{
+	p, _ := New(Config{
 		Providers: []Provider{{Name: "anthropic", UpstreamURL: upstream.URL}},
 		ProjectID: "test",
 	}, submitter, calc)
@@ -575,7 +575,7 @@ func TestUserID_EmptyWithoutAuthContext(t *testing.T) {
 	submitter := &mockSubmitter{}
 	calc := costcalc.New()
 
-	p := New(Config{
+	p, _ := New(Config{
 		Providers: []Provider{{Name: "anthropic", UpstreamURL: upstream.URL}},
 		ProjectID: "test",
 	}, submitter, calc)

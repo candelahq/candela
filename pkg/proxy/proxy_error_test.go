@@ -46,7 +46,7 @@ func TestADCTokenInjection(t *testing.T) {
 	submitter := &mockSubmitter{}
 	calc := newCalcWithTestModels()
 
-	p := New(Config{
+	p, _ := New(Config{
 		Providers: []Provider{{
 			Name:        "anthropic",
 			UpstreamURL: upstream.URL,
@@ -93,7 +93,7 @@ func TestADCTokenFailure(t *testing.T) {
 	submitter := &mockSubmitter{}
 	calc := newCalcWithTestModels()
 
-	p := New(Config{
+	p, _ := New(Config{
 		Providers: []Provider{{
 			Name:        "anthropic",
 			UpstreamURL: upstream.URL,
@@ -144,7 +144,7 @@ func TestUpstream429_SurfacedToClient(t *testing.T) {
 	submitter := &mockSubmitter{}
 	calc := newCalcWithTestModels()
 
-	p := New(Config{
+	p, _ := New(Config{
 		Providers: []Provider{{Name: "anthropic", UpstreamURL: upstream.URL}},
 		ProjectID: "test",
 	}, submitter, calc)
@@ -193,7 +193,7 @@ func TestUpstream500_SurfacedToClient(t *testing.T) {
 	submitter := &mockSubmitter{}
 	calc := newCalcWithTestModels()
 
-	p := New(Config{
+	p, _ := New(Config{
 		Providers: []Provider{{Name: "anthropic", UpstreamURL: upstream.URL}},
 		ProjectID: "test",
 	}, submitter, calc)
@@ -239,7 +239,7 @@ func TestUpstreamUnreachable_502(t *testing.T) {
 	calc := newCalcWithTestModels()
 
 	// Point to a guaranteed-closed port.
-	p := New(Config{
+	p, _ := New(Config{
 		Providers: []Provider{{Name: "anthropic", UpstreamURL: "http://127.0.0.1:1"}},
 		ProjectID: "test",
 	}, submitter, calc)
@@ -282,7 +282,7 @@ func TestUpstream500_TracksErrorInSpan(t *testing.T) {
 	submitter := &mockSubmitter{}
 	calc := newCalcWithTestModels()
 
-	p := New(Config{
+	p, _ := New(Config{
 		Providers: []Provider{{Name: "anthropic", UpstreamURL: upstream.URL}},
 		ProjectID: "test",
 	}, submitter, calc)
@@ -373,7 +373,7 @@ func TestStreamingSSE_EndToEnd_WithTranslation(t *testing.T) {
 	submitter := &mockSubmitter{}
 	calc := newCalcWithTestModels()
 
-	p := New(Config{
+	p, _ := New(Config{
 		Providers: []Provider{{
 			Name:             "anthropic",
 			UpstreamURL:      upstream.URL,
@@ -463,7 +463,7 @@ func TestStreamingSSE_Passthrough_NoTranslation(t *testing.T) {
 	submitter := &mockSubmitter{}
 	calc := newCalcWithTestModels()
 
-	p := New(Config{
+	p, _ := New(Config{
 		Providers: []Provider{{Name: "openai", UpstreamURL: upstream.URL}},
 		ProjectID: "test",
 	}, submitter, calc)

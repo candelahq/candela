@@ -57,7 +57,7 @@ func TestUpstreamError_DoesNotLeakURL(t *testing.T) {
 	// C-2: Error response should not contain internal URLs.
 	// Set up a proxy with a provider that has an unreachable upstream.
 	calc := newTestCalc()
-	proxy := New(Config{
+	proxy, _ := New(Config{
 		Providers: []Provider{
 			{Name: "openai", UpstreamURL: "http://192.168.0.1:99999"},
 		},

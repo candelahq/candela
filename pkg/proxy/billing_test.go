@@ -66,7 +66,7 @@ func TestPricingGate_BlocksUnknownCloudModel(t *testing.T) {
 	calc := costcalc.New()
 	// "anthropic" has default pricing, but "mystery-model" is not registered.
 
-	p := New(Config{
+	p, _ := New(Config{
 		Providers: []Provider{{Name: "anthropic", UpstreamURL: upstream.URL}},
 		ProjectID: "test",
 	}, submitter, calc)
@@ -129,7 +129,7 @@ func TestPricingGate_AllowsLocalProvider(t *testing.T) {
 	submitter := &mockSubmitter{}
 	calc := costcalc.New()
 
-	p := New(Config{
+	p, _ := New(Config{
 		Providers: []Provider{{Name: "local", UpstreamURL: upstream.URL}},
 		ProjectID: "test",
 	}, submitter, calc)
@@ -181,7 +181,7 @@ func TestBudgetFloor_ExhaustedUserBlocked(t *testing.T) {
 	submitter := &mockSubmitter{}
 	calc := costcalc.New()
 
-	p := New(Config{
+	p, _ := New(Config{
 		Providers: []Provider{{Name: "anthropic", UpstreamURL: upstream.URL}},
 		ProjectID: "test",
 	}, submitter, calc)
@@ -234,7 +234,7 @@ func TestProxy_PricingGate_KnownModelAllowed(t *testing.T) {
 	calc := costcalc.New()
 	// claude-sonnet-4-20250514 is in the default pricing table.
 
-	p := New(Config{
+	p, _ := New(Config{
 		Providers: []Provider{{Name: "anthropic", UpstreamURL: upstream.URL}},
 		ProjectID: "test",
 	}, submitter, calc)
@@ -282,7 +282,7 @@ func TestProxy_BudgetFloor_ZeroBalance_Blocked(t *testing.T) {
 	submitter := &mockSubmitter{}
 	calc := costcalc.New()
 
-	p := New(Config{
+	p, _ := New(Config{
 		Providers: []Provider{{Name: "anthropic", UpstreamURL: upstream.URL}},
 		ProjectID: "test",
 	}, submitter, calc)

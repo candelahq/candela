@@ -738,13 +738,17 @@ func main() {
 		}
 
 		if len(activeProviders) > 0 {
-			llmProxy = proxy.New(proxy.Config{
+			llmProxy, err = proxy.New(proxy.Config{
 				Providers:      activeProviders,
 				ProjectID:      cfg.Proxy.ProjectID,
 				MaxRequestCost: cfg.Proxy.MaxRequestCost,
 				DailyLimits:    cfg.Proxy.DailyLimits,
 				Policy:         cfg.Proxy.Policy,
 			}, proc, calc)
+			if err != nil {
+				slog.Error("invalid proxy configuration", "error", err)
+				os.Exit(1)
+			}
 
 			// Wire team-mode features if Firestore is available.
 			if userStore != nil {

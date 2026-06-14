@@ -80,7 +80,7 @@ func TestBedrockProxyIntegration(t *testing.T) {
 		Provider: "anthropic", Model: "anthropic.claude-3-5-sonnet-20241022-v2:0",
 		InputPerMillion: 3.00, OutputPerMillion: 15.00,
 	})
-	p := New(Config{
+	p, _ := New(Config{
 		ProjectID: "test",
 		Providers: []Provider{
 			{
@@ -176,7 +176,7 @@ func TestBedrockProxyIntegration_SignerError(t *testing.T) {
 		Provider: "anthropic", Model: "anthropic.claude-3-5-sonnet-20241022-v2:0",
 		InputPerMillion: 3.00, OutputPerMillion: 15.00,
 	})
-	p := New(Config{
+	p, _ := New(Config{
 		ProjectID: "test",
 		Providers: []Provider{
 			{
@@ -234,7 +234,7 @@ func TestBedrockProxyIntegration_StreamingPath(t *testing.T) {
 		Provider: "anthropic", Model: "anthropic.claude-3-5-sonnet-20241022-v2:0",
 		InputPerMillion: 3.00, OutputPerMillion: 15.00,
 	})
-	p := New(Config{
+	p, _ := New(Config{
 		ProjectID: "test",
 		Providers: []Provider{
 			{

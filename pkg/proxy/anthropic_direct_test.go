@@ -48,7 +48,7 @@ func TestAnthropicDirect_EndToEnd_Passthrough(t *testing.T) {
 	submitter := &mockSubmitter{}
 	calc := costcalc.New()
 
-	p := New(Config{
+	p, _ := New(Config{
 		Providers: []Provider{{Name: "anthropic-direct", UpstreamURL: upstream.URL}},
 		ProjectID: "test-project",
 	}, submitter, calc)
@@ -164,7 +164,7 @@ func TestAnthropicDirect_NoADCInjection(t *testing.T) {
 	calc := costcalc.New()
 
 	// No TokenSource — that's the point.
-	p := New(Config{
+	p, _ := New(Config{
 		Providers: []Provider{{Name: "anthropic-direct", UpstreamURL: upstream.URL}},
 		ProjectID: "test",
 	}, submitter, calc)
@@ -222,7 +222,7 @@ func TestAnthropicDirect_StreamingPassthrough(t *testing.T) {
 	submitter := &mockSubmitter{}
 	calc := costcalc.New()
 
-	p := New(Config{
+	p, _ := New(Config{
 		Providers: []Provider{{Name: "anthropic-direct", UpstreamURL: upstream.URL}},
 		ProjectID: "test",
 	}, submitter, calc)
@@ -321,7 +321,7 @@ func TestAnthropicDirect_UserAttribution(t *testing.T) {
 	submitter := &mockSubmitter{}
 	calc := costcalc.New()
 
-	p := New(Config{
+	p, _ := New(Config{
 		Providers: []Provider{{Name: "anthropic-direct", UpstreamURL: upstream.URL}},
 		ProjectID: "test",
 	}, submitter, calc)
@@ -506,7 +506,7 @@ func TestAnthropicDirect_CountTokens_NoSpan(t *testing.T) {
 	submitter := &mockSubmitter{}
 	calc := costcalc.New()
 
-	p := New(Config{
+	p, _ := New(Config{
 		Providers: []Provider{{Name: "anthropic-direct", UpstreamURL: upstream.URL}},
 		ProjectID: "test",
 	}, submitter, calc)

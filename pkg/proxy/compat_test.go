@@ -83,7 +83,7 @@ func TestCompatRoutes_GetModels(t *testing.T) {
 	submitter := &mockSubmitter{}
 	calc := newCalcWithTestModels()
 
-	p := New(Config{
+	p, _ := New(Config{
 		Providers: []Provider{{Name: "openai", UpstreamURL: "http://unused"}},
 		ProjectID: "test",
 	}, submitter, calc)
@@ -147,7 +147,7 @@ func TestCompatRoutes_ChatCompletions_RoutesToProvider(t *testing.T) {
 	submitter := &mockSubmitter{}
 	calc := newCalcWithTestModels()
 
-	p := New(Config{
+	p, _ := New(Config{
 		Providers: []Provider{{Name: "openai", UpstreamURL: upstream.URL}},
 		ProjectID: "test",
 	}, submitter, calc)
@@ -215,7 +215,7 @@ func TestCompatRoutes_ChatCompletions_UnknownModel(t *testing.T) {
 	submitter := &mockSubmitter{}
 	calc := newCalcWithTestModels()
 
-	p := New(Config{
+	p, _ := New(Config{
 		Providers: []Provider{{Name: "openai", UpstreamURL: "http://unused"}},
 		ProjectID: "test",
 	}, submitter, calc)
@@ -255,7 +255,7 @@ func TestCompatRoutes_ChatCompletions_MissingModel(t *testing.T) {
 	submitter := &mockSubmitter{}
 	calc := newCalcWithTestModels()
 
-	p := New(Config{
+	p, _ := New(Config{
 		Providers: []Provider{{Name: "openai", UpstreamURL: "http://unused"}},
 		ProjectID: "test",
 	}, submitter, calc)
@@ -291,7 +291,7 @@ func TestCompatRoutes_ChatCompletions_InvalidJSON(t *testing.T) {
 	submitter := &mockSubmitter{}
 	calc := newCalcWithTestModels()
 
-	p := New(Config{
+	p, _ := New(Config{
 		Providers: []Provider{{Name: "openai", UpstreamURL: "http://unused"}},
 		ProjectID: "test",
 	}, submitter, calc)

@@ -29,7 +29,7 @@ func TestIntegration_BudgetGateBlocksViaCompatRoute(t *testing.T) {
 	submitter := &mockSubmitter{}
 	calc := newCalcWithTestModels()
 
-	p := New(Config{
+	p, _ := New(Config{
 		Providers: []Provider{{Name: "openai", UpstreamURL: upstream.URL}},
 		ProjectID: "test-budget-compat-v5",
 	}, submitter, calc)
@@ -94,7 +94,7 @@ func TestIntegration_StreamingResponseForwarding(t *testing.T) {
 	submitter := &mockSubmitter{}
 	calc := newCalcWithTestModels()
 
-	p := New(Config{
+	p, _ := New(Config{
 		Providers: []Provider{{Name: "openai", UpstreamURL: upstream.URL}},
 		ProjectID: "test-stream",
 	}, submitter, calc)
@@ -161,7 +161,7 @@ func TestIntegration_CircuitBreakerTrips(t *testing.T) {
 	submitter := &mockSubmitter{}
 	calc := newCalcWithTestModels()
 
-	p := New(Config{
+	p, _ := New(Config{
 		Providers: []Provider{{Name: "openai", UpstreamURL: upstream.URL}},
 		ProjectID: "test-cb-v5",
 	}, submitter, calc)
@@ -197,7 +197,7 @@ func TestIntegration_CircuitBreakerTrips(t *testing.T) {
 
 func TestIntegration_CompatModelsEndpoint(t *testing.T) {
 	calc := newCalcWithTestModels()
-	p := New(Config{
+	p, _ := New(Config{
 		Providers: []Provider{{Name: "openai", UpstreamURL: "http://localhost:1"}},
 		ProjectID: "test-models",
 	}, nil, calc)
@@ -246,7 +246,7 @@ func TestIntegration_ServiceAccountSkipsBudget(t *testing.T) {
 	submitter := &mockSubmitter{}
 	calc := newCalcWithTestModels()
 
-	p := New(Config{
+	p, _ := New(Config{
 		Providers: []Provider{{Name: "openai", UpstreamURL: upstream.URL}},
 		ProjectID: "test-sa-v5",
 	}, submitter, calc)
@@ -325,7 +325,7 @@ func TestIntegration_ProxyCallsTouchLastActive(t *testing.T) {
 		},
 	}
 
-	p := New(Config{
+	p, _ := New(Config{
 		Providers: []Provider{{Name: "openai", UpstreamURL: upstream.URL}},
 		ProjectID: "test-touch-active",
 	}, submitter, calc)

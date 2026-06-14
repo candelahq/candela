@@ -22,7 +22,7 @@ func TestCompatRoute_ModelNameInjection(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	p := New(Config{
+	p, _ := New(Config{
 		Providers: []Provider{{Name: "openai", UpstreamURL: upstream.URL}},
 		ProjectID: "test",
 	}, submitter, calc)
@@ -78,7 +78,7 @@ func TestHandleProxy_MaxBytesError413(t *testing.T) {
 	submitter := &mockSubmitter{}
 	calc := newCalcWithTestModels()
 
-	p := New(Config{
+	p, _ := New(Config{
 		Providers: []Provider{{Name: "openai", UpstreamURL: upstream.URL}},
 		ProjectID: "test",
 	}, submitter, calc)
@@ -113,7 +113,7 @@ func TestHandleProxy_UnknownProviderSanitized(t *testing.T) {
 	submitter := &mockSubmitter{}
 	calc := newCalcWithTestModels()
 
-	p := New(Config{
+	p, _ := New(Config{
 		Providers: []Provider{{Name: "openai", UpstreamURL: "http://localhost:1"}},
 		ProjectID: "test",
 	}, submitter, calc)
@@ -163,7 +163,7 @@ func TestRequestID_UsesTraceIDFormat(t *testing.T) {
 
 	submitter := &mockSubmitter{}
 	calc := newCalcWithTestModels()
-	p := New(Config{
+	p, _ := New(Config{
 		Providers: []Provider{{Name: "openai", UpstreamURL: upstream.URL}},
 		ProjectID: "test",
 	}, submitter, calc)
@@ -196,7 +196,7 @@ func TestRequestID_UsesTraceIDFormat(t *testing.T) {
 func TestHandleProxy_EmptyPath(t *testing.T) {
 	submitter := &mockSubmitter{}
 	calc := newCalcWithTestModels()
-	p := New(Config{
+	p, _ := New(Config{
 		Providers: []Provider{{Name: "openai", UpstreamURL: "http://localhost:1"}},
 		ProjectID: "test",
 	}, submitter, calc)
@@ -216,7 +216,7 @@ func TestHandleProxy_GETModelsRoute(t *testing.T) {
 	submitter := &mockSubmitter{}
 	calc := newCalcWithTestModels()
 
-	p := New(Config{
+	p, _ := New(Config{
 		Providers: []Provider{{Name: "anthropic", UpstreamURL: "http://localhost:1"}},
 		ProjectID: "test",
 	}, submitter, calc)

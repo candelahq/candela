@@ -49,7 +49,7 @@ func TestProxy_EndToEnd_OpenAI(t *testing.T) {
 	submitter := &mockSubmitter{}
 	calc := newCalcWithTestModels()
 
-	p := New(Config{
+	p, _ := New(Config{
 		Providers: []Provider{{Name: "openai", UpstreamURL: upstream.URL}},
 		ProjectID: "test-project",
 	}, submitter, calc)
@@ -125,7 +125,7 @@ func TestProxy_EndToEnd_CompatBudgetExhausted(t *testing.T) {
 	submitter := &mockSubmitter{}
 	calc := newCalcWithTestModels()
 
-	p := New(Config{
+	p, _ := New(Config{
 		Providers: []Provider{{Name: "openai", UpstreamURL: upstream.URL}},
 		ProjectID: "test-budget-compat",
 	}, submitter, calc)
@@ -181,7 +181,7 @@ func TestProxy_EndToEnd_W3CTraceContext(t *testing.T) {
 
 	submitter := &mockSubmitter{}
 	calc := newCalcWithTestModels()
-	p := New(Config{
+	p, _ := New(Config{
 		Providers: []Provider{{Name: "openai", UpstreamURL: upstream.URL}},
 		ProjectID: "test-trace",
 	}, submitter, calc)

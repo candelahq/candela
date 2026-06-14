@@ -179,7 +179,7 @@ func TestProxy_TenantID_HeaderPropagatedToSpan(t *testing.T) {
 	defer upstream.Close()
 
 	sub := &mockSubmitter{}
-	p := New(Config{
+	p, _ := New(Config{
 		Providers: []Provider{{Name: "openai", UpstreamURL: upstream.URL}},
 		ProjectID: "proj-test",
 	}, sub, newCalcWithTestModels())
@@ -226,7 +226,7 @@ func TestProxy_TenantID_BaggageWinsOverHeader(t *testing.T) {
 	defer upstream.Close()
 
 	sub := &mockSubmitter{}
-	p := New(Config{
+	p, _ := New(Config{
 		Providers: []Provider{{Name: "openai", UpstreamURL: upstream.URL}},
 		ProjectID: "proj-test",
 	}, sub, newCalcWithTestModels())
@@ -273,7 +273,7 @@ func TestProxy_TenantID_AbsentHeaderLeavesEmpty(t *testing.T) {
 	defer upstream.Close()
 
 	sub := &mockSubmitter{}
-	p := New(Config{
+	p, _ := New(Config{
 		Providers: []Provider{{Name: "openai", UpstreamURL: upstream.URL}},
 		ProjectID: "proj-test",
 	}, sub, newCalcWithTestModels())
@@ -319,7 +319,7 @@ func TestProxy_TenantID_InvalidHeaderRejected(t *testing.T) {
 	defer upstream.Close()
 
 	sub := &mockSubmitter{}
-	p := New(Config{
+	p, _ := New(Config{
 		Providers: []Provider{{Name: "openai", UpstreamURL: upstream.URL}},
 		ProjectID: "proj-test",
 	}, sub, newCalcWithTestModels())
@@ -367,7 +367,7 @@ func TestProxy_TenantID_MultiBaggageHeaders(t *testing.T) {
 	defer upstream.Close()
 
 	sub := &mockSubmitter{}
-	p := New(Config{
+	p, _ := New(Config{
 		Providers: []Provider{{Name: "openai", UpstreamURL: upstream.URL}},
 		ProjectID: "proj-test",
 	}, sub, newCalcWithTestModels())
@@ -412,7 +412,7 @@ func TestProxy_TenantID_Precedence(t *testing.T) {
 	defer upstream.Close()
 
 	sub := &mockSubmitter{}
-	p := New(Config{
+	p, _ := New(Config{
 		Providers: []Provider{{Name: "openai", UpstreamURL: upstream.URL}},
 		ProjectID: "proj-test",
 	}, sub, newCalcWithTestModels())
@@ -447,7 +447,7 @@ func TestProxy_TenantID_Streaming(t *testing.T) {
 	defer upstream.Close()
 
 	sub := &mockSubmitter{}
-	p := New(Config{
+	p, _ := New(Config{
 		Providers: []Provider{{Name: "openai", UpstreamURL: upstream.URL}},
 		ProjectID: "proj-test",
 	}, sub, newCalcWithTestModels())

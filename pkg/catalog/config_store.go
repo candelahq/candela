@@ -54,6 +54,11 @@ func (s *ConfigStore) Update(_ context.Context, _ Entry) error {
 	return ErrReadOnly
 }
 
+// Delete always returns ErrReadOnly — ConfigStore is immutable.
+func (s *ConfigStore) Delete(_ context.Context, _, _ string) error {
+	return ErrReadOnly
+}
+
 // Source returns "config".
 func (s *ConfigStore) Source() string { return "config" }
 

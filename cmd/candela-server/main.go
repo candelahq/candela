@@ -368,11 +368,16 @@ func main() {
 		connecthandlers.NewProjectHandler(projectStore))
 	mux.Handle(projectPath, projectH)
 
+	catalogPath, catalogH := candelav1connect.NewModelCatalogServiceHandler(
+		connecthandlers.NewCatalogHandler(catalogStore, userStore))
+	mux.Handle(catalogPath, catalogH)
+
 	slog.Info("ConnectRPC services registered",
 		"trace", tracePath,
 		"ingestion", ingestionPath,
 		"dashboard", dashboardPath,
-		"project", projectPath)
+		"project", projectPath,
+		"catalog", catalogPath)
 
 	// Register LLM proxy routes (selective activation).
 	if cfg.Proxy.Enabled {

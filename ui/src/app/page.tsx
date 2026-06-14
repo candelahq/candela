@@ -1,14 +1,19 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
 import { useDashboard } from "@/hooks/useDashboard";
+import { useCurrentUser } from "@/hooks/useCurrentUser";
 import { AreaChart } from "@/components/chart";
 import { TimeRangeSelector } from "@/components/TimeRangeSelector";
 import { ScopeToggle } from "@/components/ScopeToggle";
 import { useScope } from "@/components/UserScopeProvider";
 import { ErrorBanner } from "@/components/ErrorBanner";
 import { SkeletonCard } from "@/components/SkeletonCard";
+import { TenantLeaderboard } from "@/components/TenantLeaderboard";
 import { SpanStatus } from "@/gen/candela/types/trace_pb";
+
+type DashboardTab = "overview" | "tenants";
 
 // ──────────────────────────────────────────
 // Status helpers
@@ -25,6 +30,8 @@ const statusLabel = (s: number) => {
 
 export default function DashboardPage() {
   const { includeBudget } = useScope();
+  const { isAdmin } = useCurrentUser();
+  const [activeTab, setActiveTab] = useState<DashboardTab>("overview");
   const {
     summary,
     recentTraces,
@@ -42,17 +49,43 @@ export default function DashboardPage() {
   return (
     <>
       <header className="main-header">
-        <h1>Dashboard</h1>
+        <div>
+          <h1>Dashboard</h1>
+          {isAdmin && (
+            <div className="dashboard-tabs" style={{ display: "flex", gap: 0, marginTop: 8 }}>
+              <button
+                className={`dashboard-tab ${activeTab === "overview" ? "dashboard-tab--active" : ""}`}
+                onClick={() => setActiveTab("overview")}
+              >
+                Overview
+              </button>
+              <button
+                className={`dashboard-tab ${activeTab === "tenants" ? "dashboard-tab--active" : ""}`}
+                onClick={() => setActiveTab("tenants")}
+              >
+                🏢 Tenants
+              </button>
+            </div>
+          )}
+        </div>
         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
           <ScopeToggle />
-          <TimeRangeSelector value={timeRange} onChange={setTimeRange} />
-          <button className="btn" onClick={refresh}>
-            🔄
-          </button>
+          {activeTab === "overview" && (
+            <TimeRangeSelector value={timeRange} onChange={setTimeRange} />
+          )}
+          {activeTab === "overview" && (
+            <button className="btn" onClick={refresh}>
+              🔄
+            </button>
+          )}
         </div>
       </header>
 
       <div className="main-body">
+        {activeTab === "tenants" && isAdmin ? (
+          <TenantLeaderboard />
+        ) : (
+        <>
         {error && (
           <ErrorBanner title="Dashboard Error">
             {error}
@@ -259,7 +292,46 @@ export default function DashboardPage() {
             </table>
           )}
         </div>
+        </>
+        )}
       </div>
+
+      <style jsx>{`
+        .dashboard-tabs {
+          display: flex;
+          gap: 0;
+        }
+        .dashboard-tab {
+          padding: 6px 16px;
+          font-size: 13px;
+          font-weight: 500;
+          border: 1px solid var(--border);
+          background: transparent;
+          color: var(--text-muted);
+          cursor: pointer;
+          transition: all 0.15s ease;
+        }
+        .dashboard-tab:first-child {
+          border-radius: 6px 0 0 6px;
+        }
+        .dashboard-tab:last-child {
+          border-radius: 0 6px 6px 0;
+          border-left: none;
+        }
+        .dashboard-tab:hover {
+          background: var(--bg-tertiary);
+          color: var(--text-primary);
+        }
+        .dashboard-tab--active {
+          background: var(--accent);
+          color: var(--bg-primary);
+          border-color: var(--accent);
+        }
+        .dashboard-tab--active:hover {
+          background: var(--accent);
+          color: var(--bg-primary);
+        }
+      `}</style>
     </>
   );
 }

@@ -8,6 +8,8 @@ import (
 	"errors"
 	"strings"
 	"time"
+
+	"github.com/candelahq/candela/pkg/billing"
 )
 
 // ErrNotFound indicates that the requested resource does not exist.
@@ -499,46 +501,15 @@ type UserRecord struct {
 	RateLimit    *int      `json:"rate_limit,omitempty"`     // nil = unchanged; &0 = clear to default
 }
 
-// BudgetRecord is the Go representation of a user's recurring budget.
-type BudgetRecord struct {
-	UserID     string  `json:"user_id"`
-	LimitUSD   float64 `json:"limit_usd,omitempty"`
-	SpentUSD   float64 `json:"spent_usd,omitempty"`
-	TokensUsed int64   `json:"tokens_used,omitempty"`
-	// AllTokensUsed is incremented for every LLM call before the grants waterfall —
-	// regardless of whether the cost was absorbed by a grant or the budget.
-	// This gives GetMyBudget an accurate "tokens used today" count from Firestore
-	// without needing BigQuery. Contrast with TokensUsed, which is budget-portion only.
-	AllTokensUsed int64     `json:"all_tokens_used,omitempty"`
-	PeriodType    string    `json:"period_type,omitempty"` // "daily"
-	PeriodKey     string    `json:"period_key,omitempty"`  // "2026-04", "2026-W15"
-	PeriodStart   time.Time `json:"period_start,omitempty"`
-	PeriodEnd     time.Time `json:"period_end,omitempty"`
-}
+// BudgetRecord is a type alias for billing.BudgetRecord.
+// The canonical type lives in pkg/billing; this alias preserves backward
+// compatibility for existing code that references storage.BudgetRecord.
+type BudgetRecord = billing.BudgetRecord
 
-// GrantRecord is the Go representation of a one-time budget grant.
-type GrantRecord struct {
-	ID        string    `json:"id"`
-	UserID    string    `json:"user_id"`
-	AmountUSD float64   `json:"amount_usd,omitempty"`
-	SpentUSD  float64   `json:"spent_usd,omitempty"`
-	Reason    string    `json:"reason,omitempty"`
-	GrantedBy string    `json:"granted_by,omitempty"`
-	StartsAt  time.Time `json:"starts_at,omitempty"`
-	ExpiresAt time.Time `json:"expires_at,omitempty"`
-	CreatedAt time.Time `json:"created_at,omitempty"`
-}
+// GrantRecord is a type alias for billing.GrantRecord.
+type GrantRecord = billing.GrantRecord
 
-// Remaining returns how much of this grant is still available.
-// Clamped to 0 to prevent floating-point overdraft from reducing
-// the apparent total budget in CheckBudget (BILL-3).
-func (g *GrantRecord) Remaining() float64 {
-	r := g.AmountUSD - g.SpentUSD
-	if r < 0 {
-		return 0
-	}
-	return r
-}
+// Note: GrantRecord.Remaining() is defined on the canonical type in pkg/billing.
 
 // AuditRecord is the Go representation of an admin audit log entry.
 type AuditRecord struct {
@@ -550,14 +521,8 @@ type AuditRecord struct {
 	Timestamp  time.Time `json:"timestamp"`
 }
 
-// BudgetCheckResult is returned by CheckBudget.
-type BudgetCheckResult struct {
-	Allowed       bool    // Whether the estimated cost is within budget
-	RemainingUSD  float64 // Total remaining across grants + budget
-	GrantsUSD     float64 // Remaining in active grants
-	BudgetUSD     float64 // Remaining in recurring budget
-	EstimatedCost float64 // The estimated cost that was checked
-}
+// BudgetCheckResult is a type alias for billing.BudgetCheckResult.
+type BudgetCheckResult = billing.BudgetCheckResult
 
 // UserStore manages users, budgets, grants, audit, and rate limits.
 // Implemented by firestoredb for production.
@@ -613,6 +578,9 @@ type UserStore interface {
 	// RevokeGrant cancels an active grant by setting its expiry to now.
 	RevokeGrant(ctx context.Context, userID, grantID string) error
 
+	// GetGrant returns a specific grant by ID.
+	GetGrant(ctx context.Context, userID, grantID string) (*GrantRecord, error)
+
 	// ── Budget Enforcement ──
 
 	// CheckBudget evaluates whether an estimated cost is within the user's budget.
@@ -648,19 +616,8 @@ type UserStore interface {
 	Close() error
 }
 
-// BudgetAlert represents a threshold notification event.
-type BudgetAlert struct {
-	UserID    string    `json:"user_id" firestore:"user_id"`
-	Email     string    `json:"email" firestore:"email"`
-	Threshold float64   `json:"threshold" firestore:"threshold"` // 0.8, 0.9, 1.0
-	SpentUSD  float64   `json:"spent_usd" firestore:"spent_usd"`
-	LimitUSD  float64   `json:"limit_usd" firestore:"limit_usd"`
-	PeriodKey string    `json:"period_key" firestore:"period_key"`
-	SentAt    time.Time `json:"sent_at" firestore:"sent_at"`
-}
+// BudgetAlert is a type alias for billing.BudgetAlert.
+type BudgetAlert = billing.BudgetAlert
 
-// Notifier sends budget alerts through a specific channel.
-// Implementations: logging (v1), Slack, Microsoft Teams.
-type Notifier interface {
-	NotifyBudgetThreshold(ctx context.Context, alert BudgetAlert) error
-}
+// Notifier is a type alias for billing.Notifier.
+type Notifier = billing.Notifier

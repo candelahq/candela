@@ -29,6 +29,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
+	"github.com/candelahq/candela/pkg/billing"
 	"github.com/candelahq/candela/pkg/storage"
 )
 
@@ -814,6 +815,16 @@ func (s *Store) RevokeGrant(ctx context.Context, userID, grantID string) error {
 	return nil
 }
 
+func (s *Store) GetGrant(ctx context.Context, userID, grantID string) (*storage.GrantRecord, error) {
+	userID = sanitizeID(userID)
+	snap, err := s.client.Collection(usersCol).Doc(userID).
+		Collection(grantsCol).Doc(grantID).Get(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("firestoredb: getting grant %s: %w", grantID, err)
+	}
+	return snapToGrant(snap)
+}
+
 // ──────────────────────────────────────────
 // Budget Enforcement
 // ──────────────────────────────────────────
@@ -857,6 +868,7 @@ func (s *Store) CheckBudget(ctx context.Context, userID string, estimatedCostUSD
 	} else if user != nil && user.Status == storage.StatusInactive {
 		return &storage.BudgetCheckResult{
 			Allowed:       false,
+			Reason:        billing.ReasonNoBudget,
 			RemainingUSD:  0,
 			EstimatedCost: estimatedCostUSD,
 		}, nil
@@ -877,6 +889,7 @@ func (s *Store) CheckBudget(ctx context.Context, userID string, estimatedCostUSD
 				"user_id", sanitizedUID)
 			return &storage.BudgetCheckResult{
 				Allowed:       false,
+				Reason:        billing.ReasonSoftBlocked,
 				RemainingUSD:  0,
 				EstimatedCost: estimatedCostUSD,
 			}, nil
@@ -907,8 +920,18 @@ func (s *Store) CheckBudget(ctx context.Context, userID string, estimatedCostUSD
 	}
 
 	totalRemaining := grantsRemaining + budgetRemaining
+	allowed := totalRemaining >= estimatedCostUSD
+	reason := billing.ReasonAllowed
+	if !allowed {
+		if budget == nil && grantsRemaining == 0 {
+			reason = billing.ReasonNoBudget
+		} else {
+			reason = billing.ReasonBudgetExhausted
+		}
+	}
 	return &storage.BudgetCheckResult{
-		Allowed:       totalRemaining >= estimatedCostUSD,
+		Allowed:       allowed,
+		Reason:        reason,
 		RemainingUSD:  totalRemaining,
 		GrantsUSD:     grantsRemaining,
 		BudgetUSD:     budgetRemaining,
@@ -1363,3 +1386,4 @@ func sanitizeID(id string) string {
 
 // Ensure Store implements UserStore at compile time.
 var _ storage.UserStore = (*Store)(nil)
+var _ billing.Service = (*Store)(nil)

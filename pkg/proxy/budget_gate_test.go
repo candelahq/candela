@@ -62,6 +62,9 @@ func (b *budgetUserStore) ListGrants(context.Context, string, bool) ([]*storage.
 	return nil, nil
 }
 func (b *budgetUserStore) RevokeGrant(context.Context, string, string) error { return nil }
+func (b *budgetUserStore) GetGrant(context.Context, string, string) (*storage.GrantRecord, error) {
+	return nil, nil
+}
 func (b *budgetUserStore) DeductSpend(context.Context, string, float64, int64) error {
 	return nil
 }

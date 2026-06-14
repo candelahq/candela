@@ -84,7 +84,8 @@ candela/
 │   ├── ingestion/              #   OTel span ingestion
 │   ├── runtime/                #   Local LLM runtime abstraction
 │   ├── session/                #   Session resolution
-│   └── notify/                 #   Budget threshold notifications
+│   ├── notify/                 #   Budget threshold notifications
+│   └── billing/                #   Storage-agnostic billing types and Service interface
 │
 ├── ui/                         # Next.js 16 web interface
 │   ├── src/app/                #   App Router pages
@@ -117,6 +118,11 @@ candela/
 - **`deploy/`** — Docker and Helm configs for production deployments.
 - **`docs/`** — Deep-dive docs on architecture, security, proxy internals, and more.
 - **`gen/`** — Auto-generated code from protobuf definitions. **Don't edit these files directly** — they're regenerated from [`candelahq/candela-protos`](https://github.com/candelahq/candela-protos) via `buf generate`.
+
+### Key files to know
+
+- **`pkg/costcalc/pricing.yaml`** — Built-in list prices for all cloud models. **This is where you add pricing for new models.** It's embedded at compile time via `//go:embed`.
+- **`pkg/billing/`** — Storage-agnostic billing types (`BudgetRecord`, `GrantRecord`, `BudgetCheckResult`) and the `Service` interface. If you're adding billing features, implement against this interface.
 
 ---
 

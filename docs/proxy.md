@@ -349,6 +349,38 @@ For full observability with unified OTel traces (agent DAG + proxy spans in one 
 
 ---
 
+## 🚫 Model Allowlist / Policy Gate
+
+Candela supports a model allowlist that restricts which models users can access through the proxy. When configured, requests to unlisted models receive a **403 Forbidden** response with an audit log entry.
+
+### Configuration
+
+Add a `policy.allowed_models` section under `proxy:` in `config.yaml`:
+
+```yaml
+proxy:
+  policy:
+    allowed_models:
+      - provider: openai
+        models: ["gpt-4o", "gpt-4o-mini"]
+      - provider: anthropic
+        models: ["claude-sonnet-4-*"]    # glob patterns supported
+      - provider: gemini-oai
+        models: ["gemini-2.5-flash-*", "gemini-2.5-pro-*"]
+```
+
+### Behavior
+
+- **Glob patterns**: Use `*` wildcards to match model families (e.g., `claude-sonnet-4-*` matches all dated variants)
+- **Omit to allow all**: If `policy.allowed_models` is omitted or empty, all models are allowed (backward compatible)
+- **403 response**: Blocked requests return `403 Forbidden` with a JSON error body:
+  ```json
+  {"error": {"message": "model not allowed by policy", "type": "forbidden", "code": 403}}
+  ```
+- **Audit trail**: Every blocked request is logged with the user ID, requested model, and provider for security auditing
+
+---
+
 ## 🛠️ Advanced Proxy Config
 
 Configuration is done via `config.yaml`:

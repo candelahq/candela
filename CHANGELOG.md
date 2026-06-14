@@ -2,6 +2,71 @@
 
 All notable changes to Candela are documented here, organized by development phase. PRs are merged to `main`.
 
+## v0.5.7 — 2026-06-14
+
+### Pricing Engine Overhaul (Batch 8)
+
+#### `pricing.yaml` Extraction
+- Extract all built-in model pricing from `calculator.go` into a dedicated `pkg/costcalc/pricing.yaml` file
+- Embed at compile time via `//go:embed` — parsed by `loadDefaults()` at startup
+- Strict validation: panics on missing provider/model or non-positive prices
+- Pricing drift test (`drift_test.go`) ensures YAML stays in sync with snapshot
+
+#### `normalizeModelID` for Vertex AI Compatibility
+- New `normalizeModelID()` function converts hyphen-separated version suffixes to dotted form
+- Handles Vertex AI model IDs (e.g., `claude-3-5-sonnet-20241022` → `claude-3.5-sonnet-20241022`)
+- Only the canonical (dotted) form needs to exist in `pricing.yaml`
+- Comprehensive test coverage including edge cases in `audit_unit_test.go`
+
+#### Opus Pricing Fix
+- Correct Claude Opus 4 pricing in `pricing.yaml` (was using Sonnet rates)
+
+### Model Allowlist / Policy Gate (Batch 8)
+- `policy.allowed_models` config restricts which models users can access through the proxy
+- Glob pattern support (e.g., `claude-sonnet-4-*` matches all dated variants)
+- 403 Forbidden response for blocked models with JSON error body
+- Audit log entry for every blocked request (user ID, model, provider)
+- Backward compatible: omitting the config allows all models
+
+### Billing Interface Extraction (Batch 8)
+- New `pkg/billing/` package with storage-agnostic types and `Service` interface
+- Extracted `BudgetRecord`, `GrantRecord`, `BudgetCheckResult`, `BudgetAlert` from `pkg/storage`
+- `Reason` field in `BudgetCheckResult` with constants: `allowed`, `budget_exhausted`, `soft_blocked`, `no_budget`
+- `pkg/storage/store.go` now uses type aliases pointing to `pkg/billing`
+
+### Budget & Grant Enhancements (Batch 9)
+
+#### Configurable Budget Timezone
+- `budget.timezone` config field (IANA timezone names, e.g., `America/New_York`)
+- Controls when daily/weekly/monthly budget periods roll over
+- `import _ "time/tzdata"` embeds timezone database for scratch/distroless containers
+- Default: UTC (backward compatible)
+
+#### `StartsAt` Grant Filtering
+- Future-dated grants excluded from the active grant waterfall in `DeductSpend()`
+- Filters on `starts_at <= now` before sorting by expiry
+- Prevents early consumption of grants scheduled for later dates
+
+#### `GetGrant` API
+- New `GetGrant` RPC endpoint for fetching individual grant details
+- Returns full grant record with computed remaining balance
+
+### Tenant Cost Leaderboard (Batch 9)
+- Per-tenant cost ranking in the team mode dashboard
+- Leaderboard data served via existing `GetUserLeaderboard` RPC
+
+### Frontend Test Infrastructure (Batch 9)
+- Vitest integration for React component and hook unit testing
+- Fast HMR-powered test runner alongside existing Playwright E2E suite
+
+### DE Audit Findings (Batch 9)
+- Fix NaN propagation in cost calculations for edge-case token counts
+- Fix `DeductSpend` time drift — use server-received timestamp, not client-sent
+- Clamp `GrantRecord.Remaining()` to 0 to prevent negative float artifacts
+- ~245 new tests added across Batches 1–9
+
+---
+
 ## v0.5.6 — 2026-05-27
 
 ### IAP Auth Fixes (#289)

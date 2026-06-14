@@ -44,13 +44,36 @@ Step 5 means there's a gap — the model is missing from both the config and bui
 
 The calculator ships with built-in list prices for **all cloud models** reachable through the Candela proxy (OpenAI, Google, Anthropic). These are standard list prices — not negotiated rates.
 
-See the current pricing table in [`pkg/costcalc/calculator.go` → `loadDefaults()`](../pkg/costcalc/calculator.go) for exact rates.
+See the current pricing table in [`pkg/costcalc/pricing.yaml`](../pkg/costcalc/pricing.yaml), which is embedded at compile time via `//go:embed`. The `loadDefaults()` function in `calculator.go` parses this file at startup.
 
 **Coverage:**
 - **Google**: Gemini 3.1, 2.5 (Pro/Flash/Flash-Lite), 2.0, 1.5
 - **OpenAI**: GPT-5.4 family, GPT-4o, reasoning models (o1/o3)
 - **Anthropic**: Claude 4.7/4.6/4.5, Claude 4 (Vertex AI IDs), Claude 3.5 legacy
 - **Local**: Always $0.00 — runs on your hardware
+
+### Pricing Degradation Chain
+
+Candela supports multiple pricing sources with graceful degradation:
+
+```
+1. Firestore Model Catalog  (catalog.backend: "firestore")  → dynamic, admin-managed
+2. Config YAML overrides    (pricing.models in config.yaml) → per-deployment negotiated rates
+3. Frozen pricing.yaml      (//go:embed at compile time)    → built-in list prices
+```
+
+If the Firestore catalog is unavailable, the server falls back to config overrides, then to the embedded `pricing.yaml`. This ensures pricing is **always available** even in offline or degraded environments.
+
+### Model ID Normalization
+
+Vertex AI model IDs use hyphens (e.g., `claude-3-5-sonnet-20241022`), while Anthropic's canonical IDs use dots for version suffixes. The `normalizeModelID()` function in `calculator.go` handles this conversion automatically:
+
+```
+claude-3-5-sonnet-20241022  →  claude-3.5-sonnet-20241022
+claude-sonnet-4-20250514    →  (no change — no trailing version suffix pattern)
+```
+
+This means you only need to add the canonical (dotted) form to `pricing.yaml` — the hyphenated Vertex AI variants are resolved automatically.
 
 ---
 
@@ -157,10 +180,9 @@ Restart the server. The new model will be priced correctly.
 
 ### Option B: Update Built-In Defaults (permanent)
 
-1. Edit `pkg/costcalc/calculator.go` → `loadDefaults()`
-2. Add the new model with its list pricing
-3. Run tests: `nix develop -c go test ./pkg/costcalc -v`
-4. Deploy
+1. Edit `pkg/costcalc/pricing.yaml` — add the new model entry
+2. Run tests: `nix develop -c go test ./pkg/costcalc -v`
+3. Deploy — the updated `pricing.yaml` is embedded at compile time via `//go:embed`
 
 ---
 
@@ -168,8 +190,10 @@ Restart the server. The new model will be priced correctly.
 
 | File | Purpose |
 |------|---------|
-| `pkg/costcalc/calculator.go` | `Calculator`, `loadDefaults()`, `LoadFromConfig()`, `resolve()`, discount math |
-| `pkg/costcalc/calculator_test.go` | Unit tests for pricing, discounts, and overrides |
+| `pkg/costcalc/pricing.yaml` | Built-in list prices for all cloud models (embedded via `//go:embed`) |
+| `pkg/costcalc/calculator.go` | `Calculator`, `loadDefaults()`, `LoadFromConfig()`, `resolve()`, `normalizeModelID()`, discount math |
+| `pkg/costcalc/calculator_test.go` | Unit tests for pricing, discounts, overrides, and model ID normalization |
+| `pkg/billing/` | Storage-agnostic billing types (`BudgetRecord`, `GrantRecord`, `BudgetCheckResult`) and `Service` interface |
 | `pkg/proxy/proxy.go` | Token extraction from provider responses |
 | `collector/processors/genaiprocessor/processor.go` | OTel pipeline cost enrichment |
 | `cmd/candela-server/main.go` | Wiring `cfg.Pricing` → `calc.LoadFromConfig()` |

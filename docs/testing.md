@@ -6,15 +6,16 @@ Candela has a comprehensive test suite covering unit tests, integration tests, a
 
 ```
 tests/
-├── Go Unit Tests (~20 files)
-│   ├── pkg/proxy/*_test.go         — proxy, translation, circuit breaker
-│   ├── pkg/costcalc/*_test.go      — cost calculation
+├── Go Unit Tests (~30+ files, ~400+ tests)
+│   ├── pkg/proxy/*_test.go         — proxy, translation, circuit breaker, budget gate
+│   ├── pkg/costcalc/*_test.go      — cost calculation, pricing.yaml drift, normalizeModelID, audit
 │   ├── pkg/processor/*_test.go     — span processor batching/fanout
 │   ├── pkg/auth/*_test.go          — auth middleware, admin guard, context
 │   ├── pkg/runtime/*_test.go       — runtime interface, discovery, manager
 │   ├── pkg/notify/*_test.go        — budget notifications
+│   ├── pkg/billing/*_test.go       — billing types, BudgetCheckResult
 │   ├── pkg/storage/*_test.go       — storage interfaces
-│   └── cmd/candela/*_test.go — LM handler, span capture, state, API
+│   └── cmd/candela/*_test.go       — LM handler, span capture, state, API
 │
 ├── Go Integration Tests
 │   ├── pkg/connecthandlers/integration_test.go — full service stack
@@ -22,11 +23,23 @@ tests/
 │   ├── pkg/connecthandlers/user_handler_test.go
 │   └── cmd/candela/ui_integration_test.go
 │
+├── Hurl HTTP Integration Tests (test/functional/)
+│   ├── proxy/         — proxy round-trip + error tests
+│   ├── billing/       — budget gate + pricing gate tests
+│   ├── compat/        — /v1/models + compat routing tests
+│   └── security/      — header injection + auth bypass tests
+│
+├── Vitest Frontend Unit Tests (ui/)
+│   └── src/**/*.test.ts           — component + hook unit tests
+│
 └── Playwright E2E Tests (3 suites)
     ├── e2e/app.spec.ts             — dashboard, traces, costs, usage
     ├── e2e/admin.spec.ts           — user mgmt, budgets, audit
     └── e2e/team_mode.spec.ts       — leaderboard, per-user, alerts
 ```
+
+> [!NOTE]
+> ~245 tests were added across Batches 1–9, bringing the total to 400+ Go tests, 30+ Hurl integration tests, and 27+ Playwright E2E tests.
 
 ---
 
@@ -85,6 +98,28 @@ pnpm exec playwright test e2e/admin.spec.ts
 # Run a specific test by name
 pnpm exec playwright test -g "should show budget gauge"
 ```
+
+### Hurl HTTP Integration Tests
+
+Language-agnostic HTTP integration tests using [Hurl](https://hurl.dev/) — works against both Go and Rust binaries:
+
+```bash
+# Start the mock upstream, then:
+./test/functional/run.sh --go   # run against Go binary
+./test/functional/run.sh --rust # run against Rust binary
+```
+
+See [`test/functional/README.md`](../test/functional/README.md) for full setup.
+
+### Vitest Frontend Unit Tests
+
+```bash
+cd ui
+pnpm run test          # run Vitest unit tests
+pnpm run test:watch    # watch mode during development
+```
+
+Vitest provides fast, HMR-powered unit testing for React components and hooks in the Next.js UI.
 
 ---
 

@@ -6,6 +6,7 @@
 //
 //	candela start                      # start proxy in background
 //	candela stop                       # stop the background proxy
+//	candela restart                    # restart the background proxy
 //	candela status                     # check if proxy is running
 //	candela run                        # run in foreground (debug)
 //	candela run --config ./my.yaml     # custom config
@@ -139,6 +140,8 @@ func main() {
 		cmdStart()
 	case "stop":
 		cmdStop()
+	case "restart":
+		cmdRestart()
 	case "status":
 		cmdStatus()
 	case "auth":
@@ -152,6 +155,7 @@ func main() {
 Usage:
   candela start          Start proxy in background
   candela stop           Stop the background proxy
+  candela restart        Restart the background proxy
   candela status         Show proxy status
   candela run [flags]    Run in foreground
   candela auth login --provider gcp   Login to GCP via browser
@@ -288,6 +292,48 @@ func cmdStop() {
 
 	_ = os.Remove(pidPath)
 	fmt.Printf("🛑 candela stopped (PID %d)\n", pid)
+}
+
+// cmdRestart gracefully stops the running proxy (if any) and starts it again.
+// If the proxy is not running, it simply starts it.
+func cmdRestart() {
+	pidPath := pidFilePath()
+	if pidPath == "" {
+		slog.Error("cannot determine home directory")
+		os.Exit(1)
+	}
+
+	fmt.Println("🔄 Restarting Candela...")
+
+	// Check if proxy is currently running.
+	data, err := os.ReadFile(pidPath)
+	if err == nil {
+		pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
+		if err == nil && pid > 0 {
+			process, err := os.FindProcess(pid)
+			if err == nil && process.Signal(syscall.Signal(0)) == nil {
+				// Process is alive — send SIGTERM.
+				fmt.Printf("⏹  Stopping process %d...\n", pid)
+				if err := process.Signal(syscall.SIGTERM); err != nil {
+					slog.Error("failed to stop candela", "pid", pid, "error", err)
+					os.Exit(1)
+				}
+				// Wait for process to exit (up to 5 seconds).
+				for i := 0; i < 50; i++ {
+					time.Sleep(100 * time.Millisecond)
+					if process.Signal(syscall.Signal(0)) != nil {
+						break
+					}
+				}
+				fmt.Printf("🛑 Stopped (PID %d)\n", pid)
+			}
+		}
+		// Remove stale/old PID file before starting.
+		_ = os.Remove(pidPath)
+	}
+
+	fmt.Println("▶  Starting Candela...")
+	cmdStart()
 }
 
 // cmdStatus checks the PID file and health endpoint.

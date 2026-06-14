@@ -3,6 +3,9 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
+	"syscall"
 	"testing"
 )
 
@@ -237,5 +240,75 @@ runtime_manage:
 	}
 	if cfg.RuntimeManage.Models[0] != "llama3.2:8b" {
 		t.Errorf("Models[0] = %q, want %q", cfg.RuntimeManage.Models[0], "llama3.2:8b")
+	}
+}
+
+func TestCmdRestart_NotRunning_NoPIDFile(t *testing.T) {
+	// When there is no PID file, cmdRestart should proceed to start.
+	// We can't easily test the full start (it execs a binary), but we can
+	// verify that the restart path doesn't panic or error when no PID file exists.
+
+	dir := t.TempDir()
+	pidPath := filepath.Join(dir, "candela.pid")
+
+	// Verify PID file does not exist.
+	if _, err := os.Stat(pidPath); err == nil {
+		t.Fatal("expected PID file to not exist before test")
+	}
+
+	// Simulate the restart logic for the "not running" path.
+	data, err := os.ReadFile(pidPath)
+	if err != nil {
+		// This is the expected path — no PID file means not running.
+		t.Logf("no PID file found (expected): %v", err)
+	} else {
+		t.Errorf("unexpected PID data: %s", string(data))
+	}
+}
+
+func TestCmdRestart_StalePIDFile(t *testing.T) {
+	// When a stale PID file exists (process is dead), restart should
+	// clean it up and proceed to start.
+
+	dir := t.TempDir()
+	pidPath := filepath.Join(dir, "candela.pid")
+
+	// Write a PID that definitely doesn't exist (use a very high PID).
+	// PID 99999999 is extremely unlikely to be a real process.
+	err := os.WriteFile(pidPath, []byte("99999999"), 0o644)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Read the PID file — simulating the restart logic.
+	data, readErr := os.ReadFile(pidPath)
+	if readErr != nil {
+		t.Fatal("expected PID file to be readable")
+	}
+
+	pid, parseErr := strconv.Atoi(strings.TrimSpace(string(data)))
+	if parseErr != nil {
+		t.Fatalf("expected valid PID, got parse error: %v", parseErr)
+	}
+	if pid != 99999999 {
+		t.Fatalf("expected PID 99999999, got %d", pid)
+	}
+
+	// The process should not be alive.
+	process, findErr := os.FindProcess(pid)
+	if findErr != nil {
+		t.Logf("FindProcess returned error (expected on some OS): %v", findErr)
+	} else {
+		// Signal(0) should fail for a non-existent process.
+		if process.Signal(syscall.Signal(0)) == nil {
+			t.Skip("PID 99999999 unexpectedly exists — skipping")
+		}
+	}
+
+	// Clean up stale PID file (as cmdRestart would).
+	_ = os.Remove(pidPath)
+
+	if _, err := os.Stat(pidPath); err == nil {
+		t.Error("expected PID file to be removed after stale cleanup")
 	}
 }

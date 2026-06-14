@@ -18,6 +18,7 @@ import (
 	"time"
 
 	_ "go.uber.org/automaxprocs" // automatically sets GOMAXPROCS from container CPU quota
+	_ "time/tzdata"              // Embed timezone database for scratch/distroless containers
 
 	"cloud.google.com/go/firestore"
 	firebase "firebase.google.com/go/v4"

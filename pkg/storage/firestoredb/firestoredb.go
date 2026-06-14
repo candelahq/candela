@@ -587,7 +587,7 @@ const budgetConfigDocID = "config"
 
 func (s *Store) SetBudget(ctx context.Context, budget *storage.BudgetRecord) error {
 	if budget.PeriodKey == "" {
-		budget.PeriodKey = currentPeriodKey(budget.PeriodType, s.budgetLocation)
+		budget.PeriodKey = currentPeriodKey(budget.PeriodType, s.budgetLocation, time.Now())
 	}
 	userID := sanitizeID(budget.UserID)
 	userRef := s.client.Collection(usersCol).Doc(userID)
@@ -632,7 +632,7 @@ func (s *Store) GetBudget(ctx context.Context, userID string) (*storage.BudgetRe
 			periodType = pt
 		}
 	}
-	periodKey := currentPeriodKey(periodType, s.budgetLocation)
+	periodKey := currentPeriodKey(periodType, s.budgetLocation, time.Now())
 
 	ref := userRef.Collection(budgetsCol).Doc(periodKey)
 	snap, err := ref.Get(ctx)
@@ -705,7 +705,7 @@ func (s *Store) ResetSpend(ctx context.Context, userID string) error {
 			periodType = pt
 		}
 	}
-	periodKey := currentPeriodKey(periodType, s.budgetLocation)
+	periodKey := currentPeriodKey(periodType, s.budgetLocation, time.Now())
 
 	ref := userRef.Collection(budgetsCol).Doc(periodKey)
 	// #H: Use Set+Merge instead of Update so this is idempotent on a missing
@@ -960,7 +960,7 @@ func (s *Store) DeductSpend(ctx context.Context, userID string, costUSD float64,
 				periodType = pt
 			}
 		}
-		periodKey := currentPeriodKey(periodType, s.budgetLocation)
+		periodKey := currentPeriodKey(periodType, s.budgetLocation, time.Now())
 
 		// Read 3: Load budget period spend doc using the correct period key.
 		budgetRef := userRef.Collection(budgetsCol).Doc(periodKey)
@@ -1298,11 +1298,11 @@ func snapToAudit(snap *firestore.DocumentSnapshot) (*storage.AuditRecord, error)
 // If loc is nil, UTC is used.
 // #F: was `func currentPeriodKey(_ string)` — the argument was always
 // ignored, so monthly and weekly budgets always rolled over daily.
-func currentPeriodKey(periodType string, loc *time.Location) string {
+func currentPeriodKey(periodType string, loc *time.Location, now time.Time) string {
 	if loc == nil {
 		loc = time.UTC
 	}
-	now := time.Now().In(loc)
+	now = now.In(loc)
 	switch periodType {
 	case "monthly":
 		return now.Format("2006-01")

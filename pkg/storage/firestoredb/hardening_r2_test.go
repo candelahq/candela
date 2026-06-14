@@ -18,7 +18,7 @@ import (
 
 // U13: currentPeriodKey("daily") returns YYYY-MM-DD.
 func TestCurrentPeriodKey_Daily(t *testing.T) {
-	got := currentPeriodKey("daily")
+	got := currentPeriodKey("daily", time.UTC)
 	want := time.Now().UTC().Format("2006-01-02")
 	if got != want {
 		t.Errorf("daily: got %q, want %q", got, want)
@@ -29,7 +29,7 @@ func TestCurrentPeriodKey_Daily(t *testing.T) {
 // Before fix #F the argument was ignored and "monthly" silently returned
 // YYYY-MM-DD — causing monthly budgets to reset every day.
 func TestCurrentPeriodKey_Monthly(t *testing.T) {
-	got := currentPeriodKey("monthly")
+	got := currentPeriodKey("monthly", time.UTC)
 	want := time.Now().UTC().Format("2006-01")
 	if got != want {
 		t.Errorf("monthly: got %q, want %q", got, want)
@@ -42,7 +42,7 @@ func TestCurrentPeriodKey_Monthly(t *testing.T) {
 
 // U15: currentPeriodKey("weekly") returns a week-number key (YYYY-WNN).
 func TestCurrentPeriodKey_Weekly(t *testing.T) {
-	got := currentPeriodKey("weekly")
+	got := currentPeriodKey("weekly", time.UTC)
 	yearStr := time.Now().UTC().Format("2006")
 	if !strings.HasPrefix(got, yearStr+"-W") {
 		t.Errorf("weekly key has unexpected format: %q (want prefix %q)", got, yearStr+"-W")
@@ -103,8 +103,8 @@ func TestSetBudget_MonthlyPeriod_CorrectDocKey(t *testing.T) {
 		t.Fatalf("SetBudget (monthly): %v", err)
 	}
 
-	monthlyKey := currentPeriodKey("monthly")
-	dailyKey := currentPeriodKey("daily")
+	monthlyKey := currentPeriodKey("monthly", time.UTC)
+	dailyKey := currentPeriodKey("daily", time.UTC)
 	if monthlyKey == dailyKey {
 		t.Skip("monthly and daily keys identical — skipping (first day of month)")
 	}
@@ -146,7 +146,7 @@ func TestResetSpend_IdempotentOnMissingPeriodDoc(t *testing.T) {
 	}
 
 	// Delete the period doc to simulate a fresh day (no spend doc yet).
-	periodKey := currentPeriodKey("daily")
+	periodKey := currentPeriodKey("daily", time.UTC)
 	_, _ = s.client.Collection(usersCol).Doc(sanitizeID(uid)).
 		Collection(budgetsCol).Doc(periodKey).Delete(ctx)
 

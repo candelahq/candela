@@ -523,13 +523,13 @@ func TestAuditLog(t *testing.T) {
 
 func TestCurrentPeriodKey(t *testing.T) {
 	// All budgets are daily — verify the format is YYYY-MM-DD.
-	daily := currentPeriodKey("daily")
+	daily := currentPeriodKey("daily", time.UTC)
 	if len(daily) != 10 { // "2026-04-21"
 		t.Errorf("daily key = %q, expected format like 2026-04-21", daily)
 	}
 
 	// Any input should return daily format.
-	also := currentPeriodKey("anything")
+	also := currentPeriodKey("anything", time.UTC)
 	if also != daily {
 		t.Errorf("expected same daily key for any input, got %q vs %q", also, daily)
 	}

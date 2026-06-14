@@ -112,7 +112,8 @@ func sweepRateLimitCache() {
 
 // Store implements storage.UserStore using Firestore.
 type Store struct {
-	client *firestore.Client
+	client         *firestore.Client
+	budgetLocation *time.Location // timezone for budget period key computation (default: UTC)
 }
 
 // New creates a new Firestore-backed UserStore.
@@ -121,12 +122,21 @@ func New(ctx context.Context, projectID, databaseID string) (*Store, error) {
 	if err != nil {
 		return nil, fmt.Errorf("firestoredb: creating client: %w", err)
 	}
-	return &Store{client: client}, nil
+	return &Store{client: client, budgetLocation: time.UTC}, nil
 }
 
 // NewWithClient creates a Store with an existing Firestore client (useful for tests).
 func NewWithClient(client *firestore.Client) *Store {
-	return &Store{client: client}
+	return &Store{client: client, budgetLocation: time.UTC}
+}
+
+// SetBudgetLocation sets the timezone used for budget period key computation.
+// If loc is nil, UTC is used.
+func (s *Store) SetBudgetLocation(loc *time.Location) {
+	if loc == nil {
+		loc = time.UTC
+	}
+	s.budgetLocation = loc
 }
 
 // Close releases Firestore resources.
@@ -577,7 +587,7 @@ const budgetConfigDocID = "config"
 
 func (s *Store) SetBudget(ctx context.Context, budget *storage.BudgetRecord) error {
 	if budget.PeriodKey == "" {
-		budget.PeriodKey = currentPeriodKey(budget.PeriodType)
+		budget.PeriodKey = currentPeriodKey(budget.PeriodType, s.budgetLocation)
 	}
 	userID := sanitizeID(budget.UserID)
 	userRef := s.client.Collection(usersCol).Doc(userID)
@@ -622,7 +632,7 @@ func (s *Store) GetBudget(ctx context.Context, userID string) (*storage.BudgetRe
 			periodType = pt
 		}
 	}
-	periodKey := currentPeriodKey(periodType)
+	periodKey := currentPeriodKey(periodType, s.budgetLocation)
 
 	ref := userRef.Collection(budgetsCol).Doc(periodKey)
 	snap, err := ref.Get(ctx)
@@ -695,7 +705,7 @@ func (s *Store) ResetSpend(ctx context.Context, userID string) error {
 			periodType = pt
 		}
 	}
-	periodKey := currentPeriodKey(periodType)
+	periodKey := currentPeriodKey(periodType, s.budgetLocation)
 
 	ref := userRef.Collection(budgetsCol).Doc(periodKey)
 	// #H: Use Set+Merge instead of Update so this is idempotent on a missing
@@ -950,7 +960,7 @@ func (s *Store) DeductSpend(ctx context.Context, userID string, costUSD float64,
 				periodType = pt
 			}
 		}
-		periodKey := currentPeriodKey(periodType)
+		periodKey := currentPeriodKey(periodType, s.budgetLocation)
 
 		// Read 3: Load budget period spend doc using the correct period key.
 		budgetRef := userRef.Collection(budgetsCol).Doc(periodKey)
@@ -1285,10 +1295,14 @@ func snapToAudit(snap *firestore.DocumentSnapshot) (*storage.AuditRecord, error)
 // currentPeriodKey returns the period key for the given period type.
 // Supported period types: "daily" (YYYY-MM-DD), "monthly" (YYYY-MM),
 // "weekly" (YYYY-WNN). Unknown types fall back to "daily".
+// If loc is nil, UTC is used.
 // #F: was `func currentPeriodKey(_ string)` — the argument was always
 // ignored, so monthly and weekly budgets always rolled over daily.
-func currentPeriodKey(periodType string) string {
-	now := time.Now().UTC()
+func currentPeriodKey(periodType string, loc *time.Location) string {
+	if loc == nil {
+		loc = time.UTC
+	}
+	now := time.Now().In(loc)
 	switch periodType {
 	case "monthly":
 		return now.Format("2006-01")

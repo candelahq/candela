@@ -44,7 +44,7 @@ func TestDeductSpend_AutoRollover_CreatesNewPeriodDoc(t *testing.T) {
 	}
 
 	// Delete the current period spend doc to simulate a new day.
-	periodKey := currentPeriodKey("daily")
+	periodKey := currentPeriodKey("daily", time.UTC)
 	_, _ = s.client.Collection(usersCol).Doc(uid).
 		Collection(budgetsCol).Doc(periodKey).Delete(ctx)
 
@@ -93,7 +93,7 @@ func TestGetBudget_FallsBackToConfigDoc_ZeroSpend(t *testing.T) {
 	}
 
 	// Delete the period doc to simulate a new day.
-	periodKey := currentPeriodKey("daily")
+	periodKey := currentPeriodKey("daily", time.UTC)
 	_, _ = s.client.Collection(usersCol).Doc(uid).
 		Collection(budgetsCol).Doc(periodKey).Delete(ctx)
 

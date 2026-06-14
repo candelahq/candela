@@ -1585,26 +1585,27 @@ func (p *Proxy) handleStreamingResponse(
 // Both standard and streaming responses produce the same struct; the only
 // difference is how they parse the upstream response.
 type spanParams struct {
-	provider        Provider
-	model           string
-	sessionID       string
-	effectiveUserID string // resolved end-user identity (auth email > auth UID)
-	tenantID        string // downstream customer/tenant (from Baggage or header)
-	jobID           string // experiment/job ID (from Baggage or header)
-	inputContent    string
-	outputContent   string
-	inputTokens     int64
-	outputTokens    int64
-	cacheTokens     CacheTokens // raw prompt cache breakdown
-	startTime       time.Time
-	endTime         time.Time
-	status          storage.SpanStatus
-	ttfb            time.Duration
-	requestID       string
-	extraAttrs      map[string]string // streaming-specific, status code, etc.
-	namePrefix      string            // e.g. "openai.chat" or "openai.chat.stream"
-	traceCtx        *traceContext     // W3C trace context from caller (nil = generate new)
-	proxySpanID     string            // pre-generated span ID (for outgoing traceparent)
+	provider         Provider
+	model            string
+	sessionID        string
+	effectiveUserID  string // resolved end-user identity (auth email > auth UID)
+	tenantID         string // downstream customer/tenant (from Baggage or header)
+	jobID            string // experiment/job ID (from Baggage or header)
+	inputContent     string
+	outputContent    string
+	reasoningContent string
+	inputTokens      int64
+	outputTokens     int64
+	cacheTokens      CacheTokens // raw prompt cache breakdown
+	startTime        time.Time
+	endTime          time.Time
+	status           storage.SpanStatus
+	ttfb             time.Duration
+	requestID        string
+	extraAttrs       map[string]string // streaming-specific, status code, etc.
+	namePrefix       string            // e.g. "openai.chat" or "openai.chat.stream"
+	traceCtx         *traceContext     // W3C trace context from caller (nil = generate new)
+	proxySpanID      string            // pre-generated span ID (for outgoing traceparent)
 }
 
 // deductBudget handles the synchronous budget deduction after a response is
@@ -1809,6 +1810,7 @@ func (p *Proxy) buildSpan(ctx context.Context, params spanParams) {
 			CostUSD:             cost,
 			InputContent:        params.inputContent,
 			OutputContent:       params.outputContent,
+			ReasoningContent:    params.reasoningContent,
 			CacheReadTokens:     params.cacheTokens.CacheReadTokens,
 			CacheCreationTokens: params.cacheTokens.CacheCreationTokens,
 			InputRate:           inputRate,
@@ -1871,6 +1873,14 @@ func (p *Proxy) createSpan(
 		model = extractModelFromResponse(provider.Name, respBody)
 	}
 
+	// Extract <think> tags from output content (#312).
+	// Only for known reasoning models — prevents corrupting legitimate
+	// <think> content in non-reasoning model output (e.g. code examples).
+	var reasoningContent string
+	if isReasoningModel(model) {
+		outputContent, reasoningContent = extractThinking(outputContent)
+	}
+
 	// Normalize cached input tokens via the calculator (handles all providers).
 	// extendedTTL applies 2.0× for Anthropic 1-hour cache creation (#191).
 	inputTokens = p.calc.NormalizeCachedInputWithTTL(provider.Name, model, inputTokens, ct.CacheReadTokens, ct.CacheCreationTokens, extendedTTL)
@@ -1881,25 +1891,26 @@ func (p *Proxy) createSpan(
 	}
 
 	p.buildSpan(ctx, spanParams{
-		provider:        provider,
-		model:           model,
-		effectiveUserID: effectiveUserID,
-		tenantID:        tenantID,
-		jobID:           jobID,
-		inputContent:    inputContent,
-		outputContent:   outputContent,
-		inputTokens:     inputTokens,
-		outputTokens:    outputTokens,
-		cacheTokens:     ct,
-		startTime:       startTime,
-		endTime:         endTime,
-		status:          status,
-		ttfb:            ttfb,
-		requestID:       requestID,
-		sessionID:       sessionID,
-		namePrefix:      fmt.Sprintf("%s.chat", provider.Name),
-		traceCtx:        traceCtx,
-		proxySpanID:     proxySpanID,
+		provider:         provider,
+		model:            model,
+		effectiveUserID:  effectiveUserID,
+		tenantID:         tenantID,
+		jobID:            jobID,
+		inputContent:     inputContent,
+		outputContent:    outputContent,
+		reasoningContent: reasoningContent,
+		inputTokens:      inputTokens,
+		outputTokens:     outputTokens,
+		cacheTokens:      ct,
+		startTime:        startTime,
+		endTime:          endTime,
+		status:           status,
+		ttfb:             ttfb,
+		requestID:        requestID,
+		sessionID:        sessionID,
+		namePrefix:       fmt.Sprintf("%s.chat", provider.Name),
+		traceCtx:         traceCtx,
+		proxySpanID:      proxySpanID,
 		extraAttrs: map[string]string{
 			"http.status": fmt.Sprintf("%d", statusCode),
 		},
@@ -1932,30 +1943,39 @@ func (p *Proxy) createStreamingSpan(
 		model = extractModelFromStreamingResponse(provider.Name, streamData)
 	}
 
+	// Extract <think> tags from streaming output content (#312).
+	// Only for known reasoning models — prevents corrupting legitimate
+	// <think> content in non-reasoning model output (e.g. code examples).
+	var reasoningContent string
+	if isReasoningModel(model) {
+		outputContent, reasoningContent = extractThinking(outputContent)
+	}
+
 	// Normalize cached input tokens via the calculator (handles all providers).
 	// extendedTTL applies 2.0× for Anthropic 1-hour cache creation (#191).
 	inputTokens = p.calc.NormalizeCachedInputWithTTL(provider.Name, model, inputTokens, ct.CacheReadTokens, ct.CacheCreationTokens, extendedTTL)
 
 	p.buildSpan(ctx, spanParams{
-		provider:        provider,
-		model:           model,
-		effectiveUserID: effectiveUserID,
-		tenantID:        tenantID,
-		jobID:           jobID,
-		inputContent:    inputContent,
-		outputContent:   outputContent,
-		inputTokens:     inputTokens,
-		outputTokens:    outputTokens,
-		cacheTokens:     ct,
-		startTime:       startTime,
-		endTime:         endTime,
-		status:          streamStatus,
-		ttfb:            ttfb,
-		requestID:       requestID,
-		sessionID:       sessionID,
-		namePrefix:      fmt.Sprintf("%s.chat.stream", provider.Name),
-		traceCtx:        traceCtx,
-		proxySpanID:     proxySpanID,
+		provider:         provider,
+		model:            model,
+		effectiveUserID:  effectiveUserID,
+		tenantID:         tenantID,
+		jobID:            jobID,
+		inputContent:     inputContent,
+		outputContent:    outputContent,
+		reasoningContent: reasoningContent,
+		inputTokens:      inputTokens,
+		outputTokens:     outputTokens,
+		cacheTokens:      ct,
+		startTime:        startTime,
+		endTime:          endTime,
+		status:           streamStatus,
+		ttfb:             ttfb,
+		requestID:        requestID,
+		sessionID:        sessionID,
+		namePrefix:       fmt.Sprintf("%s.chat.stream", provider.Name),
+		traceCtx:         traceCtx,
+		proxySpanID:      proxySpanID,
 		extraAttrs: map[string]string{
 			"proxy.streaming": "true",
 			"llm.ttft_ms":     fmt.Sprintf("%d", ttft.Milliseconds()),

@@ -6,6 +6,75 @@ import (
 	"strings"
 )
 
+// extractThinking extracts content between <think> tags and returns
+// the cleaned content and the extracted thinking/reasoning content.
+// Models like DeepSeek R1 wrap chain-of-thought reasoning in <think> tags
+// inline in the content field. This function strips those tags and returns
+// the reasoning separately for storage in GenAIAttributes.ReasoningContent.
+//
+// Handles unclosed <think> tags (common when streaming responses are truncated,
+// e.g. DeepSeek R1): everything after the unclosed tag is treated as reasoning.
+func extractThinking(content string) (cleaned, reasoning string) {
+	// Fast path: no think tags at all.
+	if !strings.Contains(content, "<think>") {
+		return content, ""
+	}
+
+	var cleanBuf, thinkBuf strings.Builder
+	remaining := content
+
+	for {
+		openIdx := strings.Index(remaining, "<think>")
+		if openIdx == -1 {
+			cleanBuf.WriteString(remaining)
+			break
+		}
+		// Content before <think>
+		cleanBuf.WriteString(remaining[:openIdx])
+		remaining = remaining[openIdx+len("<think>"):]
+
+		closeIdx := strings.Index(remaining, "</think>")
+		if closeIdx == -1 {
+			// Unclosed tag — treat rest as reasoning.
+			if thinkBuf.Len() > 0 {
+				thinkBuf.WriteByte('\n')
+			}
+			thinkBuf.WriteString(strings.TrimSpace(remaining))
+			remaining = ""
+			break
+		}
+
+		// Matched pair.
+		if thinkBuf.Len() > 0 {
+			thinkBuf.WriteByte('\n')
+		}
+		thinkBuf.WriteString(strings.TrimSpace(remaining[:closeIdx]))
+		remaining = remaining[closeIdx+len("</think>"):]
+	}
+
+	return strings.TrimSpace(cleanBuf.String()), thinkBuf.String()
+}
+
+// isReasoningModel returns true if the model is known to use <think> tags.
+// This prevents stripping legitimate <think> content from non-reasoning models
+// (e.g. a code generation model outputting <think> in example code).
+func isReasoningModel(model string) bool {
+	model = strings.ToLower(model)
+	// Models known to use inline <think> tags.
+	reasoningPrefixes := []string{
+		"deepseek-r1",
+		"deepseek-reasoner",
+		"qwq",
+		"qwen3", // Qwen3 uses thinking by default
+	}
+	for _, prefix := range reasoningPrefixes {
+		if strings.HasPrefix(model, prefix) || strings.Contains(model, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
 // NOTE: All cache normalization has been moved to costcalc.Calculator.
 // Parsers return RAW token counts; the proxy applies model-aware and
 // provider-aware cache discounts at the call site via

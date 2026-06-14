@@ -80,17 +80,18 @@ const (
 
 // GenAIAttributes holds LLM-specific attributes.
 type GenAIAttributes struct {
-	Model         string  `json:"model,omitempty"`
-	Provider      string  `json:"provider,omitempty"`
-	InputTokens   int64   `json:"input_tokens,omitempty"`
-	OutputTokens  int64   `json:"output_tokens,omitempty"`
-	TotalTokens   int64   `json:"total_tokens,omitempty"`
-	CostUSD       float64 `json:"cost_usd,omitempty"`
-	Temperature   float64 `json:"temperature,omitempty"`
-	MaxTokens     int64   `json:"max_tokens,omitempty"`
-	TopP          float64 `json:"top_p,omitempty"`
-	InputContent  string  `json:"input_content,omitempty"`
-	OutputContent string  `json:"output_content,omitempty"`
+	Model            string  `json:"model,omitempty"`
+	Provider         string  `json:"provider,omitempty"`
+	InputTokens      int64   `json:"input_tokens,omitempty"`
+	OutputTokens     int64   `json:"output_tokens,omitempty"`
+	TotalTokens      int64   `json:"total_tokens,omitempty"`
+	CostUSD          float64 `json:"cost_usd,omitempty"`
+	Temperature      float64 `json:"temperature,omitempty"`
+	MaxTokens        int64   `json:"max_tokens,omitempty"`
+	TopP             float64 `json:"top_p,omitempty"`
+	InputContent     string  `json:"input_content,omitempty"`
+	OutputContent    string  `json:"output_content,omitempty"`
+	ReasoningContent string  `json:"reasoning_content,omitempty" firestore:"reasoning_content,omitempty" bigquery:"reasoning_content"`
 
 	// Cache token breakdown (Anthropic prompt caching).
 	// These are the RAW counts from the API — not cost-normalized.

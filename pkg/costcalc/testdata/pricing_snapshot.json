@@ -26,26 +26,26 @@
   {
     "model": "claude-opus-4",
     "provider": "anthropic",
-    "input_per_million": 5,
-    "output_per_million": 25
+    "input_per_million": 15,
+    "output_per_million": 75
   },
   {
     "model": "claude-opus-4-20250514",
     "provider": "anthropic",
-    "input_per_million": 5,
-    "output_per_million": 25
+    "input_per_million": 15,
+    "output_per_million": 75
   },
   {
     "model": "claude-opus-4.6",
     "provider": "anthropic",
-    "input_per_million": 5,
-    "output_per_million": 25
+    "input_per_million": 15,
+    "output_per_million": 75
   },
   {
     "model": "claude-opus-4.7",
     "provider": "anthropic",
-    "input_per_million": 5,
-    "output_per_million": 25
+    "input_per_million": 15,
+    "output_per_million": 75
   },
   {
     "model": "claude-sonnet-4",

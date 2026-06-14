@@ -479,7 +479,8 @@ func (c *Calculator) GlobalDiscount() float64 {
 }
 
 // resolve looks up pricing: config overrides first, then built-in defaults,
-// then precomputed provider-agnostic fallback, then prefix-based fuzzy match.
+// then precomputed provider-agnostic fallback, then model ID normalization
+// (hyphen→dot version suffix), then prefix-based fuzzy match.
 // Provider aliases (e.g. "anthropic-direct" → "anthropic") are resolved before
 // lookup so passthrough routes inherit canonical pricing and config overrides.
 func (c *Calculator) resolve(provider, model string) (ModelPricing, bool) {
@@ -505,7 +506,24 @@ func (c *Calculator) resolve(provider, model string) (ModelPricing, bool) {
 		return p, true
 	}
 
-	// 4. Prefix-based fuzzy match for model variants.
+	// 4. Model ID normalization: try replacing the last hyphen-digit with
+	// dot-digit. This handles Vertex AI format (claude-opus-4-7) mapping
+	// to our canonical dotted entries (claude-opus-4.7) without duplicating
+	// every pricing entry.
+	if normalized := normalizeModelID(model); normalized != model {
+		normKey := c.key(provider, normalized)
+		if p, ok := c.overrides[normKey]; ok {
+			return p, true
+		}
+		if p, ok := c.defaults[normKey]; ok {
+			return p, true
+		}
+		if p, ok := c.fallback[strings.ToLower(normalized)]; ok {
+			return p, true
+		}
+	}
+
+	// 5. Prefix-based fuzzy match for model variants.
 	// Handles: date suffixes (gpt-4.1-2025-04-14), preview tags
 	// (gemini-2.5-pro-preview-05-06), and OpenAI fine-tunes (ft:gpt-4.1:org:name:id).
 	if base := extractBaseModel(model); base != "" && base != strings.ToLower(model) {
@@ -610,6 +628,28 @@ func isAllDigits(s string) bool {
 	return true
 }
 
+// normalizeModelID converts trailing hyphen-digit version suffixes to dot-digit.
+// This handles Vertex AI model IDs (claude-opus-4-7) mapping to our canonical
+// dotted format (claude-opus-4.7) without breaking legitimate hyphens like
+// claude-3-opus or claude-3-5-sonnet.
+//
+// Strategy: replace only the last hyphen when it's followed by a single digit,
+// which indicates a minor version number rather than a model family prefix.
+func normalizeModelID(model string) string {
+	idx := strings.LastIndex(model, "-")
+	if idx > 0 && idx < len(model)-1 {
+		suffix := model[idx+1:]
+		// Single digit version suffix (not a date like 20250514)
+		// AND the character before the hyphen is also a digit,
+		// so we only convert "4-7" → "4.7", not "opus-4" → "opus.4".
+		if len(suffix) == 1 && suffix[0] >= '0' && suffix[0] <= '9' &&
+			model[idx-1] >= '0' && model[idx-1] <= '9' {
+			return model[:idx] + "." + suffix
+		}
+	}
+	return model
+}
+
 // rebuildFallback creates a deterministic lookup for model names without providers.
 // Priority: Overrides > Defaults. Tie-breaker: Alphabetical provider.
 //
@@ -681,17 +721,19 @@ func (c *Calculator) loadDefaults() {
 		{Provider: "google", Model: "gemini-1.5-pro", InputPerMillion: 1.25, OutputPerMillion: 5.00},
 
 		// ── Anthropic (via Vertex AI or direct) ──────────────────
-		// Claude 4.6/4.7 (latest)
-		{Provider: "anthropic", Model: "claude-opus-4.7", InputPerMillion: 5.00, OutputPerMillion: 25.00},
-		{Provider: "anthropic", Model: "claude-opus-4.6", InputPerMillion: 5.00, OutputPerMillion: 25.00},
+		// Claude 4.6/4.7 (latest) — canonical dotted format.
+		// Hyphenated variants (e.g. claude-opus-4-7 from Vertex AI) are
+		// resolved via normalizeModelID in resolve(), not duplicated here.
+		{Provider: "anthropic", Model: "claude-opus-4.7", InputPerMillion: 15.00, OutputPerMillion: 75.00},
+		{Provider: "anthropic", Model: "claude-opus-4.6", InputPerMillion: 15.00, OutputPerMillion: 75.00},
 		{Provider: "anthropic", Model: "claude-sonnet-4.6", InputPerMillion: 3.00, OutputPerMillion: 15.00},
 		{Provider: "anthropic", Model: "claude-haiku-4.5", InputPerMillion: 1.00, OutputPerMillion: 5.00},
 		// Claude 4 (short names — used by editors and Claude Code)
 		{Provider: "anthropic", Model: "claude-sonnet-4", InputPerMillion: 3.00, OutputPerMillion: 15.00},
-		{Provider: "anthropic", Model: "claude-opus-4", InputPerMillion: 5.00, OutputPerMillion: 25.00},
+		{Provider: "anthropic", Model: "claude-opus-4", InputPerMillion: 15.00, OutputPerMillion: 75.00},
 		// Claude 4 (Vertex AI model IDs with date suffix)
 		{Provider: "anthropic", Model: "claude-sonnet-4-20250514", InputPerMillion: 3.00, OutputPerMillion: 15.00},
-		{Provider: "anthropic", Model: "claude-opus-4-20250514", InputPerMillion: 5.00, OutputPerMillion: 25.00},
+		{Provider: "anthropic", Model: "claude-opus-4-20250514", InputPerMillion: 15.00, OutputPerMillion: 75.00},
 		// Claude 3.5 (legacy)
 		{Provider: "anthropic", Model: "claude-3-5-sonnet-20241022", InputPerMillion: 3.00, OutputPerMillion: 15.00},
 		{Provider: "anthropic", Model: "claude-haiku-3-5-20241022", InputPerMillion: 0.80, OutputPerMillion: 4.00},

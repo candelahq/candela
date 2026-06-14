@@ -189,6 +189,15 @@ func (s *integrationStore) RevokeGrant(_ context.Context, userID, grantID string
 	return fmt.Errorf("grant %s: %w", grantID, storage.ErrNotFound)
 }
 
+func (s *integrationStore) GetGrant(_ context.Context, userID, grantID string) (*storage.GrantRecord, error) {
+	for _, g := range s.grants[userID] {
+		if g.ID == grantID {
+			return g, nil
+		}
+	}
+	return nil, fmt.Errorf("grant %s: %w", grantID, storage.ErrNotFound)
+}
+
 func (s *integrationStore) CheckBudget(_ context.Context, userID string, estimatedCostUSD float64) (*storage.BudgetCheckResult, error) {
 	return &storage.BudgetCheckResult{Allowed: true, RemainingUSD: 100}, nil
 }

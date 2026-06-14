@@ -177,6 +177,15 @@ func (m *mockUserStore) RevokeGrant(_ context.Context, userID, grantID string) e
 	return fmt.Errorf("grant not found: %s", grantID)
 }
 
+func (m *mockUserStore) GetGrant(_ context.Context, userID, grantID string) (*storage.GrantRecord, error) {
+	for _, g := range m.grants[userID] {
+		if g.ID == grantID {
+			return g, nil
+		}
+	}
+	return nil, fmt.Errorf("grant not found: %s", grantID)
+}
+
 func (m *mockUserStore) CheckBudget(_ context.Context, userID string, estimated float64) (*storage.BudgetCheckResult, error) {
 	var grantsRem float64
 	for _, g := range m.grants[userID] {

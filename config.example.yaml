@@ -164,3 +164,10 @@ sinks:
   #   timeout_sec: 30                   # Per-export timeout in seconds
   #   headers:                           # Optional auth headers
   #     Authorization: "Bearer <token>"
+
+# Budget period reset timezone (#136).
+# Controls when daily/monthly/weekly budgets roll over.
+# Uses IANA timezone names (e.g. "America/New_York", "Europe/London").
+# Default: UTC (backward compatible).
+# budget:
+#   timezone: "America/New_York"

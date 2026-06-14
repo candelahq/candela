@@ -18,6 +18,7 @@ import (
 	"time"
 
 	_ "go.uber.org/automaxprocs" // automatically sets GOMAXPROCS from container CPU quota
+	_ "time/tzdata"              // Embed timezone database for scratch/distroless containers
 
 	"cloud.google.com/go/firestore"
 	firebase "firebase.google.com/go/v4"
@@ -131,6 +132,9 @@ type Config struct {
 			TimeoutSec  int               `yaml:"timeout_sec"` // per-export timeout (default: 30)
 		} `yaml:"otlp"`
 	} `yaml:"sinks"`
+	Budget struct {
+		Timezone string `yaml:"timezone"` // IANA timezone for budget period reset (default: UTC)
+	} `yaml:"budget"`
 }
 
 // CatalogConfig holds model catalog configuration.
@@ -397,6 +401,18 @@ func main() {
 			slog.Error("failed to initialize Firestore", "error", err)
 			os.Exit(1)
 		}
+
+		// Apply budget timezone if configured (#136).
+		if cfg.Budget.Timezone != "" {
+			loc, err := time.LoadLocation(cfg.Budget.Timezone)
+			if err != nil {
+				slog.Error("invalid budget timezone", "timezone", cfg.Budget.Timezone, "error", err)
+				os.Exit(1)
+			}
+			fStore.SetBudgetLocation(loc)
+			slog.Info("budget timezone configured", "timezone", cfg.Budget.Timezone)
+		}
+
 		defer func() { _ = fStore.Close() }()
 		userStore = fStore
 

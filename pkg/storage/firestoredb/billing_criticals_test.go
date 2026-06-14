@@ -6,6 +6,7 @@ package firestoredb
 
 import (
 	"testing"
+	"time"
 
 	"github.com/candelahq/candela/pkg/storage"
 )
@@ -13,7 +14,7 @@ import (
 // ─── CRIT-14: period type propagates through the full converter chain ─────────
 
 func TestCurrentPeriodKey_UnknownFallsBackToDaily(t *testing.T) {
-	key := currentPeriodKey("quarterly") // unknown → daily fallback
+	key := currentPeriodKey("quarterly", time.UTC, time.Now()) // unknown → daily fallback
 	if len(key) != 10 {
 		t.Errorf("unknown type key = %q, want daily fallback YYYY-MM-DD (10 chars)", key)
 	}
@@ -22,13 +23,15 @@ func TestCurrentPeriodKey_UnknownFallsBackToDaily(t *testing.T) {
 func TestCurrentPeriodKey_DailyAndMonthlyAreDifferent(t *testing.T) {
 	// Regression for CRIT-14: if period_type is ignored, both return the same
 	// key and monthly budgets behave identically to daily budgets.
-	if currentPeriodKey("daily") == currentPeriodKey("monthly") {
+	now := time.Now()
+	if currentPeriodKey("daily", time.UTC, now) == currentPeriodKey("monthly", time.UTC, now) {
 		t.Error("daily key == monthly key — period_type is being ignored")
 	}
 }
 
 func TestCurrentPeriodKey_DailyAndWeeklyAreDifferent(t *testing.T) {
-	if currentPeriodKey("daily") == currentPeriodKey("weekly") {
+	now := time.Now()
+	if currentPeriodKey("daily", time.UTC, now) == currentPeriodKey("weekly", time.UTC, now) {
 		t.Error("daily key == weekly key — period_type is being ignored")
 	}
 }

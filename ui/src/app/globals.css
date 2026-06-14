@@ -2584,3 +2584,152 @@ tr:hover .model-bar {
   filter: drop-shadow(0 0 8px rgba(240, 160, 48, 0.3));
 }
 
+/* ──────────────────────────────────────────
+   Setup Page
+   ────────────────────────────────────────── */
+
+.setup-inline-code {
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 2px 6px;
+  font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+  font-size: 12px;
+  color: var(--accent);
+}
+
+.setup-proxy-url {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+  font-size: 13px;
+  color: var(--text-primary);
+}
+
+.setup-proxy-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--success);
+  flex-shrink: 0;
+  box-shadow: 0 0 6px rgba(52, 211, 153, 0.4);
+}
+
+.setup-tabs {
+  display: flex;
+  gap: 0;
+  border-bottom: 1px solid var(--border-subtle);
+  overflow-x: auto;
+  background: var(--bg-tertiary);
+}
+
+.setup-tab {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 12px 16px;
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--text-muted);
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease;
+}
+
+.setup-tab:hover {
+  color: var(--text-secondary);
+  background: var(--bg-hover);
+}
+
+.setup-tab-active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+}
+
+.setup-tab-icon {
+  font-size: 14px;
+}
+
+.setup-tab-label {
+  font-size: 13px;
+}
+
+.setup-snippet-container {
+  position: relative;
+}
+
+.setup-snippet-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 16px;
+  background: var(--bg-elevated);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.setup-snippet-lang {
+  font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+  font-size: 11px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.setup-copy-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 12px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.setup-copy-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+  border-color: var(--accent-dim);
+}
+
+.setup-copy-btn-copied {
+  background: rgba(52, 211, 153, 0.12);
+  border-color: rgba(52, 211, 153, 0.3);
+  color: var(--success);
+}
+
+.setup-copy-btn-copied:hover {
+  background: rgba(52, 211, 153, 0.18);
+  color: var(--success);
+  border-color: rgba(52, 211, 153, 0.4);
+}
+
+.setup-snippet-code {
+  margin: 0;
+  padding: 20px;
+  background: var(--bg-primary);
+  font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--text-primary);
+  overflow-x: auto;
+  tab-size: 2;
+}
+
+.setup-snippet-code code {
+  font-family: inherit;
+}

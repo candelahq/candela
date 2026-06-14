@@ -3,8 +3,36 @@ package proxy
 import (
 	"bytes"
 	"encoding/json"
+	"regexp"
 	"strings"
 )
+
+// thinkTagRe matches <think>...</think> blocks (including multiline content).
+// Used to extract reasoning/thinking content from model responses that inline
+// it in the content field (e.g. DeepSeek R1, QwQ).
+var thinkTagRe = regexp.MustCompile(`(?s)<think>(.*?)</think>`)
+
+// extractThinking extracts content between <think> tags and returns
+// the cleaned content and the extracted thinking/reasoning content.
+// Models like DeepSeek R1 wrap chain-of-thought reasoning in <think> tags
+// inline in the content field. This function strips those tags and returns
+// the reasoning separately for storage in GenAIAttributes.ReasoningContent.
+func extractThinking(content string) (cleaned, reasoning string) {
+	matches := thinkTagRe.FindAllStringSubmatch(content, -1)
+	if len(matches) == 0 {
+		return content, ""
+	}
+	var thinkParts []string
+	for _, m := range matches {
+		part := strings.TrimSpace(m[1])
+		if part != "" {
+			thinkParts = append(thinkParts, part)
+		}
+	}
+	reasoning = strings.Join(thinkParts, "\n")
+	cleaned = strings.TrimSpace(thinkTagRe.ReplaceAllString(content, ""))
+	return cleaned, reasoning
+}
 
 // NOTE: All cache normalization has been moved to costcalc.Calculator.
 // Parsers return RAW token counts; the proxy applies model-aware and

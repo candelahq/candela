@@ -19,6 +19,9 @@ func TestPricingSnapshot(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Add trailing newline for editor compatibility — most editors and
+	// git prefer files to end with a newline.
+	current = append(current, '\n')
 
 	snapshotPath := filepath.Join("testdata", "pricing_snapshot.json")
 
@@ -26,23 +29,18 @@ func TestPricingSnapshot(t *testing.T) {
 		if err := os.MkdirAll(filepath.Dir(snapshotPath), 0o755); err != nil {
 			t.Fatal(err)
 		}
-		if err := os.WriteFile(snapshotPath, append(current, '\n'), 0o644); err != nil {
+		if err := os.WriteFile(snapshotPath, current, 0o644); err != nil {
 			t.Fatal(err)
 		}
 		t.Log("Updated pricing snapshot")
 		return
 	}
 
-	// If snapshot doesn't exist, create it and pass (first run).
+	// If the snapshot doesn't exist, fail rather than silently creating it.
+	// In CI (where testdata may not be committed), this ensures drift is
+	// caught instead of masked by auto-creation.
 	if _, err := os.Stat(snapshotPath); os.IsNotExist(err) {
-		if err := os.MkdirAll(filepath.Dir(snapshotPath), 0o755); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(snapshotPath, append(current, '\n'), 0o644); err != nil {
-			t.Fatal(err)
-		}
-		t.Log("Created pricing snapshot — commit testdata/pricing_snapshot.json")
-		return
+		t.Fatalf("pricing snapshot missing: %s\nRun with -update-snapshot to create it", snapshotPath)
 	}
 
 	// Compare with existing snapshot.
@@ -51,8 +49,8 @@ func TestPricingSnapshot(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if string(append(current, '\n')) != string(expected) {
-		// Write actual output for easy diffing.
+	if string(current) != string(expected) {
+		// Write actual output for easy diffing (with trailing newline).
 		_ = os.WriteFile(snapshotPath+".actual", current, 0o644)
 		t.Errorf("pricing drift detected!\n"+
 			"The default pricing in calculator.go has changed since the last snapshot.\n"+
@@ -61,6 +59,16 @@ func TestPricingSnapshot(t *testing.T) {
 			"  2. Or copy %s.actual → %s\n"+
 			"  3. Commit the updated snapshot",
 			snapshotPath, snapshotPath)
+	}
+}
+
+// TestPricingSnapshot_RequiresFile verifies the snapshot file is committed to
+// the repo. This is a fast, standalone check that doesn't require computing
+// the snapshot — it just ensures the file exists on disk.
+func TestPricingSnapshot_RequiresFile(t *testing.T) {
+	snapshotPath := filepath.Join("testdata", "pricing_snapshot.json")
+	if _, err := os.Stat(snapshotPath); os.IsNotExist(err) {
+		t.Fatal("pricing_snapshot.json must be committed to the repo")
 	}
 }
 
@@ -73,7 +81,15 @@ func TestDefaultsModelCount(t *testing.T) {
 		t.Errorf("only %d default models, expected at least 20", len(defaults))
 	}
 
-	// Check for duplicate entries.
+	// Check for duplicate entries (provider + model key).
+	//
+	// NOTE: loadDefaults() stores entries into a map keyed by provider/model,
+	// so true duplicates in the source slice are silently overwritten before
+	// Defaults() ever sees them. This check on Defaults() acts as a safety
+	// net — if loadDefaults ever changes to use a slice or append-based
+	// approach, this will catch regressions. It also validates that the
+	// map-based dedup hasn't hidden a copy-paste error where two entries
+	// differ only in pricing (last-write-wins would mask the first).
 	seen := make(map[string]bool)
 	for _, d := range defaults {
 		key := d.Provider + "/" + d.Model

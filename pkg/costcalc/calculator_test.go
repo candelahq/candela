@@ -24,8 +24,8 @@ func TestCalculate(t *testing.T) {
 			model:        "claude-opus-4.7",
 			inputTokens:  1000,
 			outputTokens: 500,
-			wantMin:      0.052, // 1K×$15.00/M + 500×$75.00/M = $0.015 + $0.0375 = $0.0525
-			wantMax:      0.053,
+			wantMin:      0.017, // 1K×$5.00/M + 500×$25.00/M = $0.005 + $0.0125 = $0.0175
+			wantMax:      0.018,
 		},
 		{
 			name:         "Gemini 2.0 Flash",
@@ -520,12 +520,12 @@ func TestOpusPricing(t *testing.T) {
 		model     string
 		wantInput float64
 	}{
-		{"claude-opus-4.7", 15.00},
-		{"claude-opus-4-7", 15.00}, // hyphen variant (Vertex AI format)
-		{"claude-opus-4.6", 15.00},
-		{"claude-opus-4-6", 15.00},
-		{"claude-opus-4", 15.00},
-		{"claude-opus-4-20250514", 15.00},
+		{"claude-opus-4.7", 5.00},
+		{"claude-opus-4-7", 5.00}, // hyphen variant (Vertex AI format)
+		{"claude-opus-4.6", 5.00},
+		{"claude-opus-4-6", 5.00},
+		{"claude-opus-4", 5.00},
+		{"claude-opus-4-20250514", 5.00},
 	}
 	for _, tt := range tests {
 		t.Run(tt.model, func(t *testing.T) {

@@ -75,19 +75,26 @@ models:
     input_per_million: 1.25
     output_per_million: 5.00
 
-  # ── Anthropic (via Vertex AI or direct) ──────────────────
-  # Claude 4.6/4.7 (latest) — canonical dotted format.
+  # Claude 4.6/4.7/4.8 (latest) — canonical dotted format.
   # Hyphenated variants (e.g. claude-opus-4-7 from Vertex AI) are
   # resolved via normalizeModelID in resolve(), not duplicated here.
+  #
+  # All Opus 4.x versions are $5/$25 per Anthropic pricing.
+  # (Claude 3 Opus was $15/$75 — do NOT confuse the two.)
+  - provider: anthropic
+    model: claude-opus-4.8
+    input_per_million: 5.00
+    output_per_million: 25.00
+
   - provider: anthropic
     model: claude-opus-4.7
-    input_per_million: 15.00
-    output_per_million: 75.00
+    input_per_million: 5.00
+    output_per_million: 25.00
 
   - provider: anthropic
     model: claude-opus-4.6
-    input_per_million: 15.00
-    output_per_million: 75.00
+    input_per_million: 5.00
+    output_per_million: 25.00
 
   - provider: anthropic
     model: claude-sonnet-4.6
@@ -107,8 +114,8 @@ models:
 
   - provider: anthropic
     model: claude-opus-4
-    input_per_million: 15.00
-    output_per_million: 75.00
+    input_per_million: 5.00
+    output_per_million: 25.00
 
   # Claude 4 (Vertex AI model IDs with date suffix)
   - provider: anthropic
@@ -118,8 +125,14 @@ models:
 
   - provider: anthropic
     model: claude-opus-4-20250514
-    input_per_million: 15.00
-    output_per_million: 75.00
+    input_per_million: 5.00
+    output_per_million: 25.00
+
+  # Claude Fable 5 (June 2026, new highest-capability tier)
+  - provider: anthropic
+    model: claude-fable-5
+    input_per_million: 10.00
+    output_per_million: 50.00
 
   # Claude 3.5 (legacy)
   - provider: anthropic

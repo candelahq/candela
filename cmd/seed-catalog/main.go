@@ -27,6 +27,7 @@ import (
 
 func main() {
 	projectID := flag.String("project-id", "", "GCP Project ID (required)")
+	databaseID := flag.String("database-id", "(default)", "Firestore database ID")
 	collection := flag.String("collection", "model_catalog", "Firestore collection name")
 	dryRun := flag.Bool("dry-run", false, "Print entries without writing to Firestore")
 	flag.Parse()
@@ -55,8 +56,8 @@ func main() {
 		})
 	}
 
-	fmt.Printf("🕯️  seed-catalog (project=%s collection=%s dry-run=%v)\n\n",
-		*projectID, *collection, *dryRun)
+	fmt.Printf("🕯️  seed-catalog (project=%s database=%s collection=%s dry-run=%v)\n\n",
+		*projectID, *databaseID, *collection, *dryRun)
 	fmt.Printf("Found %d default model pricing entries.\n\n", len(entries))
 
 	if *dryRun {
@@ -76,7 +77,7 @@ func main() {
 
 	// Create Firestore client and store.
 	ctx := context.Background()
-	client, err := firestore.NewClient(ctx, *projectID)
+	client, err := firestore.NewClientWithDatabase(ctx, *projectID, *databaseID)
 	if err != nil {
 		log.Fatalf("firestore client: %v", err)
 	}

@@ -60,6 +60,17 @@ type Entry struct {
 	// DiscountPercent is a model-specific discount (0.0–1.0).
 	DiscountPercent float64   `json:"discount_percent,omitempty"`
 	UpdatedAt       time.Time `json:"updated_at,omitempty"` // last modification timestamp
+
+	// ProviderModelID is the upstream provider's model identifier when it
+	// differs from ModelID. For example, Anthropic uses "claude-opus-4.7"
+	// but Vertex AI requires "claude-opus-4-7" (dashes instead of dots).
+	// If empty, ModelID is used as-is for upstream requests.
+	ProviderModelID string `json:"provider_model_id,omitempty"`
+
+	// Region is the cloud region to use for this specific model.
+	// For Vertex AI, this determines the endpoint (e.g. "global", "us-east5").
+	// If empty, falls back to the deployment-wide CANDELA_VERTEX_REGION setting.
+	Region string `json:"region,omitempty"`
 }
 
 // ModelCatalogStore is the core abstraction for the model catalog.

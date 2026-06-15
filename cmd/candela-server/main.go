@@ -527,6 +527,13 @@ func main() {
 					allProviders[i].PathRewriter = &proxy.VertexAIPathRewriter{
 						ProjectID: cfg.Proxy.VertexAI.ProjectID,
 						Region:    region,
+						ModelResolver: func(model string) (string, string) {
+							entry, err := catalogStore.Get(context.Background(), "anthropic", model)
+							if err != nil || entry == nil {
+								return "", ""
+							}
+							return entry.ProviderModelID, entry.Region
+						},
 					}
 					if tokenSource != nil {
 						allProviders[i].TokenSource = tokenSource

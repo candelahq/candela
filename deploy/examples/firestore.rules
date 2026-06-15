@@ -1,0 +1,205 @@
+rules_version = '2';
+
+// ===============================================================
+// Candela — Firestore Security Rules
+// ===============================================================
+//
+// Architecture:  All Firestore access is performed server-side via the
+//                Go Admin SDK (cloud.google.com/go/firestore), which
+//                **bypasses** security rules entirely.  These rules
+//                exist as defense-in-depth to block any unauthorized
+//                client-side access that could occur if a Firebase
+//                API key were leaked or a client SDK were inadvertently
+//                initialized.
+//
+// Principle:     Default-deny everything, then open narrow paths only
+//                where a legitimate client-side need exists.
+//
+// ===============================================================
+// Assumed Data Model (Firestore collections)
+// ===============================================================
+//
+// Top-level collections:
+//   users/{userId}
+//     Fields: id (string), email (string), display_name (string?),
+//             role (string: "admin"|"developer"), status (string),
+//             created_at (timestamp), last_seen_at (timestamp),
+//             last_active_at (timestamp), rate_limit (int?)
+//     Subcollections:
+//       budgets/{budgetId}  — period spend tracking + config
+//       grants/{grantId}    — admin-issued budget grants
+//       audit/{auditId}     — per-user audit trail
+//
+//   model_catalog/{entryId}
+//     Fields: model_id (string, required), provider (string, required),
+//             display_name (string?), input_per_million (float, required),
+//             output_per_million (float, required), enabled (bool),
+//             category (string?), context_window (int?),
+//             input_per_million_high (float?), output_per_million_high (float?),
+//             tier_threshold_tokens (int?), aliases (list<string>?),
+//             allowed_tenants (list<string>?), discount_percent (float?),
+//             updated_at (timestamp, server-managed)
+//
+//   global_audit/{entryId}
+//     Fields: id (string), action (string), actor_id (string),
+//             actor_email (string), target_id (string?),
+//             details (string?), timestamp (timestamp)
+//
+//   rate_limit/{userId}
+//     Fields: (rate limiting metadata, server-managed)
+//
+// ===============================================================
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ─────────────────────────────────────────────
+    // Helper Functions
+    // ─────────────────────────────────────────────
+
+    // Check if the request comes from an authenticated user.
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    // Check if the authenticated user has admin custom claims.
+    // NOTE: In Candela, admin role is stored in the Firestore user doc
+    // (role: "admin"), NOT in Firebase Auth custom claims. Since the
+    // Admin SDK bypasses rules, this function is a secondary gate for
+    // any hypothetical client-side access. If custom claims are added
+    // in the future, update this function.
+    function isAdmin() {
+      return isAuthenticated()
+        && request.auth.token.get('admin', false) == true;
+    }
+
+    // Check if the requester owns the user document.
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    // Validate required fields exist in the incoming document.
+    function hasRequiredFields(fields) {
+      return request.resource.data.keys().hasAll(fields);
+    }
+
+    // Validate the document only contains allowed fields.
+    function hasOnlyAllowedFields(fields) {
+      return request.resource.data.keys().hasOnly(fields);
+    }
+
+    // ─────────────────────────────────────────────
+    // model_catalog — the MODEL CATALOG collection
+    // ─────────────────────────────────────────────
+    // Read:   authenticated users (all registered users can browse models)
+    // Write:  admin-only via custom claims (defense-in-depth;
+    //         primary writes go through Admin SDK)
+    // Validate: required pricing fields on create/update
+    //
+    match /model_catalog/{entryId} {
+
+      // Validator: ensures required fields and correct types.
+      function isValidCatalogEntry() {
+        let data = request.resource.data;
+        let requiredFields = ['model_id', 'provider', 'input_per_million', 'output_per_million'];
+        let allowedFields = [
+          'model_id', 'provider', 'display_name',
+          'input_per_million', 'output_per_million', 'enabled',
+          'category', 'context_window',
+          'input_per_million_high', 'output_per_million_high',
+          'tier_threshold_tokens', 'aliases', 'allowed_tenants',
+          'discount_percent', 'updated_at'
+        ];
+        return hasRequiredFields(requiredFields)
+          && hasOnlyAllowedFields(allowedFields)
+          && data.model_id is string
+          && data.model_id.size() > 0
+          && data.model_id.size() <= 256
+          && data.provider is string
+          && data.provider.size() > 0
+          && data.provider.size() <= 128
+          && data.input_per_million is number
+          && data.input_per_million >= 0
+          && data.output_per_million is number
+          && data.output_per_million >= 0;
+      }
+
+      // Any authenticated user can read catalog entries.
+      allow read: if isAuthenticated();
+
+      // Only admins (via custom claims) can create entries with valid data.
+      allow create: if isAdmin() && isValidCatalogEntry();
+
+      // Only admins can update; must still pass validation.
+      allow update: if isAdmin() && isValidCatalogEntry();
+
+      // Only admins can delete catalog entries.
+      allow delete: if isAdmin();
+    }
+
+    // ─────────────────────────────────────────────
+    // users — user profile documents
+    // ─────────────────────────────────────────────
+    // Read:   owner can read own doc; admin can read any
+    // Write:  server-only (Admin SDK) in production
+    //         Defense-in-depth: deny client-side writes entirely
+    //
+    match /users/{userId} {
+      allow read: if isOwner(userId) || isAdmin();
+      allow write: if false;  // Server-only via Admin SDK
+
+      // ── budgets (subcollection) ──
+      // Budget tracking is entirely server-managed.
+      match /budgets/{budgetId} {
+        allow read: if isOwner(userId) || isAdmin();
+        allow write: if false;  // Server-only via Admin SDK
+      }
+
+      // ── grants (subcollection) ──
+      // Admin-issued budget grants, server-managed.
+      match /grants/{grantId} {
+        allow read: if isOwner(userId) || isAdmin();
+        allow write: if false;  // Server-only via Admin SDK
+      }
+
+      // ── audit (subcollection) ──
+      // Per-user audit trail, server-managed.
+      // Only the user themselves or admins can read audit logs.
+      match /audit/{auditId} {
+        allow read: if isOwner(userId) || isAdmin();
+        allow write: if false;  // Server-only via Admin SDK
+      }
+    }
+
+    // ─────────────────────────────────────────────
+    // global_audit — cross-user audit log
+    // ─────────────────────────────────────────────
+    // Read:   admin-only (contains sensitive operational data)
+    // Write:  server-only (Admin SDK)
+    //
+    match /global_audit/{entryId} {
+      allow read: if isAdmin();
+      allow write: if false;  // Server-only via Admin SDK
+    }
+
+    // ─────────────────────────────────────────────
+    // rate_limit — per-user rate limiting state
+    // ─────────────────────────────────────────────
+    // Entirely server-managed; no client access.
+    //
+    match /rate_limit/{userId} {
+      allow read, write: if false;  // Server-only via Admin SDK
+    }
+
+    // ─────────────────────────────────────────────
+    // Default deny — catch-all for any unlisted paths
+    // ─────────────────────────────────────────────
+    // Any collection or document not matched above is denied.
+    // This is implicit in Firestore (unmatched paths = denied),
+    // but we make it explicit for clarity.
+    //
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

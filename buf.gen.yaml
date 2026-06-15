@@ -6,21 +6,21 @@ managed:
       module: buf.build/candelahq/protos
       value: github.com/candelahq/candela/gen/go
 plugins:
-  # Go protobuf
-  - remote: buf.build/protocolbuffers/go
+  # Go protobuf — pinned to prevent CI codegen drift
+  - remote: buf.build/protocolbuffers/go:v1.36.11
     out: gen/go
     opt: paths=source_relative
-  # Go ConnectRPC
-  - remote: buf.build/connectrpc/go
+  # Go ConnectRPC — pinned to prevent CI codegen drift
+  - remote: buf.build/connectrpc/go:v1.19.1
     out: gen/go
     opt: paths=source_relative
-  # TypeScript (ES) — message types
-  - remote: buf.build/bufbuild/es
+  # TypeScript (ES) — message types — pinned to prevent CI codegen drift
+  - remote: buf.build/bufbuild/es:v2.12.0
     out: ui/src/gen
     opt: target=ts
     include_imports: true
-  # TypeScript (ES) — ConnectRPC service stubs
-  - remote: buf.build/connectrpc/es
+  # TypeScript (ES) — ConnectRPC service stubs — pinned to prevent CI codegen drift
+  - remote: buf.build/connectrpc/es:v1.6.1
     out: ui/src/gen
     opt: target=ts
   # BigQuery schema generation from proto (local plugin)

@@ -247,9 +247,9 @@ func TestCalculator_TieredPricing_AtExactThreshold(t *testing.T) {
 
 func TestCalculator_TieredPricing_NoTierFields_UsesBaserate(t *testing.T) {
 	c := New()
-	// Models without tiered pricing (e.g. gemini-2.0-flash) use base rate regardless of input size.
-	costSmall := c.Calculate("google", "gemini-2.0-flash", 100_000, 10_000)
-	costLarge := c.Calculate("google", "gemini-2.0-flash", 500_000, 10_000)
+	// Models without tiered pricing (e.g. gemini-2.5-flash-lite) use base rate regardless of input size.
+	costSmall := c.Calculate("google", "gemini-2.5-flash-lite", 100_000, 10_000)
+	costLarge := c.Calculate("google", "gemini-2.5-flash-lite", 500_000, 10_000)
 	// Both should use the same rate per token — just different volumes.
 	rateSmall := costSmall / (100_000.0 + 10_000.0)
 	rateLarge := costLarge / (500_000.0 + 10_000.0)

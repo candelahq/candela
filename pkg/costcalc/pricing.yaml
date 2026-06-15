@@ -28,16 +28,6 @@ models:
     input_per_million: 0.25
     output_per_million: 1.50
 
-  # Gemini 3
-  - provider: google
-    model: gemini-3-flash
-    input_per_million: 0.50
-    output_per_million: 3.00
-
-  - provider: google
-    model: gemini-3-flash-lite
-    input_per_million: 0.02
-    output_per_million: 0.10
 
   # Gemini 2.5
   - provider: google
@@ -58,22 +48,6 @@ models:
     input_per_million: 0.10
     output_per_million: 0.40
 
-  # Gemini 2.0
-  - provider: google
-    model: gemini-2.0-flash
-    input_per_million: 0.10
-    output_per_million: 0.40
-
-  # Gemini 1.5 (legacy)
-  - provider: google
-    model: gemini-1.5-flash
-    input_per_million: 0.075
-    output_per_million: 0.30
-
-  - provider: google
-    model: gemini-1.5-pro
-    input_per_million: 1.25
-    output_per_million: 5.00
 
   # Claude 4.6/4.7/4.8 (latest) — canonical dotted format.
   # Hyphenated variants (e.g. claude-opus-4-7 from Vertex AI) are
@@ -128,27 +102,7 @@ models:
     input_per_million: 5.00
     output_per_million: 25.00
 
-  # Claude Fable 5 (June 2026, new highest-capability tier)
-  - provider: anthropic
-    model: claude-fable-5
-    input_per_million: 10.00
-    output_per_million: 50.00
 
-  # Claude 3.5 (legacy)
-  - provider: anthropic
-    model: claude-3-5-sonnet-20241022
-    input_per_million: 3.00
-    output_per_million: 15.00
-
-  - provider: anthropic
-    model: claude-haiku-3-5-20241022
-    input_per_million: 0.80
-    output_per_million: 4.00
-
-  - provider: anthropic
-    model: claude-3-opus-20240229
-    input_per_million: 15.00
-    output_per_million: 75.00
 
   # ── OpenAI ───────────────────────────────────────────────
   # GPT-4.1 family (current flagship, 1M context)
@@ -200,10 +154,6 @@ models:
     input_per_million: 0.40
     output_per_million: 2.00
 
-  - provider: mistral
-    model: codestral-2501
-    input_per_million: 0.30
-    output_per_million: 0.90
 
   - provider: mistral
     model: codestral-2
@@ -216,10 +166,7 @@ models:
     input_per_million: 0.14
     output_per_million: 0.28
 
-  - provider: deepseek
-    model: deepseek-r1
-    input_per_million: 0.14
-    output_per_million: 0.28
+
 
   # ── DeepSeek V3 (via Vertex AI, global) ──────
   - provider: deepseek-v3
@@ -227,15 +174,7 @@ models:
     input_per_million: 0.14
     output_per_million: 0.28
 
-  - provider: deepseek-v3
-    model: deepseek-v3-maas
-    input_per_million: 0.14
-    output_per_million: 0.28
 
-  - provider: deepseek-v3
-    model: deepseek-chat
-    input_per_million: 0.14
-    output_per_million: 0.28
 
   # ── Qwen (via Vertex AI OpenAI-compat) ─────────────────
   - provider: qwen
@@ -248,8 +187,3 @@ models:
     input_per_million: 0.22
     output_per_million: 1.80
 
-  # Aliases — older/shorter model names still in client configs.
-  - provider: qwen
-    model: qwen-2.5-coder-32b-instruct-maas
-    input_per_million: 0.30
-    output_per_million: 1.20

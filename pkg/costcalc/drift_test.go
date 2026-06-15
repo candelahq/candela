@@ -79,8 +79,8 @@ func TestDefaultsModelCount(t *testing.T) {
 	defaults := c.Defaults()
 
 	// Sanity check: we should have a reasonable number of models.
-	if len(defaults) < 30 {
-		t.Errorf("only %d default models, expected at least 30", len(defaults))
+	if len(defaults) < 20 {
+		t.Errorf("only %d default models, expected at least 20", len(defaults))
 	}
 
 	// Check for duplicate entries (provider + model key).
@@ -129,7 +129,7 @@ func TestPricingYAMLValid(t *testing.T) {
 func TestPricingYAMLModelCount(t *testing.T) {
 	c := New()
 	defaults := c.Defaults()
-	if len(defaults) < 30 {
-		t.Errorf("expected at least 30 models, got %d", len(defaults))
+	if len(defaults) < 20 {
+		t.Errorf("expected at least 20 models, got %d", len(defaults))
 	}
 }

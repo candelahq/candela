@@ -27,15 +27,7 @@ func TestCalculate(t *testing.T) {
 			wantMin:      0.017, // 1K×$5.00/M + 500×$25.00/M = $0.005 + $0.0125 = $0.0175
 			wantMax:      0.018,
 		},
-		{
-			name:         "Gemini 2.0 Flash",
-			provider:     "google",
-			model:        "gemini-2.0-flash",
-			inputTokens:  10000,
-			outputTokens: 2000,
-			wantMin:      0.001,
-			wantMax:      0.002,
-		},
+
 		{
 			name:         "Claude Sonnet 4",
 			provider:     "anthropic",
@@ -57,7 +49,7 @@ func TestCalculate(t *testing.T) {
 		{
 			name:         "Zero tokens returns zero cost",
 			provider:     "google",
-			model:        "gemini-2.0-flash",
+			model:        "gemini-2.5-flash-lite",
 			inputTokens:  0,
 			outputTokens: 0,
 			wantMin:      0,
@@ -117,24 +109,7 @@ func TestCalculate(t *testing.T) {
 			wantMin:      0.005, // 10K×$0.25/M + 2K×$1.50/M = $0.0025 + $0.003 = $0.0055
 			wantMax:      0.006,
 		},
-		{
-			name:         "Gemini 3 Flash",
-			provider:     "google",
-			model:        "gemini-3-flash",
-			inputTokens:  10000,
-			outputTokens: 2000,
-			wantMin:      0.010, // 10K×$0.50/M + 2K×$3.00/M = $0.005 + $0.006 = $0.011
-			wantMax:      0.012,
-		},
-		{
-			name:         "Gemini 3 Flash Lite",
-			provider:     "google",
-			model:        "gemini-3-flash-lite",
-			inputTokens:  100000,
-			outputTokens: 20000,
-			wantMin:      0.003, // 100K×$0.02/M + 20K×$0.10/M = $0.002 + $0.002 = $0.004
-			wantMax:      0.005,
-		},
+
 		{
 			name:         "Gemini 3.5 Flash",
 			provider:     "google",
@@ -180,15 +155,7 @@ func TestCalculate(t *testing.T) {
 			wantMin:      0.001, // 10K×$0.14/M + 2K×$0.28/M = $0.0014 + $0.00056 = $0.00196
 			wantMax:      0.002,
 		},
-		{
-			name:         "Codestral 2501",
-			provider:     "mistral",
-			model:        "codestral-2501",
-			inputTokens:  1000,
-			outputTokens: 500,
-			wantMin:      0.0007, // 1K×$0.30/M + 500×$0.90/M = $0.0003 + $0.00045 = $0.00075
-			wantMax:      0.0008,
-		},
+
 		{
 			name:         "Qwen3 235B",
 			provider:     "qwen",
@@ -232,14 +199,14 @@ func TestSetPricing(t *testing.T) {
 func TestLoadFromConfig(t *testing.T) {
 	calc := New()
 
-	// Override Gemini 2.0 Flash with a negotiated rate
+	// Override Gemini 2.5 Flash Lite with a negotiated rate
 	calc.LoadFromConfig(PricingConfig{
 		Models: []ModelPricing{
-			{Provider: "google", Model: "gemini-2.0-flash", InputPerMillion: 0.05, OutputPerMillion: 0.20},
+			{Provider: "google", Model: "gemini-2.5-flash-lite", InputPerMillion: 0.05, OutputPerMillion: 0.20},
 		},
 	})
 
-	got := calc.Calculate("google", "gemini-2.0-flash", 1_000_000, 1_000_000)
+	got := calc.Calculate("google", "gemini-2.5-flash-lite", 1_000_000, 1_000_000)
 	want := 0.25 // 0.05 + 0.20 (overridden, not 0.10 + 0.40)
 	if math.Abs(got-want) > 0.001 {
 		t.Errorf("Calculate with config override = %f, want %f", got, want)

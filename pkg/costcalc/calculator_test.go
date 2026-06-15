@@ -520,6 +520,8 @@ func TestOpusPricing(t *testing.T) {
 		model     string
 		wantInput float64
 	}{
+		{"claude-opus-4.8", 5.00},
+		{"claude-opus-4-8", 5.00}, // hyphen variant (Vertex AI format)
 		{"claude-opus-4.7", 5.00},
 		{"claude-opus-4-7", 5.00}, // hyphen variant (Vertex AI format)
 		{"claude-opus-4.6", 5.00},

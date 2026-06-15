@@ -565,3 +565,249 @@ func TestResetSpend(t *testing.T) {
 		t.Errorf("tokens_used after reset = %d, want 0", got.TokensUsed)
 	}
 }
+
+// ──────────────────────────────────────────────────────────────────────────────
+// DeductSpend + StartsAt filtering
+// ──────────────────────────────────────────────────────────────────────────────
+
+// TestDeductSpend_SkipsFutureGrant verifies that a grant with StartsAt in the
+// future is NOT consumed by DeductSpend. The cost should fall entirely on the
+// daily budget instead.
+func TestDeductSpend_SkipsFutureGrant(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	userID := fmt.Sprintf("test-future-grant-%d", time.Now().UnixNano())
+	user := &storage.UserRecord{ID: userID, Email: "future@example.com", Role: "developer"}
+	t.Cleanup(func() { cleanupUser(ctx, s, userID) })
+
+	if err := s.CreateUser(ctx, user); err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+
+	// Set a $50 daily budget.
+	if err := s.SetBudget(ctx, &storage.BudgetRecord{
+		UserID: userID, LimitUSD: 50.0, PeriodType: "daily",
+	}); err != nil {
+		t.Fatalf("SetBudget: %v", err)
+	}
+
+	// Create a $100 grant that starts TOMORROW — must not be consumed today.
+	if err := s.CreateGrant(ctx, &storage.GrantRecord{
+		UserID:    userID,
+		AmountUSD: 100.0,
+		Reason:    "future grant",
+		GrantedBy: "admin@example.com",
+		StartsAt:  time.Now().UTC().Add(24 * time.Hour),
+		ExpiresAt: time.Now().UTC().Add(48 * time.Hour),
+	}); err != nil {
+		t.Fatalf("CreateGrant: %v", err)
+	}
+
+	// Deduct $10 — should come entirely from budget, not the future grant.
+	if err := s.DeductSpend(ctx, userID, 10.0, 100); err != nil {
+		t.Fatalf("DeductSpend: %v", err)
+	}
+
+	b, err := s.GetBudget(ctx, userID)
+	if err != nil {
+		t.Fatalf("GetBudget: %v", err)
+	}
+	if b.SpentUSD != 10.0 {
+		t.Errorf("budget.SpentUSD = %f, want 10.0 (entire cost on budget)", b.SpentUSD)
+	}
+
+	// The future grant must be untouched.
+	grants, err := s.ListGrants(ctx, userID, false)
+	if err != nil {
+		t.Fatalf("ListGrants: %v", err)
+	}
+	for _, g := range grants {
+		if g.Reason == "future grant" && g.SpentUSD != 0 {
+			t.Errorf("future grant.SpentUSD = %f, want 0 (should not be consumed before StartsAt)", g.SpentUSD)
+		}
+	}
+}
+
+// TestDeductSpend_UsesActiveGrant verifies that a grant with StartsAt in the
+// past IS consumed by DeductSpend when the budget overflows.
+func TestDeductSpend_UsesActiveGrant(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	userID := fmt.Sprintf("test-active-grant-%d", time.Now().UnixNano())
+	user := &storage.UserRecord{ID: userID, Email: "active@example.com", Role: "developer"}
+	t.Cleanup(func() { cleanupUser(ctx, s, userID) })
+
+	if err := s.CreateUser(ctx, user); err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+
+	// Set a $5 daily budget (small, so overflow hits the grant).
+	if err := s.SetBudget(ctx, &storage.BudgetRecord{
+		UserID: userID, LimitUSD: 5.0, PeriodType: "daily",
+	}); err != nil {
+		t.Fatalf("SetBudget: %v", err)
+	}
+
+	// Create a $100 grant that started YESTERDAY — should be consumable.
+	if err := s.CreateGrant(ctx, &storage.GrantRecord{
+		UserID:    userID,
+		AmountUSD: 100.0,
+		Reason:    "active grant",
+		GrantedBy: "admin@example.com",
+		StartsAt:  time.Now().UTC().Add(-24 * time.Hour),
+		ExpiresAt: time.Now().UTC().Add(48 * time.Hour),
+	}); err != nil {
+		t.Fatalf("CreateGrant: %v", err)
+	}
+
+	// Deduct $15 — budget absorbs $5, grant absorbs $10 overflow.
+	if err := s.DeductSpend(ctx, userID, 15.0, 200); err != nil {
+		t.Fatalf("DeductSpend: %v", err)
+	}
+
+	b, err := s.GetBudget(ctx, userID)
+	if err != nil {
+		t.Fatalf("GetBudget: %v", err)
+	}
+	if b.SpentUSD != 5.0 {
+		t.Errorf("budget.SpentUSD = %f, want 5.0", b.SpentUSD)
+	}
+
+	grants, err := s.ListGrants(ctx, userID, false)
+	if err != nil {
+		t.Fatalf("ListGrants: %v", err)
+	}
+	for _, g := range grants {
+		if g.Reason == "active grant" && g.SpentUSD != 10.0 {
+			t.Errorf("active grant.SpentUSD = %f, want 10.0 (overflow absorbed)", g.SpentUSD)
+		}
+	}
+}
+
+// TestDeductSpend_ZeroStartsAt_IsActive verifies that a grant with a zero-value
+// StartsAt (legacy behaviour) is treated as immediately active.
+func TestDeductSpend_ZeroStartsAt_IsActive(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	userID := fmt.Sprintf("test-zero-starts-%d", time.Now().UnixNano())
+	user := &storage.UserRecord{ID: userID, Email: "legacy@example.com", Role: "developer"}
+	t.Cleanup(func() { cleanupUser(ctx, s, userID) })
+
+	if err := s.CreateUser(ctx, user); err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+
+	// Set a $5 daily budget.
+	if err := s.SetBudget(ctx, &storage.BudgetRecord{
+		UserID: userID, LimitUSD: 5.0, PeriodType: "daily",
+	}); err != nil {
+		t.Fatalf("SetBudget: %v", err)
+	}
+
+	// Create a grant with zero StartsAt (legacy — no starts_at field stored).
+	if err := s.CreateGrant(ctx, &storage.GrantRecord{
+		UserID:    userID,
+		AmountUSD: 50.0,
+		Reason:    "legacy grant",
+		GrantedBy: "admin@example.com",
+		// StartsAt intentionally left zero.
+		ExpiresAt: time.Now().UTC().Add(48 * time.Hour),
+	}); err != nil {
+		t.Fatalf("CreateGrant: %v", err)
+	}
+
+	// Deduct $15 — budget absorbs $5, legacy grant absorbs $10 overflow.
+	if err := s.DeductSpend(ctx, userID, 15.0, 200); err != nil {
+		t.Fatalf("DeductSpend: %v", err)
+	}
+
+	grants, err := s.ListGrants(ctx, userID, false)
+	if err != nil {
+		t.Fatalf("ListGrants: %v", err)
+	}
+	for _, g := range grants {
+		if g.Reason == "legacy grant" && g.SpentUSD != 10.0 {
+			t.Errorf("legacy grant.SpentUSD = %f, want 10.0 (zero StartsAt = active)", g.SpentUSD)
+		}
+	}
+}
+
+// TestDeductSpend_MixedGrants verifies that when both a future grant and an
+// active grant exist, only the active one is consumed.
+func TestDeductSpend_MixedGrants(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	userID := fmt.Sprintf("test-mixed-grants-%d", time.Now().UnixNano())
+	user := &storage.UserRecord{ID: userID, Email: "mixed@example.com", Role: "developer"}
+	t.Cleanup(func() { cleanupUser(ctx, s, userID) })
+
+	if err := s.CreateUser(ctx, user); err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+
+	// Set a $5 daily budget.
+	if err := s.SetBudget(ctx, &storage.BudgetRecord{
+		UserID: userID, LimitUSD: 5.0, PeriodType: "daily",
+	}); err != nil {
+		t.Fatalf("SetBudget: %v", err)
+	}
+
+	// Grant A: starts TOMORROW — must NOT be consumed.
+	if err := s.CreateGrant(ctx, &storage.GrantRecord{
+		UserID:    userID,
+		AmountUSD: 200.0,
+		Reason:    "future grant",
+		GrantedBy: "admin@example.com",
+		StartsAt:  time.Now().UTC().Add(24 * time.Hour),
+		ExpiresAt: time.Now().UTC().Add(72 * time.Hour),
+	}); err != nil {
+		t.Fatalf("CreateGrant future: %v", err)
+	}
+
+	// Grant B: started an hour ago — should be consumed.
+	if err := s.CreateGrant(ctx, &storage.GrantRecord{
+		UserID:    userID,
+		AmountUSD: 20.0,
+		Reason:    "active grant",
+		GrantedBy: "admin@example.com",
+		StartsAt:  time.Now().UTC().Add(-1 * time.Hour),
+		ExpiresAt: time.Now().UTC().Add(24 * time.Hour),
+	}); err != nil {
+		t.Fatalf("CreateGrant active: %v", err)
+	}
+
+	// Deduct $25 — budget absorbs $5, active grant absorbs $20 overflow.
+	// Future grant must remain untouched.
+	if err := s.DeductSpend(ctx, userID, 25.0, 500); err != nil {
+		t.Fatalf("DeductSpend: %v", err)
+	}
+
+	b, err := s.GetBudget(ctx, userID)
+	if err != nil {
+		t.Fatalf("GetBudget: %v", err)
+	}
+	if b.SpentUSD != 5.0 {
+		t.Errorf("budget.SpentUSD = %f, want 5.0", b.SpentUSD)
+	}
+
+	grants, err := s.ListGrants(ctx, userID, false)
+	if err != nil {
+		t.Fatalf("ListGrants: %v", err)
+	}
+	for _, g := range grants {
+		switch g.Reason {
+		case "future grant":
+			if g.SpentUSD != 0 {
+				t.Errorf("future grant.SpentUSD = %f, want 0", g.SpentUSD)
+			}
+		case "active grant":
+			if g.SpentUSD != 20.0 {
+				t.Errorf("active grant.SpentUSD = %f, want 20.0", g.SpentUSD)
+			}
+		}
+	}
+}

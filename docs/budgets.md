@@ -2,6 +2,20 @@
 
 Candela provides per-user budget enforcement and threshold notifications to prevent runaway LLM spending.
 
+## Budget Timezone
+
+By default, budget periods reset at **UTC midnight**. For teams in a specific timezone, configure `budget.timezone` in `config.yaml`:
+
+```yaml
+budget:
+  timezone: "America/New_York"  # IANA timezone name
+```
+
+This affects when daily, weekly, and monthly budget periods roll over. The server loads the timezone database from the embedded `time/tzdata` package, so it works in minimal container images (scratch, distroless) without requiring system timezone files.
+
+> [!NOTE]
+> The `import _ "time/tzdata"` in `cmd/candela-server/main.go` embeds the full IANA timezone database into the binary. This adds ~450KB but ensures `time.LoadLocation()` works in containers that lack `/usr/share/zoneinfo`.
+
 ## Budget Model
 
 ### Grant-First Waterfall
@@ -58,6 +72,9 @@ starts_at:  2026-04-15
 expires_at: 2026-04-30
 ```
 
+> [!NOTE]
+> **`StartsAt` filtering**: Grants with a `starts_at` date in the future are excluded from active grant listings. This prevents future-dated grants from appearing in budget checks. The `ListGrants()` function (with `activeOnly=true`) filters on `starts_at <= now`. Note: `DeductSpend()` currently queries only on `expires_at > now` — a future improvement will add `StartsAt` filtering to the transaction query as well.
+
 ### Budget Enforcement Flow
 
 ```mermaid
@@ -83,6 +100,19 @@ sequenceDiagram
 
 > [!NOTE]
 > Budget enforcement is **post-deduction**, not pre-flight. The LLM call always goes through. Budget exhaustion is enforced via pre-flight checks on subsequent requests (via `CheckBudget()`).
+
+### Budget Check Reasons
+
+`CheckBudget()` returns a `BudgetCheckResult` with a `Reason` field for programmatic handling:
+
+| Reason | Meaning |
+|--------|---------|
+| `allowed` | Request is within budget — proceed |
+| `budget_exhausted` | Recurring budget + grants fully consumed |
+| `soft_blocked` | Estimated cost exceeds remaining balance |
+| `no_budget` | No budget record exists for this user |
+
+The `Reason` field (defined in `pkg/billing/types.go`) allows clients to distinguish between hard blocks and soft blocks, enabling UX like "you're close to your limit" vs. "budget exhausted".
 
 ---
 
@@ -201,6 +231,20 @@ curl -X POST http://localhost:8181/candela.v1.UserService/CreateGrant \
   }'
 ```
 
+### Fetching a Specific Grant
+
+```bash
+curl -X POST http://localhost:8181/candela.v1.UserService/GetGrant \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer <admin-token>" \
+  -d '{
+    "userId": "user123",
+    "grantId": "grant-abc-123"
+  }'
+```
+
+Returns the full grant record including `amount_usd`, `spent_usd`, `starts_at`, `expires_at`, and computed remaining balance.
+
 ### Emergency: Reset Spend
 
 If a user's spend counter is incorrect:
@@ -235,9 +279,11 @@ gcloud alpha monitoring policies create \
 
 | File | Purpose |
 |------|---------|
+| `pkg/billing/types.go` | `BudgetRecord`, `GrantRecord`, `BudgetCheckResult`, `BudgetAlert`, reason constants |
+| `pkg/billing/billing.go` | `Service` interface — storage-agnostic billing contract |
 | `pkg/notify/notifier.go` | `BudgetChecker`, `LogNotifier`, threshold logic |
 | `pkg/notify/notifier_test.go` | Unit tests for dedup and threshold evaluation |
-| `pkg/storage/store.go` | `BudgetRecord`, `GrantRecord`, `BudgetCheckResult`, `Notifier` interface |
-| `pkg/storage/firestoredb/firestoredb.go` | `DeductSpend()`, `CheckBudget()`, grant waterfall implementation |
+| `pkg/storage/store.go` | Type aliases for `billing.*` types, `UserStore` interface |
+| `pkg/storage/firestoredb/firestoredb.go` | `DeductSpend()`, `CheckBudget()`, `GetGrant()`, grant waterfall with `StartsAt` filtering |
 | `pkg/proxy/proxy.go` | Budget deduction call in `buildSpan()` |
-| `cmd/candela-server/main.go` | Wiring `BudgetChecker` into the proxy |
+| `cmd/candela-server/main.go` | Wiring `BudgetChecker` into the proxy, budget timezone config |

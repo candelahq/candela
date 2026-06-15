@@ -37,7 +37,7 @@ func TestAudit_HealthEndpoints(t *testing.T) {
 
 	submitter := &mockSubmitter{}
 	calc := newCalcWithTestModels()
-	p := New(Config{
+	p, _ := New(Config{
 		Providers: []Provider{{Name: "openai", UpstreamURL: "http://localhost:1"}},
 		ProjectID: "test",
 	}, submitter, calc)
@@ -93,7 +93,7 @@ func TestAudit_UnknownProviderReturnsError(t *testing.T) {
 
 	submitter := &mockSubmitter{}
 	calc := newCalcWithTestModels()
-	p := New(Config{
+	p, _ := New(Config{
 		Providers: []Provider{{Name: "openai", UpstreamURL: "http://localhost:1"}},
 		ProjectID: "test",
 	}, submitter, calc)
@@ -144,7 +144,7 @@ func TestAudit_ProxyForwardAuthHeader(t *testing.T) {
 
 	submitter := &mockSubmitter{}
 	calc := newCalcWithTestModels()
-	p := New(Config{
+	p, _ := New(Config{
 		Providers: []Provider{{Name: "openai", UpstreamURL: upstream.URL}},
 		ProjectID: "test",
 	}, submitter, calc)
@@ -191,7 +191,7 @@ func TestAudit_SpanCaptured(t *testing.T) {
 
 	submitter := &mockSubmitter{}
 	calc := newCalcWithTestModels()
-	p := New(Config{
+	p, _ := New(Config{
 		Providers: []Provider{{Name: "openai", UpstreamURL: upstream.URL}},
 		ProjectID: "test",
 	}, submitter, calc)
@@ -239,7 +239,7 @@ func TestAudit_CompatModelsEndpoint(t *testing.T) {
 
 	submitter := &mockSubmitter{}
 	calc := newCalcWithTestModels()
-	p := New(Config{
+	p, _ := New(Config{
 		Providers: []Provider{{Name: "openai", UpstreamURL: "http://localhost:1"}},
 		ProjectID: "test",
 	}, submitter, calc)
@@ -311,7 +311,7 @@ func TestAudit_UpstreamError(t *testing.T) {
 
 	submitter := &mockSubmitter{}
 	calc := newCalcWithTestModels()
-	p := New(Config{
+	p, _ := New(Config{
 		Providers: []Provider{{Name: "openai", UpstreamURL: upstream.URL}},
 		ProjectID: "test",
 	}, submitter, calc)
@@ -358,7 +358,7 @@ func TestAudit_SpanHasCost(t *testing.T) {
 
 	submitter := &mockSubmitter{}
 	calc := newCalcWithTestModels()
-	p := New(Config{
+	p, _ := New(Config{
 		Providers: []Provider{{Name: "openai", UpstreamURL: upstream.URL}},
 		ProjectID: "test",
 	}, submitter, calc)

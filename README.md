@@ -36,7 +36,8 @@ For deep observability into agent frameworks (**ADK**, **LangChain**, **CrewAI**
 ## ✨ Key Features
 
 - **🕯️ OTel-Native**: OTLP is our native language. No proprietary SDKs.
-- **💰 Real-time Cost Tracking**: Automatic token extraction and USD calculation for OpenAI, Google, and Anthropic — including Anthropic prompt caching (1.25× write at 5m TTL, 2× write at 1h TTL, 0.1× read).
+- **💰 Real-time Cost Tracking**: Automatic token extraction and USD calculation for OpenAI, Google, and Anthropic — including Anthropic prompt caching (1.25× write at 5m TTL, 2× write at 1h TTL, 0.1× read). Pricing is config-driven via [`pricing.yaml`](pkg/costcalc/pricing.yaml) with `//go:embed`.
+- **🚫 Model Allowlist/Blocklist**: `policy.allowed_models` restricts which models users can access, with glob pattern support and audit logging for blocked requests.
 - **🔐 Role-Based Access Control**: Admin vs Developer roles with budget enforcement and grant-based spending with reset countdowns.
 - **🔑 Multi-Cloud Auth**: `candela auth login --provider gcp|aws` — native OAuth2 for GCP, SSO/access keys for AWS. No `gcloud` or `aws` CLI dependency.
 - **🗄️ Pluggable Storage**: **DuckDB** for high-performance local/edge; **BigQuery** for serverless production scale (with `GROUPING SETS` combined queries); **SQLite** for lightweight dev.
@@ -625,6 +626,7 @@ candela/
 │   ├── runtime/                 # Local LLM runtime abstraction (Ollama, vLLM, LM Studio)
 │   ├── session/                 # Session resolution (header + fingerprint)
 │   ├── notify/                  # Budget threshold notifications
+│   ├── billing/                 # Storage-agnostic billing types and Service interface
 │   └── ingestion/               # OTel span ingestion
 ├── cmd/candela-sidecar/         # Production sidecar binary
 ├── terraform/                   # GCP infrastructure (OpenTofu/Terraform)

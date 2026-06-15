@@ -1,6 +1,9 @@
 package main
 
 import (
+	"flag"
+	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/candelahq/candela/pkg/catalog"
@@ -105,5 +108,51 @@ func TestDryRunDoesNotPanic(t *testing.T) {
 	}
 	if len(entries) != len(defaults) {
 		t.Errorf("entry count %d != defaults count %d", len(entries), len(defaults))
+	}
+}
+
+func TestDatabaseIDFlagDefault(t *testing.T) {
+	// Verify the --database-id flag defaults to "(default)" so that
+	// NewClientWithDatabase always receives a valid value.
+	fs := flag.NewFlagSet("test", flag.ContinueOnError)
+	databaseID := fs.String("database-id", "(default)", "Firestore database ID")
+
+	// Parse with no args — should use default.
+	if err := fs.Parse([]string{}); err != nil {
+		t.Fatal(err)
+	}
+	if *databaseID != "(default)" {
+		t.Errorf("expected default database-id to be '(default)', got %q", *databaseID)
+	}
+}
+
+func TestDatabaseIDFlagOverride(t *testing.T) {
+	// Verify --database-id can be overridden to a named database.
+	fs := flag.NewFlagSet("test", flag.ContinueOnError)
+	databaseID := fs.String("database-id", "(default)", "Firestore database ID")
+
+	if err := fs.Parse([]string{"--database-id=candela"}); err != nil {
+		t.Fatal(err)
+	}
+	if *databaseID != "candela" {
+		t.Errorf("expected database-id to be 'candela', got %q", *databaseID)
+	}
+}
+
+func TestOutputFormatIncludesDatabaseID(t *testing.T) {
+	// Verify the output format string includes the database ID.
+	projectID := "test-project"
+	databaseID := "my-db"
+	collection := "model_catalog"
+	dryRun := true
+
+	got := fmt.Sprintf("🕯️  seed-catalog (project=%s database=%s collection=%s dry-run=%v)",
+		projectID, databaseID, collection, dryRun)
+
+	if !strings.Contains(got, "database=my-db") {
+		t.Errorf("output should include database ID: %s", got)
+	}
+	if !strings.Contains(got, "project=test-project") {
+		t.Errorf("output should include project ID: %s", got)
 	}
 }

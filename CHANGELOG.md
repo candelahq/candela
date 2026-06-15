@@ -43,8 +43,8 @@ All notable changes to Candela are documented here, organized by development pha
 - Default: UTC (backward compatible)
 
 #### `StartsAt` Grant Filtering
-- Future-dated grants excluded from the active grant waterfall in `DeductSpend()`
-- Filters on `starts_at <= now` before sorting by expiry
+- Future-dated grants excluded from active grant listings in `ListGrants()`
+- Filters on `starts_at <= now` before returning results
 - Prevents early consumption of grants scheduled for later dates
 
 #### `GetGrant` API

@@ -66,11 +66,13 @@ If the Firestore catalog is unavailable, the server falls back to config overrid
 
 ### Model ID Normalization
 
-Vertex AI model IDs use hyphens (e.g., `claude-3-5-sonnet-20241022`), while Anthropic's canonical IDs use dots for version suffixes. The `normalizeModelID()` function in `calculator.go` handles this conversion automatically:
+Vertex AI model IDs use hyphens for version suffixes (e.g., `claude-opus-4-7`), while pricing entries use dots (e.g., `claude-opus-4.7`). The `normalizeModelID()` function in `calculator.go` converts trailing `digit-digit` patterns automatically:
 
 ```
-claude-3-5-sonnet-20241022  →  claude-3.5-sonnet-20241022
-claude-sonnet-4-20250514    →  (no change — no trailing version suffix pattern)
+claude-opus-4-7             →  claude-opus-4.7   (trailing version normalized)
+claude-sonnet-4-6           →  claude-sonnet-4.6  (trailing version normalized)
+claude-3-opus-20240229      →  (no change — date suffix, not a version)
+claude-3-5-sonnet           →  (no change — "5" not at end of string)
 ```
 
 This means you only need to add the canonical (dotted) form to `pricing.yaml` — the hyphenated Vertex AI variants are resolved automatically.

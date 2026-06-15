@@ -73,7 +73,7 @@ expires_at: 2026-04-30
 ```
 
 > [!NOTE]
-> **`StartsAt` filtering**: Grants with a `starts_at` date in the future are excluded from the active grant waterfall. This prevents future-dated grants from being consumed early. The `DeductSpend()` function filters on `starts_at <= now` before sorting by expiry.
+> **`StartsAt` filtering**: Grants with a `starts_at` date in the future are excluded from active grant listings. This prevents future-dated grants from appearing in budget checks. The `ListGrants()` function (with `activeOnly=true`) filters on `starts_at <= now`. Note: `DeductSpend()` currently queries only on `expires_at > now` — a future improvement will add `StartsAt` filtering to the transaction query as well.
 
 ### Budget Enforcement Flow
 

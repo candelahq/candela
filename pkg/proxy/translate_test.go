@@ -596,6 +596,91 @@ func TestVertexAIPathRewriter(t *testing.T) {
 	}
 }
 
+func TestVertexAIPathRewriterWithModelResolver(t *testing.T) {
+	rewriter := &VertexAIPathRewriter{
+		ProjectID: "my-project",
+		Region:    "us-east5", // default region
+		ModelResolver: func(model string) (string, string) {
+			switch model {
+			case "claude-opus-4.7":
+				return "claude-opus-4-7", "global"
+			case "claude-haiku-4.5":
+				return "claude-haiku-4-5", "global"
+			case "claude-sonnet-4":
+				return "", "global" // no ID override, only region
+			default:
+				return "", ""
+			}
+		},
+	}
+
+	tests := []struct {
+		name      string
+		model     string
+		streaming bool
+		want      string
+	}{
+		{
+			name:  "dots to dashes with region override",
+			model: "claude-opus-4.7",
+			want:  "/v1/projects/my-project/locations/global/publishers/anthropic/models/claude-opus-4-7:rawPredict",
+		},
+		{
+			name:  "haiku dots to dashes",
+			model: "claude-haiku-4.5",
+			want:  "/v1/projects/my-project/locations/global/publishers/anthropic/models/claude-haiku-4-5:rawPredict",
+		},
+		{
+			name:  "region override only — no model ID change",
+			model: "claude-sonnet-4",
+			want:  "/v1/projects/my-project/locations/global/publishers/anthropic/models/claude-sonnet-4:rawPredict",
+		},
+		{
+			name:  "unknown model — uses defaults",
+			model: "claude-unknown-99",
+			want:  "/v1/projects/my-project/locations/us-east5/publishers/anthropic/models/claude-unknown-99:rawPredict",
+		},
+		{
+			name:      "streaming with resolver",
+			model:     "claude-opus-4.7",
+			streaming: true,
+			want:      "/v1/projects/my-project/locations/global/publishers/anthropic/models/claude-opus-4-7:streamRawPredict",
+		},
+		{
+			name:  "date-suffixed model resolves via Display name",
+			model: "claude-opus-4.7-20250514",
+			want:  "/v1/projects/my-project/locations/global/publishers/anthropic/models/claude-opus-4-7@20250514:rawPredict",
+		},
+		{
+			name:  "date-suffixed sonnet — region only, suffix preserved",
+			model: "claude-sonnet-4-20250514",
+			want:  "/v1/projects/my-project/locations/global/publishers/anthropic/models/claude-sonnet-4@20250514:rawPredict",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := rewriter.RewritePath(tt.model, tt.streaming)
+			if got != tt.want {
+				t.Errorf("RewritePath = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestVertexAIPathRewriterNilResolver(t *testing.T) {
+	// Without a resolver, behavior is unchanged from the original.
+	rewriter := &VertexAIPathRewriter{
+		ProjectID: "my-project",
+		Region:    "global",
+	}
+	got := rewriter.RewritePath("claude-opus-4.7", false)
+	want := "/v1/projects/my-project/locations/global/publishers/anthropic/models/claude-opus-4.7:rawPredict"
+	if got != want {
+		t.Errorf("RewritePath = %q, want %q", got, want)
+	}
+}
+
 func TestVertexAIUpstreamURL(t *testing.T) {
 	tests := []struct {
 		region string

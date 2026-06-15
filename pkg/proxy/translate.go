@@ -565,18 +565,46 @@ func (t *AnthropicFormatTranslator) TranslateStreamChunk(data []byte, model stri
 // VertexAIPathRewriter rewrites URL paths for Vertex AI's publisher model endpoints.
 type VertexAIPathRewriter struct {
 	ProjectID string // GCP project ID
-	Region    string // GCP region (e.g. "us-central1")
+	Region    string // GCP region (e.g. "us-central1") — used as default
+
+	// ModelResolver optionally resolves a model name to its provider-specific
+	// model ID and region from the catalog. If nil or the lookup returns empty
+	// strings, the raw model name and default Region are used.
+	ModelResolver func(model string) (providerModelID, region string)
 }
 
 func (r *VertexAIPathRewriter) RewritePath(model string, streaming bool) string {
 	info := ParseModelName(model)
+
+	// Resolve provider-specific model ID and region from catalog.
+	region := r.Region
+	vertexModel := info.VertexAI
+	if r.ModelResolver != nil {
+		// Look up by Display name (base name without date suffix) since the
+		// catalog is seeded with base names like "claude-opus-4.7", not
+		// "claude-opus-4.7-20250514".
+		if pmID, reg := r.ModelResolver(info.Display); pmID != "" || reg != "" {
+			if pmID != "" {
+				// Re-attach any date suffix from the original model name
+				// so ParseModelName produces the correct @version format.
+				resolvedModel := pmID
+				if matches := dateVersionRe.FindStringSubmatch(model); len(matches) == 2 {
+					resolvedModel = pmID + "-" + matches[1]
+				}
+				vertexModel = ParseModelName(resolvedModel).VertexAI
+			}
+			if reg != "" {
+				region = reg
+			}
+		}
+	}
 
 	method := "rawPredict"
 	if streaming {
 		method = "streamRawPredict"
 	}
 	return fmt.Sprintf("/v1/projects/%s/locations/%s/publishers/anthropic/models/%s:%s",
-		r.ProjectID, r.Region, info.VertexAI, method)
+		r.ProjectID, region, vertexModel, method)
 }
 
 // ====================================================================

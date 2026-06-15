@@ -156,3 +156,57 @@ func TestOutputFormatIncludesDatabaseID(t *testing.T) {
 		t.Errorf("output should include project ID: %s", got)
 	}
 }
+
+func TestVertexModelID(t *testing.T) {
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{"claude-opus-4.7", "claude-opus-4-7"},
+		{"claude-opus-4.8", "claude-opus-4-8"},
+		{"claude-haiku-4.5", "claude-haiku-4-5"},
+		{"claude-sonnet-4.6", "claude-sonnet-4-6"},
+		{"claude-sonnet-4", "claude-sonnet-4"},                       // no dots — unchanged
+		{"claude-3-5-sonnet-20241022", "claude-3-5-sonnet-20241022"}, // no dots
+	}
+	for _, tt := range tests {
+		got := vertexModelID(tt.input)
+		if got != tt.want {
+			t.Errorf("vertexModelID(%q) = %q, want %q", tt.input, got, tt.want)
+		}
+	}
+}
+
+func TestAnthropicEntriesHaveProviderModelID(t *testing.T) {
+	calc := costcalc.New()
+	defaults := calc.Defaults()
+
+	for _, p := range defaults {
+		if p.Provider != "anthropic" {
+			continue
+		}
+		e := catalog.Entry{
+			ModelID:  p.Model,
+			Provider: p.Provider,
+		}
+		if vid := vertexModelID(p.Model); vid != p.Model {
+			e.ProviderModelID = vid
+		}
+		e.Region = "global"
+
+		// Models with dots must have a ProviderModelID set.
+		if strings.Contains(p.Model, ".") {
+			if e.ProviderModelID == "" {
+				t.Errorf("anthropic model %q has dots but no ProviderModelID", p.Model)
+			}
+			if strings.Contains(e.ProviderModelID, ".") {
+				t.Errorf("ProviderModelID %q should not contain dots", e.ProviderModelID)
+			}
+		}
+
+		// All Anthropic models should have region = "global".
+		if e.Region != "global" {
+			t.Errorf("anthropic model %q should have region=global, got %q", p.Model, e.Region)
+		}
+	}
+}

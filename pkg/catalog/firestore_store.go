@@ -33,6 +33,8 @@ type firestoreEntry struct {
 	AllowedTenants       []string  `firestore:"allowed_tenants,omitempty"`
 	DiscountPercent      float64   `firestore:"discount_percent,omitempty"`
 	UpdatedAt            time.Time `firestore:"updated_at,serverTimestamp"`
+	ProviderModelID      string    `firestore:"provider_model_id,omitempty"`
+	Region               string    `firestore:"region,omitempty"`
 }
 
 func entryToFirestore(e *Entry) *firestoreEntry {
@@ -52,6 +54,8 @@ func entryToFirestore(e *Entry) *firestoreEntry {
 		AllowedTenants:       e.AllowedTenants,
 		DiscountPercent:      e.DiscountPercent,
 		UpdatedAt:            e.UpdatedAt,
+		ProviderModelID:      e.ProviderModelID,
+		Region:               e.Region,
 	}
 }
 
@@ -72,6 +76,8 @@ func firestoreToEntry(fe *firestoreEntry) Entry {
 		AllowedTenants:       fe.AllowedTenants,
 		DiscountPercent:      fe.DiscountPercent,
 		UpdatedAt:            fe.UpdatedAt,
+		ProviderModelID:      fe.ProviderModelID,
+		Region:               fe.Region,
 	}
 }
 

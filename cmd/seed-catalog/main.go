@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"log"
 	"log/slog"
+	"strings"
 
 	"cloud.google.com/go/firestore"
 
@@ -43,7 +44,7 @@ func main() {
 	// Convert ModelPricing → catalog.Entry.
 	entries := make([]catalog.Entry, 0, len(defaults))
 	for _, p := range defaults {
-		entries = append(entries, catalog.Entry{
+		e := catalog.Entry{
 			ModelID:              p.Model,
 			Provider:             p.Provider,
 			InputPerMillion:      p.InputPerMillion,
@@ -53,7 +54,19 @@ func main() {
 			TierThresholdTokens:  p.TierThresholdTokens,
 			DiscountPercent:      p.DiscountPercent,
 			Enabled:              true,
-		})
+		}
+
+		// For Anthropic models routed through Vertex AI, set the
+		// provider-specific model ID (Vertex uses dashes, not dots)
+		// and default to the "global" region endpoint.
+		if p.Provider == "anthropic" {
+			if vid := vertexModelID(p.Model); vid != p.Model {
+				e.ProviderModelID = vid
+			}
+			e.Region = "global"
+		}
+
+		entries = append(entries, e)
 	}
 
 	fmt.Printf("🕯️  seed-catalog (project=%s database=%s collection=%s dry-run=%v)\n\n",
@@ -111,4 +124,13 @@ func main() {
 	}
 
 	fmt.Printf("\n✅ Done — %d entries seeded, %d errors.\n", seeded, errCount)
+}
+
+// vertexModelID converts an Anthropic model name to its Vertex AI equivalent.
+// Vertex AI uses dashes where Anthropic uses dots in version numbers.
+// e.g. "claude-opus-4.7" → "claude-opus-4-7"
+//
+// If no dots are present, returns the input unchanged.
+func vertexModelID(model string) string {
+	return strings.ReplaceAll(model, ".", "-")
 }

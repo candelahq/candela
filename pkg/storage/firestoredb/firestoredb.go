@@ -1041,6 +1041,10 @@ func (s *Store) DeductSpend(ctx context.Context, userID string, costUSD float64,
 			grantCoverage := float64(0)
 			for _, snap := range grantsSnaps {
 				if g, err2 := snapToGrant(snap); err2 == nil {
+					// Skip grants that haven't started yet (same as ListGrants).
+					if !g.StartsAt.IsZero() && g.StartsAt.After(now) {
+						continue
+					}
 					grantCoverage += g.Remaining()
 				}
 			}
@@ -1104,6 +1108,10 @@ func (s *Store) DeductSpend(ctx context.Context, userID string, costUSD float64,
 			}
 			g, err := snapToGrant(snap)
 			if err != nil {
+				continue
+			}
+			// Filter out grants that haven't started yet.
+			if !g.StartsAt.IsZero() && g.StartsAt.After(now) {
 				continue
 			}
 			available := g.Remaining()

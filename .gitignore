@@ -77,3 +77,4 @@ firebase.json
 .firebase/
 /candela
 candela-protos/
+pkg/costcalc/testdata/pricing_snapshot.json.actual

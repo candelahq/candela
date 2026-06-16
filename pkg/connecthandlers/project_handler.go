@@ -15,17 +15,23 @@ import (
 // ProjectHandler implements the ProjectService ConnectRPC handler.
 type ProjectHandler struct {
 	store storage.ProjectStore
+	users storage.UserStore // optional, nil in local dev
 }
 
 // NewProjectHandler creates a new ProjectHandler.
-func NewProjectHandler(store storage.ProjectStore) *ProjectHandler {
-	return &ProjectHandler{store: store}
+func NewProjectHandler(store storage.ProjectStore, users storage.UserStore) *ProjectHandler {
+	return &ProjectHandler{store: store, users: users}
 }
 
 func (h *ProjectHandler) CreateProject(
 	ctx context.Context,
 	req *connect.Request[v1.CreateProjectRequest],
 ) (*connect.Response[v1.CreateProjectResponse], error) {
+	if uid := scopeUserID(ctx, h.users); uid != "" {
+		return nil, connect.NewError(connect.CodePermissionDenied,
+			fmt.Errorf("admin access required"))
+	}
+
 	p, err := h.store.CreateProject(ctx, storage.Project{
 		Name:        req.Msg.Name,
 		Description: req.Msg.Description,
@@ -88,6 +94,11 @@ func (h *ProjectHandler) DeleteProject(
 	ctx context.Context,
 	req *connect.Request[v1.DeleteProjectRequest],
 ) (*connect.Response[v1.DeleteProjectResponse], error) {
+	if uid := scopeUserID(ctx, h.users); uid != "" {
+		return nil, connect.NewError(connect.CodePermissionDenied,
+			fmt.Errorf("admin access required"))
+	}
+
 	if err := h.store.DeleteProject(ctx, req.Msg.Id); err != nil {
 		return nil, connect.NewError(connect.CodeNotFound, fmt.Errorf("project not found"))
 	}
@@ -98,6 +109,11 @@ func (h *ProjectHandler) CreateAPIKey(
 	ctx context.Context,
 	req *connect.Request[v1.CreateAPIKeyRequest],
 ) (*connect.Response[v1.CreateAPIKeyResponse], error) {
+	if uid := scopeUserID(ctx, h.users); uid != "" {
+		return nil, connect.NewError(connect.CodePermissionDenied,
+			fmt.Errorf("admin access required"))
+	}
+
 	fullKey := projectdb.GenerateAPIKey()
 
 	key, err := h.store.CreateAPIKey(ctx, storage.APIKey{
@@ -138,6 +154,11 @@ func (h *ProjectHandler) RevokeAPIKey(
 	ctx context.Context,
 	req *connect.Request[v1.RevokeAPIKeyRequest],
 ) (*connect.Response[v1.RevokeAPIKeyResponse], error) {
+	if uid := scopeUserID(ctx, h.users); uid != "" {
+		return nil, connect.NewError(connect.CodePermissionDenied,
+			fmt.Errorf("admin access required"))
+	}
+
 	if err := h.store.RevokeAPIKey(ctx, req.Msg.Id); err != nil {
 		return nil, connect.NewError(connect.CodeNotFound, fmt.Errorf("API key not found"))
 	}

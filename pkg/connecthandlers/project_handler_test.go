@@ -105,7 +105,7 @@ func (m *mockProjectStore) ValidateAPIKey(_ context.Context, rawKey string) (*st
 
 func TestProjectHandler_CreateProject(t *testing.T) {
 	store := newMockProjectStore()
-	handler := NewProjectHandler(store)
+	handler := NewProjectHandler(store, nil)
 
 	resp, err := handler.CreateProject(context.Background(),
 		connect.NewRequest(&v1.CreateProjectRequest{
@@ -129,7 +129,7 @@ func TestProjectHandler_CreateProject(t *testing.T) {
 
 func TestProjectHandler_GetProject_NotFound(t *testing.T) {
 	store := newMockProjectStore()
-	handler := NewProjectHandler(store)
+	handler := NewProjectHandler(store, nil)
 
 	_, err := handler.GetProject(context.Background(),
 		connect.NewRequest(&v1.GetProjectRequest{Id: "nonexistent"}))
@@ -148,7 +148,7 @@ func TestProjectHandler_GetProject_NotFound(t *testing.T) {
 
 func TestProjectHandler_ListProjects_Pagination(t *testing.T) {
 	store := newMockProjectStore()
-	handler := NewProjectHandler(store)
+	handler := NewProjectHandler(store, nil)
 
 	// Create 3 projects.
 	for i := 0; i < 3; i++ {
@@ -185,7 +185,7 @@ func TestProjectHandler_ListProjects_Pagination(t *testing.T) {
 
 func TestProjectHandler_DeleteProject_NotFound(t *testing.T) {
 	store := newMockProjectStore()
-	handler := NewProjectHandler(store)
+	handler := NewProjectHandler(store, nil)
 
 	_, err := handler.DeleteProject(context.Background(),
 		connect.NewRequest(&v1.DeleteProjectRequest{Id: "nonexistent"}))
@@ -204,7 +204,7 @@ func TestProjectHandler_DeleteProject_NotFound(t *testing.T) {
 
 func TestProjectHandler_CreateAPIKey(t *testing.T) {
 	store := newMockProjectStore()
-	handler := NewProjectHandler(store)
+	handler := NewProjectHandler(store, nil)
 
 	// Create a project first.
 	p, _ := store.CreateProject(context.Background(), storage.Project{Name: "Key Project"})
@@ -233,7 +233,7 @@ func TestProjectHandler_CreateAPIKey(t *testing.T) {
 
 func TestProjectHandler_RevokeAPIKey_NotFound(t *testing.T) {
 	store := newMockProjectStore()
-	handler := NewProjectHandler(store)
+	handler := NewProjectHandler(store, nil)
 
 	_, err := handler.RevokeAPIKey(context.Background(),
 		connect.NewRequest(&v1.RevokeAPIKeyRequest{Id: "nonexistent"}))
@@ -252,7 +252,7 @@ func TestProjectHandler_RevokeAPIKey_NotFound(t *testing.T) {
 
 func TestProjectHandler_FullLifecycle(t *testing.T) {
 	store := newMockProjectStore()
-	handler := NewProjectHandler(store)
+	handler := NewProjectHandler(store, nil)
 
 	// Create project.
 	createResp, err := handler.CreateProject(context.Background(),

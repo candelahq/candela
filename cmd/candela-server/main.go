@@ -31,6 +31,7 @@ import (
 	connect "connectrpc.com/connect"
 	"connectrpc.com/validate"
 	"github.com/candelahq/candela/gen/go/candela/v1/candelav1connect"
+	"github.com/candelahq/candela/pkg/audit"
 	"github.com/candelahq/candela/pkg/auth"
 	"github.com/candelahq/candela/pkg/catalog"
 	"github.com/candelahq/candela/pkg/connecthandlers"
@@ -420,12 +421,16 @@ func main() {
 		// Create protovalidate interceptor (validates request fields before handler).
 		validateInterceptor := validate.NewInterceptor()
 
+		// Audit interceptor logs all mutation RPCs with actor identity and outcome.
+		auditLogger := audit.NewSlogLogger()
+		auditInterceptor := audit.Interceptor(auditLogger, audit.DefaultMutationProcedures)
+
 		userPath, userH := candelav1connect.NewUserServiceHandler(
 			connecthandlers.NewUserHandler(fStore, cfg.Users.DefaultDailyBudgetUSD),
-			connect.WithInterceptors(validateInterceptor, auth.AdminInterceptor(fStore)))
+			connect.WithInterceptors(validateInterceptor, auth.AdminInterceptor(fStore), auditInterceptor))
 		mux.Handle(userPath, userH)
 		slog.Info("UserService registered", "path", userPath,
-			"admin_guard", true, "validation", true,
+			"admin_guard", true, "validation", true, "audit", true,
 			"default_daily_budget", cfg.Users.DefaultDailyBudgetUSD)
 	} else {
 		slog.Info("Firestore disabled — UserService not available, all users see all traces")
@@ -451,14 +456,27 @@ func main() {
 	}
 	defer func() { _ = projectStore.Close() }()
 
+	// Build audit interceptor for services outside the Firestore block.
+	// If Firestore is disabled, auditInterceptor is nil-safe (not wired).
+	var projectInterceptors, catalogInterceptors []connect.Interceptor
+	catalogValidateInterceptor := validate.NewInterceptor()
+	if userStore != nil {
+		auditLogger := audit.NewSlogLogger()
+		auditInterceptor := audit.Interceptor(auditLogger, audit.DefaultMutationProcedures)
+		projectInterceptors = []connect.Interceptor{auditInterceptor}
+		catalogInterceptors = []connect.Interceptor{catalogValidateInterceptor, auditInterceptor}
+	} else {
+		catalogInterceptors = []connect.Interceptor{catalogValidateInterceptor}
+	}
+
 	projectPath, projectH := candelav1connect.NewProjectServiceHandler(
-		connecthandlers.NewProjectHandler(projectStore))
+		connecthandlers.NewProjectHandler(projectStore, userStore),
+		connect.WithInterceptors(projectInterceptors...))
 	mux.Handle(projectPath, projectH)
 
-	catalogValidateInterceptor := validate.NewInterceptor()
 	catalogPath, catalogH := candelav1connect.NewModelCatalogServiceHandler(
 		connecthandlers.NewCatalogHandler(catalogStore, userStore),
-		connect.WithInterceptors(catalogValidateInterceptor))
+		connect.WithInterceptors(catalogInterceptors...))
 	mux.Handle(catalogPath, catalogH)
 
 	slog.Info("ConnectRPC services registered",

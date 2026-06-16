@@ -251,6 +251,19 @@ func (h *UserHandler) UpdateUser(
 		return nil, internalError("failed to update user", err)
 	}
 
+	caller := auth.FromContext(ctx)
+	actorEmail := ""
+	if caller != nil {
+		actorEmail = caller.Email
+	}
+	h.logAudit(ctx, &storage.AuditRecord{
+		UserID:     user.ID,
+		ActorEmail: actorEmail,
+		Action:     "update_user",
+		Details:    fmt.Sprintf("fields: %v", paths),
+		Timestamp:  time.Now(),
+	})
+
 	return connect.NewResponse(&v1.UpdateUserResponse{
 		User: userToProto(user),
 	}), nil

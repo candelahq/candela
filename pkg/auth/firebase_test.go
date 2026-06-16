@@ -600,3 +600,126 @@ func TestFirebaseAuthMiddleware_DevMode_IgnoresAllowlist(t *testing.T) {
 		t.Fatalf("dev mode with SA allowlist status = %d, want 200", rr2.Code)
 	}
 }
+
+// --- Production auth path tests (dev_mode=false, no IAP) ---
+
+func TestFirebaseAuthMiddleware_ProdMode_NoBearerToken_Returns401(t *testing.T) {
+	// In production mode with no Firebase client and no Cloud Run audience,
+	// requests without any Authorization header must get 401.
+	handler := FirebaseAuthMiddleware(echoHandler(), nil, "", nil, false, nil)
+
+	req := httptest.NewRequest("POST", "/candela.v1.SpanService/ListSpans", nil)
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401", rr.Code)
+	}
+
+	var errResp map[string]string
+	body, _ := io.ReadAll(rr.Body)
+	_ = json.Unmarshal(body, &errResp)
+	if errResp["error"] != "missing authentication" {
+		t.Errorf("error = %q, want %q", errResp["error"], "missing authentication")
+	}
+}
+
+func TestFirebaseAuthMiddleware_ProdMode_InvalidBearerToken_Returns401(t *testing.T) {
+	// In production mode, an invalid Bearer token should be rejected with 401
+	// after all strategies (Firebase, Google ID token, OAuth2) fail.
+	handler := FirebaseAuthMiddleware(echoHandler(), nil, "", nil, false, nil)
+
+	req := httptest.NewRequest("POST", "/candela.v1.SpanService/ListSpans", nil)
+	req.Header.Set("Authorization", "Bearer bogus-token-12345")
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401", rr.Code)
+	}
+
+	var errResp map[string]string
+	body, _ := io.ReadAll(rr.Body)
+	_ = json.Unmarshal(body, &errResp)
+	if errResp["error"] != "invalid authentication token" {
+		t.Errorf("error = %q, want %q", errResp["error"], "invalid authentication token")
+	}
+}
+
+func TestFirebaseAuthMiddleware_ProdMode_XCandelaAuth_Preferred(t *testing.T) {
+	// When behind IAP, X-Candela-Auth carries the original user identity token
+	// and should take priority over the IAP-replaced Authorization header.
+	// With no validators configured, both tokens will fail, but this tests
+	// that extractBearerToken returns the X-Candela-Auth token.
+	handler := FirebaseAuthMiddleware(echoHandler(), nil, "", nil, false, nil)
+
+	req := httptest.NewRequest("GET", "/api/data", nil)
+	req.Header.Set("X-Candela-Auth", "Bearer custom-token")
+	req.Header.Set("Authorization", "Bearer iap-replaced-token")
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+
+	// Both tokens are invalid, so we get 401 — but the important thing is
+	// that it didn't crash and the middleware ran through all strategies.
+	if rr.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401", rr.Code)
+	}
+}
+
+func TestExtractBearerToken_XCandelaAuth_Priority(t *testing.T) {
+	// X-Candela-Auth should take priority over Authorization.
+	req := httptest.NewRequest("GET", "/", nil)
+	req.Header.Set("X-Candela-Auth", "Bearer candela-token")
+	req.Header.Set("Authorization", "Bearer auth-token")
+	got := extractBearerToken(req)
+	if got != "candela-token" {
+		t.Errorf("extractBearerToken() = %q, want %q (X-Candela-Auth should take priority)", got, "candela-token")
+	}
+}
+
+func TestFirebaseAuthMiddleware_ProdMode_HealthzBypassesAuth(t *testing.T) {
+	// Health checks must bypass auth even in production mode with no
+	// validators configured. This is critical for Cloud Run health probes.
+	healthHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("ok"))
+	})
+	handler := FirebaseAuthMiddleware(healthHandler, nil, "", nil, false, nil)
+
+	for _, path := range []string{"/healthz", "/readyz"} {
+		t.Run(path, func(t *testing.T) {
+			req := httptest.NewRequest("GET", path, nil)
+			rr := httptest.NewRecorder()
+			handler.ServeHTTP(rr, req)
+
+			if rr.Code != http.StatusOK {
+				t.Fatalf("%s status = %d, want 200", path, rr.Code)
+			}
+			body, _ := io.ReadAll(rr.Body)
+			if string(body) != "ok" {
+				t.Errorf("%s body = %q, want %q", path, string(body), "ok")
+			}
+		})
+	}
+}
+
+func TestFirebaseAuthMiddleware_ProdMode_SelfServicePath_StillRequiresToken(t *testing.T) {
+	// Self-service paths bypass the registration gate but still require
+	// a valid auth token. Without a token, they should return 401.
+	handler := FirebaseAuthMiddleware(echoHandler(), nil, "", nil, false, nil)
+
+	for _, path := range []string{
+		"/candela.v1.UserService/GetCurrentUser",
+		"/candela.v1.UserService/GetMyBudget",
+	} {
+		t.Run(path, func(t *testing.T) {
+			req := httptest.NewRequest("POST", path, nil)
+			rr := httptest.NewRecorder()
+			handler.ServeHTTP(rr, req)
+
+			if rr.Code != http.StatusUnauthorized {
+				t.Fatalf("self-service path %s without token: status = %d, want 401", path, rr.Code)
+			}
+		})
+	}
+}

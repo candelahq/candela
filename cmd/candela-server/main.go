@@ -906,9 +906,11 @@ func main() {
 	// Wrap the mux with Firebase Auth middleware.
 	devMode := cfg.Auth.DevMode
 	// Guard: never allow dev mode on Cloud Run (K_SERVICE is always set by Cloud Run).
+	// Fail-closed: refuse to start rather than silently correcting.
 	if devMode && os.Getenv("K_SERVICE") != "" {
-		slog.Error("auth.dev_mode=true is not allowed on Cloud Run — disabling")
-		devMode = false
+		slog.Error("FATAL: auth.dev_mode=true is not allowed on Cloud Run — refusing to start",
+			"K_SERVICE", os.Getenv("K_SERVICE"))
+		os.Exit(1)
 	}
 
 	// Initialize Firebase Admin SDK for token verification.

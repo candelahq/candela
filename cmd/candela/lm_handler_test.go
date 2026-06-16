@@ -1001,3 +1001,139 @@ func TestRewriteModelInBody_DoesNotCorruptUserContent(t *testing.T) {
 		t.Errorf("user content corrupted: %q", result.Messages[0].Content)
 	}
 }
+
+// TestTeamMode_ExcludesCloudModels verifies that in team mode (soloMode=false),
+// cloud models are NOT included in the /v1/models response.
+func TestTeamMode_ExcludesCloudModels(t *testing.T) {
+	remoteModels := []openaiModel{
+		{ID: "gemini-2.5-pro", Object: "model", OwnedBy: "google"},
+	}
+	remoteSrv := mockRemoteServer(t, remoteModels)
+	t.Cleanup(remoteSrv.Close)
+
+	cloudModels := map[string]string{
+		"claude-sonnet-4": "anthropic",
+		"gpt-4o":          "openai",
+	}
+
+	// Team mode: soloMode=false
+	h := newLMHandler(nil, proxyTo(remoteSrv.URL), nil, nil, nil, cloudModels, costcalc.New(), false)
+	t.Cleanup(h.Close)
+	srv := httptest.NewServer(h)
+	t.Cleanup(srv.Close)
+
+	resp, err := http.Get(srv.URL + "/v1/models")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close() //nolint:errcheck
+	body, _ := io.ReadAll(resp.Body)
+	var result openaiModelList
+	if err := json.Unmarshal(body, &result); err != nil {
+		t.Fatal(err)
+	}
+
+	// Should only contain remote models, not cloud models.
+	for _, m := range result.Data {
+		if m.ID == "claude-sonnet-4" || m.ID == "gpt-4o" {
+			t.Errorf("team mode should not include cloud model %q", m.ID)
+		}
+	}
+	// Should contain the remote model.
+	found := false
+	for _, m := range result.Data {
+		if m.ID == "gemini-2.5-pro" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("expected remote model gemini-2.5-pro in team mode response")
+	}
+}
+
+// TestSoloMode_IncludesCloudModels verifies that in solo mode (soloMode=true),
+// cloud models ARE included in the /v1/models response.
+func TestSoloMode_IncludesCloudModels(t *testing.T) {
+	cloudModels := map[string]string{
+		"claude-sonnet-4": "anthropic",
+	}
+
+	// Solo mode: soloMode=true, no remote
+	h := newLMHandler(nil, nil, nil, nil, nil, cloudModels, costcalc.New(), true)
+	t.Cleanup(h.Close)
+	srv := httptest.NewServer(h)
+	t.Cleanup(srv.Close)
+
+	resp, err := http.Get(srv.URL + "/v1/models")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close() //nolint:errcheck
+	body, _ := io.ReadAll(resp.Body)
+	var result openaiModelList
+	if err := json.Unmarshal(body, &result); err != nil {
+		t.Fatal(err)
+	}
+
+	found := false
+	for _, m := range result.Data {
+		if m.ID == "claude-sonnet-4" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("expected cloud model claude-sonnet-4 in solo mode response")
+	}
+}
+
+// TestLMHandler_Close stops the background goroutine without blocking.
+func TestLMHandler_Close(t *testing.T) {
+	remoteSrv := mockRemoteServer(t, []openaiModel{
+		{ID: "test-model", Object: "model", OwnedBy: "test"},
+	})
+	t.Cleanup(remoteSrv.Close)
+
+	// Team mode starts a background goroutine.
+	h := newLMHandler(nil, proxyTo(remoteSrv.URL), nil, nil, nil, nil, nil, false)
+	// Close should not block or panic.
+	h.Close()
+	// Calling Close again should be safe.
+	h.Close()
+}
+
+// TestAtomicModelCache verifies that the atomic model caches work correctly.
+func TestAtomicModelCache(t *testing.T) {
+	h := newLMHandler(nil, nil, nil, nil, nil, nil, nil, true)
+	t.Cleanup(h.Close)
+
+	// Initially empty.
+	if locals := h.loadLocalModels(); len(locals) != 0 {
+		t.Errorf("expected empty local models, got %d", len(locals))
+	}
+	if remotes := h.loadRemoteModels(); len(remotes) != 0 {
+		t.Errorf("expected empty remote models, got %d", len(remotes))
+	}
+
+	// Store and verify local models.
+	h.localModels.Store(map[string]bool{"llama3.2:latest": true})
+	if locals := h.loadLocalModels(); !locals["llama3.2:latest"] {
+		t.Error("expected llama3.2:latest in local models")
+	}
+
+	// Store and verify remote models.
+	h.remoteModels.Store(map[string]bool{"claude-sonnet-4": true, "gemini-2.5-pro": true})
+	remotes := h.loadRemoteModels()
+	if !remotes["claude-sonnet-4"] || !remotes["gemini-2.5-pro"] {
+		t.Errorf("expected claude-sonnet-4 and gemini-2.5-pro in remote models, got %v", remotes)
+	}
+
+	// Overwrite atomically — old entries should be gone.
+	h.remoteModels.Store(map[string]bool{"gemini-2.5-pro": true})
+	remotes = h.loadRemoteModels()
+	if remotes["claude-sonnet-4"] {
+		t.Error("claude-sonnet-4 should be gone after atomic swap")
+	}
+	if !remotes["gemini-2.5-pro"] {
+		t.Error("gemini-2.5-pro should still be present")
+	}
+}

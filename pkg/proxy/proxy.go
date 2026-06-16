@@ -250,9 +250,10 @@ type Proxy struct {
 	users    storage.UserStore     // Budget deduction (nil = no budget tracking)
 	budgetCk *notify.BudgetChecker // Budget threshold notifications (nil = no alerts)
 
-	compatModels  []CompatModel // configured models for per-provider /models responses
-	modelListJSON atomic.Value  // cached []byte JSON response for /v1/models
-	compatMu      sync.RWMutex  // guards compatModels reads during refresh
+	compatModels     []CompatModel // configured models for per-provider /models responses
+	modelListJSON    atomic.Value  // cached []byte JSON response for /v1/models
+	modelProviderMap atomic.Value  // cached map[string]string (model→provider) for O(1) lookups
+	compatMu         sync.RWMutex  // guards compatModels reads during refresh
 
 	// CRIT-3: Durable outbox for failed DeductSpend calls.
 	spendOutbox *spendoutbox.Outbox
@@ -541,15 +542,11 @@ func (p *Proxy) RegisterCompatRoutes(mux *http.ServeMux, models []CompatModel) {
 	})
 
 	// POST /v1/chat/completions — route to provider based on model name in body.
-	// The model→provider lookup reads from the live compatModels list so it
-	// stays current after RefreshModels() calls.
+	// The model→provider lookup uses an atomic map for O(1) lock-free lookups.
 	lookupProvider := func(modelID string) (string, bool) {
-		p.compatMu.RLock()
-		defer p.compatMu.RUnlock()
-		for _, m := range p.compatModels {
-			if m.ID == modelID {
-				return m.Provider, true
-			}
+		if m, ok := p.modelProviderMap.Load().(map[string]string); ok {
+			prov, found := m[modelID]
+			return prov, found
 		}
 		return "", false
 	}
@@ -567,7 +564,6 @@ func (p *Proxy) RegisterCompatRoutes(mux *http.ServeMux, models []CompatModel) {
 			return
 		}
 		_ = r.Body.Close()
-
 		var req struct {
 			Model string `json:"model"`
 		}
@@ -581,21 +577,22 @@ func (p *Proxy) RegisterCompatRoutes(mux *http.ServeMux, models []CompatModel) {
 		providerName, ok := lookupProvider(req.Model)
 		if !ok {
 			// Try prefix-based alias resolution (e.g. "claude-sonnet-4" → "claude-sonnet-4-20250514").
-			p.compatMu.RLock()
-			var matches []string
-			for _, m := range p.compatModels {
-				if strings.HasPrefix(m.ID, req.Model) {
-					matches = append(matches, m.ID)
+			// Use the atomic map for lock-free iteration.
+			if provMap, loaded := p.modelProviderMap.Load().(map[string]string); loaded {
+				var matches []string
+				for id := range provMap {
+					if strings.HasPrefix(id, req.Model) {
+						matches = append(matches, id)
+					}
 				}
-			}
-			p.compatMu.RUnlock()
-			if len(matches) == 1 {
-				resolved := matches[0]
-				slog.Info("compat: resolved model alias", "from", req.Model, "to", resolved)
-				providerName, _ = lookupProvider(resolved)
-				ok = true
-				// Rewrite the model field in the body so upstream gets the canonical ID.
-				body = rewriteModelField(body, resolved)
+				if len(matches) == 1 {
+					resolved := matches[0]
+					slog.Info("compat: resolved model alias", "from", req.Model, "to", resolved)
+					providerName = provMap[resolved]
+					ok = true
+					// Rewrite the model field in the body so upstream gets the canonical ID.
+					body = rewriteModelField(body, resolved)
+				}
 			}
 		}
 		if !ok {
@@ -641,6 +638,13 @@ func (p *Proxy) setModels(models []CompatModel) {
 	p.compatMu.Lock()
 	p.compatModels = pricedModels
 	p.compatMu.Unlock()
+
+	// Build O(1) lookup map for the chat completions hot path.
+	providerMap := make(map[string]string, len(pricedModels))
+	for _, m := range pricedModels {
+		providerMap[m.ID] = m.Provider
+	}
+	p.modelProviderMap.Store(providerMap)
 
 	p.modelListJSON.Store(buildModelsResponse(pricedModels))
 	slog.Info("📋 model list updated", "models", len(pricedModels))

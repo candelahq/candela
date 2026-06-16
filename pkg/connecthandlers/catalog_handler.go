@@ -32,8 +32,11 @@ func (h *CatalogHandler) ListModelCatalog(
 ) (*connect.Response[v1.ListModelCatalogResponse], error) {
 	includeDisabled := req.Msg.IncludeDisabled
 
+	// Resolve caller scope once — empty string means admin (full access).
+	callerScope := scopeUserID(ctx, h.users)
+
 	// Non-admin callers cannot see disabled models.
-	if uid := scopeUserID(ctx, h.users); uid != "" {
+	if callerScope != "" {
 		includeDisabled = false
 	}
 
@@ -50,7 +53,7 @@ func (h *CatalogHandler) ListModelCatalog(
 	return connect.NewResponse(&v1.ListModelCatalogResponse{
 		Models:        pbModels,
 		Source:        h.store.Source(),
-		AdminEditable: h.store.Writable() && scopeUserID(ctx, h.users) == "",
+		AdminEditable: h.store.Writable() && callerScope == "",
 	}), nil
 }
 

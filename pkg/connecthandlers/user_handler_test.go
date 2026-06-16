@@ -787,6 +787,49 @@ func TestUserHandler_UpdateUser_FieldMask(t *testing.T) {
 	}
 }
 
+// TestUserHandler_UpdateUser_RoleChange_Unauthenticated verifies that
+// unauthenticated callers (nil auth context) are denied role changes.
+// This is a defense-in-depth test — production uses AdminInterceptor,
+// but the handler should be independently secure.
+func TestUserHandler_UpdateUser_RoleChange_Unauthenticated(t *testing.T) {
+	store := newMockUserStore()
+	handler := NewUserHandler(store, 0)
+
+	// Create a target user as admin first.
+	adminCtx := authedCtx("admin@example.com")
+	_, _ = handler.CreateUser(adminCtx, connect.NewRequest(&v1.CreateUserRequest{
+		Email: "admin@example.com",
+		Role:  typespb.UserRole_USER_ROLE_ADMIN,
+	}))
+	createResp, _ := handler.CreateUser(adminCtx, connect.NewRequest(&v1.CreateUserRequest{
+		Email: "target@example.com",
+		Role:  typespb.UserRole_USER_ROLE_DEVELOPER,
+	}))
+	userID := createResp.Msg.User.Id
+
+	// Attempt role escalation with no auth context (context.Background()).
+	_, err := handler.UpdateUser(context.Background(), connect.NewRequest(&v1.UpdateUserRequest{
+		Id:   userID,
+		Role: typespb.UserRole_USER_ROLE_ADMIN,
+	}))
+	if err == nil {
+		t.Fatal("expected error for unauthenticated role change")
+	}
+	connectErr, ok := err.(*connect.Error)
+	if !ok {
+		t.Fatalf("expected *connect.Error, got %T", err)
+	}
+	if connectErr.Code() != connect.CodeUnauthenticated {
+		t.Errorf("expected CodeUnauthenticated, got %v", connectErr.Code())
+	}
+
+	// Verify the role was NOT changed.
+	u, _ := store.GetUser(context.Background(), userID)
+	if u.Role != "developer" {
+		t.Errorf("role should still be developer, got %q", u.Role)
+	}
+}
+
 func TestUserHandler_GetMyBudget_Unauthenticated(t *testing.T) {
 	store := newMockUserStore()
 	handler := NewUserHandler(store, 0)

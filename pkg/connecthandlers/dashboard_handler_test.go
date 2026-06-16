@@ -245,3 +245,92 @@ func TestGetDashboardData_FallbackReader(t *testing.T) {
 		t.Errorf("Models count = %d, want 1", len(resp.Msg.Models))
 	}
 }
+
+// ── Leaderboard authorization tests ─────────────────────────────────────────
+
+// mockUserStoreForDashboard is a minimal mock that returns user records by email.
+type mockUserStoreForDashboard struct {
+	storage.UserStore // embed to satisfy interface; unused methods panic
+	users             map[string]*storage.UserRecord
+}
+
+func (m *mockUserStoreForDashboard) GetUserByEmail(_ context.Context, email string) (*storage.UserRecord, error) {
+	if u, ok := m.users[email]; ok {
+		return u, nil
+	}
+	return nil, storage.ErrNotFound
+}
+
+// startDashboardServerWithAuth creates a test server with a specific user store
+// and injects the given auth user into every request.
+func startDashboardServerWithAuth(t *testing.T, spanStore storage.SpanReader, userStore storage.UserStore, user *auth.User) candelav1connect.DashboardServiceClient {
+	t.Helper()
+	mux := http.NewServeMux()
+	path, handler := candelav1connect.NewDashboardServiceHandler(
+		connecthandlers.NewDashboardHandler(spanStore, userStore),
+	)
+	mux.Handle(path, handler)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ctx := auth.NewContext(r.Context(), user)
+		mux.ServeHTTP(w, r.WithContext(ctx))
+	}))
+	t.Cleanup(server.Close)
+
+	return candelav1connect.NewDashboardServiceClient(http.DefaultClient, server.URL)
+}
+
+// TestGetJobLeaderboard_DeveloperDenied verifies that non-admin callers
+// are rejected from GetJobLeaderboard with PermissionDenied.
+func TestGetJobLeaderboard_DeveloperDenied(t *testing.T) {
+	userStore := &mockUserStoreForDashboard{
+		users: map[string]*storage.UserRecord{
+			"dev@example.com": {
+				ID:    "dev@example.com",
+				Email: "dev@example.com",
+				Role:  storage.RoleDeveloper,
+			},
+		},
+	}
+	spanStore := &fallbackStore{}
+
+	client := startDashboardServerWithAuth(t, spanStore, userStore,
+		&auth.User{ID: "dev-uid", Email: "dev@example.com"})
+
+	_, err := client.GetJobLeaderboard(context.Background(),
+		connect.NewRequest(&v1.GetJobLeaderboardRequest{}))
+	if err == nil {
+		t.Fatal("expected permission denied for developer calling GetJobLeaderboard")
+	}
+	connectErr, ok := err.(*connect.Error)
+	if !ok {
+		t.Fatalf("expected *connect.Error, got %T", err)
+	}
+	if connectErr.Code() != connect.CodePermissionDenied {
+		t.Errorf("expected CodePermissionDenied, got %v", connectErr.Code())
+	}
+}
+
+// TestGetJobLeaderboard_AdminAllowed verifies that admin callers
+// can access GetJobLeaderboard successfully.
+func TestGetJobLeaderboard_AdminAllowed(t *testing.T) {
+	userStore := &mockUserStoreForDashboard{
+		users: map[string]*storage.UserRecord{
+			"admin@example.com": {
+				ID:    "admin@example.com",
+				Email: "admin@example.com",
+				Role:  storage.RoleAdmin,
+			},
+		},
+	}
+	spanStore := &fallbackStore{}
+
+	client := startDashboardServerWithAuth(t, spanStore, userStore,
+		&auth.User{ID: "admin-uid", Email: "admin@example.com"})
+
+	_, err := client.GetJobLeaderboard(context.Background(),
+		connect.NewRequest(&v1.GetJobLeaderboardRequest{}))
+	if err != nil {
+		t.Fatalf("expected admin to access GetJobLeaderboard, got: %v", err)
+	}
+}

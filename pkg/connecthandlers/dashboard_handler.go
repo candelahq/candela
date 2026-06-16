@@ -405,6 +405,12 @@ func (h *DashboardHandler) GetTenantLeaderboard(
 }
 
 func (h *DashboardHandler) GetJobLeaderboard(ctx context.Context, req *connect.Request[v1.GetJobLeaderboardRequest]) (*connect.Response[v1.GetJobLeaderboardResponse], error) {
+	// Admin-only: non-admin users (non-empty scopeUserID) are denied.
+	if uid := scopeUserID(ctx, h.users); uid != "" {
+		return nil, connect.NewError(connect.CodePermissionDenied,
+			fmt.Errorf("job leaderboard is admin-only"))
+	}
+
 	q, limit := parseLeaderboardParams(req.Msg)
 	jobs, err := h.store.GetJobLeaderboard(ctx, q, limit)
 	if err != nil {

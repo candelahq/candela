@@ -50,7 +50,7 @@ func (h *CatalogHandler) ListModelCatalog(
 	return connect.NewResponse(&v1.ListModelCatalogResponse{
 		Models:        pbModels,
 		Source:        h.store.Source(),
-		AdminEditable: h.store.Writable(),
+		AdminEditable: h.store.Writable() && scopeUserID(ctx, h.users) == "",
 	}), nil
 }
 

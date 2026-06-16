@@ -180,6 +180,40 @@ func TestCatalogHandler_ListDisabled_NonAdmin(t *testing.T) {
 	}
 }
 
+// TestCatalogHandler_ListAdminEditable_Developer verifies that developers
+// do NOT receive admin_editable=true even on a writable store.
+func TestCatalogHandler_ListAdminEditable_Developer(t *testing.T) {
+	store := newMockWritableCatalogStore(testCatalogEntries) // Writable() = true
+	handler := NewCatalogHandler(store, newDeveloperUserStore())
+
+	resp, err := handler.ListModelCatalog(developerContext(),
+		connect.NewRequest(&v1.ListModelCatalogRequest{}))
+	if err != nil {
+		t.Fatalf("ListModelCatalog: %v", err)
+	}
+
+	if resp.Msg.AdminEditable {
+		t.Error("expected admin_editable=false for developer caller on writable store")
+	}
+}
+
+// TestCatalogHandler_ListAdminEditable_Admin verifies that admins
+// receive admin_editable=true on a writable store.
+func TestCatalogHandler_ListAdminEditable_Admin(t *testing.T) {
+	store := newMockWritableCatalogStore(testCatalogEntries) // Writable() = true
+	handler := NewCatalogHandler(store, newAdminUserStore())
+
+	resp, err := handler.ListModelCatalog(adminContext(),
+		connect.NewRequest(&v1.ListModelCatalogRequest{}))
+	if err != nil {
+		t.Fatalf("ListModelCatalog: %v", err)
+	}
+
+	if !resp.Msg.AdminEditable {
+		t.Error("expected admin_editable=true for admin caller on writable store")
+	}
+}
+
 // TestCatalogHandler_UpdateReadOnly tests that update returns Unimplemented
 // when the store is read-only.
 func TestCatalogHandler_UpdateReadOnly(t *testing.T) {

@@ -11,7 +11,7 @@ import (
 	"net/http/httputil"
 	"regexp"
 	"strings"
-	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/candelahq/candela/pkg/costcalc"
@@ -31,23 +31,32 @@ type lmHandler struct {
 	cloudProxy   *proxy.Proxy           // direct cloud proxy (solo + cloud mode)
 	cloudModels  map[string]string      // model ID → provider name
 	calc         *costcalc.Calculator   // pricing calculator (for filtering unpriced models)
+	soloMode     bool                   // true = solo mode (use embedded cloud models), false = team mode
 
-	localModels  sync.Map // model ID string → bool (cached for fast routing)
-	remoteModels sync.Map // model ID string → bool (cached from remote /v1/models)
+	// Model caches stored as atomic.Value holding map[string]bool.
+	// Updated atomically by swapping the entire map — no in-place mutation.
+	localModels  atomic.Value // map[string]bool (cached for fast routing)
+	remoteModels atomic.Value // map[string]bool (cached from remote /v1/models)
 
 	remoteFetchGroup singleflight.Group // deduplicates concurrent lazy fetches
+
+	// Remote model cache TTL: tracks when we last refreshed so periodic
+	// callers don't hammer the server on every /v1/models request.
+	lastRemoteFetch atomic.Int64 // unix timestamp of last successful fetch
+
+	stopCh chan struct{} // closed by Close() to stop background goroutines
 }
 
 // newLMHandler creates a smart LM compat handler that merges local + remote + cloud
 // models and routes chat completions to the correct backend.
-func newLMHandler(mgr *runtime.Manager, remoteProxy, localProxy *httputil.ReverseProxy, localHandler http.Handler, cloudProxy *proxy.Proxy, cloudModels map[string]string, calc *costcalc.Calculator) *lmHandler {
+func newLMHandler(mgr *runtime.Manager, remoteProxy, localProxy *httputil.ReverseProxy, localHandler http.Handler, cloudProxy *proxy.Proxy, cloudModels map[string]string, calc *costcalc.Calculator, soloMode bool) *lmHandler {
 	if localHandler == nil && localProxy != nil {
 		localHandler = localProxy
 	}
 	if cloudModels == nil {
 		cloudModels = make(map[string]string)
 	}
-	return &lmHandler{
+	h := &lmHandler{
 		mgr:          mgr,
 		remoteProxy:  remoteProxy,
 		localProxy:   localProxy,
@@ -55,7 +64,91 @@ func newLMHandler(mgr *runtime.Manager, remoteProxy, localProxy *httputil.Revers
 		cloudProxy:   cloudProxy,
 		cloudModels:  cloudModels,
 		calc:         calc,
+		soloMode:     soloMode,
+		stopCh:       make(chan struct{}),
 	}
+
+	// Initialize empty maps in atomic values.
+	h.localModels.Store(make(map[string]bool))
+	h.remoteModels.Store(make(map[string]bool))
+
+	// In team mode, pre-fetch remote models and start a background refresh.
+	if !soloMode && remoteProxy != nil {
+		go h.startRemoteRefresh()
+	}
+
+	return h
+}
+
+// Close stops background goroutines. Safe to call multiple times.
+func (h *lmHandler) Close() {
+	select {
+	case <-h.stopCh:
+		// already closed
+	default:
+		close(h.stopCh)
+	}
+}
+
+// startRemoteRefresh periodically refreshes the remote model cache.
+func (h *lmHandler) startRemoteRefresh() {
+	// Initial fetch with a short delay to let the server come up.
+	select {
+	case <-time.After(2 * time.Second):
+	case <-h.stopCh:
+		return
+	}
+	h.refreshRemoteModels()
+
+	ticker := time.NewTicker(60 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			h.refreshRemoteModels()
+		case <-h.stopCh:
+			return
+		}
+	}
+}
+
+// refreshRemoteModels fetches the model list from the remote server
+// and atomically swaps the cache.
+// Distinguishes fetch failure (nil → keep stale cache) from a valid
+// empty response ([] → clear the cache).
+func (h *lmHandler) refreshRemoteModels() {
+	req, err := http.NewRequest(http.MethodGet, "/v1/models", nil)
+	if err != nil {
+		return
+	}
+	models := h.fetchRemoteModels(req)
+	if models == nil {
+		return // fetch failed — keep stale cache
+	}
+	// models may be empty (all disabled) — that's valid, clear the cache.
+	newSet := make(map[string]bool, len(models))
+	for _, m := range models {
+		newSet[m.ID] = true
+	}
+	h.remoteModels.Store(newSet)
+	h.lastRemoteFetch.Store(time.Now().Unix())
+	slog.Info("lm handler: remote model cache refreshed", "models", len(models))
+}
+
+// loadLocalModels returns the current local model cache.
+func (h *lmHandler) loadLocalModels() map[string]bool {
+	if m, ok := h.localModels.Load().(map[string]bool); ok {
+		return m
+	}
+	return nil
+}
+
+// loadRemoteModels returns the current remote model cache.
+func (h *lmHandler) loadRemoteModels() map[string]bool {
+	if m, ok := h.remoteModels.Load().(map[string]bool); ok {
+		return m
+	}
+	return nil
 }
 
 func (h *lmHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -99,7 +192,7 @@ func (h *lmHandler) serveModels(w http.ResponseWriter, r *http.Request) {
 			slog.Warn("lm handler: failed to list local models", "error", err)
 		} else {
 			backendName := h.mgr.Runtime().Name()
-			// Refresh the cached model set.
+			// Build new set and atomically swap.
 			newSet := make(map[string]bool, len(models))
 			for _, m := range models {
 				merged = append(merged, openaiModel{
@@ -108,49 +201,40 @@ func (h *lmHandler) serveModels(w http.ResponseWriter, r *http.Request) {
 					OwnedBy: backendName,
 				})
 				newSet[m.ID] = true
-				h.localModels.Store(m.ID, true)
 			}
-			// Remove stale entries.
-			h.localModels.Range(func(key, _ any) bool {
-				if !newSet[key.(string)] {
-					h.localModels.Delete(key)
-				}
-				return true
-			})
+			h.localModels.Store(newSet)
 		}
 	}
 
-	// 2. Add direct cloud models (only if priced).
-	for modelID, providerName := range h.cloudModels {
-		if h.calc != nil && !h.calc.HasPricing(providerName, modelID) {
-			slog.Warn("⚠️ hiding cloud model from /v1/models — no pricing configured",
-				"model", modelID, "provider", providerName)
-			continue
+	// 2. Add direct cloud models (only in solo mode, and only if priced).
+	if h.soloMode {
+		for modelID, providerName := range h.cloudModels {
+			if h.calc != nil && !h.calc.HasPricing(providerName, modelID) {
+				slog.Warn("⚠️ hiding cloud model from /v1/models — no pricing configured",
+					"model", modelID, "provider", providerName)
+				continue
+			}
+			merged = append(merged, openaiModel{
+				ID:      modelID,
+				Object:  "model",
+				OwnedBy: providerName,
+			})
 		}
-		merged = append(merged, openaiModel{
-			ID:      modelID,
-			Object:  "model",
-			OwnedBy: providerName,
-		})
 	}
 
 	// 3. Fetch remote models by proxying to the remote Candela server.
 	remoteModels := h.fetchRemoteModels(r)
 	merged = append(merged, remoteModels...)
 
-	// Cache remote model IDs for alias resolution.
-	newRemoteSet := make(map[string]bool, len(remoteModels))
-	for _, m := range remoteModels {
-		newRemoteSet[m.ID] = true
-		h.remoteModels.Store(m.ID, true)
-	}
-	// Remove stale remote entries.
-	h.remoteModels.Range(func(key, _ any) bool {
-		if !newRemoteSet[key.(string)] {
-			h.remoteModels.Delete(key)
+	// Cache remote model IDs atomically for alias resolution.
+	// Only update if we got a valid response (non-nil), even if empty.
+	if remoteModels != nil {
+		newRemoteSet := make(map[string]bool, len(remoteModels))
+		for _, m := range remoteModels {
+			newRemoteSet[m.ID] = true
 		}
-		return true
-	})
+		h.remoteModels.Store(newRemoteSet)
+	}
 
 	// 4. Return merged OpenAI-format response.
 	w.Header().Set("Content-Type", "application/json")
@@ -221,13 +305,16 @@ func (h *lmHandler) serveChat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 2. Cloud model → direct cloud proxy (solo + cloud mode).
-	if providerName, ok := h.cloudModels[req.Model]; ok && h.cloudProxy != nil {
-		slog.Debug("lm handler: routing to cloud provider", "model", req.Model, "provider", providerName)
-		// Rewrite path for the proxy package: /proxy/{provider}/v1/chat/completions
-		r.URL.Path = fmt.Sprintf("/proxy/%s/v1/chat/completions", providerName)
-		h.cloudProxy.ServeHTTP(w, r)
-		return
+	// 2. Cloud model → direct cloud proxy (solo mode only).
+	// In team mode, all cloud traffic must go through the remote server
+	// so the server catalog remains the single source of truth.
+	if h.soloMode {
+		if providerName, ok := h.cloudModels[req.Model]; ok && h.cloudProxy != nil {
+			slog.Debug("lm handler: routing to cloud provider", "model", req.Model, "provider", providerName)
+			r.URL.Path = fmt.Sprintf("/proxy/%s/v1/chat/completions", providerName)
+			h.cloudProxy.ServeHTTP(w, r)
+			return
+		}
 	}
 
 	// 3. Remote server → team mode proxy.
@@ -247,14 +334,13 @@ func (h *lmHandler) isLocalModel(model string) bool {
 	if model == "" || h.mgr == nil || h.localProxy == nil {
 		return false
 	}
-	_, ok := h.localModels.Load(model)
-	if ok {
+	locals := h.loadLocalModels()
+	if locals[model] {
 		return true
 	}
 	// Also check without tag (e.g., "llama3.2" → "llama3.2:latest").
 	if !strings.Contains(model, ":") {
-		_, ok = h.localModels.Load(model + ":latest")
-		return ok
+		return locals[model+":latest"]
 	}
 	return false
 }
@@ -268,40 +354,40 @@ func (h *lmHandler) resolveModel(model string) string {
 		return model
 	}
 
-	// Collect all known model IDs.
+	// Collect all known model IDs from atomic caches.
 	var allModels []string
-	h.localModels.Range(func(key, _ any) bool {
-		allModels = append(allModels, key.(string))
-		return true
-	})
+	for id := range h.loadLocalModels() {
+		allModels = append(allModels, id)
+	}
 	for id := range h.cloudModels {
 		allModels = append(allModels, id)
 	}
 
 	// Lazy-populate remote models if cache is empty and we have a remote proxy.
 	// Uses singleflight to prevent thundering herd on concurrent first requests.
-	remoteEmpty := true
-	h.remoteModels.Range(func(_, _ any) bool {
-		remoteEmpty = false
-		return false // stop after first entry
-	})
-	if remoteEmpty && h.remoteProxy != nil {
+	remoteCache := h.loadRemoteModels()
+	if len(remoteCache) == 0 && h.remoteProxy != nil {
 		_, _, _ = h.remoteFetchGroup.Do("fetch-remote-models", func() (any, error) {
 			req, _ := http.NewRequest(http.MethodGet, "/v1/models", nil)
 			if req != nil {
 				remote := h.fetchRemoteModels(req)
-				for _, m := range remote {
-					h.remoteModels.Store(m.ID, true)
+				if len(remote) > 0 {
+					newSet := make(map[string]bool, len(remote))
+					for _, m := range remote {
+						newSet[m.ID] = true
+					}
+					h.remoteModels.Store(newSet)
 				}
 			}
 			return nil, nil
 		})
+		// Re-read after potential update.
+		remoteCache = h.loadRemoteModels()
 	}
 
-	h.remoteModels.Range(func(key, _ any) bool {
-		allModels = append(allModels, key.(string))
-		return true
-	})
+	for id := range remoteCache {
+		allModels = append(allModels, id)
+	}
 
 	// Exact match → no resolution needed.
 	for _, id := range allModels {

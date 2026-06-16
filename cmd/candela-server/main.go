@@ -830,27 +830,64 @@ func main() {
 			// (e.g. "claude-sonnet-4") and dated variants ("claude-sonnet-4-20250514")
 			// that resolve to the same underlying model. Keep all of them — the
 			// compat layer's prefix-based alias resolution handles short→long mapping.
-			seen := make(map[string]bool)
-			var compatModels []proxy.CompatModel
-			for _, m := range calc.Models() {
-				compatProvider, ok := pricingToCompat[m.Provider]
-				if !ok || !activeSet[compatProvider] {
-					continue
+			buildCompatModels := func() []proxy.CompatModel {
+				seen := make(map[string]bool)
+				var models []proxy.CompatModel
+				for _, m := range calc.Models() {
+					compatProvider, ok := pricingToCompat[m.Provider]
+					if !ok || !activeSet[compatProvider] {
+						continue
+					}
+					key := compatProvider + "/" + m.Model
+					if seen[key] {
+						continue
+					}
+					seen[key] = true
+					models = append(models, proxy.CompatModel{
+						ID:       m.Model,
+						Provider: compatProvider,
+					})
 				}
-				key := compatProvider + "/" + m.Model
-				if seen[key] {
-					continue
-				}
-				seen[key] = true
-				compatModels = append(compatModels, proxy.CompatModel{
-					ID:       m.Model,
-					Provider: compatProvider,
-				})
+				return models
 			}
+
+			compatModels := buildCompatModels()
 
 			if len(compatModels) > 0 {
 				llmProxy.RegisterCompatRoutes(mux, compatModels)
 				slog.Info("📋 /v1/models endpoint registered", "models", len(compatModels))
+			}
+
+			// Periodic catalog refresh: when backed by Firestore (or any
+			// non-config store), reload the catalog every 60s and push
+			// updated models to the proxy.  This lets admins add/remove
+			// models in Firestore without restarting the server.
+			if catalogStore != nil && catalogStore.Source() != "config" {
+				catalogDone := make(chan struct{})
+				go func() {
+					ticker := time.NewTicker(60 * time.Second)
+					defer ticker.Stop()
+					for {
+						select {
+						case <-ticker.C:
+							ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+							entries, err := catalogStore.List(ctx, false)
+							cancel()
+							if err != nil {
+								slog.Warn("catalog refresh failed", "error", err)
+								continue
+							}
+							calc.LoadFromCatalog(entries)
+							refreshed := buildCompatModels()
+							llmProxy.RefreshModels(refreshed)
+						case <-catalogDone:
+							return
+						}
+					}
+				}()
+				// Ensure the goroutine is stopped when the server exits.
+				defer close(catalogDone)
+				slog.Info("🔄 catalog refresh goroutine started", "interval", "60s")
 			}
 
 			var names []string

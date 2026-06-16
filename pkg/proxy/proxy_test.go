@@ -686,3 +686,46 @@ func TestPricingProvider(t *testing.T) {
 		}
 	}
 }
+
+// TestRefreshModels verifies that RefreshModels dynamically updates the /v1/models
+// response without restarting.
+func TestRefreshModels(t *testing.T) {
+	p, err := New(Config{
+		Providers: []Provider{{Name: "test", UpstreamURL: "http://localhost:9999"}},
+	}, &mockSubmitter{}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	mux := http.NewServeMux()
+	initial := []CompatModel{
+		{ID: "model-a", Provider: "test"},
+	}
+	p.RegisterCompatRoutes(mux, initial)
+
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	// Initial: should have model-a.
+	resp, _ := http.Get(srv.URL + "/v1/models")
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close() //nolint:errcheck
+	if !strings.Contains(string(body), "model-a") {
+		t.Error("expected model-a in initial response")
+	}
+
+	// Refresh with model-b.
+	p.RefreshModels([]CompatModel{
+		{ID: "model-b", Provider: "test"},
+	})
+
+	resp, _ = http.Get(srv.URL + "/v1/models")
+	body, _ = io.ReadAll(resp.Body)
+	resp.Body.Close() //nolint:errcheck
+	if strings.Contains(string(body), "model-a") {
+		t.Error("model-a should be gone after refresh")
+	}
+	if !strings.Contains(string(body), "model-b") {
+		t.Error("expected model-b after refresh")
+	}
+}

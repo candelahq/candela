@@ -25,7 +25,21 @@ jobs:
       - name: Fix git ownership for Nix flake
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
-      - name: Buf registry whoami
+      - name: Check BUF_TOKEN is set
+        run: |
+          if [ -z "$BUF_TOKEN" ]; then
+            echo "::warning::BUF_TOKEN secret is not set or empty"
+          else
+            echo "BUF_TOKEN is configured (${#BUF_TOKEN} chars)"
+          fi
         env:
           BUF_TOKEN: ${{ secrets.BUF_TOKEN }}
-        run: nix develop . --command buf registry whoami
+
+      - name: Buf registry whoami
+        run: |
+          nix develop . --command buf registry whoami || {
+            echo "::error::buf registry whoami failed — check that BUF_TOKEN secret is configured"
+            exit 1
+          }
+        env:
+          BUF_TOKEN: ${{ secrets.BUF_TOKEN }}

@@ -28,7 +28,9 @@ type Multi []Logger
 
 func (m Multi) Log(ctx context.Context, event Event) {
 	for _, l := range m {
-		l.Log(ctx, event)
+		if l != nil {
+			l.Log(ctx, event)
+		}
 	}
 }
 

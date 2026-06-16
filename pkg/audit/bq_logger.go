@@ -6,6 +6,7 @@ import (
 	"log/slog"
 
 	"cloud.google.com/go/bigquery"
+	"google.golang.org/api/googleapi"
 )
 
 const bqTableName = "admin_audit_log"
@@ -22,11 +23,15 @@ type bqRow struct {
 	Error      string                 `bigquery:"error"`
 }
 
-// BQLogger writes audit events to a BigQuery table.
+// BQLogger writes audit events to a BigQuery table asynchronously.
+// Events are buffered in a channel and written by a background goroutine,
+// keeping BigQuery latency off the RPC critical path.
 // Create one via NewBQLogger; call Close when done.
 type BQLogger struct {
 	client   *bigquery.Client
 	inserter *bigquery.Inserter
+	events   chan bqRow
+	done     chan struct{}
 }
 
 // BQConfig holds BigQuery audit logger configuration.
@@ -35,7 +40,7 @@ type BQConfig struct {
 	Dataset   string
 }
 
-// NewBQLogger creates a BigQuery audit logger.
+// NewBQLogger creates a BigQuery audit logger with an async write loop.
 // It does NOT create the table — call EnsureTable separately if needed.
 func NewBQLogger(ctx context.Context, cfg BQConfig) (*BQLogger, error) {
 	client, err := bigquery.NewClient(ctx, cfg.ProjectID)
@@ -44,14 +49,33 @@ func NewBQLogger(ctx context.Context, cfg BQConfig) (*BQLogger, error) {
 	}
 
 	table := client.Dataset(cfg.Dataset).Table(bqTableName)
-	return &BQLogger{
+	l := &BQLogger{
 		client:   client,
 		inserter: table.Inserter(),
-	}, nil
+		events:   make(chan bqRow, 256),
+		done:     make(chan struct{}),
+	}
+	go l.writeLoop()
+	return l, nil
 }
 
-// Log writes an audit event to BigQuery.
-func (l *BQLogger) Log(ctx context.Context, e Event) {
+// writeLoop drains the events channel and writes rows to BigQuery.
+// It uses context.Background() so inserts are not cancelled by request contexts.
+func (l *BQLogger) writeLoop() {
+	defer close(l.done)
+	for row := range l.events {
+		if err := l.inserter.Put(context.Background(), row); err != nil {
+			slog.Warn("audit: failed to write to BigQuery",
+				"error", err,
+				"procedure", row.Procedure,
+				"actor", row.ActorEmail)
+		}
+	}
+}
+
+// Log enqueues an audit event for async writing to BigQuery.
+// If the buffer is full, the event is dropped with a warning.
+func (l *BQLogger) Log(_ context.Context, e Event) {
 	row := bqRow{
 		Timestamp:  bigquery.NullTimestamp{Timestamp: e.Timestamp, Valid: true},
 		ActorEmail: e.ActorEmail,
@@ -62,20 +86,23 @@ func (l *BQLogger) Log(ctx context.Context, e Event) {
 		StatusCode: e.StatusCode,
 		Error:      e.Error,
 	}
-	if err := l.inserter.Put(ctx, row); err != nil {
-		slog.WarnContext(ctx, "audit: failed to write to BigQuery",
-			"error", err,
+	select {
+	case l.events <- row:
+	default:
+		slog.Warn("audit: BQ event buffer full, dropping event",
 			"procedure", e.Procedure,
 			"actor", e.ActorEmail)
 	}
 }
 
-// Close releases the BigQuery client resources.
+// Close drains the event buffer and releases the BigQuery client.
 func (l *BQLogger) Close() error {
+	close(l.events)
+	<-l.done // wait for writeLoop to finish
 	return l.client.Close()
 }
 
-// EnsureTable creates the admin_audit_log table if it does not exist.
+// EnsureTable creates the admin_audit_log table if it does not already exist.
 func EnsureTable(ctx context.Context, cfg BQConfig) error {
 	client, err := bigquery.NewClient(ctx, cfg.ProjectID)
 	if err != nil {
@@ -107,6 +134,11 @@ func EnsureTable(ctx context.Context, cfg BQConfig) error {
 	}
 
 	if err := table.Create(ctx, md); err != nil {
+		// Idempotent: if table already exists, that's fine.
+		if apiErr, ok := err.(*googleapi.Error); ok && apiErr.Code == 409 {
+			slog.Info("audit: BigQuery table already exists", "table", bqTableName)
+			return nil
+		}
 		return fmt.Errorf("audit: failed to create table %s: %w", bqTableName, err)
 	}
 	slog.Info("audit: BigQuery table created", "table", bqTableName, "dataset", cfg.Dataset)

@@ -14,6 +14,10 @@ import (
 // This interceptor should be wired AFTER auth and validation interceptors so it
 // only fires for authorized, validated requests.
 func Interceptor(logger Logger, procedures map[string]bool) connect.UnaryInterceptorFunc {
+	// Nil-safe: return a no-op interceptor if no logger is provided.
+	if logger == nil {
+		return func(next connect.UnaryFunc) connect.UnaryFunc { return next }
+	}
 	return func(next connect.UnaryFunc) connect.UnaryFunc {
 		return func(ctx context.Context, req connect.AnyRequest) (connect.AnyResponse, error) {
 			procedure := req.Spec().Procedure
@@ -34,7 +38,7 @@ func Interceptor(logger Logger, procedures map[string]bool) connect.UnaryInterce
 			// Build the audit event.
 			service, method := ParseProcedure(procedure)
 			event := Event{
-				Timestamp:  time.Now(),
+				Timestamp:  time.Now().UTC(),
 				ActorEmail: actorEmail,
 				ActorID:    actorID,
 				Service:    service,

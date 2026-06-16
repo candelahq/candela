@@ -261,7 +261,7 @@ func (h *UserHandler) UpdateUser(
 		ActorEmail: actorEmail,
 		Action:     "update_user",
 		Details:    fmt.Sprintf("fields: %v", paths),
-		Timestamp:  time.Now(),
+		Timestamp:  time.Now().UTC(),
 	})
 
 	return connect.NewResponse(&v1.UpdateUserResponse{

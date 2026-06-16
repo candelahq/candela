@@ -863,22 +863,30 @@ func main() {
 			// updated models to the proxy.  This lets admins add/remove
 			// models in Firestore without restarting the server.
 			if catalogStore != nil && catalogStore.Source() != "config" {
+				catalogDone := make(chan struct{})
 				go func() {
 					ticker := time.NewTicker(60 * time.Second)
 					defer ticker.Stop()
-					for range ticker.C {
-						ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-						entries, err := catalogStore.List(ctx, false)
-						cancel()
-						if err != nil {
-							slog.Warn("catalog refresh failed", "error", err)
-							continue
+					for {
+						select {
+						case <-ticker.C:
+							ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+							entries, err := catalogStore.List(ctx, false)
+							cancel()
+							if err != nil {
+								slog.Warn("catalog refresh failed", "error", err)
+								continue
+							}
+							calc.LoadFromCatalog(entries)
+							refreshed := buildCompatModels()
+							llmProxy.RefreshModels(refreshed)
+						case <-catalogDone:
+							return
 						}
-						calc.LoadFromCatalog(entries)
-						refreshed := buildCompatModels()
-						llmProxy.RefreshModels(refreshed)
 					}
 				}()
+				// Ensure the goroutine is stopped when the server exits.
+				defer close(catalogDone)
 				slog.Info("🔄 catalog refresh goroutine started", "interval", "60s")
 			}
 

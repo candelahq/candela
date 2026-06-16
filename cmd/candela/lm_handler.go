@@ -114,21 +114,25 @@ func (h *lmHandler) startRemoteRefresh() {
 
 // refreshRemoteModels fetches the model list from the remote server
 // and atomically swaps the cache.
+// Distinguishes fetch failure (nil → keep stale cache) from a valid
+// empty response ([] → clear the cache).
 func (h *lmHandler) refreshRemoteModels() {
 	req, err := http.NewRequest(http.MethodGet, "/v1/models", nil)
 	if err != nil {
 		return
 	}
 	models := h.fetchRemoteModels(req)
-	if len(models) > 0 {
-		newSet := make(map[string]bool, len(models))
-		for _, m := range models {
-			newSet[m.ID] = true
-		}
-		h.remoteModels.Store(newSet)
-		h.lastRemoteFetch.Store(time.Now().Unix())
-		slog.Info("lm handler: remote model cache refreshed", "models", len(models))
+	if models == nil {
+		return // fetch failed — keep stale cache
 	}
+	// models may be empty (all disabled) — that's valid, clear the cache.
+	newSet := make(map[string]bool, len(models))
+	for _, m := range models {
+		newSet[m.ID] = true
+	}
+	h.remoteModels.Store(newSet)
+	h.lastRemoteFetch.Store(time.Now().Unix())
+	slog.Info("lm handler: remote model cache refreshed", "models", len(models))
 }
 
 // loadLocalModels returns the current local model cache.
@@ -223,7 +227,8 @@ func (h *lmHandler) serveModels(w http.ResponseWriter, r *http.Request) {
 	merged = append(merged, remoteModels...)
 
 	// Cache remote model IDs atomically for alias resolution.
-	if len(remoteModels) > 0 {
+	// Only update if we got a valid response (non-nil), even if empty.
+	if remoteModels != nil {
 		newRemoteSet := make(map[string]bool, len(remoteModels))
 		for _, m := range remoteModels {
 			newRemoteSet[m.ID] = true
@@ -300,13 +305,16 @@ func (h *lmHandler) serveChat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 2. Cloud model → direct cloud proxy (solo + cloud mode).
-	if providerName, ok := h.cloudModels[req.Model]; ok && h.cloudProxy != nil {
-		slog.Debug("lm handler: routing to cloud provider", "model", req.Model, "provider", providerName)
-		// Rewrite path for the proxy package: /proxy/{provider}/v1/chat/completions
-		r.URL.Path = fmt.Sprintf("/proxy/%s/v1/chat/completions", providerName)
-		h.cloudProxy.ServeHTTP(w, r)
-		return
+	// 2. Cloud model → direct cloud proxy (solo mode only).
+	// In team mode, all cloud traffic must go through the remote server
+	// so the server catalog remains the single source of truth.
+	if h.soloMode {
+		if providerName, ok := h.cloudModels[req.Model]; ok && h.cloudProxy != nil {
+			slog.Debug("lm handler: routing to cloud provider", "model", req.Model, "provider", providerName)
+			r.URL.Path = fmt.Sprintf("/proxy/%s/v1/chat/completions", providerName)
+			h.cloudProxy.ServeHTTP(w, r)
+			return
+		}
 	}
 
 	// 3. Remote server → team mode proxy.

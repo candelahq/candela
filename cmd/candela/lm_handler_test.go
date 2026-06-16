@@ -1137,3 +1137,134 @@ func TestAtomicModelCache(t *testing.T) {
 		t.Error("gemini-2.5-pro should still be present")
 	}
 }
+
+// TestTeamMode_ChatRejectsCloudRouting verifies that in team mode,
+// chat completions do NOT route to the cloud proxy — they must go
+// through the remote server to enforce the server catalog.
+func TestTeamMode_ChatRejectsCloudRouting(t *testing.T) {
+	cloudHit := false
+	cloudSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		cloudHit = true
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"from cloud"}}]}`))
+	}))
+	t.Cleanup(cloudSrv.Close)
+
+	remoteHit := false
+	remoteSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v1/models" {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"object":"list","data":[]}`))
+			return
+		}
+		remoteHit = true
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"from remote"}}]}`))
+	}))
+	t.Cleanup(remoteSrv.Close)
+
+	cloudModels := map[string]string{"claude-sonnet-4": "anthropic"}
+
+	// Team mode: soloMode=false — cloud routing should be bypassed.
+	h := newLMHandler(nil, proxyTo(remoteSrv.URL), nil, nil, nil, cloudModels, nil, false)
+	t.Cleanup(h.Close)
+	srv := httptest.NewServer(h)
+	t.Cleanup(srv.Close)
+
+	// Send a chat completion for a cloud model.
+	resp, err := http.Post(srv.URL+"/v1/chat/completions", "application/json",
+		strings.NewReader(`{"model":"claude-sonnet-4","messages":[{"role":"user","content":"hi"}]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close() //nolint:errcheck
+	_, _ = io.ReadAll(resp.Body)
+
+	if cloudHit {
+		t.Error("team mode should NOT route to cloud proxy")
+	}
+	if !remoteHit {
+		t.Error("team mode should route to remote server")
+	}
+}
+
+// TestRemoteEmptyResponse_ClearsCache verifies that when the remote
+// server returns a valid but empty model list, the cache is cleared
+// (not left stale).
+func TestRemoteEmptyResponse_ClearsCache(t *testing.T) {
+	callCount := 0
+	remoteSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		callCount++
+		w.Header().Set("Content-Type", "application/json")
+		if callCount == 1 {
+			// First call: return a model.
+			_, _ = w.Write([]byte(`{"object":"list","data":[{"id":"model-a","object":"model","owned_by":"test"}]}`))
+		} else {
+			// Second call: return empty list (all models disabled).
+			_, _ = w.Write([]byte(`{"object":"list","data":[]}`))
+		}
+	}))
+	t.Cleanup(remoteSrv.Close)
+
+	h := newLMHandler(nil, proxyTo(remoteSrv.URL), nil, nil, nil, nil, nil, false)
+	t.Cleanup(h.Close)
+	srv := httptest.NewServer(h)
+	t.Cleanup(srv.Close)
+
+	// First request: should populate cache with model-a.
+	resp, _ := http.Get(srv.URL + "/v1/models")
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close() //nolint:errcheck
+	if !strings.Contains(string(body), "model-a") {
+		t.Fatal("expected model-a in first response")
+	}
+
+	// Verify cache is populated.
+	if remotes := h.loadRemoteModels(); !remotes["model-a"] {
+		t.Fatal("expected model-a in remote cache after first request")
+	}
+
+	// Second request: remote returns empty list.
+	resp, _ = http.Get(srv.URL + "/v1/models")
+	_, _ = io.ReadAll(resp.Body)
+	resp.Body.Close() //nolint:errcheck
+
+	// Cache should now be empty (not stale).
+	if remotes := h.loadRemoteModels(); remotes["model-a"] {
+		t.Error("model-a should be cleared from cache when remote returns empty list")
+	}
+}
+
+// TestRemoteDown_PreservesStaleCache verifies that when the remote
+// server is down, the stale cache is preserved (not cleared).
+func TestRemoteDown_PreservesStaleCache(t *testing.T) {
+	remoteSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"object":"list","data":[{"id":"model-a","object":"model","owned_by":"test"}]}`))
+	}))
+	t.Cleanup(remoteSrv.Close)
+
+	h := newLMHandler(nil, proxyTo(remoteSrv.URL), nil, nil, nil, nil, nil, false)
+	t.Cleanup(h.Close)
+	srv := httptest.NewServer(h)
+	t.Cleanup(srv.Close)
+
+	// First request: populate cache.
+	resp, _ := http.Get(srv.URL + "/v1/models")
+	_, _ = io.ReadAll(resp.Body)
+	resp.Body.Close() //nolint:errcheck
+
+	if remotes := h.loadRemoteModels(); !remotes["model-a"] {
+		t.Fatal("expected model-a in cache")
+	}
+
+	// Now call refreshRemoteModels directly with the server stopped
+	// to simulate the remote being down.
+	remoteSrv.Close()
+	h.refreshRemoteModels()
+
+	// Cache should still have model-a (stale cache preserved on failure).
+	if remotes := h.loadRemoteModels(); !remotes["model-a"] {
+		t.Error("model-a should be preserved in cache when remote is down")
+	}
+}

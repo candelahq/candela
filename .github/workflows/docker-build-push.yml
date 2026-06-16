@@ -47,7 +47,7 @@ jobs:
       REGISTRY: ghcr.io
       IMAGE_NAME: ${{ github.repository_owner }}/${{ inputs.image_name }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - uses: actions/setup-go@v5
         if: inputs.setup_go

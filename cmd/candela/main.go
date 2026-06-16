@@ -862,7 +862,7 @@ func runForeground() {
 		cloudCalc = costcalc.New()
 	}
 
-	lmH := newLMHandler(mgr, remoteProxy, runtimeLocalProxy, localHandler, cloudProxy, cloudModels, cloudCalc)
+	lmH := newLMHandler(mgr, remoteProxy, runtimeLocalProxy, localHandler, cloudProxy, cloudModels, cloudCalc, soloMode)
 	lmAddr := fmt.Sprintf("127.0.0.1:%d", lmPort)
 
 	// ── Graceful shutdown ──

@@ -17,6 +17,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"math"
 	"net"
 	"net/http"
@@ -24,10 +25,9 @@ import (
 	"os"
 	"regexp"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
-
-	"log/slog"
 
 	"golang.org/x/oauth2"
 
@@ -250,7 +250,9 @@ type Proxy struct {
 	users    storage.UserStore     // Budget deduction (nil = no budget tracking)
 	budgetCk *notify.BudgetChecker // Budget threshold notifications (nil = no alerts)
 
-	compatModels []CompatModel // configured models for per-provider /models responses
+	compatModels  []CompatModel // configured models for per-provider /models responses
+	modelListJSON atomic.Value  // cached []byte JSON response for /v1/models
+	compatMu      sync.RWMutex  // guards compatModels reads during refresh
 
 	// CRIT-3: Durable outbox for failed DeductSpend calls.
 	spendOutbox *spendoutbox.Outbox
@@ -515,45 +517,41 @@ type CompatModel struct {
 // GET /v1/models returns the configured model list.
 // POST /v1/chat/completions routes to the correct provider based on the model name.
 func (p *Proxy) RegisterCompatRoutes(mux *http.ServeMux, models []CompatModel) {
-	// Filter models: only surface models with known pricing.
-	// This ensures clients never discover a model that would show $0.00 cost.
-	var pricedModels []CompatModel
-	for _, m := range models {
-		if p.calc != nil && !p.calc.HasPricing(m.Provider, m.ID) {
-			slog.Warn("⚠️ hiding model from /v1/models — no pricing configured",
-				"model", m.ID, "provider", m.Provider)
-			continue
-		}
-		pricedModels = append(pricedModels, m)
-	}
-
-	if dropped := len(models) - len(pricedModels); dropped > 0 {
-		slog.Info("model list filtered by pricing availability",
-			"total", len(models), "visible", len(pricedModels), "hidden", dropped)
-	}
-
-	// Build the /v1/models response once at startup.
-	modelList := buildModelsResponse(pricedModels)
-
-	// Store models for per-provider /models responses in handleProxy.
-	p.compatModels = pricedModels
+	// Initial model list build.
+	p.setModels(models)
 
 	// GET /v1/models — return the configured model list (OpenAI-compatible).
 	mux.HandleFunc("GET /v1/models", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write(modelList)
+		if data, ok := p.modelListJSON.Load().([]byte); ok {
+			_, _ = w.Write(data)
+		} else {
+			_, _ = w.Write([]byte(`{"object":"list","data":[]}`))
+		}
 	})
 
 	// GET /api/v0/models — LM Studio native API (used by IntelliJ's "Test Connection").
 	mux.HandleFunc("GET /api/v0/models", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write(modelList)
+		if data, ok := p.modelListJSON.Load().([]byte); ok {
+			_, _ = w.Write(data)
+		} else {
+			_, _ = w.Write([]byte(`{"object":"list","data":[]}`))
+		}
 	})
 
-	// Build model→provider lookup.
-	modelToProvider := make(map[string]string, len(pricedModels))
-	for _, m := range pricedModels {
-		modelToProvider[m.ID] = m.Provider
+	// POST /v1/chat/completions — route to provider based on model name in body.
+	// The model→provider lookup reads from the live compatModels list so it
+	// stays current after RefreshModels() calls.
+	lookupProvider := func(modelID string) (string, bool) {
+		p.compatMu.RLock()
+		defer p.compatMu.RUnlock()
+		for _, m := range p.compatModels {
+			if m.ID == modelID {
+				return m.Provider, true
+			}
+		}
+		return "", false
 	}
 
 	// POST /v1/chat/completions — route to provider based on model name in body.
@@ -580,19 +578,21 @@ func (p *Proxy) RegisterCompatRoutes(mux *http.ServeMux, models []CompatModel) {
 			return
 		}
 
-		providerName, ok := modelToProvider[req.Model]
+		providerName, ok := lookupProvider(req.Model)
 		if !ok {
 			// Try prefix-based alias resolution (e.g. "claude-sonnet-4" → "claude-sonnet-4-20250514").
+			p.compatMu.RLock()
 			var matches []string
-			for id := range modelToProvider {
-				if strings.HasPrefix(id, req.Model) {
-					matches = append(matches, id)
+			for _, m := range p.compatModels {
+				if strings.HasPrefix(m.ID, req.Model) {
+					matches = append(matches, m.ID)
 				}
 			}
+			p.compatMu.RUnlock()
 			if len(matches) == 1 {
 				resolved := matches[0]
 				slog.Info("compat: resolved model alias", "from", req.Model, "to", resolved)
-				providerName = modelToProvider[resolved]
+				providerName, _ = lookupProvider(resolved)
 				ok = true
 				// Rewrite the model field in the body so upstream gets the canonical ID.
 				body = rewriteModelField(body, resolved)
@@ -617,6 +617,40 @@ func (p *Proxy) RegisterCompatRoutes(mux *http.ServeMux, models []CompatModel) {
 		r.ContentLength = int64(len(body))
 		p.handleProxy(w, r)
 	})
+}
+
+// setModels filters models by pricing availability, stores them, and rebuilds
+// the cached JSON response. Thread-safe for concurrent reads.
+func (p *Proxy) setModels(models []CompatModel) {
+	// Filter models: only surface models with known pricing.
+	var pricedModels []CompatModel
+	for _, m := range models {
+		if p.calc != nil && !p.calc.HasPricing(m.Provider, m.ID) {
+			slog.Warn("⚠️ hiding model from /v1/models — no pricing configured",
+				"model", m.ID, "provider", m.Provider)
+			continue
+		}
+		pricedModels = append(pricedModels, m)
+	}
+
+	if dropped := len(models) - len(pricedModels); dropped > 0 {
+		slog.Info("model list filtered by pricing availability",
+			"total", len(models), "visible", len(pricedModels), "hidden", dropped)
+	}
+
+	p.compatMu.Lock()
+	p.compatModels = pricedModels
+	p.compatMu.Unlock()
+
+	p.modelListJSON.Store(buildModelsResponse(pricedModels))
+	slog.Info("📋 model list updated", "models", len(pricedModels))
+}
+
+// RefreshModels replaces the current model list with a new set of models.
+// This is intended to be called periodically when the catalog changes
+// (e.g. Firestore catalog refresh) without restarting the server.
+func (p *Proxy) RefreshModels(models []CompatModel) {
+	p.setModels(models)
 }
 
 func buildModelsResponse(models []CompatModel) []byte {
@@ -845,12 +879,14 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 	// Build per-provider model list from the proxy's registered providers/models.
 	if r.Method == http.MethodGet && strings.HasSuffix(upstreamPath, "/models") {
 		// Collect models configured for this specific provider.
+		p.compatMu.RLock()
 		var providerModels []CompatModel
 		for _, m := range p.compatModels {
 			if m.Provider == providerName {
 				providerModels = append(providerModels, m)
 			}
 		}
+		p.compatMu.RUnlock()
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write(buildModelsResponse(providerModels))
 		return

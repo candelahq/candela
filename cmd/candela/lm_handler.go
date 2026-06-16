@@ -12,6 +12,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/candelahq/candela/pkg/costcalc"
@@ -31,23 +32,28 @@ type lmHandler struct {
 	cloudProxy   *proxy.Proxy           // direct cloud proxy (solo + cloud mode)
 	cloudModels  map[string]string      // model ID → provider name
 	calc         *costcalc.Calculator   // pricing calculator (for filtering unpriced models)
+	soloMode     bool                   // true = solo mode (use embedded cloud models), false = team mode
 
 	localModels  sync.Map // model ID string → bool (cached for fast routing)
 	remoteModels sync.Map // model ID string → bool (cached from remote /v1/models)
 
 	remoteFetchGroup singleflight.Group // deduplicates concurrent lazy fetches
+
+	// Remote model cache TTL: tracks when we last refreshed so periodic
+	// callers don't hammer the server on every /v1/models request.
+	lastRemoteFetch atomic.Int64 // unix timestamp of last successful fetch
 }
 
 // newLMHandler creates a smart LM compat handler that merges local + remote + cloud
 // models and routes chat completions to the correct backend.
-func newLMHandler(mgr *runtime.Manager, remoteProxy, localProxy *httputil.ReverseProxy, localHandler http.Handler, cloudProxy *proxy.Proxy, cloudModels map[string]string, calc *costcalc.Calculator) *lmHandler {
+func newLMHandler(mgr *runtime.Manager, remoteProxy, localProxy *httputil.ReverseProxy, localHandler http.Handler, cloudProxy *proxy.Proxy, cloudModels map[string]string, calc *costcalc.Calculator, soloMode bool) *lmHandler {
 	if localHandler == nil && localProxy != nil {
 		localHandler = localProxy
 	}
 	if cloudModels == nil {
 		cloudModels = make(map[string]string)
 	}
-	return &lmHandler{
+	h := &lmHandler{
 		mgr:          mgr,
 		remoteProxy:  remoteProxy,
 		localProxy:   localProxy,
@@ -55,6 +61,52 @@ func newLMHandler(mgr *runtime.Manager, remoteProxy, localProxy *httputil.Revers
 		cloudProxy:   cloudProxy,
 		cloudModels:  cloudModels,
 		calc:         calc,
+		soloMode:     soloMode,
+	}
+
+	// In team mode, pre-fetch remote models and start a background refresh.
+	if !soloMode && remoteProxy != nil {
+		go h.startRemoteRefresh()
+	}
+
+	return h
+}
+
+// startRemoteRefresh periodically refreshes the remote model cache.
+func (h *lmHandler) startRemoteRefresh() {
+	// Initial fetch with a short delay to let the server come up.
+	time.Sleep(2 * time.Second)
+	h.refreshRemoteModels()
+
+	ticker := time.NewTicker(60 * time.Second)
+	defer ticker.Stop()
+	for range ticker.C {
+		h.refreshRemoteModels()
+	}
+}
+
+// refreshRemoteModels fetches the model list from the remote server
+// and updates the cache.
+func (h *lmHandler) refreshRemoteModels() {
+	req, err := http.NewRequest(http.MethodGet, "/v1/models", nil)
+	if err != nil {
+		return
+	}
+	models := h.fetchRemoteModels(req)
+	if len(models) > 0 {
+		newSet := make(map[string]bool, len(models))
+		for _, m := range models {
+			newSet[m.ID] = true
+			h.remoteModels.Store(m.ID, true)
+		}
+		h.remoteModels.Range(func(key, _ any) bool {
+			if !newSet[key.(string)] {
+				h.remoteModels.Delete(key)
+			}
+			return true
+		})
+		h.lastRemoteFetch.Store(time.Now().Unix())
+		slog.Info("lm handler: remote model cache refreshed", "models", len(models))
 	}
 }
 
@@ -120,18 +172,20 @@ func (h *lmHandler) serveModels(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// 2. Add direct cloud models (only if priced).
-	for modelID, providerName := range h.cloudModels {
-		if h.calc != nil && !h.calc.HasPricing(providerName, modelID) {
-			slog.Warn("⚠️ hiding cloud model from /v1/models — no pricing configured",
-				"model", modelID, "provider", providerName)
-			continue
+	// 2. Add direct cloud models (only in solo mode, and only if priced).
+	if h.soloMode {
+		for modelID, providerName := range h.cloudModels {
+			if h.calc != nil && !h.calc.HasPricing(providerName, modelID) {
+				slog.Warn("⚠️ hiding cloud model from /v1/models — no pricing configured",
+					"model", modelID, "provider", providerName)
+				continue
+			}
+			merged = append(merged, openaiModel{
+				ID:      modelID,
+				Object:  "model",
+				OwnedBy: providerName,
+			})
 		}
-		merged = append(merged, openaiModel{
-			ID:      modelID,
-			Object:  "model",
-			OwnedBy: providerName,
-		})
 	}
 
 	// 3. Fetch remote models by proxying to the remote Candela server.

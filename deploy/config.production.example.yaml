@@ -46,8 +46,9 @@ cors:
   allowed_origins: []
 
 auth:
-  dev_mode: true  # Cloud Run invoker IAM handles access control.
-  # TODO: replace with Firebase Auth / Cloud Run ID token validation.
+  dev_mode: false  # Firebase Auth + Google ID token validation (no IAP).
+  # allowed_service_accounts:  # SAs allowed to proxy — deny all if empty.
+  #   - "your-sa@your-project.iam.gserviceaccount.com"
 
 firestore:
   enabled: true

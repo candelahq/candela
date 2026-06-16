@@ -902,13 +902,15 @@ func main() {
 	}
 
 	addr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)
-
 	// Wrap the mux with Firebase Auth middleware.
 	devMode := cfg.Auth.DevMode
-	// Guard: never allow dev mode on Cloud Run (K_SERVICE is always set by Cloud Run).
-	if devMode && os.Getenv("K_SERVICE") != "" {
-		slog.Error("auth.dev_mode=true is not allowed on Cloud Run — disabling")
-		devMode = false
+	// Cloud Run service URL is the audience for Google ID tokens (candela-local).
+	cloudRunURL := os.Getenv("CLOUD_RUN_URL")
+
+	// Guard: never allow dev mode on Cloud Run. Fail-closed.
+	if err := validateAuthConfig(devMode, os.Getenv("K_SERVICE"), cloudRunURL); err != nil {
+		slog.Error("FATAL: " + err.Error())
+		os.Exit(1)
 	}
 
 	// Initialize Firebase Admin SDK for token verification.
@@ -926,9 +928,6 @@ func main() {
 		}
 		slog.Info("🔐 Firebase Auth initialized")
 	}
-
-	// Cloud Run service URL is the audience for Google ID tokens (candela-local).
-	cloudRunURL := os.Getenv("CLOUD_RUN_URL")
 
 	// Build a UserAuthorizer from the Firestore UserStore (if available).
 	// This restricts access to only registered users.
@@ -1146,4 +1145,16 @@ func corsMiddleware(next http.Handler, origins []string) http.Handler {
 
 		next.ServeHTTP(w, r)
 	})
+}
+
+// validateAuthConfig checks that the auth configuration is safe for the runtime environment.
+// Returns an error if the configuration would be insecure.
+func validateAuthConfig(devMode bool, kService, cloudRunURL string) error {
+	if devMode && kService != "" {
+		return fmt.Errorf("auth.dev_mode=true is not allowed on Cloud Run (K_SERVICE=%s)", kService)
+	}
+	if kService != "" && cloudRunURL == "" {
+		slog.Warn("CLOUD_RUN_URL not set on Cloud Run — Google ID token validation (Strategy 2) will be skipped; tokens will fall through to OAuth2 userinfo (slower)")
+	}
+	return nil
 }

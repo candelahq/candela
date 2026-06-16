@@ -218,12 +218,14 @@ func (h *UserHandler) UpdateUser(
 	for _, p := range paths {
 		if p == "role" {
 			caller := auth.FromContext(ctx)
-			if caller != nil {
-				callerRecord, err := h.store.GetUserByEmail(ctx, caller.Email)
-				if err != nil || callerRecord.Role != storage.RoleAdmin {
-					return nil, connect.NewError(connect.CodePermissionDenied,
-						fmt.Errorf("only admins can modify user roles"))
-				}
+			if caller == nil {
+				return nil, connect.NewError(connect.CodeUnauthenticated,
+					fmt.Errorf("authentication required to modify roles"))
+			}
+			callerRecord, err := h.store.GetUserByEmail(ctx, caller.Email)
+			if err != nil || callerRecord.Role != storage.RoleAdmin {
+				return nil, connect.NewError(connect.CodePermissionDenied,
+					fmt.Errorf("only admins can modify user roles"))
 			}
 			break
 		}

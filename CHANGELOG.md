@@ -2,6 +2,25 @@
 
 All notable changes to Candela are documented here, organized by development phase. PRs are merged to `main`.
 
+## v0.7.1 — 2026-06-16
+
+### Security Fixes
+
+- **GetJobLeaderboard missing authorization** (HIGH): Added `scopeUserID` admin guard — any authenticated developer could previously query cross-user job cost/usage data (#410)
+- **UpdateUser role escalation bypass** (MEDIUM-HIGH): Inverted nil-caller check to deny-by-default — unauthenticated contexts could previously modify user roles without any permission check (#410)
+- **Catalog AdminEditable UI leak** (MEDIUM): `AdminEditable` response field now checks caller role in addition to store writability — developers no longer see admin-only UI controls they can't use (#409)
+
+### Improvements
+
+- **UpdateUser error handling**: Distinguish `ErrNotFound` from transient storage errors in role-mutation guard — DB outages no longer masquerade as `PermissionDenied` (#410)
+- **ListModelCatalog performance**: Cache `scopeUserID` result to avoid redundant database lookup per request (#409)
+
+### Ops / CI
+
+- Disable `dev_mode` in production, fail-closed on Cloud Run (#406)
+- Bump `actions/checkout` v4 → v5 for Node.js 24 compatibility (#405)
+- Remove buf_whoami diagnostic workflow (#411)
+
 ## v0.5.7 — 2026-06-14
 
 ### Pricing Engine Overhaul (Batch 8)

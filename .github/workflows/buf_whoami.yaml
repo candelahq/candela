@@ -1,0 +1,31 @@
+name: Buf Whoami
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: read
+
+jobs:
+  buf-whoami:
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/candelahq/candela-dev:latest
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Fix git ownership for Nix flake
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+      - name: Buf registry whoami
+        env:
+          BUF_TOKEN: ${{ secrets.BUF_TOKEN }}
+        run: nix develop . --command buf registry whoami

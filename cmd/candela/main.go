@@ -144,6 +144,8 @@ func main() {
 		cmdRestart()
 	case "status":
 		cmdStatus()
+	case "doctor":
+		cmdDoctor()
 	case "auth":
 		// Guard: os.Args[2:] is safe (returns [] when len==2), but be explicit.
 		var authArgs []string
@@ -162,6 +164,8 @@ Usage:
   candela stop           Stop the background proxy
   candela restart        Restart the background proxy
   candela status         Show proxy status
+  candela doctor         Check for port conflicts
+  candela doctor --fix   Kill conflicting processes
   candela run [flags]    Run in foreground
   candela auth login --provider gcp   Login to GCP via browser
   candela auth login --provider aws   Login to AWS
@@ -422,6 +426,119 @@ func cmdStatus() {
 	fmt.Printf("  PID:   %d\n", pid)
 	fmt.Printf("  proxy: http://127.0.0.1:%d\n", port)
 	fmt.Printf("  UI:    http://127.0.0.1:%d/_local/\n", port)
+}
+
+// cmdDoctor checks for port conflicts and optionally kills conflicting processes.
+func cmdDoctor() {
+	fix := len(os.Args) > 2 && os.Args[2] == "--fix"
+
+	port := resolvePort(nil)
+	lmPort := 1234 // default LM Studio compat port
+	if cfg := loadConfig(""); cfg.LMStudioPort != 0 {
+		lmPort = cfg.LMStudioPort
+	}
+
+	// Read our own PID file so we can exclude our own process from conflicts.
+	ownPID := 0
+	if pidPath := pidFilePath(); pidPath != "" {
+		if data, err := os.ReadFile(pidPath); err == nil {
+			ownPID, _ = strconv.Atoi(strings.TrimSpace(string(data)))
+		}
+	}
+
+	type portProcess struct {
+		Port    int
+		PID     int
+		Command string
+	}
+
+	var conflicts []portProcess
+	clean := true
+
+	for _, p := range []struct {
+		port int
+		name string
+	}{
+		{port, "proxy"},
+		{lmPort, "LM Studio compat"},
+	} {
+		procs := findProcessesOnPort(p.port)
+		for _, proc := range procs {
+			if proc.pid == ownPID {
+				continue // skip our own process
+			}
+			clean = false
+			conflicts = append(conflicts, portProcess{Port: p.port, PID: proc.pid, Command: proc.command})
+			fmt.Printf("⚠️  port %d (%s): PID %d — %s\n", p.port, p.name, proc.pid, proc.command)
+		}
+		if len(procs) == 0 || (len(procs) == 1 && procs[0].pid == ownPID) {
+			fmt.Printf("✅ port %d (%s): clear\n", p.port, p.name)
+		}
+	}
+
+	if clean {
+		fmt.Println("\n🩺 No port conflicts detected.")
+		return
+	}
+
+	if !fix {
+		fmt.Println("\nRun 'candela doctor --fix' to kill conflicting processes.")
+		return
+	}
+
+	// Kill conflicting processes.
+	for _, c := range conflicts {
+		proc, err := os.FindProcess(c.PID)
+		if err != nil {
+			fmt.Printf("❌ could not find PID %d: %v\n", c.PID, err)
+			continue
+		}
+		if err := proc.Signal(syscall.SIGTERM); err != nil {
+			// Try SIGKILL as fallback.
+			if err := proc.Signal(syscall.SIGKILL); err != nil {
+				fmt.Printf("❌ could not kill PID %d: %v\n", c.PID, err)
+				continue
+			}
+		}
+		fmt.Printf("🔪 killed PID %d (%s) on port %d\n", c.PID, c.Command, c.Port)
+	}
+
+	// Clean up stale PID file if present.
+	if pidPath := pidFilePath(); pidPath != "" {
+		_ = os.Remove(pidPath)
+	}
+
+	fmt.Println("\n✅ Ports cleared. Run 'candela start' to start fresh.")
+}
+
+// portProcessInfo holds info about a process listening on a port.
+type portProcessInfo struct {
+	pid     int
+	command string
+}
+
+// findProcessesOnPort uses lsof to find processes listening on a given TCP port.
+func findProcessesOnPort(port int) []portProcessInfo {
+	out, err := exec.Command("lsof", "-i", fmt.Sprintf("tcp:%d", port), "-sTCP:LISTEN", "-n", "-P").Output()
+	if err != nil {
+		return nil
+	}
+
+	var procs []portProcessInfo
+	seen := make(map[int]bool)
+	for _, line := range strings.Split(string(out), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) < 2 || fields[0] == "COMMAND" {
+			continue // skip header
+		}
+		pid, err := strconv.Atoi(fields[1])
+		if err != nil || seen[pid] {
+			continue
+		}
+		seen[pid] = true
+		procs = append(procs, portProcessInfo{pid: pid, command: fields[0]})
+	}
+	return procs
 }
 
 // resolvePort returns the configured port by checking args then config file.

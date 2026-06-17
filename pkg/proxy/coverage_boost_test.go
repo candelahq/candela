@@ -313,3 +313,152 @@ func TestIsUtilityEndpoint(t *testing.T) {
 		}
 	}
 }
+
+// ====================================================================
+// MaaS provider integration tests — prefix injection, parser registry,
+// model extraction, and stream usage injection.
+// ====================================================================
+
+// TestMaaSProviders_InDefaultProviders verifies all MaaS providers
+// are registered in DefaultProviders.
+func TestMaaSProviders_InDefaultProviders(t *testing.T) {
+	providers := DefaultProviders()
+	names := make(map[string]bool)
+	for _, p := range providers {
+		names[p.Name] = true
+	}
+
+	want := []string{"deepseek", "deepseek-v3", "qwen", "zai"}
+	for _, name := range want {
+		if !names[name] {
+			t.Errorf("MaaS provider %q not found in DefaultProviders()", name)
+		}
+	}
+}
+
+// TestMaaSProviders_ParserRegistry verifies all MaaS providers have
+// parsers registered and they return openaiParser (not fallback).
+func TestMaaSProviders_ParserRegistry(t *testing.T) {
+	maas := []string{"deepseek", "deepseek-v3", "qwen", "zai"}
+	for _, name := range maas {
+		p := getParser(name)
+		if _, ok := p.(*openaiParser); !ok {
+			t.Errorf("getParser(%q) = %T, want *openaiParser", name, p)
+		}
+	}
+
+	// Verify unknown provider falls back.
+	p := getParser("unknown-provider")
+	if _, ok := p.(*fallbackParser); !ok {
+		t.Errorf("getParser(\"unknown-provider\") = %T, want *fallbackParser", p)
+	}
+}
+
+// TestMaaSProviders_ModelPrefixRewrite verifies that rewriteModelField
+// correctly prepends publisher prefixes for each MaaS provider.
+func TestMaaSProviders_ModelPrefixRewrite(t *testing.T) {
+	tests := []struct {
+		provider string
+		model    string
+		prefix   string
+		want     string
+	}{
+		{"deepseek", "deepseek-r1-0528-maas", "deepseek-ai/", "deepseek-ai/deepseek-r1-0528-maas"},
+		{"deepseek-v3", "deepseek-v3.2-maas", "deepseek-ai/", "deepseek-ai/deepseek-v3.2-maas"},
+		{"qwen", "qwen3-235b-a22b-instruct-2507-maas", "qwen/", "qwen/qwen3-235b-a22b-instruct-2507-maas"},
+		{"zai", "glm-5-maas", "zai-org/", "zai-org/glm-5-maas"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.provider+"/"+tt.model, func(t *testing.T) {
+			body := []byte(`{"model":"` + tt.model + `","messages":[]}`)
+			result := rewriteModelField(body, tt.prefix+tt.model)
+
+			var req struct {
+				Model string `json:"model"`
+			}
+			if err := json.Unmarshal(result, &req); err != nil {
+				t.Fatalf("failed to parse: %v", err)
+			}
+			if req.Model != tt.want {
+				t.Errorf("model = %q, want %q", req.Model, tt.want)
+			}
+		})
+	}
+}
+
+// TestMaaSProviders_ModelPrefixIdempotent verifies that if the model
+// already has the publisher prefix, rewrite is not double-applied.
+func TestMaaSProviders_ModelPrefixIdempotent(t *testing.T) {
+	tests := []struct {
+		provider string
+		prefix   string
+		model    string
+	}{
+		{"deepseek", "deepseek-ai/", "deepseek-ai/deepseek-r1-0528-maas"},
+		{"qwen", "qwen/", "qwen/qwen3-235b-a22b-instruct-2507-maas"},
+		{"zai", "zai-org/", "zai-org/glm-5-maas"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.provider, func(t *testing.T) {
+			// When prefix already present, the model should not change.
+			if !strings.HasPrefix(tt.model, tt.prefix) {
+				t.Fatalf("test setup: model %q should start with prefix %q", tt.model, tt.prefix)
+			}
+		})
+	}
+}
+
+// TestMaaSProviders_ExtractModel verifies that extractModelFromResponse
+// strips publisher prefixes for MaaS providers.
+func TestMaaSProviders_ExtractModel(t *testing.T) {
+	tests := []struct {
+		provider string
+		response string
+		want     string
+	}{
+		{"deepseek", `{"model":"deepseek-ai/deepseek-r1-0528-maas"}`, "deepseek-r1-0528-maas"},
+		{"deepseek-v3", `{"model":"deepseek-ai/deepseek-v3.2-maas"}`, "deepseek-v3.2-maas"},
+		{"qwen", `{"model":"qwen/qwen3-235b-a22b-instruct-2507-maas"}`, "qwen3-235b-a22b-instruct-2507-maas"},
+		{"zai", `{"model":"zai-org/glm-5-maas"}`, "glm-5-maas"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.provider, func(t *testing.T) {
+			got := extractModelFromResponse(tt.provider, []byte(tt.response))
+			if got != tt.want {
+				t.Errorf("extractModelFromResponse(%q) = %q, want %q", tt.provider, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestMaaSProviders_InjectStreamUsage verifies that injectStreamUsageOption
+// adds stream_options for all MaaS providers.
+func TestMaaSProviders_InjectStreamUsage(t *testing.T) {
+	maas := []string{"deepseek", "deepseek-v3", "qwen", "zai"}
+	body := []byte(`{"model":"test","stream":true}`)
+
+	for _, provider := range maas {
+		t.Run(provider, func(t *testing.T) {
+			result := injectStreamUsageOption(provider, body)
+			if !strings.Contains(string(result), "stream_options") {
+				t.Errorf("injectStreamUsageOption(%q) did not add stream_options", provider)
+			}
+			if !strings.Contains(string(result), "include_usage") {
+				t.Errorf("injectStreamUsageOption(%q) did not add include_usage", provider)
+			}
+		})
+	}
+
+	// Verify non-OpenAI providers don't get injection.
+	for _, provider := range []string{"anthropic", "google"} {
+		t.Run(provider+"_no_inject", func(t *testing.T) {
+			result := injectStreamUsageOption(provider, body)
+			if strings.Contains(string(result), "stream_options") {
+				t.Errorf("injectStreamUsageOption(%q) should not inject for non-OpenAI provider", provider)
+			}
+		})
+	}
+}

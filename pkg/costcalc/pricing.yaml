@@ -178,3 +178,9 @@ models:
     model: qwen3-coder-480b-a35b-instruct-maas
     input_per_million: 0.22
     output_per_million: 1.80
+
+  # ── Z.AI GLM (via Vertex AI OpenAI-compat) ────────────────
+  - provider: zai
+    model: glm-5-maas
+    input_per_million: 1.00
+    output_per_million: 3.20

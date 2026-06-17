@@ -331,6 +331,8 @@ func DefaultProviders() []Provider {
 		{Name: "deepseek-v3", UpstreamURL: "https://aiplatform.googleapis.com"},
 		// Qwen via Vertex AI OpenAI-compat endpoint (global). Model prefix: qwen/
 		{Name: "qwen", UpstreamURL: "https://aiplatform.googleapis.com"},
+		// Z.AI GLM via Vertex AI OpenAI-compat endpoint (global). Model prefix: zai-org/
+		{Name: "zai", UpstreamURL: "https://aiplatform.googleapis.com"},
 	}
 }
 
@@ -1204,6 +1206,10 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 		case "qwen":
 			if !strings.HasPrefix(requestModel, "qwen/") {
 				upstreamBody = rewriteModelField(upstreamBody, "qwen/"+requestModel)
+			}
+		case "zai":
+			if !strings.HasPrefix(requestModel, "zai-org/") {
+				upstreamBody = rewriteModelField(upstreamBody, "zai-org/"+requestModel)
 			}
 		}
 	}

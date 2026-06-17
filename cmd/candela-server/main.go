@@ -704,6 +704,8 @@ func main() {
 					defaultRegion = "global"
 				case "qwen":
 					defaultRegion = "us-south1"
+				case "zai":
+					defaultRegion = "global"
 				default:
 					continue
 				}

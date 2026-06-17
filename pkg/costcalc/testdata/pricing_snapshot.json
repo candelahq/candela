@@ -178,5 +178,11 @@
     "provider": "qwen",
     "input_per_million": 0.22,
     "output_per_million": 1.8
+  },
+  {
+    "model": "glm-5-maas",
+    "provider": "zai",
+    "input_per_million": 1,
+    "output_per_million": 3.2
   }
 ]

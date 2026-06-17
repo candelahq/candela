@@ -644,11 +644,11 @@ func main() {
 		} else {
 			// Without a project ID, Vertex AI providers can't route.
 			// Remove them from allProviders to prevent broken defaults.
-			slog.Warn("⚠️ Vertex AI providers require vertex_ai.project_id — gemini-oai, google, gemini-vertex, mistral, deepseek, deepseek-v3, qwen providers will be disabled")
+			slog.Warn("⚠️ Vertex AI providers require vertex_ai.project_id — gemini-oai, google, gemini-vertex, mistral, deepseek, deepseek-v3, qwen, zai providers will be disabled")
 			var filtered []proxy.Provider
 			for _, p := range allProviders {
 				switch p.Name {
-				case "gemini-oai", "google", "gemini-vertex", "mistral", "deepseek", "deepseek-v3", "qwen":
+				case "gemini-oai", "google", "gemini-vertex", "mistral", "deepseek", "deepseek-v3", "qwen", "zai":
 					// Skip — these need Vertex AI project ID
 				default:
 					filtered = append(filtered, p)
@@ -704,6 +704,8 @@ func main() {
 					defaultRegion = "global"
 				case "qwen":
 					defaultRegion = "us-south1"
+				case "zai":
+					defaultRegion = "global"
 				default:
 					continue
 				}
@@ -732,7 +734,7 @@ func main() {
 		// Validate provider_overrides keys — warn on unknown providers.
 		if len(cfg.Proxy.VertexAI.ProviderOverrides) > 0 {
 			validOverrideProviders := map[string]bool{
-				"mistral": true, "deepseek": true, "deepseek-v3": true, "qwen": true,
+				"mistral": true, "deepseek": true, "deepseek-v3": true, "qwen": true, "zai": true,
 				"anthropic": true, "anthropic-vertex": true,
 				"gemini-oai": true, "gemini-vertex": true, "google": true,
 			}
@@ -836,6 +838,7 @@ func main() {
 				"deepseek":    "deepseek",    // DeepSeek R1 via Vertex AI OpenAI-compat
 				"deepseek-v3": "deepseek-v3", // DeepSeek V3 via Vertex AI OpenAI-compat
 				"qwen":        "qwen",        // Qwen via Vertex AI OpenAI-compat
+				"zai":         "zai",         // Z.AI GLM via Vertex AI OpenAI-compat
 			}
 
 			// Build set of active provider names for quick lookup.

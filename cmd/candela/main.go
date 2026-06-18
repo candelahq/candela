@@ -432,7 +432,7 @@ func cmdStatus() {
 func cmdDoctor() {
 	fix := len(os.Args) > 2 && os.Args[2] == "--fix"
 
-	port := resolvePort(nil)
+	port := resolvePort(os.Args[2:])
 	lmPort := 1234 // default LM Studio compat port
 	if cfg := loadConfig(""); cfg.LMStudioPort != 0 {
 		lmPort = cfg.LMStudioPort
@@ -446,39 +446,73 @@ func cmdDoctor() {
 		}
 	}
 
-	type portProcess struct {
-		Port    int
+	// Collect conflicts grouped by PID.
+	type conflictInfo struct {
 		PID     int
 		Command string
+		Ports   []int
 	}
+	conflictsByPID := make(map[int]*conflictInfo)
+	var conflictOrder []int // preserve discovery order
 
-	var conflicts []portProcess
-	clean := true
-
-	for _, p := range []struct {
+	ports := []struct {
 		port int
 		name string
 	}{
 		{port, "proxy"},
 		{lmPort, "LM Studio compat"},
-	} {
+	}
+
+	for _, p := range ports {
 		procs := findProcessesOnPort(p.port)
+		hasConflict := false
 		for _, proc := range procs {
 			if proc.pid == ownPID {
-				continue // skip our own process
+				continue
 			}
-			clean = false
-			conflicts = append(conflicts, portProcess{Port: p.port, PID: proc.pid, Command: proc.command})
-			fmt.Printf("⚠️  port %d (%s): PID %d — %s\n", p.port, p.name, proc.pid, proc.command)
+			hasConflict = true
+			if c, ok := conflictsByPID[proc.pid]; ok {
+				c.Ports = append(c.Ports, p.port)
+			} else {
+				conflictsByPID[proc.pid] = &conflictInfo{
+					PID:     proc.pid,
+					Command: proc.command,
+					Ports:   []int{p.port},
+				}
+				conflictOrder = append(conflictOrder, proc.pid)
+			}
 		}
-		if len(procs) == 0 || (len(procs) == 1 && procs[0].pid == ownPID) {
+		if !hasConflict {
 			fmt.Printf("✅ port %d (%s): clear\n", p.port, p.name)
 		}
 	}
 
-	if clean {
+	if len(conflictsByPID) == 0 {
 		fmt.Println("\n🩺 No port conflicts detected.")
 		return
+	}
+
+	// Print conflicts grouped by process.
+	launchdManaged := false
+	for _, pid := range conflictOrder {
+		c := conflictsByPID[pid]
+		portStrs := make([]string, len(c.Ports))
+		for i, p := range c.Ports {
+			portStrs[i] = strconv.Itoa(p)
+		}
+		fmt.Printf("⚠️  PID %d (%s) is using port %s\n", c.PID, c.Command, strings.Join(portStrs, ", "))
+		if isLaunchdManaged(c.PID) {
+			launchdManaged = true
+			fmt.Printf("   ↳ managed by launchd (brew services)\n")
+		}
+	}
+
+	if launchdManaged {
+		fmt.Println("\n⚠️  Process is managed by launchd — killing it will cause respawn.")
+		fmt.Println("   Use: brew services stop candela")
+		if !fix {
+			return
+		}
 	}
 
 	if !fix {
@@ -486,29 +520,52 @@ func cmdDoctor() {
 		return
 	}
 
-	// Kill conflicting processes.
-	for _, c := range conflicts {
+	// Kill conflicting processes (deduplicated by PID).
+	for _, pid := range conflictOrder {
+		c := conflictsByPID[pid]
 		proc, err := os.FindProcess(c.PID)
 		if err != nil {
 			fmt.Printf("❌ could not find PID %d: %v\n", c.PID, err)
 			continue
 		}
 		if err := proc.Signal(syscall.SIGTERM); err != nil {
-			// Try SIGKILL as fallback.
 			if err := proc.Signal(syscall.SIGKILL); err != nil {
 				fmt.Printf("❌ could not kill PID %d: %v\n", c.PID, err)
 				continue
 			}
 		}
-		fmt.Printf("🔪 killed PID %d (%s) on port %d\n", c.PID, c.Command, c.Port)
+		fmt.Printf("🔪 killed PID %d (%s)\n", c.PID, c.Command)
 	}
 
-	// Clean up stale PID file if present.
-	if pidPath := pidFilePath(); pidPath != "" {
-		_ = os.Remove(pidPath)
+	// Clean up stale PID file only if the tracked process is no longer running.
+	if pidPath := pidFilePath(); pidPath != "" && ownPID > 0 {
+		if proc, err := os.FindProcess(ownPID); err != nil || proc.Signal(syscall.Signal(0)) != nil {
+			_ = os.Remove(pidPath)
+		}
 	}
 
 	fmt.Println("\n✅ Ports cleared. Run 'candela start' to start fresh.")
+}
+
+// isLaunchdManaged checks whether a PID is managed by a launchd service
+// (e.g. homebrew.mxcl.candela). Killing a launchd-managed process will
+// cause launchd to respawn it immediately.
+func isLaunchdManaged(pid int) bool {
+	out, err := exec.Command("launchctl", "list").Output()
+	if err != nil {
+		return false
+	}
+	pidStr := strconv.Itoa(pid)
+	for _, line := range strings.Split(string(out), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) >= 3 && fields[0] == pidStr {
+			label := fields[2]
+			if strings.Contains(label, "candela") || strings.Contains(label, "homebrew") {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // portProcessInfo holds info about a process listening on a port.
@@ -521,6 +578,10 @@ type portProcessInfo struct {
 func findProcessesOnPort(port int) []portProcessInfo {
 	out, err := exec.Command("lsof", "-i", fmt.Sprintf("tcp:%d", port), "-sTCP:LISTEN", "-n", "-P").Output()
 	if err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
+			return nil // no processes found
+		}
+		fmt.Fprintf(os.Stderr, "⚠️  Warning: failed to run 'lsof': %v. Port conflict detection may be incomplete.\n", err)
 		return nil
 	}
 
@@ -529,7 +590,7 @@ func findProcessesOnPort(port int) []portProcessInfo {
 	for _, line := range strings.Split(string(out), "\n") {
 		fields := strings.Fields(line)
 		if len(fields) < 2 || fields[0] == "COMMAND" {
-			continue // skip header
+			continue
 		}
 		pid, err := strconv.Atoi(fields[1])
 		if err != nil || seen[pid] {

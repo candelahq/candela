@@ -18,6 +18,9 @@ func TestFindProcessesOnPort_NoListeners(t *testing.T) {
 }
 
 func TestFindProcessesOnPort_WithListener(t *testing.T) {
+	if _, err := exec.LookPath("lsof"); err != nil {
+		t.Skip("lsof not available")
+	}
 	// Start a listener on a random port.
 	cmd := exec.Command("bash", "-c", `
 		exec 3<>/dev/tcp/127.0.0.1/0 2>/dev/null || true
@@ -77,6 +80,9 @@ time.sleep(30)
 }
 
 func TestFindProcessesOnPort_DeduplicatesPIDs(t *testing.T) {
+	if _, err := exec.LookPath("lsof"); err != nil {
+		t.Skip("lsof not available")
+	}
 	// findProcessesOnPort should not return the same PID twice
 	// even if lsof shows multiple file descriptors for the same process.
 	// We test this indirectly: start one listener, verify we get exactly 1 result.

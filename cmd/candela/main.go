@@ -206,6 +206,30 @@ func cmdStart() {
 		_ = os.Remove(pidPath)
 	}
 
+	// Check if another process is already listening on the target port.
+	// This catches cases where candela is managed externally (e.g. launchd/brew services)
+	// and the PID file doesn't reflect the running process.
+	port := resolvePort(os.Args[2:])
+	if procs := findProcessesOnPort(port); len(procs) > 0 {
+		p := procs[0]
+		fmt.Printf("⚠️  port %d is already in use by %s (PID %d)\n", port, p.command, p.pid)
+		if p.command == "candela" {
+			// Check if candela might be managed by brew services.
+			home, _ := os.UserHomeDir()
+			plistPath := filepath.Join(home, "Library", "LaunchAgents", "homebrew.mxcl.candela.plist")
+			if _, err := os.Stat(plistPath); err == nil {
+				fmt.Println("   It looks like candela is managed by brew services.")
+				fmt.Println("   Use 'brew services restart candela' or 'brew services stop candela' first.")
+			} else {
+				fmt.Println("   candela is already running.")
+				fmt.Println("   Use 'candela stop' first, then try again.")
+			}
+		} else {
+			fmt.Printf("   Run 'candela doctor --fix' to kill the conflicting process.\n")
+		}
+		os.Exit(1)
+	}
+
 	// Ensure ~/.candela/ exists.
 	if err := os.MkdirAll(filepath.Dir(pidPath), 0o700); err != nil {
 		slog.Error("failed to create candela directory", "error", err)
@@ -248,8 +272,7 @@ func cmdStart() {
 		slog.Warn("failed to write PID file", "path", pidPath, "error", err)
 	}
 
-	// Resolve port from args or config for display.
-	port := resolvePort(os.Args[2:])
+	// port was already resolved above for the conflict check.
 
 	fmt.Printf("🕯️ candela started (PID %d)\n", cmd.Process.Pid)
 	fmt.Printf("   proxy: http://127.0.0.1:%d\n", port)

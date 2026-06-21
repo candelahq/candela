@@ -215,9 +215,14 @@ func cmdStart() {
 		fmt.Printf("⚠️  port %d is already in use by %s (PID %d)\n", port, p.command, p.pid)
 		if p.command == "candela" {
 			// Check if candela might be managed by brew services.
-			home, _ := os.UserHomeDir()
-			plistPath := filepath.Join(home, "Library", "LaunchAgents", "homebrew.mxcl.candela.plist")
-			if _, err := os.Stat(plistPath); err == nil {
+			home, err := os.UserHomeDir()
+			var plistExists bool
+			if err == nil && home != "" {
+				plistPath := filepath.Join(home, "Library", "LaunchAgents", "homebrew.mxcl.candela.plist")
+				_, err = os.Stat(plistPath)
+				plistExists = err == nil
+			}
+			if plistExists {
 				fmt.Println("   It looks like candela is managed by brew services.")
 				fmt.Println("   Use 'brew services restart candela' or 'brew services stop candela' first.")
 			} else {

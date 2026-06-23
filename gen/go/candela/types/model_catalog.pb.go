@@ -8,6 +8,7 @@ package types
 
 import (
 	_ "buf.build/gen/go/bufbuild/protovalidate/protocolbuffers/go/buf/validate"
+	_ "github.com/protocgen/proto2type/proto/proto2type"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	timestamppb "google.golang.org/protobuf/types/known/timestamppb"
@@ -59,7 +60,15 @@ type ModelCatalogEntry struct {
 	DiscountPercent float64 `protobuf:"fixed64,14,opt,name=discount_percent,json=discountPercent,proto3" json:"discount_percent,omitempty"`
 	// When this entry was last modified. Set by the server on writes, read-only
 	// for clients. Useful for audit trail and debugging pricing changes.
-	UpdatedAt     *timestamppb.Timestamp `protobuf:"bytes,15,opt,name=updated_at,json=updatedAt,proto3" json:"updated_at,omitempty"`
+	UpdatedAt *timestamppb.Timestamp `protobuf:"bytes,15,opt,name=updated_at,json=updatedAt,proto3" json:"updated_at,omitempty"`
+	// Provider's upstream model identifier when it differs from model_id.
+	// For example, Anthropic uses "claude-opus-4.7" as model_id but Vertex AI
+	// requires "claude-opus-4-7" (dashes instead of dots).
+	// If empty, model_id is used as-is for upstream requests.
+	ProviderModelId string `protobuf:"bytes,16,opt,name=provider_model_id,json=providerModelId,proto3" json:"provider_model_id,omitempty"`
+	// Cloud region for this specific model (e.g., "global", "us-east5").
+	// Falls back to the deployment-wide CANDELA_VERTEX_REGION setting if empty.
+	Region        string `protobuf:"bytes,17,opt,name=region,proto3" json:"region,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -199,19 +208,32 @@ func (x *ModelCatalogEntry) GetUpdatedAt() *timestamppb.Timestamp {
 	return nil
 }
 
+func (x *ModelCatalogEntry) GetProviderModelId() string {
+	if x != nil {
+		return x.ProviderModelId
+	}
+	return ""
+}
+
+func (x *ModelCatalogEntry) GetRegion() string {
+	if x != nil {
+		return x.Region
+	}
+	return ""
+}
+
 var File_candela_types_model_catalog_proto protoreflect.FileDescriptor
 
 const file_candela_types_model_catalog_proto_rawDesc = "" +
 	"\n" +
-	"!candela/types/model_catalog.proto\x12\rcandela.types\x1a\x1bbuf/validate/validate.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"\xe7\x05\n" +
-	"\x11ModelCatalogEntry\x12%\n" +
-	"\bmodel_id\x18\x01 \x01(\tB\n" +
-	"\xbaH\ar\x05\x10\x01\x18\x80\x01R\amodelId\x12%\n" +
-	"\bprovider\x18\x02 \x01(\tB\t\xbaH\x06r\x04\x10\x01\x18@R\bprovider\x12+\n" +
-	"\fdisplay_name\x18\x03 \x01(\tB\b\xbaH\x05r\x03\x18\x80\x02R\vdisplayName\x12:\n" +
-	"\x11input_per_million\x18\x04 \x01(\x01B\x0e\xbaH\v\x12\t)\x00\x00\x00\x00\x00\x00\x00\x00R\x0finputPerMillion\x12<\n" +
-	"\x12output_per_million\x18\x05 \x01(\x01B\x0e\xbaH\v\x12\t)\x00\x00\x00\x00\x00\x00\x00\x00R\x10outputPerMillion\x12\x18\n" +
-	"\aenabled\x18\x06 \x01(\bR\aenabled\x12\x1a\n" +
+	"!candela/types/model_catalog.proto\x12\rcandela.types\x1a\x1bbuf/validate/validate.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x18proto2type/options.proto\"\xd3\x06\n" +
+	"\x11ModelCatalogEntry\x12+\n" +
+	"\bmodel_id\x18\x01 \x01(\tB\x10\xbaH\ar\x05\x10\x01\x18\x80\x01\xa2\xff+\x02(\x02R\amodelId\x12+\n" +
+	"\bprovider\x18\x02 \x01(\tB\x0f\xbaH\x06r\x04\x10\x01\x18@\xa2\xff+\x02(\x02R\bprovider\x12+\n" +
+	"\fdisplay_name\x18\x03 \x01(\tB\b\xbaH\x05r\x03\x18\x80\x02R\vdisplayName\x12@\n" +
+	"\x11input_per_million\x18\x04 \x01(\x01B\x14\xbaH\v\x12\t)\x00\x00\x00\x00\x00\x00\x00\x00\xa2\xff+\x02(\x02R\x0finputPerMillion\x12B\n" +
+	"\x12output_per_million\x18\x05 \x01(\x01B\x14\xbaH\v\x12\t)\x00\x00\x00\x00\x00\x00\x00\x00\xa2\xff+\x02(\x02R\x10outputPerMillion\x12 \n" +
+	"\aenabled\x18\x06 \x01(\bB\x06\xa2\xff+\x02(\x02R\aenabled\x12\x1a\n" +
 	"\bcategory\x18\a \x01(\tR\bcategory\x12%\n" +
 	"\x0econtext_window\x18\b \x01(\x03R\rcontextWindow\x12C\n" +
 	"\x16input_per_million_high\x18\t \x01(\x01B\x0e\xbaH\v\x12\t)\x00\x00\x00\x00\x00\x00\x00\x00R\x13inputPerMillionHigh\x12E\n" +
@@ -220,9 +242,11 @@ const file_candela_types_model_catalog_proto_rawDesc = "" +
 	"\x15tier_threshold_tokens\x18\v \x01(\x03R\x13tierThresholdTokens\x12\x18\n" +
 	"\aaliases\x18\f \x03(\tR\aaliases\x12'\n" +
 	"\x0fallowed_tenants\x18\r \x03(\tR\x0eallowedTenants\x12B\n" +
-	"\x10discount_percent\x18\x0e \x01(\x01B\x17\xbaH\x14\x12\x12\x19\x00\x00\x00\x00\x00\x00\xf0?)\x00\x00\x00\x00\x00\x00\x00\x00R\x0fdiscountPercent\x129\n" +
+	"\x10discount_percent\x18\x0e \x01(\x01B\x17\xbaH\x14\x12\x12\x19\x00\x00\x00\x00\x00\x00\xf0?)\x00\x00\x00\x00\x00\x00\x00\x00R\x0fdiscountPercent\x12A\n" +
 	"\n" +
-	"updated_at\x18\x0f \x01(\v2\x1a.google.protobuf.TimestampR\tupdatedAtB\xae\x01\n" +
+	"updated_at\x18\x0f \x01(\v2\x1a.google.protobuf.TimestampB\x06\xa2\xff+\x02\x10\x01R\tupdatedAt\x12*\n" +
+	"\x11provider_model_id\x18\x10 \x01(\tR\x0fproviderModelId\x12\x16\n" +
+	"\x06region\x18\x11 \x01(\tR\x06regionB\xae\x01\n" +
 	"\x11com.candela.typesB\x11ModelCatalogProtoP\x01Z1github.com/candelahq/candela/gen/go/candela/types\xa2\x02\x03CTX\xaa\x02\rCandela.Types\xca\x02\rCandela\\Types\xe2\x02\x19Candela\\Types\\GPBMetadata\xea\x02\x0eCandela::Typesb\x06proto3"
 
 var (

@@ -1,0 +1,23 @@
+version: v2
+managed:
+  enabled: true
+  override:
+    - file_option: go_package_prefix
+      module: buf.build/candelahq/protos
+      value: github.com/candelahq/candela/gen/go
+plugins:
+  # proto2type — domain types + Firestore storage types
+  # Scoped to candela/types/ only via --path flag in Makefile
+  # Install: go install github.com/protocgen/proto2type@latest
+  - local: protoc-gen-proto2type
+    out: gen/go
+    opt:
+      - paths=source_relative
+      - domain=true
+      - backend=firestore
+      - go_package=github.com/candelahq/candela/gen/go/candela/types/domain;domain
+inputs:
+  - git_repo: https://github.com/candelahq/candela-protos.git
+    branch: main
+    paths:
+      - candela/types

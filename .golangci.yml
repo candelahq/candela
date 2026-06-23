@@ -1,0 +1,10 @@
+version: "2"
+run:
+  timeout: 5m
+  modules-download-mode: readonly
+linters:
+  exclusions:
+    paths:
+      - scratch
+      - ui/node_modules
+      - gen

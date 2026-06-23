@@ -6,6 +6,7 @@ import (
 
 	connect "connectrpc.com/connect"
 	types "github.com/candelahq/candela/gen/go/candela/types"
+	domain "github.com/candelahq/candela/gen/go/candela/types/domain"
 	v1 "github.com/candelahq/candela/gen/go/candela/v1"
 	"github.com/candelahq/candela/pkg/auth"
 	"github.com/candelahq/candela/pkg/catalog"
@@ -579,7 +580,7 @@ func TestCatalogHandler_UpdateNilEntry(t *testing.T) {
 	}
 }
 
-// TestApplyFieldMask is a unit test for the applyFieldMask helper.
+// TestApplyFieldMask is a unit test for the generated ApplyFieldMaskModelCatalogEntry helper.
 func TestApplyFieldMask(t *testing.T) {
 	dst := catalog.Entry{
 		ModelID:         "model-1",
@@ -600,22 +601,85 @@ func TestApplyFieldMask(t *testing.T) {
 		ContextWindow:   200_000,
 	}
 
-	result := applyFieldMask(dst, src, []string{"enabled", "display_name"})
+	domain.ApplyFieldMaskModelCatalogEntry(&dst, &src, []string{"enabled", "display_name"})
 
-	if result.Enabled != false {
+	if dst.Enabled != false {
 		t.Error("enabled should be false")
 	}
-	if result.DisplayName != "New Name" {
-		t.Errorf("display_name: got %q, want %q", result.DisplayName, "New Name")
+	if dst.DisplayName != "New Name" {
+		t.Errorf("display_name: got %q, want %q", dst.DisplayName, "New Name")
 	}
 	// Unmasked fields should be from dst.
-	if result.InputPerMillion != 1.00 {
-		t.Errorf("input_per_million should be 1.00 (from dst), got %v", result.InputPerMillion)
+	if dst.InputPerMillion != 1.00 {
+		t.Errorf("input_per_million should be 1.00 (from dst), got %v", dst.InputPerMillion)
 	}
-	if result.Category != "flagship" {
-		t.Errorf("category should be 'flagship' (from dst), got %q", result.Category)
+	if dst.Category != "flagship" {
+		t.Errorf("category should be 'flagship' (from dst), got %q", dst.Category)
 	}
-	if result.ContextWindow != 100_000 {
-		t.Errorf("context_window should be 100000 (from dst), got %d", result.ContextWindow)
+	if dst.ContextWindow != 100_000 {
+		t.Errorf("context_window should be 100000 (from dst), got %d", dst.ContextWindow)
+	}
+}
+
+// TestProtoRoundTrip_ProviderModelIDAndRegion is a regression test ensuring
+// ProviderModelID and Region survive the proto round-trip. The hand-written
+// converters silently dropped these fields (mapped 15 of 17).
+func TestProtoRoundTrip_ProviderModelIDAndRegion(t *testing.T) {
+	entry := catalog.Entry{
+		ModelID:         "claude-sonnet-4",
+		Provider:        "anthropic",
+		DisplayName:     "Claude Sonnet 4",
+		Enabled:         true,
+		ProviderModelID: "claude-sonnet-4-20250514",
+		Region:          "us-east5",
+	}
+
+	pb := entry.ToProto()
+	if pb.ProviderModelId != "claude-sonnet-4-20250514" {
+		t.Errorf("ToProto: ProviderModelId = %q, want %q", pb.ProviderModelId, "claude-sonnet-4-20250514")
+	}
+	if pb.Region != "us-east5" {
+		t.Errorf("ToProto: Region = %q, want %q", pb.Region, "us-east5")
+	}
+
+	var roundTripped catalog.Entry
+	roundTripped.FromProto(pb)
+	if roundTripped.ProviderModelID != "claude-sonnet-4-20250514" {
+		t.Errorf("FromProto: ProviderModelID = %q, want %q", roundTripped.ProviderModelID, "claude-sonnet-4-20250514")
+	}
+	if roundTripped.Region != "us-east5" {
+		t.Errorf("FromProto: Region = %q, want %q", roundTripped.Region, "us-east5")
+	}
+}
+
+// TestApplyFieldMask_ProviderModelIDAndRegion is a regression test ensuring
+// the generated field mask supports provider_model_id and region paths.
+func TestApplyFieldMask_ProviderModelIDAndRegion(t *testing.T) {
+	dst := catalog.Entry{
+		ModelID:         "model-1",
+		Provider:        "prov",
+		ProviderModelID: "old-provider-id",
+		Region:          "us-central1",
+		DisplayName:     "Original",
+	}
+	src := catalog.Entry{
+		ModelID:         "model-1",
+		Provider:        "prov",
+		ProviderModelID: "new-provider-id",
+		Region:          "us-east5",
+		DisplayName:     "Changed",
+	}
+
+	domain.ApplyFieldMaskModelCatalogEntry(&dst, &src, []string{"provider_model_id", "region"})
+
+	if dst.ProviderModelID != "new-provider-id" {
+		t.Errorf("provider_model_id: got %q, want %q", dst.ProviderModelID, "new-provider-id")
+	}
+	if dst.Region != "us-east5" {
+		t.Errorf("region: got %q, want %q", dst.Region, "us-east5")
+	}
+	// Unmasked field should be preserved.
+	if dst.DisplayName != "Original" {
+		t.Errorf("display_name should be preserved, got %q", dst.DisplayName)
 	}
 }

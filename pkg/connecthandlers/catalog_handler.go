@@ -7,10 +7,10 @@ import (
 
 	connect "connectrpc.com/connect"
 	types "github.com/candelahq/candela/gen/go/candela/types"
+	domain "github.com/candelahq/candela/gen/go/candela/types/domain"
 	v1 "github.com/candelahq/candela/gen/go/candela/v1"
 	"github.com/candelahq/candela/pkg/catalog"
 	"github.com/candelahq/candela/pkg/storage"
-	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 // CatalogHandler implements the ModelCatalogService ConnectRPC handler.
@@ -47,7 +47,7 @@ func (h *CatalogHandler) ListModelCatalog(
 
 	pbModels := make([]*types.ModelCatalogEntry, len(entries))
 	for i, e := range entries {
-		pbModels[i] = entryToProto(&e)
+		pbModels[i] = e.ToProto()
 	}
 
 	return connect.NewResponse(&v1.ListModelCatalogResponse{
@@ -80,7 +80,8 @@ func (h *CatalogHandler) UpdateModelCatalogEntry(
 			fmt.Errorf("entry is required"))
 	}
 
-	entry := protoToEntry(pbEntry)
+	var entry catalog.Entry
+	entry.FromProto(pbEntry)
 
 	// Apply field mask: if the caller specified which fields to update,
 	// merge only those fields onto the existing entry to avoid data loss.
@@ -93,7 +94,8 @@ func (h *CatalogHandler) UpdateModelCatalogEntry(
 			}
 			return nil, internalError("failed to fetch existing entry for field mask", err)
 		}
-		entry = applyFieldMask(*existing, entry, mask.Paths)
+		domain.ApplyFieldMaskModelCatalogEntry(existing, &entry, mask.Paths)
+		entry = *existing
 	}
 
 	if err := h.store.Update(ctx, entry); err != nil {
@@ -106,12 +108,12 @@ func (h *CatalogHandler) UpdateModelCatalogEntry(
 		slog.Warn("re-fetch after update failed, returning input entry",
 			"provider", entry.Provider, "model_id", entry.ModelID, "error", err)
 		return connect.NewResponse(&v1.UpdateModelCatalogEntryResponse{
-			Entry: entryToProto(&entry),
+			Entry: entry.ToProto(),
 		}), nil
 	}
 
 	return connect.NewResponse(&v1.UpdateModelCatalogEntryResponse{
-		Entry: entryToProto(updated),
+		Entry: updated.ToProto(),
 	}), nil
 }
 
@@ -144,89 +146,4 @@ func (h *CatalogHandler) DeleteModelCatalogEntry(
 	}
 
 	return connect.NewResponse(&v1.DeleteModelCatalogEntryResponse{}), nil
-}
-
-// applyFieldMask merges only the specified fields from src into dst.
-// Unrecognised paths are silently ignored (the proto validator should
-// catch invalid paths before they reach here).
-func applyFieldMask(dst, src catalog.Entry, paths []string) catalog.Entry {
-	for _, path := range paths {
-		switch path {
-		case "enabled":
-			dst.Enabled = src.Enabled
-		case "display_name":
-			dst.DisplayName = src.DisplayName
-		case "input_per_million":
-			dst.InputPerMillion = src.InputPerMillion
-		case "output_per_million":
-			dst.OutputPerMillion = src.OutputPerMillion
-		case "input_per_million_high":
-			dst.InputPerMillionHigh = src.InputPerMillionHigh
-		case "output_per_million_high":
-			dst.OutputPerMillionHigh = src.OutputPerMillionHigh
-		case "tier_threshold_tokens":
-			dst.TierThresholdTokens = src.TierThresholdTokens
-		case "discount_percent":
-			dst.DiscountPercent = src.DiscountPercent
-		case "category":
-			dst.Category = src.Category
-		case "context_window":
-			dst.ContextWindow = src.ContextWindow
-		case "aliases":
-			dst.Aliases = src.Aliases
-		case "allowed_tenants":
-			dst.AllowedTenants = src.AllowedTenants
-		}
-	}
-	return dst
-}
-
-// --- Proto converters ---
-
-// entryToProto converts a catalog.Entry to a proto ModelCatalogEntry.
-func entryToProto(e *catalog.Entry) *types.ModelCatalogEntry {
-	pb := &types.ModelCatalogEntry{
-		ModelId:              e.ModelID,
-		Provider:             e.Provider,
-		DisplayName:          e.DisplayName,
-		InputPerMillion:      e.InputPerMillion,
-		OutputPerMillion:     e.OutputPerMillion,
-		Enabled:              e.Enabled,
-		Category:             e.Category,
-		ContextWindow:        e.ContextWindow,
-		InputPerMillionHigh:  e.InputPerMillionHigh,
-		OutputPerMillionHigh: e.OutputPerMillionHigh,
-		TierThresholdTokens:  e.TierThresholdTokens,
-		Aliases:              e.Aliases,
-		AllowedTenants:       e.AllowedTenants,
-		DiscountPercent:      e.DiscountPercent,
-	}
-	if !e.UpdatedAt.IsZero() {
-		pb.UpdatedAt = timestamppb.New(e.UpdatedAt)
-	}
-	return pb
-}
-
-// protoToEntry converts a proto ModelCatalogEntry to a catalog.Entry.
-func protoToEntry(pb *types.ModelCatalogEntry) catalog.Entry {
-	e := catalog.Entry{
-		ModelID:              pb.ModelId,
-		Provider:             pb.Provider,
-		DisplayName:          pb.DisplayName,
-		InputPerMillion:      pb.InputPerMillion,
-		OutputPerMillion:     pb.OutputPerMillion,
-		Enabled:              pb.Enabled,
-		Category:             pb.Category,
-		ContextWindow:        pb.ContextWindow,
-		InputPerMillionHigh:  pb.InputPerMillionHigh,
-		OutputPerMillionHigh: pb.OutputPerMillionHigh,
-		TierThresholdTokens:  pb.TierThresholdTokens,
-		Aliases:              pb.Aliases,
-		AllowedTenants:       pb.AllowedTenants,
-		DiscountPercent:      pb.DiscountPercent,
-	}
-	if pb.UpdatedAt != nil {
-		e.UpdatedAt = pb.UpdatedAt.AsTime()
-	}
-	return e
 }

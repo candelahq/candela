@@ -7,13 +7,14 @@ import { fileDesc, messageDesc } from "@bufbuild/protobuf/codegenv2";
 import { file_buf_validate_validate } from "../../buf/validate/validate_pb";
 import type { Timestamp } from "@bufbuild/protobuf/wkt";
 import { file_google_protobuf_timestamp } from "@bufbuild/protobuf/wkt";
+import { file_proto2type_options } from "../../proto2type/options_pb";
 import type { Message } from "@bufbuild/protobuf";
 
 /**
  * Describes the file candela/types/model_catalog.proto.
  */
 export const file_candela_types_model_catalog: GenFile = /*@__PURE__*/
-  fileDesc("CiFjYW5kZWxhL3R5cGVzL21vZGVsX2NhdGFsb2cucHJvdG8SDWNhbmRlbGEudHlwZXMijQQKEU1vZGVsQ2F0YWxvZ0VudHJ5EhwKCG1vZGVsX2lkGAEgASgJQgq6SAdyBRABGIABEhsKCHByb3ZpZGVyGAIgASgJQgm6SAZyBBABGEASHgoMZGlzcGxheV9uYW1lGAMgASgJQgi6SAVyAxiAAhIpChFpbnB1dF9wZXJfbWlsbGlvbhgEIAEoAUIOukgLEgkpAAAAAAAAAAASKgoSb3V0cHV0X3Blcl9taWxsaW9uGAUgASgBQg66SAsSCSkAAAAAAAAAABIPCgdlbmFibGVkGAYgASgIEhAKCGNhdGVnb3J5GAcgASgJEhYKDmNvbnRleHRfd2luZG93GAggASgDEi4KFmlucHV0X3Blcl9taWxsaW9uX2hpZ2gYCSABKAFCDrpICxIJKQAAAAAAAAAAEi8KF291dHB1dF9wZXJfbWlsbGlvbl9oaWdoGAogASgBQg66SAsSCSkAAAAAAAAAABIdChV0aWVyX3RocmVzaG9sZF90b2tlbnMYCyABKAMSDwoHYWxpYXNlcxgMIAMoCRIXCg9hbGxvd2VkX3RlbmFudHMYDSADKAkSMQoQZGlzY291bnRfcGVyY2VudBgOIAEoAUIXukgUEhIZAAAAAAAA8D8pAAAAAAAAAAASLgoKdXBkYXRlZF9hdBgPIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXBCrgEKEWNvbS5jYW5kZWxhLnR5cGVzQhFNb2RlbENhdGFsb2dQcm90b1ABWjFnaXRodWIuY29tL2NhbmRlbGFocS9jYW5kZWxhL2dlbi9nby9jYW5kZWxhL3R5cGVzogIDQ1RYqgINQ2FuZGVsYS5UeXBlc8oCDUNhbmRlbGFcVHlwZXPiAhlDYW5kZWxhXFR5cGVzXEdQQk1ldGFkYXRh6gIOQ2FuZGVsYTo6VHlwZXNiBnByb3RvMw", [file_buf_validate_validate, file_google_protobuf_timestamp]);
+  fileDesc("CiFjYW5kZWxhL3R5cGVzL21vZGVsX2NhdGFsb2cucHJvdG8SDWNhbmRlbGEudHlwZXMi4AQKEU1vZGVsQ2F0YWxvZ0VudHJ5EiIKCG1vZGVsX2lkGAEgASgJQhC6SAdyBRABGIABov8rAigCEiEKCHByb3ZpZGVyGAIgASgJQg+6SAZyBBABGECi/ysCKAISHgoMZGlzcGxheV9uYW1lGAMgASgJQgi6SAVyAxiAAhIvChFpbnB1dF9wZXJfbWlsbGlvbhgEIAEoAUIUukgLEgkpAAAAAAAAAACi/ysCKAISMAoSb3V0cHV0X3Blcl9taWxsaW9uGAUgASgBQhS6SAsSCSkAAAAAAAAAAKL/KwIoAhIXCgdlbmFibGVkGAYgASgIQgai/ysCKAISEAoIY2F0ZWdvcnkYByABKAkSFgoOY29udGV4dF93aW5kb3cYCCABKAMSLgoWaW5wdXRfcGVyX21pbGxpb25faGlnaBgJIAEoAUIOukgLEgkpAAAAAAAAAAASLwoXb3V0cHV0X3Blcl9taWxsaW9uX2hpZ2gYCiABKAFCDrpICxIJKQAAAAAAAAAAEh0KFXRpZXJfdGhyZXNob2xkX3Rva2VucxgLIAEoAxIPCgdhbGlhc2VzGAwgAygJEhcKD2FsbG93ZWRfdGVuYW50cxgNIAMoCRIxChBkaXNjb3VudF9wZXJjZW50GA4gASgBQhe6SBQSEhkAAAAAAADwPykAAAAAAAAAABI2Cgp1cGRhdGVkX2F0GA8gASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcEIGov8rAhABEhkKEXByb3ZpZGVyX21vZGVsX2lkGBAgASgJEg4KBnJlZ2lvbhgRIAEoCUKuAQoRY29tLmNhbmRlbGEudHlwZXNCEU1vZGVsQ2F0YWxvZ1Byb3RvUAFaMWdpdGh1Yi5jb20vY2FuZGVsYWhxL2NhbmRlbGEvZ2VuL2dvL2NhbmRlbGEvdHlwZXOiAgNDVFiqAg1DYW5kZWxhLlR5cGVzygINQ2FuZGVsYVxUeXBlc+ICGUNhbmRlbGFcVHlwZXNcR1BCTWV0YWRhdGHqAg5DYW5kZWxhOjpUeXBlc2IGcHJvdG8z", [file_buf_validate_validate, file_google_protobuf_timestamp, file_proto2type_options]);
 
 /**
  * ModelCatalogEntry represents a single model in the catalog with its
@@ -126,6 +127,24 @@ export type ModelCatalogEntry = Message<"candela.types.ModelCatalogEntry"> & {
    * @generated from field: google.protobuf.Timestamp updated_at = 15;
    */
   updatedAt?: Timestamp | undefined;
+
+  /**
+   * Provider's upstream model identifier when it differs from model_id.
+   * For example, Anthropic uses "claude-opus-4.7" as model_id but Vertex AI
+   * requires "claude-opus-4-7" (dashes instead of dots).
+   * If empty, model_id is used as-is for upstream requests.
+   *
+   * @generated from field: string provider_model_id = 16;
+   */
+  providerModelId: string;
+
+  /**
+   * Cloud region for this specific model (e.g., "global", "us-east5").
+   * Falls back to the deployment-wide CANDELA_VERTEX_REGION setting if empty.
+   *
+   * @generated from field: string region = 17;
+   */
+  region: string;
 };
 
 /**

@@ -1,8 +1,12 @@
 "use client";
 
 import { useState, useMemo } from "react";
+import { create } from "@bufbuild/protobuf";
 import { useModels, type ModelSortKey } from "@/hooks/useModels";
 import { useCatalog } from "@/hooks/useCatalog";
+import { useCatalogEntryValidation } from "@/hooks/useProtoValidation";
+import { catalogClient } from "@/lib/api";
+import { ModelCatalogEntrySchema } from "@/gen/candela/types/model_catalog_pb";
 import { type CacheEfficiency } from "@/lib/cacheUtils";
 import { TimeRangeSelector } from "@/components/TimeRangeSelector";
 import { ScopeToggle } from "@/components/ScopeToggle";
@@ -108,11 +112,52 @@ export default function ModelsPage() {
 // Catalog Tab
 // ──────────────────────────────────────────
 
+const PROVIDERS = [
+  "anthropic",
+  "google",
+  "gemini-oai",
+  "mistral",
+  "deepseek",
+  "openai",
+  "qwen",
+] as const;
+
+interface AddModelForm {
+  modelId: string;
+  provider: string;
+  displayName: string;
+  inputPerMillion: number;
+  outputPerMillion: number;
+  providerModelId: string;
+  region: string;
+  category: string;
+  enabled: boolean;
+}
+
+const EMPTY_FORM: AddModelForm = {
+  modelId: "",
+  provider: "anthropic",
+  displayName: "",
+  inputPerMillion: 0,
+  outputPerMillion: 0,
+  providerModelId: "",
+  region: "",
+  category: "",
+  enabled: true,
+};
+
 function CatalogTab() {
   const { models, source, adminEditable, loading, error, refresh } = useCatalog();
   const [search, setSearch] = useState("");
   // NOTE: toggle is local-only in v1. Persistence via UpdateCatalogEntry comes in a follow-up.
   const [enabledOverrides, setEnabledOverrides] = useState<Record<string, boolean>>({});
+
+  // Add Model modal state
+  const [showAddModal, setShowAddModal] = useState(false);
+  const [addForm, setAddForm] = useState<AddModelForm>(EMPTY_FORM);
+  const [createError, setCreateError] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+  const { validate, getError, clearErrors } = useCatalogEntryValidation();
 
   const filtered = useMemo(() => {
     if (!search) return models;
@@ -134,6 +179,49 @@ function CatalogTab() {
   const toggleEnabled = (modelId: string, provider: string, currentEnabled: boolean) => {
     const key = `${provider}/${modelId}`;
     setEnabledOverrides((prev) => ({ ...prev, [key]: !currentEnabled }));
+  };
+
+  const handleAddModel = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setCreateError(null);
+
+    const valid = await validate({
+      modelId: addForm.modelId,
+      provider: addForm.provider,
+      displayName: addForm.displayName,
+      inputPerMillion: addForm.inputPerMillion,
+      outputPerMillion: addForm.outputPerMillion,
+      enabled: addForm.enabled,
+      category: addForm.category,
+      providerModelId: addForm.providerModelId,
+      region: addForm.region,
+    });
+    if (!valid) return;
+
+    setSubmitting(true);
+    try {
+      await catalogClient.updateModelCatalogEntry({
+        entry: create(ModelCatalogEntrySchema, {
+          modelId: addForm.modelId,
+          provider: addForm.provider,
+          displayName: addForm.displayName,
+          inputPerMillion: addForm.inputPerMillion,
+          outputPerMillion: addForm.outputPerMillion,
+          enabled: addForm.enabled,
+          category: addForm.category,
+          providerModelId: addForm.providerModelId,
+          region: addForm.region,
+        }),
+      });
+      setShowAddModal(false);
+      setAddForm(EMPTY_FORM);
+      clearErrors();
+      refresh();
+    } catch (err: unknown) {
+      setCreateError(err instanceof Error ? err.message : "Failed to add model");
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   return (
@@ -171,7 +259,7 @@ function CatalogTab() {
         </div>
       )}
 
-      {/* Search + source */}
+      {/* Search + source + Add Model */}
       <div
         className="animate-in"
         style={{
@@ -200,6 +288,14 @@ function CatalogTab() {
         <button className="btn" onClick={refresh}>
           🔄
         </button>
+        {adminEditable && (
+          <button
+            className="btn btn-primary"
+            onClick={() => setShowAddModal(true)}
+          >
+            + Add Model
+          </button>
+        )}
       </div>
 
       {/* Catalog table */}
@@ -323,6 +419,146 @@ function CatalogTab() {
           </table>
         )}
       </div>
+
+      {/* Add Model Modal */}
+      {showAddModal && (
+        <div className="modal-overlay" onClick={() => setShowAddModal(false)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3>Add Model</h3>
+              <button className="modal-close" onClick={() => setShowAddModal(false)}>×</button>
+            </div>
+            <form onSubmit={handleAddModel} className="modal-body">
+              <div className="form-group">
+                <label htmlFor="add-model-id">Model ID *</label>
+                <input
+                  id="add-model-id"
+                  type="text"
+                  required
+                  value={addForm.modelId}
+                  onChange={(e) => setAddForm({ ...addForm, modelId: e.target.value })}
+                  placeholder="claude-sonnet-4"
+                  className="form-input"
+                />
+                {getError("model_id") && <div className="form-field-error">{getError("model_id")}</div>}
+              </div>
+              <div className="form-group">
+                <label htmlFor="add-provider">Provider *</label>
+                <select
+                  id="add-provider"
+                  required
+                  value={addForm.provider}
+                  onChange={(e) => setAddForm({ ...addForm, provider: e.target.value })}
+                  className="form-input"
+                >
+                  {PROVIDERS.map((p) => (
+                    <option key={p} value={p}>{p}</option>
+                  ))}
+                </select>
+                {getError("provider") && <div className="form-field-error">{getError("provider")}</div>}
+              </div>
+              <div className="form-group">
+                <label htmlFor="add-display-name">Display Name</label>
+                <input
+                  id="add-display-name"
+                  type="text"
+                  value={addForm.displayName}
+                  onChange={(e) => setAddForm({ ...addForm, displayName: e.target.value })}
+                  placeholder="Claude Sonnet 4"
+                  className="form-input"
+                />
+              </div>
+              <div style={{ display: "flex", gap: 12 }}>
+                <div className="form-group" style={{ flex: 1 }}>
+                  <label htmlFor="add-input-price">Input $/M *</label>
+                  <input
+                    id="add-input-price"
+                    type="number"
+                    required
+                    min="0"
+                    step="0.001"
+                    value={addForm.inputPerMillion || ""}
+                    onChange={(e) => setAddForm({ ...addForm, inputPerMillion: Number(e.target.value) })}
+                    placeholder="3.000"
+                    className="form-input"
+                  />
+                  {getError("input_per_million") && <div className="form-field-error">{getError("input_per_million")}</div>}
+                </div>
+                <div className="form-group" style={{ flex: 1 }}>
+                  <label htmlFor="add-output-price">Output $/M *</label>
+                  <input
+                    id="add-output-price"
+                    type="number"
+                    required
+                    min="0"
+                    step="0.001"
+                    value={addForm.outputPerMillion || ""}
+                    onChange={(e) => setAddForm({ ...addForm, outputPerMillion: Number(e.target.value) })}
+                    placeholder="15.000"
+                    className="form-input"
+                  />
+                  {getError("output_per_million") && <div className="form-field-error">{getError("output_per_million")}</div>}
+                </div>
+              </div>
+              <div className="form-group">
+                <label htmlFor="add-provider-model-id">Provider Model ID</label>
+                <input
+                  id="add-provider-model-id"
+                  type="text"
+                  value={addForm.providerModelId}
+                  onChange={(e) => setAddForm({ ...addForm, providerModelId: e.target.value })}
+                  placeholder="Upstream name when it differs"
+                  className="form-input"
+                />
+              </div>
+              <div style={{ display: "flex", gap: 12 }}>
+                <div className="form-group" style={{ flex: 1 }}>
+                  <label htmlFor="add-region">Region</label>
+                  <input
+                    id="add-region"
+                    type="text"
+                    value={addForm.region}
+                    onChange={(e) => setAddForm({ ...addForm, region: e.target.value })}
+                    placeholder="us-east5"
+                    className="form-input"
+                  />
+                </div>
+                <div className="form-group" style={{ flex: 1 }}>
+                  <label htmlFor="add-category">Category</label>
+                  <input
+                    id="add-category"
+                    type="text"
+                    value={addForm.category}
+                    onChange={(e) => setAddForm({ ...addForm, category: e.target.value })}
+                    placeholder="flagship, lite, reasoning"
+                    className="form-input"
+                  />
+                </div>
+              </div>
+              <div className="form-group">
+                <label style={{ cursor: "pointer" }}>
+                  <input
+                    type="checkbox"
+                    checked={addForm.enabled}
+                    onChange={(e) => setAddForm({ ...addForm, enabled: e.target.checked })}
+                    style={{ marginRight: 8 }}
+                  />
+                  Enabled
+                </label>
+              </div>
+              {createError && <div className="form-error">{createError}</div>}
+              <div className="modal-actions">
+                <button type="button" className="btn btn-ghost" onClick={() => setShowAddModal(false)}>
+                  Cancel
+                </button>
+                <button type="submit" className="btn btn-primary" disabled={submitting}>
+                  {submitting ? "Adding..." : "Add Model"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </>
   );
 }

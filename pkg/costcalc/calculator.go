@@ -125,6 +125,34 @@ var providerAliases = map[string]string{
 
 // New creates a Calculator with default pricing for all supported cloud models.
 func New() *Calculator {
+	c := newBase()
+	c.loadDefaults()
+	c.rebuildFallback()
+	return c
+}
+
+// NewEmpty creates a Calculator with no built-in model pricing.
+// Use this when pricing will be loaded from a database or catalog at runtime
+// rather than from the embedded pricing.yaml. Cache discount defaults and
+// provider aliases are still initialized.
+func NewEmpty() *Calculator {
+	return newBase()
+}
+
+// LoadDefaults loads embedded pricing from pricing.yaml into the calculator.
+// This is useful when a database-backed catalog is unavailable and the caller
+// needs to fall back to built-in list prices. Safe to call on a Calculator
+// created with NewEmpty(). Existing config overrides are preserved.
+func (c *Calculator) LoadDefaults() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.loadDefaults()
+	c.rebuildFallback()
+}
+
+// newBase creates a Calculator with initialized maps, provider aliases, and
+// default cache discounts, but no model pricing loaded.
+func newBase() *Calculator {
 	c := &Calculator{
 		defaults:       make(map[string]ModelPricing),
 		overrides:      make(map[string]ModelPricing),
@@ -136,8 +164,6 @@ func New() *Calculator {
 	for k, v := range defaultCacheDiscounts {
 		c.cacheDiscounts[k] = v
 	}
-	c.loadDefaults()
-	c.rebuildFallback()
 	return c
 }
 

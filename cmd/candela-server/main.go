@@ -228,8 +228,16 @@ func main() {
 	defer closeFn()
 	slog.Info("storage initialized", "backend", cfg.Storage.Backend, "sinks", len(writers))
 
-	// Initialize cost calculator with built-in defaults + config overrides.
-	calc := costcalc.New()
+	// Initialize cost calculator.
+	// Config backend relies on embedded pricing from New(); database-backed
+	// catalogs (e.g. Firestore) load pricing at runtime so start empty.
+	var calc *costcalc.Calculator
+	switch cfg.Catalog.Backend {
+	case "firestore":
+		calc = costcalc.NewEmpty()
+	default: // "config", "", or unrecognized (caught later)
+		calc = costcalc.New()
+	}
 	if cfg.Pricing.DiscountPercent > 0 || len(cfg.Pricing.Models) > 0 {
 		calc.LoadFromConfig(cfg.Pricing)
 	}
@@ -260,8 +268,9 @@ func main() {
 		}
 		if err != nil {
 			slog.Error("failed to create Firestore client for catalog", "error", err)
-			slog.Warn("falling back to config-based catalog")
-			catalogStore = catalog.NewConfigStore(nil) // falls back to built-in defaults
+			slog.Warn("falling back to config-based catalog with embedded pricing")
+			calc.LoadDefaults() // ensure embedded pricing is available for fallback
+			catalogStore = catalog.NewConfigStore(nil)
 		} else {
 			catalogStore = catalog.NewFirestoreStore(fsClient, collection)
 			catalogClosers = append(catalogClosers, func() { _ = fsClient.Close() })
@@ -285,7 +294,8 @@ func main() {
 		entries, err := catalogStore.List(ctx, false) // only enabled models needed for pricing
 		if err != nil {
 			slog.Error("failed to load catalog entries", "error", err)
-			slog.Warn("using built-in default pricing (catalog unavailable)")
+			calc.LoadDefaults() // fall back to embedded pricing
+			slog.Warn("catalog unavailable, fell back to embedded pricing")
 		} else {
 			calc.LoadFromCatalog(entries)
 		}

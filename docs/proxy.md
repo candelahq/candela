@@ -132,7 +132,7 @@ OPENAI_API_KEY=sk-... open -a Zed
 
 Send a message in Zed's Agent Panel (`Cmd+Shift+A`). You should see:
 - The response from the model in Zed
-- A trace in the Candela dashboard at `http://localhost:3000`
+- A trace in the Candela dashboard at `http://localhost:8181`
 
 ---
 
@@ -232,7 +232,7 @@ Type `/models` in the TUI and select a model under **"Claude via Candela (Vertex
 
 Send a message in the OpenCode TUI. You should see:
 - The response from the model in OpenCode
-- A trace in the Candela dashboard at `http://localhost:3000`
+- A trace in the Candela dashboard at `http://localhost:8181`
 
 ### Anthropic Prerequisites
 
@@ -317,7 +317,7 @@ LLM proxy spans in a single trace tree.
 
 1. Run `gemini` in any project directory
 2. Send a prompt — you should see the response in your terminal
-3. Check the Candela dashboard at `http://localhost:3000` for a new trace
+3. Check the Candela dashboard at `http://localhost:8181` for a new trace
 
 ### Using with Anthropic (Claude via Vertex AI)
 
@@ -398,11 +398,14 @@ proxy:
 
   # Selective provider activation — only listed providers are registered.
   # If omitted or empty, all providers are enabled.
-  # Valid values: openai, google, anthropic, gemini-oai
+  # Valid values: openai, google, anthropic, anthropic-vertex, anthropic-direct, anthropic-bedrock, gemini-oai
   providers:
     - openai
     - google
     - anthropic
+    - anthropic-vertex
+    - anthropic-direct
+    # - anthropic-bedrock  # Uncomment to enable AWS Bedrock
     - gemini-oai
 ```
 
@@ -434,6 +437,7 @@ vertex_ai:
   project: "my-project"
   region: "us-central1"
   caching_mode: "auto"  # off | auto | system-only
+  cache_ttl: 5m         # Cache entry lifetime: 5m (default, 1.25x write cost) or 1h (2x write cost, ideal for coding sessions)
 ```
 
 #### Via `config.yaml` (Cloud Run server)
@@ -444,6 +448,7 @@ proxy:
     project_id: "my-project"
     region: "us-central1"
     caching_mode: "auto"  # off | auto | system-only
+    cache_ttl: 5m         # Cache entry lifetime: 5m (default, 1.25x write cost) or 1h (2x write cost, ideal for coding sessions)
 ```
 
 ### Runtime Toggling (No Restart Required)

@@ -25,8 +25,8 @@ When an LLM call completes, cost is deducted using a **grant-first waterfall**:
 ```
 1. Check active grants (earliest expiry first)
 2. Deduct from grant balance
-3. If grants exhausted → deduct from monthly budget
-4. If monthly budget exceeded → reject future requests
+3. If grants exhausted → deduct from daily budget
+4. If daily budget exceeded → reject future requests
 ```
 
 ```
@@ -42,7 +42,7 @@ When an LLM call completes, cost is deducted using a **grant-first waterfall**:
        │ deduct $0.05
        ▼
 ┌──────────────┐
-│ Monthly       │  remaining = limit - spent
+│ Daily         │  remaining = limit - spent
 │ Budget        │
 │ $50.00 limit  │
 └──────────────┘
@@ -52,13 +52,13 @@ When an LLM call completes, cost is deducted using a **grant-first waterfall**:
 
 **Budget** (Firestore: `budgets/{userId}`):
 ```
-limit_usd:     50.00      # Monthly spending cap
+limit_usd:     50.00      # Daily spending cap
 spent_usd:     12.34      # Current period accumulated spend
 tokens_used:   45000      # Current period token count
-period_type:   "monthly"  # "monthly", "weekly", "quarterly"
-period_key:    "2026-04"  # Auto-reset when period changes
-period_start:  2026-04-01
-period_end:    2026-04-30
+period_type:   "daily"    # "daily" (default), "weekly", "monthly"
+period_key:    "2026-06-23"  # Auto-reset when period changes
+period_start:  2026-06-23
+period_end:    2026-06-23
 ```
 
 **Grant** (Firestore: `grants/{grantId}`):
@@ -120,7 +120,7 @@ The `Reason` field (defined in `pkg/billing/types.go`) allows clients to disting
 
 ### Default Thresholds
 
-Notifications fire at **80%**, **90%**, and **100%** of the monthly budget:
+Notifications fire at **80%**, **90%**, and **100%** of the daily budget:
 
 | Threshold | Meaning | Example ($50 budget) |
 |-----------|---------|---------------------|
@@ -134,7 +134,7 @@ Each threshold fires **at most once per user per budget period**. The `BudgetChe
 
 ```
 {userID}:{periodKey}:{threshold}
-→ "user123:2026-04:0.80"
+→ "user123:2026-06-23:0.80"
 ```
 
 This prevents duplicate notifications when multiple calls cross the same threshold within a period.

@@ -47,9 +47,13 @@ The calculator ships with built-in list prices for **all cloud models** reachabl
 See the current pricing table in [`pkg/costcalc/pricing.yaml`](../pkg/costcalc/pricing.yaml), which is embedded at compile time via `//go:embed`. The `loadDefaults()` function in `calculator.go` parses this file at startup.
 
 **Coverage:**
-- **Google**: Gemini 3.1, 2.5 (Pro/Flash/Flash-Lite), 2.0, 1.5
-- **OpenAI**: GPT-5.4 family, GPT-4o, reasoning models (o1/o3)
-- **Anthropic**: Claude 4.7/4.6/4.5, Claude 4 (Vertex AI IDs), Claude 3.5 legacy
+- **Google**: Gemini 3.5 Flash, 3.1 (Pro/Flash-Lite), 2.5 (Pro/Flash/Flash-Lite)
+- **Anthropic**: Claude 4.8/4.7/4.6 Opus, Sonnet 4.6, Haiku 4.5, Claude 4 (short names + Vertex AI dated IDs)
+- **OpenAI**: GPT-4.1 family (4.1/4.1-mini/4.1-nano), o3, o4-mini, GPT-4o (legacy)
+- **Mistral**: mistral-small-2503, mistral-medium-3, codestral-2 (via Vertex AI rawPredict)
+- **DeepSeek**: R1, V3 (via Vertex AI)
+- **Qwen**: qwen3-235b, qwen3-coder-480b (via Vertex AI OpenAI-compat)
+- **Z.AI**: GLM-5 (via Vertex AI OpenAI-compat)
 - **Local**: Always $0.00 — runs on your hardware
 
 ### Pricing Degradation Chain

@@ -819,3 +819,68 @@ proxy:
 			cfg.Proxy.VertexAI.Region, "us-east5")
 	}
 }
+
+// ── CANDELA_BUDGET_TIMEZONE env var tests ─────────────────────────────────────
+
+func TestLoadConfig_BudgetTimezoneEnvOverridesConfig(t *testing.T) {
+	// Write a temp config file with a timezone set.
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(cfgPath, []byte(`
+budget:
+  timezone: "America/Chicago"
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv("CANDELA_CONFIG", cfgPath)
+	t.Setenv("CANDELA_BUDGET_TIMEZONE", "America/New_York")
+
+	cfg, err := loadConfig()
+	if err != nil {
+		t.Fatalf("loadConfig() error: %v", err)
+	}
+	if cfg.Budget.Timezone != "America/New_York" {
+		t.Errorf("timezone = %q, want %q (env var should override config)",
+			cfg.Budget.Timezone, "America/New_York")
+	}
+}
+
+func TestLoadConfig_BudgetTimezoneEnvNoConfigFile(t *testing.T) {
+	// Point to a non-existent config file — env var should still apply.
+	t.Setenv("CANDELA_CONFIG", filepath.Join(t.TempDir(), "does-not-exist.yaml"))
+	t.Setenv("CANDELA_BUDGET_TIMEZONE", "Europe/London")
+
+	cfg, err := loadConfig()
+	if err != nil {
+		t.Fatalf("loadConfig() error: %v", err)
+	}
+	if cfg.Budget.Timezone != "Europe/London" {
+		t.Errorf("timezone = %q, want %q (env var should work without config file)",
+			cfg.Budget.Timezone, "Europe/London")
+	}
+}
+
+func TestLoadConfig_BudgetTimezoneConfigPreservedWithoutEnv(t *testing.T) {
+	// When no env var is set, config file value should be preserved.
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(cfgPath, []byte(`
+budget:
+  timezone: "Asia/Tokyo"
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv("CANDELA_CONFIG", cfgPath)
+	t.Setenv("CANDELA_BUDGET_TIMEZONE", "")
+
+	cfg, err := loadConfig()
+	if err != nil {
+		t.Fatalf("loadConfig() error: %v", err)
+	}
+	if cfg.Budget.Timezone != "Asia/Tokyo" {
+		t.Errorf("timezone = %q, want %q (config value should be preserved)",
+			cfg.Budget.Timezone, "Asia/Tokyo")
+	}
+}

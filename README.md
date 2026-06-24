@@ -243,6 +243,7 @@ graph TD
         VAI[Vertex AI / Google]
         ANT[Anthropic]
         OAI[OpenAI]
+        BDK[AWS Bedrock]
     end
 
     JB -->|/v1/models<br/>/v1/chat/completions| LM
@@ -261,6 +262,7 @@ graph TD
     Proxy -->|Forward| VAI
     Proxy -->|Forward| ANT
     Proxy -->|Forward| OAI
+    Proxy -->|Forward| BDK
     Proxy -.->|Capture| Processor
     Processor -->|Write| DuckDB
     Processor -.->|Write| BQ
@@ -362,6 +364,40 @@ proxy:
     - openai
     - google
     - anthropic
+    - anthropic-vertex
+    - anthropic-direct
+    - gemini-oai
+    # - anthropic-bedrock
+  vertex_ai:
+    project_id: "my-gcp-project"
+    region: "us-east5"
+    caching_mode: "auto"      # off | auto | system-only
+    cache_ttl: 5m             # 5m (default) or 1h
+  # policy:
+  #   allowed_models:
+  #     - provider: openai
+  #       models: ["gpt-4o", "gpt-4o-mini"]
+  #     - provider: anthropic
+  #       models: ["claude-sonnet-4-*"]
+
+catalog:
+  backend: "config"           # "config" (default) or "firestore"
+
+pricing:
+  discount_percent: 0.0       # global discount (0.15 = 15% off)
+  # models:
+  #   - provider: openai
+  #     model: gpt-4o
+  #     input_per_million: 2.00
+  #     output_per_million: 8.00
+
+auth:
+  dev_mode: false
+  # allowed_service_accounts:
+  #   - "candela-ci@my-project.iam.gserviceaccount.com"
+
+budget:
+  timezone: "America/New_York"  # IANA timezone for period resets (default: UTC)
 
 worker:
   batch_size: 100
@@ -706,7 +742,7 @@ gcloud auth application-default login
 ### 3. Enable Claude Models
 1. Go to [Vertex AI Model Garden](https://console.cloud.google.com/vertex-ai/model-garden)
 2. Search for "Claude"
-3. Enable Claude 3.5 Sonnet and Claude 3 Opus
+3. Enable Claude Sonnet 4 and Claude Opus 4
 4. Accept Google's terms for Anthropic models
 
 ### 4. Update Config

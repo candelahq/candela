@@ -150,7 +150,7 @@ func TestGetTenantLeaderboard_EmptyStore(t *testing.T) {
 
 // tenantSpan builds a minimal span with the given tenant_id and cost.
 func tenantSpan(spanID, traceID, tenantID string, costUSD float64) storage.Span {
-	now := time.Now().Truncate(time.Microsecond)
+	now := time.Now().UTC().Truncate(time.Microsecond)
 	const totalTokens = int64(100)
 	return storage.Span{
 		SpanID:    spanID,

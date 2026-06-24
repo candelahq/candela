@@ -10,7 +10,7 @@ import (
 
 // testSpanWithUser creates a test span with a specific user_id.
 func testSpanWithUser(id, traceID, userID string) storage.Span {
-	now := time.Now().Truncate(time.Millisecond)
+	now := time.Now().UTC().Truncate(time.Millisecond)
 	return storage.Span{
 		SpanID:      id,
 		TraceID:     traceID,
@@ -48,7 +48,7 @@ func TestQueryTraces_UserScoping(t *testing.T) {
 	store := newTestSQLiteStore(t)
 	ctx := context.Background()
 
-	now := time.Now().Truncate(time.Millisecond)
+	now := time.Now().UTC().Truncate(time.Millisecond)
 
 	spans := []storage.Span{
 		testSpanWithUser("s1", "trace-alice", "alice@example.com"),
@@ -114,7 +114,7 @@ func TestSearchSpans_UserScoping(t *testing.T) {
 	store := newTestSQLiteStore(t)
 	ctx := context.Background()
 
-	now := time.Now().Truncate(time.Millisecond)
+	now := time.Now().UTC().Truncate(time.Millisecond)
 
 	spans := []storage.Span{
 		testSpanWithUser("s1", "t1", "alice@example.com"),
@@ -164,7 +164,7 @@ func TestGetUsageSummary_UserScoping(t *testing.T) {
 	store := newTestSQLiteStore(t)
 	ctx := context.Background()
 
-	now := time.Now().Truncate(time.Millisecond)
+	now := time.Now().UTC().Truncate(time.Millisecond)
 
 	spans := []storage.Span{
 		testSpanWithUser("s1", "t1", "alice@example.com"),
@@ -214,7 +214,7 @@ func TestGetModelBreakdown_UserScoping(t *testing.T) {
 	store := newTestSQLiteStore(t)
 	ctx := context.Background()
 
-	now := time.Now().Truncate(time.Millisecond)
+	now := time.Now().UTC().Truncate(time.Millisecond)
 
 	spans := []storage.Span{
 		testSpanWithUser("s1", "t1", "alice@example.com"),

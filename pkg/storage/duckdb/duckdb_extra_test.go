@@ -19,7 +19,7 @@ import (
 func TestQueryTraces_EnvironmentFilter(t *testing.T) {
 	store := newTestStore(t)
 	ctx := context.Background()
-	now := time.Now().Truncate(time.Microsecond)
+	now := time.Now().UTC().Truncate(time.Microsecond)
 
 	prod := testSpan("s-prod", "trace-prod", storage.SpanKindLLM, "gpt-4o")
 	prod.Environment = "production"
@@ -56,7 +56,7 @@ func TestQueryTraces_EnvironmentFilter(t *testing.T) {
 func TestQueryTraces_EmptyEnvironment_ReturnsAll(t *testing.T) {
 	store := newTestStore(t)
 	ctx := context.Background()
-	now := time.Now().Truncate(time.Microsecond)
+	now := time.Now().UTC().Truncate(time.Microsecond)
 
 	s1 := testSpan("s1", "trace-1", storage.SpanKindLLM, "gpt-4o")
 	s1.Environment = "production"
@@ -90,7 +90,7 @@ func TestQueryTraces_EmptyEnvironment_ReturnsAll(t *testing.T) {
 func TestQueryTraces_OrderByTotalCost(t *testing.T) {
 	store := newTestStore(t)
 	ctx := context.Background()
-	now := time.Now().Truncate(time.Microsecond)
+	now := time.Now().UTC().Truncate(time.Microsecond)
 
 	cheap := testSpan("cheap", "trace-cheap", storage.SpanKindLLM, "gpt-4o-mini")
 	cheap.GenAI.CostUSD = 0.001
@@ -145,7 +145,7 @@ func TestQueryTraces_InvalidOrderBy_DefaultsToTime(t *testing.T) {
 	// back to the default MIN(start_time) DESC ordering.
 	store := newTestStore(t)
 	ctx := context.Background()
-	now := time.Now().Truncate(time.Microsecond)
+	now := time.Now().UTC().Truncate(time.Microsecond)
 
 	s := testSpan("s1", "trace-fallback", storage.SpanKindLLM, "gpt-4o")
 	s.StartTime = now
@@ -170,7 +170,7 @@ func TestQueryTraces_InvalidOrderBy_DefaultsToTime(t *testing.T) {
 func TestScanSpans_GenAI_PopulatedFromInputOutputOnly(t *testing.T) {
 	store := newTestStore(t)
 	ctx := context.Background()
-	now := time.Now().Truncate(time.Microsecond)
+	now := time.Now().UTC().Truncate(time.Microsecond)
 
 	// A span with no TotalTokens/CostUSD/Model but with meaningful I/O tokens —
 	// the expanded GenAI guard should still populate the struct.
@@ -221,7 +221,7 @@ func TestScanSpans_GenAI_PopulatedFromInputOutputOnly(t *testing.T) {
 func TestGetUserLeaderboard(t *testing.T) {
 	store := newTestStore(t)
 	ctx := context.Background()
-	now := time.Now().Truncate(time.Microsecond)
+	now := time.Now().UTC().Truncate(time.Microsecond)
 
 	spans := []storage.Span{
 		testSpan("l1", "trace-l1", storage.SpanKindLLM, "gpt-4o"),

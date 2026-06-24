@@ -44,7 +44,7 @@ func TestQueryTraces_UserScoping(t *testing.T) {
 	store := newTestStore(t)
 	ctx := context.Background()
 
-	now := time.Now().Truncate(time.Microsecond)
+	now := time.Now().UTC().Truncate(time.Microsecond)
 
 	spans := []storage.Span{
 		testSpanWithUser("s1", "trace-alice", "alice@example.com", storage.SpanKindLLM, "gpt-4o"),
@@ -131,7 +131,7 @@ func TestSearchSpans_UserScoping(t *testing.T) {
 	store := newTestStore(t)
 	ctx := context.Background()
 
-	now := time.Now().Truncate(time.Microsecond)
+	now := time.Now().UTC().Truncate(time.Microsecond)
 
 	spans := []storage.Span{
 		testSpanWithUser("s1", "t1", "alice@example.com", storage.SpanKindLLM, "gpt-4o"),
@@ -207,7 +207,7 @@ func TestGetUsageSummary_UserScoping(t *testing.T) {
 	store := newTestStore(t)
 	ctx := context.Background()
 
-	now := time.Now().Truncate(time.Microsecond)
+	now := time.Now().UTC().Truncate(time.Microsecond)
 
 	spans := []storage.Span{
 		testSpanWithUser("s1", "t1", "alice@example.com", storage.SpanKindLLM, "gpt-4o"),
@@ -262,7 +262,7 @@ func TestGetModelBreakdown_UserScoping(t *testing.T) {
 	store := newTestStore(t)
 	ctx := context.Background()
 
-	now := time.Now().Truncate(time.Microsecond)
+	now := time.Now().UTC().Truncate(time.Microsecond)
 
 	spans := []storage.Span{
 		testSpanWithUser("s1", "t1", "alice@example.com", storage.SpanKindLLM, "gpt-4o"),

@@ -204,6 +204,42 @@ func TestManagerStop(t *testing.T) {
 	}
 }
 
+func TestManagerConcurrentStartStopNoRace(t *testing.T) {
+	mock := &mockRuntime{
+		name:     "test",
+		endpoint: "http://127.0.0.1:9999/v1",
+	}
+
+	mgr := runtime.NewManager(mock, runtime.ManagerConfig{
+		HealthCheck: time.Millisecond,
+	})
+
+	monitorCtx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	var wg sync.WaitGroup
+	for i := 0; i < 50; i++ {
+		wg.Add(3)
+		go func() {
+			defer wg.Done()
+			_ = mgr.StartRuntime(context.Background(), monitorCtx)
+		}()
+		go func() {
+			defer wg.Done()
+			_ = mgr.Start(monitorCtx)
+		}()
+		go func() {
+			defer wg.Done()
+			_ = mgr.Stop(context.Background())
+		}()
+	}
+	wg.Wait()
+
+	if err := mgr.Stop(context.Background()); err != nil {
+		t.Fatalf("Manager.Stop() error: %v", err)
+	}
+}
+
 func TestManagerRestart(t *testing.T) {
 	mock := &mockRuntime{
 		name:     "test",

@@ -49,9 +49,7 @@ func NewManager(rt Runtime, cfg ManagerConfig) *Manager {
 // Can be called after Stop to restart the Manager.
 func (m *Manager) Start(ctx context.Context) error {
 	// Cancel any previous health loop (enables restart after Stop).
-	if m.cancel != nil {
-		m.cancel()
-	}
+	m.cancelHealthLoop()
 
 	if m.autoStart {
 		if err := m.startRuntime(ctx); err != nil {
@@ -70,9 +68,7 @@ func (m *Manager) Start(ctx context.Context) error {
 // should use the application's long-lived context so UI RPC completion does not
 // cancel health polling.
 func (m *Manager) StartRuntime(startCtx, monitorCtx context.Context) error {
-	if m.cancel != nil {
-		m.cancel()
-	}
+	m.cancelHealthLoop()
 	if err := m.startRuntime(startCtx); err != nil {
 		return err
 	}
@@ -94,9 +90,21 @@ func (m *Manager) startRuntime(ctx context.Context) error {
 
 func (m *Manager) startHealthLoop(ctx context.Context) context.Context {
 	hctx, cancel := context.WithCancel(ctx)
+	m.mu.Lock()
 	m.cancel = cancel
+	m.mu.Unlock()
 	go m.healthLoop(hctx)
 	return hctx
+}
+
+func (m *Manager) cancelHealthLoop() {
+	m.mu.Lock()
+	cancel := m.cancel
+	m.cancel = nil
+	m.mu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
 }
 
 func (m *Manager) startAutoPull(ctx context.Context) {
@@ -114,9 +122,7 @@ func (m *Manager) startAutoPull(ctx context.Context) {
 
 // Stop stops health monitoring and shuts down the runtime.
 func (m *Manager) Stop(ctx context.Context) error {
-	if m.cancel != nil {
-		m.cancel()
-	}
+	m.cancelHealthLoop()
 	err := m.rt.Stop(ctx)
 	// Update cached health immediately so GetHealth reflects the stopped state.
 	m.mu.Lock()

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useReducer, useState } from "react";
+import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import { userClient } from "@/lib/api";
 import { HelpTip } from "@/components/Tooltip";
 import { useCreateUserValidation } from "@/hooks/useProtoValidation";
@@ -8,16 +8,19 @@ import type { User, UserBudget, BudgetGrant } from "@/gen/candela/types/user_pb"
 import { UserRole, UserStatus, BudgetPeriod } from "@/gen/candela/types/user_pb";
 import { timestampFromDate } from "@bufbuild/protobuf/wkt";
 
+const PAGE_SIZE = 25;
+
 interface UsersState {
   users: User[];
   total: number;
+  nextPageToken: string;
   isLoading: boolean;
   error: string | null;
 }
 
 type Action =
   | { type: "loading" }
-  | { type: "success"; users: User[]; total: number }
+  | { type: "success"; users: User[]; total: number; nextPageToken: string }
   | { type: "error"; message: string };
 
 function reducer(state: UsersState, action: Action): UsersState {
@@ -25,7 +28,7 @@ function reducer(state: UsersState, action: Action): UsersState {
     case "loading":
       return { ...state, isLoading: true, error: null };
     case "success":
-      return { users: action.users, total: action.total, isLoading: false, error: null };
+      return { users: action.users, total: action.total, nextPageToken: action.nextPageToken, isLoading: false, error: null };
     case "error":
       return { ...state, isLoading: false, error: action.message };
   }
@@ -61,13 +64,18 @@ function defaultExpiry(): string {
 
 export default function AdminUsersPage() {
   const [state, dispatch] = useReducer(reducer, {
-    users: [], total: 0, isLoading: true, error: null,
+    users: [], total: 0, nextPageToken: "", isLoading: true, error: null,
   });
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [createForm, setCreateForm] = useState({ email: "", displayName: "", role: UserRole.DEVELOPER, budget: 0 });
   const [createError, setCreateError] = useState<string | null>(null);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const { validate, getError, clearErrors } = useCreateUserValidation();
+
+  // Pagination state
+  const [currentPageToken, setCurrentPageToken] = useState("");
+  const [pageTokenHistory, setPageTokenHistory] = useState<string[]>([]);
+  const [statusFilter, setStatusFilter] = useState<UserStatus>(UserStatus.UNSPECIFIED);
 
   // Budget modal state
   const [budgetModal, setBudgetModal] = useState<{ userId: string; email: string } | null>(null);
@@ -91,17 +99,51 @@ export default function AdminUsersPage() {
   const [deleteLoading, setDeleteLoading] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
 
-  const fetchUsers = useCallback(async () => {
+  // Stable ref for statusFilter to avoid re-creating fetchUsers on every filter change
+  const statusFilterRef = useRef(statusFilter);
+  statusFilterRef.current = statusFilter;
+
+  const fetchUsers = useCallback(async (pageToken = "") => {
     dispatch({ type: "loading" });
     try {
-      const resp = await userClient.listUsers({});
-      dispatch({ type: "success", users: resp.users, total: resp.pagination?.totalCount ?? 0 });
+      const resp = await userClient.listUsers({
+        pagination: { pageSize: PAGE_SIZE, pageToken },
+        statusFilter: statusFilterRef.current,
+      });
+      dispatch({
+        type: "success",
+        users: resp.users,
+        total: resp.pagination?.totalCount ?? 0,
+        nextPageToken: resp.pagination?.nextPageToken ?? "",
+      });
     } catch (err: unknown) {
       dispatch({ type: "error", message: err instanceof Error ? err.message : "Failed to load users" });
     }
   }, []);
 
-  useEffect(() => { fetchUsers(); }, [fetchUsers]);
+  useEffect(() => {
+    setCurrentPageToken("");
+    setPageTokenHistory([]);
+    fetchUsers("");
+  }, [fetchUsers, statusFilter]);
+
+  const handleNextPage = () => {
+    if (!state.nextPageToken) return;
+    setPageTokenHistory((prev) => [...prev, currentPageToken]);
+    setCurrentPageToken(state.nextPageToken);
+    fetchUsers(state.nextPageToken);
+  };
+
+  const handlePrevPage = () => {
+    const prev = [...pageTokenHistory];
+    const prevToken = prev.pop() ?? "";
+    setPageTokenHistory(prev);
+    setCurrentPageToken(prevToken);
+    fetchUsers(prevToken);
+  };
+
+  const currentPage = pageTokenHistory.length + 1;
+  const totalPages = Math.max(1, Math.ceil(state.total / PAGE_SIZE));
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -125,7 +167,7 @@ export default function AdminUsersPage() {
       setShowCreateModal(false);
       setCreateForm({ email: "", displayName: "", role: UserRole.DEVELOPER, budget: 0 });
       clearErrors();
-      fetchUsers();
+      fetchUsers(currentPageToken);
     } catch (err: unknown) {
       setCreateError(err instanceof Error ? err.message : "Failed to create user");
     }
@@ -135,7 +177,7 @@ export default function AdminUsersPage() {
     setActionLoading(userId);
     try {
       await userClient.deactivateUser({ id: userId });
-      fetchUsers();
+      fetchUsers(currentPageToken);
     } catch (err: unknown) {
       alert(err instanceof Error ? err.message : "Failed to deactivate user");
     } finally {
@@ -147,7 +189,7 @@ export default function AdminUsersPage() {
     setActionLoading(userId);
     try {
       await userClient.reactivateUser({ id: userId });
-      fetchUsers();
+      fetchUsers(currentPageToken);
     } catch (err: unknown) {
       alert(err instanceof Error ? err.message : "Failed to reactivate user");
     } finally {
@@ -183,7 +225,7 @@ export default function AdminUsersPage() {
         periodType: BudgetPeriod.DAILY,
       });
       setBudgetModal(null);
-      fetchUsers();
+      fetchUsers(currentPageToken);
     } catch (err: unknown) {
       setBudgetError(err instanceof Error ? err.message : "Failed to set budget");
     } finally {
@@ -263,7 +305,7 @@ export default function AdminUsersPage() {
         confirmEmail: deleteConfirmEmail,
       });
       setDeleteModal(null);
-      fetchUsers();
+      fetchUsers(currentPageToken);
     } catch (err: unknown) {
       setDeleteError(err instanceof Error ? err.message : "Failed to delete user");
     } finally {
@@ -281,13 +323,26 @@ export default function AdminUsersPage() {
           </h2>
           <p className="admin-page-subtitle">{state.total} users total</p>
         </div>
-        <button
-          className="btn btn-primary"
-          onClick={() => setShowCreateModal(true)}
-          id="create-user-btn"
-        >
-          + Create User
-        </button>
+        <div className="admin-header-actions">
+          <select
+            className="form-input form-input-sm"
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(Number(e.target.value) as UserStatus)}
+            id="status-filter"
+          >
+            <option value={UserStatus.UNSPECIFIED}>All Statuses</option>
+            <option value={UserStatus.PROVISIONED}>Provisioned</option>
+            <option value={UserStatus.ACTIVE}>Active</option>
+            <option value={UserStatus.INACTIVE}>Inactive</option>
+          </select>
+          <button
+            className="btn btn-primary"
+            onClick={() => setShowCreateModal(true)}
+            id="create-user-btn"
+          >
+            + Create User
+          </button>
+        </div>
       </div>
 
       {state.error && (
@@ -384,6 +439,31 @@ export default function AdminUsersPage() {
               )}
             </tbody>
           </table>
+
+          {/* Pagination controls */}
+          {state.total > PAGE_SIZE && (
+            <div className="pagination-controls">
+              <button
+                className="btn btn-sm btn-ghost"
+                onClick={handlePrevPage}
+                disabled={pageTokenHistory.length === 0}
+                id="prev-page-btn"
+              >
+                ← Previous
+              </button>
+              <span className="pagination-info">
+                Page {currentPage} of {totalPages}
+              </span>
+              <button
+                className="btn btn-sm btn-ghost"
+                onClick={handleNextPage}
+                disabled={!state.nextPageToken}
+                id="next-page-btn"
+              >
+                Next →
+              </button>
+            </div>
+          )}
         </div>
       )}
 

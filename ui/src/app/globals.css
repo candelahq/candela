@@ -1686,6 +1686,43 @@ tr:hover .model-bar {
 }
 
 /* ──────────────────────────────────────────
+   Admin — Header Actions
+   ────────────────────────────────────────── */
+
+.admin-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.form-input-sm {
+  padding: 6px 12px;
+  font-size: 0.8rem;
+  min-width: 140px;
+}
+
+/* ──────────────────────────────────────────
+   Admin — Pagination
+   ────────────────────────────────────────── */
+
+.pagination-controls {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  padding: 14px 20px;
+  border-top: 1px solid var(--border-subtle);
+  background: var(--bg-tertiary);
+}
+
+.pagination-info {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  min-width: 100px;
+  text-align: center;
+}
+
+/* ──────────────────────────────────────────
    Status Badges
    ────────────────────────────────────────── */
 

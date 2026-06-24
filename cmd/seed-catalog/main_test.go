@@ -82,27 +82,12 @@ func TestDefaultsAllHaveValidPricing(t *testing.T) {
 	}
 }
 
-func TestDryRunDoesNotPanic(t *testing.T) {
+func TestBuildEntriesFromDefaults(t *testing.T) {
 	// Exercise the full ModelPricing → catalog.Entry conversion path
-	// (mirrors the inline loop in main) and verify it doesn't panic.
-	calc := costcalc.New()
-	defaults := calc.Defaults()
+	// via the refactored buildEntriesFromDefaults helper.
+	entries := buildEntriesFromDefaults()
 
-	entries := make([]catalog.Entry, 0, len(defaults))
-	for _, p := range defaults {
-		entries = append(entries, catalog.Entry{
-			ModelID:              p.Model,
-			Provider:             p.Provider,
-			InputPerMillion:      p.InputPerMillion,
-			OutputPerMillion:     p.OutputPerMillion,
-			InputPerMillionHigh:  p.InputPerMillionHigh,
-			OutputPerMillionHigh: p.OutputPerMillionHigh,
-			TierThresholdTokens:  p.TierThresholdTokens,
-			DiscountPercent:      p.DiscountPercent,
-			Enabled:              true,
-		})
-	}
-
+	defaults := costcalc.New().Defaults()
 	if len(entries) == 0 {
 		t.Fatal("no entries generated")
 	}

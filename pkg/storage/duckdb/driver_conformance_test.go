@@ -29,7 +29,7 @@ import (
 func TestQueryTraces_Pagination(t *testing.T) {
 	store := newTestStore(t)
 	ctx := context.Background()
-	now := time.Now().Truncate(time.Microsecond)
+	now := time.Now().UTC().Truncate(time.Microsecond)
 
 	// Ingest 5 traces, each separated by 1 second for deterministic ordering.
 	for i := 0; i < 5; i++ {
@@ -81,7 +81,7 @@ func TestQueryTraces_Pagination(t *testing.T) {
 func TestQueryTraces_TimeRangeFiltering(t *testing.T) {
 	store := newTestStore(t)
 	ctx := context.Background()
-	now := time.Now().Truncate(time.Microsecond)
+	now := time.Now().UTC().Truncate(time.Microsecond)
 
 	sp := testSpan("s1", "t1", storage.SpanKindLLM, "gpt-4o")
 	sp.StartTime = now
@@ -141,7 +141,7 @@ func TestQueryTraces_TimeRangeFiltering(t *testing.T) {
 func TestQueryTraces_StatusAggregation(t *testing.T) {
 	store := newTestStore(t)
 	ctx := context.Background()
-	now := time.Now().Truncate(time.Microsecond)
+	now := time.Now().UTC().Truncate(time.Microsecond)
 
 	spans := []storage.Span{
 		{
@@ -195,7 +195,7 @@ func TestQueryTraces_StatusAggregation(t *testing.T) {
 func TestSearchSpans_ModelFilter(t *testing.T) {
 	store := newTestStore(t)
 	ctx := context.Background()
-	now := time.Now().Truncate(time.Microsecond)
+	now := time.Now().UTC().Truncate(time.Microsecond)
 
 	spans := []storage.Span{
 		testSpan("s1", "t1", storage.SpanKindLLM, "gpt-4o"),
@@ -232,7 +232,7 @@ func TestSearchSpans_ModelFilter(t *testing.T) {
 func TestSearchSpans_Pagination(t *testing.T) {
 	store := newTestStore(t)
 	ctx := context.Background()
-	now := time.Now().Truncate(time.Microsecond)
+	now := time.Now().UTC().Truncate(time.Microsecond)
 
 	// Ingest 5 spans.
 	for i := 0; i < 5; i++ {
@@ -269,7 +269,7 @@ func TestSearchSpans_Pagination(t *testing.T) {
 func TestEmptyStore_AllQueries(t *testing.T) {
 	store := newTestStore(t)
 	ctx := context.Background()
-	now := time.Now().Truncate(time.Microsecond)
+	now := time.Now().UTC().Truncate(time.Microsecond)
 	start := now.Add(-time.Hour)
 	end := now.Add(time.Hour)
 
@@ -344,7 +344,7 @@ func TestEmptyStore_AllQueries(t *testing.T) {
 		}
 	})
 
-	t.Run("GetTenantLeaderboard_empty_2", func(t *testing.T) {
+	t.Run("GetTenantLeaderboard_empty", func(t *testing.T) {
 		tenants, err := store.GetTenantLeaderboard(ctx, storage.UsageQuery{
 			ProjectID: "proj-empty",
 			StartTime: start, EndTime: end,
@@ -383,7 +383,7 @@ func TestEmptyStore_AllQueries(t *testing.T) {
 func TestGetJobLeaderboard_Basic(t *testing.T) {
 	store := newTestStore(t)
 	ctx := context.Background()
-	now := time.Now().Truncate(time.Microsecond)
+	now := time.Now().UTC().Truncate(time.Microsecond)
 
 	spans := []storage.Span{
 		testSpan("j1-s1", "j1-t1", storage.SpanKindLLM, "gpt-4o"),
@@ -439,7 +439,7 @@ func TestGetJobLeaderboard_Basic(t *testing.T) {
 func TestGetJobLeaderboard_LimitRespected(t *testing.T) {
 	store := newTestStore(t)
 	ctx := context.Background()
-	now := time.Now().Truncate(time.Microsecond)
+	now := time.Now().UTC().Truncate(time.Microsecond)
 
 	for i := 0; i < 5; i++ {
 		sp := testSpan(fmt.Sprintf("s%d", i), fmt.Sprintf("t%d", i), storage.SpanKindLLM, "gpt-4o")
@@ -470,7 +470,7 @@ func TestGetJobLeaderboard_LimitRespected(t *testing.T) {
 func TestConcurrentReadWrite(t *testing.T) {
 	store := newTestStore(t)
 	ctx := context.Background()
-	now := time.Now().Truncate(time.Microsecond)
+	now := time.Now().UTC().Truncate(time.Microsecond)
 
 	// Seed some initial data.
 	seed := testSpan("seed-1", "trace-seed", storage.SpanKindLLM, "gpt-4o")
@@ -489,7 +489,7 @@ func TestConcurrentReadWrite(t *testing.T) {
 		defer wg.Done()
 		for i := 0; i < 20; i++ {
 			sp := testSpan(fmt.Sprintf("w-%d", i), fmt.Sprintf("wt-%d", i), storage.SpanKindLLM, "gpt-4o")
-			sp.StartTime = time.Now().Truncate(time.Microsecond)
+			sp.StartTime = time.Now().UTC().Truncate(time.Microsecond)
 			sp.EndTime = sp.StartTime.Add(100 * time.Millisecond)
 			if err := store.IngestSpans(ctx, []storage.Span{sp}); err != nil {
 				errCh <- fmt.Errorf("write %d: %w", i, err)
@@ -543,7 +543,7 @@ func TestConcurrentReadWrite(t *testing.T) {
 func TestQueryTraces_DefaultPageSize(t *testing.T) {
 	store := newTestStore(t)
 	ctx := context.Background()
-	now := time.Now().Truncate(time.Microsecond)
+	now := time.Now().UTC().Truncate(time.Microsecond)
 
 	for i := 0; i < 3; i++ {
 		sp := testSpan(fmt.Sprintf("s%d", i), fmt.Sprintf("t%d", i), storage.SpanKindLLM, "gpt-4o")
@@ -572,7 +572,7 @@ func TestQueryTraces_DefaultPageSize(t *testing.T) {
 func TestSearchSpans_DefaultPageSize(t *testing.T) {
 	store := newTestStore(t)
 	ctx := context.Background()
-	now := time.Now().Truncate(time.Microsecond)
+	now := time.Now().UTC().Truncate(time.Microsecond)
 
 	for i := 0; i < 3; i++ {
 		sp := testSpan(fmt.Sprintf("s%d", i), fmt.Sprintf("t%d", i), storage.SpanKindLLM, "gpt-4o")
@@ -649,7 +649,7 @@ func TestIngestSpans_LabelsRoundTrip(t *testing.T) {
 func TestGetTenantLeaderboard_ExcludesEmpty(t *testing.T) {
 	store := newTestStore(t)
 	ctx := context.Background()
-	now := time.Now().Truncate(time.Microsecond)
+	now := time.Now().UTC().Truncate(time.Microsecond)
 
 	s1 := testSpan("s1", "t1", storage.SpanKindLLM, "gpt-4o")
 	s1.TenantID = "real-tenant"
@@ -680,5 +680,133 @@ func TestGetTenantLeaderboard_ExcludesEmpty(t *testing.T) {
 	}
 	if tenants[0].TenantID != "real-tenant" {
 		t.Errorf("tenant = %q, want real-tenant", tenants[0].TenantID)
+	}
+}
+
+// ─── GetUserLeaderboard: excludes empty user IDs ─────────────────────────────
+
+func TestGetUserLeaderboard_ExcludesEmpty(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(time.Microsecond)
+
+	s1 := testSpan("s1", "t1", storage.SpanKindLLM, "gpt-4o")
+	s1.UserID = "real-user@example.com"
+	s1.GenAI.CostUSD = 0.10
+	s1.StartTime = now
+	s1.EndTime = now.Add(100 * time.Millisecond)
+
+	s2 := testSpan("s2", "t2", storage.SpanKindLLM, "gpt-4o")
+	s2.UserID = "" // no user — must be excluded
+	s2.GenAI.CostUSD = 99.99
+	s2.StartTime = now.Add(time.Second)
+	s2.EndTime = now.Add(time.Second + 100*time.Millisecond)
+
+	if err := store.IngestSpans(ctx, []storage.Span{s1, s2}); err != nil {
+		t.Fatalf("ingest: %v", err)
+	}
+
+	leaders, err := store.GetUserLeaderboard(ctx, storage.UsageQuery{
+		ProjectID: "proj-test",
+		StartTime: now.Add(-10 * time.Second),
+		EndTime:   now.Add(10 * time.Second),
+	}, 10)
+	if err != nil {
+		t.Fatalf("user leaderboard: %v", err)
+	}
+	if len(leaders) != 1 {
+		t.Fatalf("got %d leaders, want 1 (empty user excluded)", len(leaders))
+	}
+	if leaders[0].UserID != "real-user@example.com" {
+		t.Errorf("user = %q, want real-user@example.com", leaders[0].UserID)
+	}
+}
+
+// ─── Leaderboard limit=1 boundary ────────────────────────────────────────────
+
+func TestGetTenantLeaderboard_LimitOne(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(time.Microsecond)
+
+	// Insert 3 distinct tenants.
+	for i, tenant := range []string{"alpha", "beta", "gamma"} {
+		sp := testSpan(
+			fmt.Sprintf("s-%d", i),
+			fmt.Sprintf("t-%d", i),
+			storage.SpanKindLLM, "gpt-4o",
+		)
+		sp.TenantID = tenant
+		sp.GenAI.CostUSD = float64(i+1) * 0.10
+		sp.StartTime = now.Add(time.Duration(i) * time.Second)
+		sp.EndTime = sp.StartTime.Add(100 * time.Millisecond)
+		if err := store.IngestSpans(ctx, []storage.Span{sp}); err != nil {
+			t.Fatalf("ingest: %v", err)
+		}
+	}
+
+	// Limit=1 should return only the most expensive tenant.
+	tenants, err := store.GetTenantLeaderboard(ctx, storage.UsageQuery{
+		ProjectID: "proj-test",
+		StartTime: now.Add(-10 * time.Second),
+		EndTime:   now.Add(10 * time.Second),
+	}, 1)
+	if err != nil {
+		t.Fatalf("tenant leaderboard: %v", err)
+	}
+	if len(tenants) != 1 {
+		t.Fatalf("got %d tenants, want 1 (limit=1)", len(tenants))
+	}
+	// gamma has highest cost ($0.30)
+	if tenants[0].TenantID != "gamma" {
+		t.Errorf("tenant = %q, want gamma (highest cost)", tenants[0].TenantID)
+	}
+}
+
+// ─── GetUsageSummary: cost aggregation ───────────────────────────────────────
+
+func TestGetUsageSummary_CostAggregation(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(time.Microsecond)
+
+	spans := []storage.Span{
+		testSpan("s1", "t1", storage.SpanKindLLM, "gpt-4o"),
+		testSpan("s2", "t2", storage.SpanKindLLM, "gemini-2.0"),
+	}
+	spans[0].GenAI.CostUSD = 0.25
+	spans[0].GenAI.InputTokens = 1000
+	spans[0].GenAI.OutputTokens = 500
+	spans[0].StartTime = now
+	spans[0].EndTime = now.Add(100 * time.Millisecond)
+
+	spans[1].GenAI.CostUSD = 0.75
+	spans[1].GenAI.InputTokens = 2000
+	spans[1].GenAI.OutputTokens = 1000
+	spans[1].StartTime = now.Add(time.Second)
+	spans[1].EndTime = now.Add(time.Second + 100*time.Millisecond)
+
+	if err := store.IngestSpans(ctx, spans); err != nil {
+		t.Fatalf("ingest: %v", err)
+	}
+
+	summary, err := store.GetUsageSummary(ctx, storage.UsageQuery{
+		ProjectID: "proj-test",
+		StartTime: now.Add(-10 * time.Second),
+		EndTime:   now.Add(10 * time.Second),
+	})
+	if err != nil {
+		t.Fatalf("usage: %v", err)
+	}
+
+	// Total cost: $0.25 + $0.75 = $1.00
+	if summary.TotalCostUSD < 0.99 || summary.TotalCostUSD > 1.01 {
+		t.Errorf("TotalCostUSD = %f, want ~1.00", summary.TotalCostUSD)
+	}
+	if summary.TotalInputTokens != 3000 {
+		t.Errorf("TotalInputTokens = %d, want 3000", summary.TotalInputTokens)
+	}
+	if summary.TotalOutputTokens != 1500 {
+		t.Errorf("TotalOutputTokens = %d, want 1500", summary.TotalOutputTokens)
 	}
 }

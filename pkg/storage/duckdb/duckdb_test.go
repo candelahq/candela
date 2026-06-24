@@ -28,7 +28,7 @@ func newTestStore(t *testing.T) *Store {
 }
 
 func testSpan(id, traceID string, kind storage.SpanKind, model string) storage.Span {
-	now := time.Now().Truncate(time.Microsecond) // DuckDB TIMESTAMP is microsecond precision
+	now := time.Now().UTC().Truncate(time.Microsecond) // DuckDB TIMESTAMP is microsecond precision
 	return storage.Span{
 		SpanID:       id,
 		TraceID:      traceID,
@@ -147,8 +147,8 @@ func TestIngestSpans_NilGenAI(t *testing.T) {
 		Name:      "http.request",
 		Kind:      storage.SpanKindGeneral,
 		Status:    storage.SpanStatusOK,
-		StartTime: time.Now().Truncate(time.Microsecond),
-		EndTime:   time.Now().Add(50 * time.Millisecond).Truncate(time.Microsecond),
+		StartTime: time.Now().UTC().Truncate(time.Microsecond),
+		EndTime:   time.Now().UTC().Add(50 * time.Millisecond).Truncate(time.Microsecond),
 		Duration:  50 * time.Millisecond,
 		ProjectID: "proj-test",
 	}
@@ -178,7 +178,7 @@ func TestQueryTraces(t *testing.T) {
 	store := newTestStore(t)
 	ctx := context.Background()
 
-	now := time.Now().Truncate(time.Microsecond)
+	now := time.Now().UTC().Truncate(time.Microsecond)
 
 	spans := []storage.Span{
 		testSpan("s1", "trace-a", storage.SpanKindLLM, "gpt-4o"),
@@ -217,7 +217,7 @@ func TestSearchSpans_FilterByKind(t *testing.T) {
 	store := newTestStore(t)
 	ctx := context.Background()
 
-	now := time.Now().Truncate(time.Microsecond)
+	now := time.Now().UTC().Truncate(time.Microsecond)
 
 	spans := []storage.Span{
 		testSpan("llm-1", "trace-mix", storage.SpanKindLLM, "gpt-4o"),
@@ -255,7 +255,7 @@ func TestGetUsageSummary(t *testing.T) {
 	store := newTestStore(t)
 	ctx := context.Background()
 
-	now := time.Now().Truncate(time.Microsecond)
+	now := time.Now().UTC().Truncate(time.Microsecond)
 
 	spans := []storage.Span{
 		testSpan("s1", "trace-u1", storage.SpanKindLLM, "gpt-4o"),
@@ -298,7 +298,7 @@ func TestGetModelBreakdown(t *testing.T) {
 	store := newTestStore(t)
 	ctx := context.Background()
 
-	now := time.Now().Truncate(time.Microsecond)
+	now := time.Now().UTC().Truncate(time.Microsecond)
 
 	spans := []storage.Span{
 		testSpan("s1", "t1", storage.SpanKindLLM, "gpt-4o"),
@@ -352,7 +352,7 @@ func TestIngestSpans_EmptyBatch(t *testing.T) {
 }
 
 func TestBuildTrace_Aggregation(t *testing.T) {
-	now := time.Now().Truncate(time.Microsecond)
+	now := time.Now().UTC().Truncate(time.Microsecond)
 
 	spans := []storage.Span{
 		{
@@ -403,8 +403,8 @@ func TestIngestSpans_EmptyAttributes(t *testing.T) {
 		Name:       "test.empty",
 		Kind:       storage.SpanKindLLM,
 		Status:     storage.SpanStatusOK,
-		StartTime:  time.Now().Truncate(time.Microsecond),
-		EndTime:    time.Now().Add(50 * time.Millisecond).Truncate(time.Microsecond),
+		StartTime:  time.Now().UTC().Truncate(time.Microsecond),
+		EndTime:    time.Now().UTC().Add(50 * time.Millisecond).Truncate(time.Microsecond),
 		Duration:   50 * time.Millisecond,
 		ProjectID:  "proj-test",
 		Attributes: map[string]string{}, // empty, not nil
@@ -454,7 +454,7 @@ func TestSearchSpans_NameSubstring(t *testing.T) {
 	store := newTestStore(t)
 	ctx := context.Background()
 
-	now := time.Now().Truncate(time.Microsecond)
+	now := time.Now().UTC().Truncate(time.Microsecond)
 
 	spans := []storage.Span{
 		{
@@ -501,7 +501,7 @@ func TestSearchSpans_NameWildcardEscape(t *testing.T) {
 	store := newTestStore(t)
 	ctx := context.Background()
 
-	now := time.Now().Truncate(time.Microsecond)
+	now := time.Now().UTC().Truncate(time.Microsecond)
 
 	spans := []storage.Span{
 		{

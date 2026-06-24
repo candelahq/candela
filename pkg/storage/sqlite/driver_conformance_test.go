@@ -557,9 +557,10 @@ func TestConcurrentReadWrite_SQLite(t *testing.T) {
 			span := storage.Span{
 				SpanID: fmt.Sprintf("w-span-%d", i), TraceID: fmt.Sprintf("w-trace-%d", i),
 				Name: "llm.chat", Kind: storage.SpanKindLLM, Status: storage.SpanStatusOK,
-				StartTime: time.Now().UTC(), EndTime: time.Now().UTC().Add(100 * time.Millisecond),
 				Duration: 100 * time.Millisecond, ProjectID: "proj-concurrent",
 			}
+			span.StartTime = time.Now().UTC()
+			span.EndTime = span.StartTime.Add(100 * time.Millisecond)
 			if err := s.IngestSpans(ctx, []storage.Span{span}); err != nil {
 				errCh <- fmt.Errorf("write %d: %w", i, err)
 			}
@@ -779,5 +780,151 @@ func TestIngestSpans_LabelsRoundTrip_SQLite(t *testing.T) {
 	}
 	if got.JobID != "eval-1" {
 		t.Errorf("JobID = %q, want eval-1", got.JobID)
+	}
+}
+
+// ─── GetUserLeaderboard: excludes empty user IDs ─────────────────────────────
+
+func TestGetUserLeaderboard_ExcludesEmpty_SQLite(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(time.Microsecond)
+
+	spans := []storage.Span{
+		{
+			SpanID: "s1", TraceID: "t1", Name: "llm.chat",
+			Kind: storage.SpanKindLLM, Status: storage.SpanStatusOK,
+			StartTime: now, EndTime: now.Add(time.Second),
+			Duration: time.Second, ProjectID: "proj-user", UserID: "real-user@example.com",
+			GenAI: &storage.GenAIAttributes{
+				Model: "gpt-4o", Provider: "openai", CostUSD: 0.10,
+			},
+		},
+		{
+			SpanID: "s2", TraceID: "t2", Name: "llm.chat",
+			Kind: storage.SpanKindLLM, Status: storage.SpanStatusOK,
+			StartTime: now.Add(time.Minute), EndTime: now.Add(time.Minute + time.Second),
+			Duration: time.Second, ProjectID: "proj-user", UserID: "", // no user
+			GenAI: &storage.GenAIAttributes{
+				Model: "gpt-4o", Provider: "openai", CostUSD: 99.99,
+			},
+		},
+	}
+	if err := s.IngestSpans(ctx, spans); err != nil {
+		t.Fatalf("ingest: %v", err)
+	}
+
+	leaders, err := s.GetUserLeaderboard(ctx, storage.UsageQuery{
+		ProjectID: "proj-user",
+		StartTime: now.Add(-time.Hour),
+		EndTime:   now.Add(time.Hour),
+	}, 10)
+	if err != nil {
+		t.Fatalf("user leaderboard: %v", err)
+	}
+	if len(leaders) != 1 {
+		t.Fatalf("got %d leaders, want 1 (empty user excluded)", len(leaders))
+	}
+	if leaders[0].UserID != "real-user@example.com" {
+		t.Errorf("user = %q, want real-user@example.com", leaders[0].UserID)
+	}
+}
+
+// ─── Leaderboard limit=1 boundary ────────────────────────────────────────────
+
+func TestGetTenantLeaderboard_LimitOne_SQLite(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(time.Microsecond)
+
+	// Insert 3 distinct tenants.
+	for i, tenant := range []string{"alpha", "beta", "gamma"} {
+		span := storage.Span{
+			SpanID: fmt.Sprintf("s-%d", i), TraceID: fmt.Sprintf("t-%d", i),
+			Name: "llm.chat", Kind: storage.SpanKindLLM, Status: storage.SpanStatusOK,
+			StartTime: now.Add(time.Duration(i) * time.Minute),
+			EndTime:   now.Add(time.Duration(i)*time.Minute + time.Second),
+			Duration:  time.Second, ProjectID: "proj-limit1", TenantID: tenant,
+			GenAI: &storage.GenAIAttributes{
+				Model: "gpt-4o", Provider: "openai",
+				CostUSD: float64(i+1) * 0.10,
+			},
+		}
+		if err := s.IngestSpans(ctx, []storage.Span{span}); err != nil {
+			t.Fatalf("ingest: %v", err)
+		}
+	}
+
+	// Limit=1 should return only the most expensive tenant.
+	tenants, err := s.GetTenantLeaderboard(ctx, storage.UsageQuery{
+		ProjectID: "proj-limit1",
+		StartTime: now.Add(-time.Hour),
+		EndTime:   now.Add(time.Hour),
+	}, 1)
+	if err != nil {
+		t.Fatalf("tenant leaderboard: %v", err)
+	}
+	if len(tenants) != 1 {
+		t.Fatalf("got %d tenants, want 1 (limit=1)", len(tenants))
+	}
+	// gamma has highest cost ($0.30)
+	if tenants[0].TenantID != "gamma" {
+		t.Errorf("tenant = %q, want gamma (highest cost)", tenants[0].TenantID)
+	}
+}
+
+// ─── GetUsageSummary: cost aggregation ───────────────────────────────────────
+
+func TestGetUsageSummary_CostAggregation_SQLite(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(time.Microsecond)
+
+	spans := []storage.Span{
+		{
+			SpanID: "s1", TraceID: "t1", Name: "llm.chat",
+			Kind: storage.SpanKindLLM, Status: storage.SpanStatusOK,
+			StartTime: now, EndTime: now.Add(time.Second),
+			Duration: time.Second, ProjectID: "proj-cost",
+			GenAI: &storage.GenAIAttributes{
+				Model: "gpt-4o", Provider: "openai",
+				InputTokens: 1000, OutputTokens: 500, TotalTokens: 1500,
+				CostUSD: 0.25,
+			},
+		},
+		{
+			SpanID: "s2", TraceID: "t2", Name: "llm.chat",
+			Kind: storage.SpanKindLLM, Status: storage.SpanStatusOK,
+			StartTime: now.Add(time.Minute), EndTime: now.Add(time.Minute + time.Second),
+			Duration: time.Second, ProjectID: "proj-cost",
+			GenAI: &storage.GenAIAttributes{
+				Model: "gemini-2.0", Provider: "google",
+				InputTokens: 2000, OutputTokens: 1000, TotalTokens: 3000,
+				CostUSD: 0.75,
+			},
+		},
+	}
+	if err := s.IngestSpans(ctx, spans); err != nil {
+		t.Fatalf("ingest: %v", err)
+	}
+
+	summary, err := s.GetUsageSummary(ctx, storage.UsageQuery{
+		ProjectID: "proj-cost",
+		StartTime: now.Add(-time.Hour),
+		EndTime:   now.Add(time.Hour),
+	})
+	if err != nil {
+		t.Fatalf("usage: %v", err)
+	}
+
+	// Total cost: $0.25 + $0.75 = $1.00
+	if summary.TotalCostUSD < 0.99 || summary.TotalCostUSD > 1.01 {
+		t.Errorf("TotalCostUSD = %f, want ~1.00", summary.TotalCostUSD)
+	}
+	if summary.TotalInputTokens != 3000 {
+		t.Errorf("TotalInputTokens = %d, want 3000", summary.TotalInputTokens)
+	}
+	if summary.TotalOutputTokens != 1500 {
+		t.Errorf("TotalOutputTokens = %d, want 1500", summary.TotalOutputTokens)
 	}
 }

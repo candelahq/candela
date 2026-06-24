@@ -36,7 +36,7 @@ func spanWithEnv(id, traceID, env string, cost float64, start time.Time) storage
 func TestQueryTraces_EnvironmentFilter_SQLite(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
-	now := time.Now().Truncate(time.Millisecond)
+	now := time.Now().UTC().Truncate(time.Millisecond)
 
 	spans := []storage.Span{
 		spanWithEnv("p1", "trace-prod", "production", 0.01, now.Add(-2*time.Second)),
@@ -67,7 +67,7 @@ func TestQueryTraces_EnvironmentFilter_SQLite(t *testing.T) {
 func TestQueryTraces_OrderByCost_SQLite(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
-	now := time.Now().Truncate(time.Millisecond)
+	now := time.Now().UTC().Truncate(time.Millisecond)
 
 	spans := []storage.Span{
 		spanWithEnv("c1", "trace-cheap", "test", 0.001, now.Add(-2*time.Second)),
@@ -99,7 +99,7 @@ func TestQueryTraces_OrderByCost_SQLite(t *testing.T) {
 func TestQueryTraces_DefaultSortIsDescTime_SQLite(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
-	now := time.Now().Truncate(time.Millisecond)
+	now := time.Now().UTC().Truncate(time.Millisecond)
 
 	spans := []storage.Span{
 		spanWithEnv("old", "trace-old", "test", 0.01, now.Add(-3*time.Second)),
@@ -130,7 +130,7 @@ func TestQueryTraces_DefaultSortIsDescTime_SQLite(t *testing.T) {
 func TestGetUserLeaderboard_SQLite(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
-	now := time.Now().Truncate(time.Millisecond)
+	now := time.Now().UTC().Truncate(time.Millisecond)
 
 	spans := []storage.Span{
 		spanWithEnv("l1", "trace-l1", "test", 0.10, now.Add(-3*time.Second)),
@@ -172,7 +172,7 @@ func TestGetUserLeaderboard_SQLite(t *testing.T) {
 func TestScanSpans_GenAI_InputOutputOnly_SQLite(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
-	now := time.Now().Truncate(time.Millisecond)
+	now := time.Now().UTC().Truncate(time.Millisecond)
 
 	span := storage.Span{
 		SpanID:    "io-only",

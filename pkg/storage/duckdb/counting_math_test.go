@@ -20,7 +20,7 @@ import (
 func TestUserLeaderboard_CallCount_CountsTraces(t *testing.T) {
 	store := newTestStore(t)
 	ctx := context.Background()
-	now := time.Now().Truncate(time.Microsecond)
+	now := time.Now().UTC().Truncate(time.Microsecond)
 
 	// One trace with 3 spans: root → llm → tool
 	spans := []storage.Span{
@@ -77,7 +77,7 @@ func TestUserLeaderboard_CallCount_CountsTraces(t *testing.T) {
 func TestTenantLeaderboard_CallCount_MultipleTracesMultipleSpans(t *testing.T) {
 	store := newTestStore(t)
 	ctx := context.Background()
-	now := time.Now().Truncate(time.Microsecond)
+	now := time.Now().UTC().Truncate(time.Microsecond)
 
 	spans := []storage.Span{
 		// Tenant A: 2 traces, each with 2 spans = 4 total spans, but 2 distinct traces.
@@ -156,7 +156,7 @@ func TestTenantLeaderboard_CallCount_MultipleTracesMultipleSpans(t *testing.T) {
 func TestJobLeaderboard_CallCount_CountsTraces(t *testing.T) {
 	store := newTestStore(t)
 	ctx := context.Background()
-	now := time.Now().Truncate(time.Microsecond)
+	now := time.Now().UTC().Truncate(time.Microsecond)
 
 	spans := []storage.Span{
 		// Job "eval-run-1": 1 trace with 3 spans.
@@ -210,7 +210,7 @@ func TestJobLeaderboard_CallCount_CountsTraces(t *testing.T) {
 func TestGetUsageSummary_ErrorRate_TraceLevelNotSpanLevel(t *testing.T) {
 	store := newTestStore(t)
 	ctx := context.Background()
-	now := time.Now().Truncate(time.Microsecond)
+	now := time.Now().UTC().Truncate(time.Microsecond)
 
 	spans := []storage.Span{
 		// Trace 1: root OK, child ERROR → trace is errored (1 errored trace)
@@ -268,7 +268,7 @@ func TestGetUsageSummary_ErrorRate_TraceLevelNotSpanLevel(t *testing.T) {
 func TestGetUsageSummary_ErrorRate_MultipleErrorsInSameTrace(t *testing.T) {
 	store := newTestStore(t)
 	ctx := context.Background()
-	now := time.Now().Truncate(time.Microsecond)
+	now := time.Now().UTC().Truncate(time.Microsecond)
 
 	spans := []storage.Span{
 		// Trace 1: 3 spans, 2 errored → still 1 errored TRACE
@@ -316,7 +316,7 @@ func TestGetUsageSummary_ErrorRate_MultipleErrorsInSameTrace(t *testing.T) {
 func TestGetUsageSummary_ErrorRate_ZeroWhenNoSpans(t *testing.T) {
 	store := newTestStore(t)
 	ctx := context.Background()
-	now := time.Now().Truncate(time.Microsecond)
+	now := time.Now().UTC().Truncate(time.Microsecond)
 
 	summary, err := store.GetUsageSummary(ctx, storage.UsageQuery{
 		ProjectID: "proj-test",
@@ -339,7 +339,7 @@ func TestGetUsageSummary_ErrorRate_ZeroWhenNoSpans(t *testing.T) {
 func TestGetUsageSummary_AvgLatency_RootSpansOnly(t *testing.T) {
 	store := newTestStore(t)
 	ctx := context.Background()
-	now := time.Now().Truncate(time.Microsecond)
+	now := time.Now().UTC().Truncate(time.Microsecond)
 
 	spans := []storage.Span{
 		// Root span: 2 seconds (this IS the request latency)
@@ -392,7 +392,7 @@ func TestGetUsageSummary_AvgLatency_RootSpansOnly(t *testing.T) {
 func TestUserLeaderboard_AvgLatency_RootSpansOnly(t *testing.T) {
 	store := newTestStore(t)
 	ctx := context.Background()
-	now := time.Now().Truncate(time.Microsecond)
+	now := time.Now().UTC().Truncate(time.Microsecond)
 
 	spans := []storage.Span{
 		// Root span: 3 seconds
@@ -443,7 +443,7 @@ func TestUserLeaderboard_AvgLatency_RootSpansOnly(t *testing.T) {
 func TestGetUsageSummary_AvgLatency_NoRootSpans_FallsBackToLLMSpans(t *testing.T) {
 	store := newTestStore(t)
 	ctx := context.Background()
-	now := time.Now().Truncate(time.Microsecond)
+	now := time.Now().UTC().Truncate(time.Microsecond)
 
 	spans := []storage.Span{
 		{
@@ -481,7 +481,7 @@ func TestGetUsageSummary_AvgLatency_NoRootSpans_FallsBackToLLMSpans(t *testing.T
 func TestQueryTraces_PrimaryModel_ByHighestCost(t *testing.T) {
 	store := newTestStore(t)
 	ctx := context.Background()
-	now := time.Now().Truncate(time.Microsecond)
+	now := time.Now().UTC().Truncate(time.Microsecond)
 
 	spans := []storage.Span{
 		// Root span
@@ -552,7 +552,7 @@ func TestQueryTraces_PrimaryModel_ByHighestCost(t *testing.T) {
 func TestQueryTraces_PrimaryProvider_MatchesModel(t *testing.T) {
 	store := newTestStore(t)
 	ctx := context.Background()
-	now := time.Now().Truncate(time.Microsecond)
+	now := time.Now().UTC().Truncate(time.Microsecond)
 
 	spans := []storage.Span{
 		{
@@ -613,7 +613,7 @@ func TestQueryTraces_PrimaryProvider_MatchesModel(t *testing.T) {
 func TestQueryTraces_Status_DetectsChildErrors(t *testing.T) {
 	store := newTestStore(t)
 	ctx := context.Background()
-	now := time.Now().Truncate(time.Microsecond)
+	now := time.Now().UTC().Truncate(time.Microsecond)
 
 	spans := []storage.Span{
 		// Root: OK (status=1)

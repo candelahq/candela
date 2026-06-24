@@ -103,7 +103,7 @@ export default function AdminUsersPage() {
   const statusFilterRef = useRef(statusFilter);
   statusFilterRef.current = statusFilter;
 
-  const fetchUsers = useCallback(async (pageToken = "") => {
+  const fetchUsers = useCallback(async (pageToken = ""): Promise<boolean> => {
     dispatch({ type: "loading" });
     try {
       const resp = await userClient.listUsers({
@@ -116,8 +116,10 @@ export default function AdminUsersPage() {
         total: resp.pagination?.totalCount ?? 0,
         nextPageToken: resp.pagination?.nextPageToken ?? "",
       });
+      return true;
     } catch (err: unknown) {
       dispatch({ type: "error", message: err instanceof Error ? err.message : "Failed to load users" });
+      return false;
     }
   }, []);
 
@@ -127,19 +129,23 @@ export default function AdminUsersPage() {
     fetchUsers("");
   }, [fetchUsers, statusFilter]);
 
-  const handleNextPage = () => {
+  const handleNextPage = async () => {
     if (!state.nextPageToken) return;
-    setPageTokenHistory((prev) => [...prev, currentPageToken]);
-    setCurrentPageToken(state.nextPageToken);
-    fetchUsers(state.nextPageToken);
+    const success = await fetchUsers(state.nextPageToken);
+    if (success) {
+      setPageTokenHistory((prev) => [...prev, currentPageToken]);
+      setCurrentPageToken(state.nextPageToken);
+    }
   };
 
-  const handlePrevPage = () => {
+  const handlePrevPage = async () => {
     const prev = [...pageTokenHistory];
     const prevToken = prev.pop() ?? "";
-    setPageTokenHistory(prev);
-    setCurrentPageToken(prevToken);
-    fetchUsers(prevToken);
+    const success = await fetchUsers(prevToken);
+    if (success) {
+      setPageTokenHistory(prev);
+      setCurrentPageToken(prevToken);
+    }
   };
 
   const currentPage = pageTokenHistory.length + 1;

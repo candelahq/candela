@@ -102,5 +102,5 @@ jobs:
           platforms: ${{ inputs.platforms || '' }}
           tags: ${{ steps.version.outputs.tags || steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          # Cache disabled: GHA cache caused stale binaries to ship without
+          # security fixes (v0.7.1 incident). Build time (~2 min) is acceptable.

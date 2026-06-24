@@ -69,6 +69,118 @@ func TestNewEmpty(t *testing.T) {
 	})
 }
 
+func TestLoadDefaults(t *testing.T) {
+	t.Run("recovers pricing on empty calculator", func(t *testing.T) {
+		calc := NewEmpty()
+		// Verify initially empty.
+		if calc.HasPricing("openai", "gpt-4o") {
+			t.Fatal("expected no pricing before LoadDefaults")
+		}
+		cost := calc.Calculate("openai", "gpt-4o", 1_000_000, 1_000_000)
+		if cost != 0 {
+			t.Fatalf("expected zero cost before LoadDefaults, got %f", cost)
+		}
+
+		// Load embedded pricing.
+		calc.LoadDefaults()
+
+		// Verify pricing is now available.
+		if !calc.HasPricing("openai", "gpt-4o") {
+			t.Error("expected pricing for gpt-4o after LoadDefaults")
+		}
+		cost = calc.Calculate("openai", "gpt-4o", 1_000_000, 1_000_000)
+		if cost <= 0 {
+			t.Errorf("expected non-zero cost after LoadDefaults, got %f", cost)
+		}
+	})
+
+	t.Run("preserves config overrides", func(t *testing.T) {
+		calc := NewEmpty()
+		// Apply a config override before LoadDefaults.
+		calc.LoadFromConfig(PricingConfig{
+			Models: []ModelPricing{{
+				Provider: "openai", Model: "gpt-4o",
+				InputPerMillion: 999.0, OutputPerMillion: 999.0,
+			}},
+		})
+
+		calc.LoadDefaults()
+
+		// The config override should take priority over embedded defaults.
+		p, ok := calc.Resolve("openai", "gpt-4o")
+		if !ok {
+			t.Fatal("expected gpt-4o to resolve")
+		}
+		if p.InputPerMillion != 999.0 {
+			t.Errorf("config override should take priority: got input rate %f, want 999.0", p.InputPerMillion)
+		}
+	})
+
+	t.Run("idempotent on New calculator", func(t *testing.T) {
+		calc := New()
+		defaultsBefore := calc.Defaults()
+
+		calc.LoadDefaults()
+
+		defaultsAfter := calc.Defaults()
+		if len(defaultsBefore) != len(defaultsAfter) {
+			t.Errorf("LoadDefaults on New() changed model count: %d → %d",
+				len(defaultsBefore), len(defaultsAfter))
+		}
+	})
+}
+
+func TestNewVsNewEmpty_ConfigBackendContract(t *testing.T) {
+	// This test verifies the core contract: config backend users must use
+	// New() (not NewEmpty()) to get embedded pricing. This is the exact
+	// scenario that broke when NewEmpty() was used unconditionally.
+
+	t.Run("New provides pricing for config backend", func(t *testing.T) {
+		calc := New()
+		// Config backend relies on embedded pricing — should work.
+		cost := calc.Calculate("openai", "gpt-4o", 1_000_000, 1_000_000)
+		if cost <= 0 {
+			t.Errorf("New() should have embedded pricing: got cost %f, want > 0", cost)
+		}
+		models := calc.Models()
+		if len(models) == 0 {
+			t.Error("New() should have models loaded")
+		}
+	})
+
+	t.Run("NewEmpty has no pricing without explicit loading", func(t *testing.T) {
+		calc := NewEmpty()
+		cost := calc.Calculate("openai", "gpt-4o", 1_000_000, 1_000_000)
+		if cost != 0 {
+			t.Errorf("NewEmpty() should have zero pricing: got cost %f, want 0", cost)
+		}
+		models := calc.Models()
+		if len(models) != 0 {
+			t.Errorf("NewEmpty() should have 0 models, got %d", len(models))
+		}
+	})
+
+	t.Run("NewEmpty with LoadDefaults matches New", func(t *testing.T) {
+		calcNew := New()
+		calcEmpty := NewEmpty()
+		calcEmpty.LoadDefaults()
+
+		newModels := calcNew.Models()
+		emptyModels := calcEmpty.Models()
+		if len(newModels) != len(emptyModels) {
+			t.Errorf("model count mismatch: New()=%d, NewEmpty()+LoadDefaults()=%d",
+				len(newModels), len(emptyModels))
+		}
+
+		// Spot-check a specific model cost.
+		costNew := calcNew.Calculate("openai", "gpt-4o", 1_000_000, 1_000_000)
+		costEmpty := calcEmpty.Calculate("openai", "gpt-4o", 1_000_000, 1_000_000)
+		if math.Abs(costNew-costEmpty) > 0.001 {
+			t.Errorf("costs differ: New()=%f, NewEmpty()+LoadDefaults()=%f", costNew, costEmpty)
+		}
+	})
+}
+
 func TestCalculate(t *testing.T) {
 	calc := New()
 

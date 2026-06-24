@@ -139,6 +139,17 @@ func NewEmpty() *Calculator {
 	return newBase()
 }
 
+// LoadDefaults loads embedded pricing from pricing.yaml into the calculator.
+// This is useful when a database-backed catalog is unavailable and the caller
+// needs to fall back to built-in list prices. Safe to call on a Calculator
+// created with NewEmpty(). Existing config overrides are preserved.
+func (c *Calculator) LoadDefaults() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.loadDefaults()
+	c.rebuildFallback()
+}
+
 // newBase creates a Calculator with initialized maps, provider aliases, and
 // default cache discounts, but no model pricing loaded.
 func newBase() *Calculator {

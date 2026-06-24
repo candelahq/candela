@@ -6,6 +6,69 @@ import (
 	"testing"
 )
 
+func TestNewEmpty(t *testing.T) {
+	calc := NewEmpty()
+
+	t.Run("no models loaded", func(t *testing.T) {
+		models := calc.Models()
+		if len(models) != 0 {
+			t.Errorf("NewEmpty().Models() returned %d models, want 0", len(models))
+		}
+	})
+
+	t.Run("defaults empty", func(t *testing.T) {
+		defaults := calc.Defaults()
+		if len(defaults) != 0 {
+			t.Errorf("NewEmpty().Defaults() returned %d defaults, want 0", len(defaults))
+		}
+	})
+
+	t.Run("calculate returns zero for any model", func(t *testing.T) {
+		cost := calc.Calculate("openai", "gpt-4o", 1_000_000, 1_000_000)
+		if cost != 0 {
+			t.Errorf("NewEmpty().Calculate(gpt-4o) = %f, want 0", cost)
+		}
+	})
+
+	t.Run("local still free", func(t *testing.T) {
+		cost := calc.Calculate("local", "llama3:8b", 1_000_000, 1_000_000)
+		if cost != 0 {
+			t.Errorf("NewEmpty().Calculate(local) = %f, want 0", cost)
+		}
+	})
+
+	t.Run("cache discounts initialized", func(t *testing.T) {
+		_, ok := calc.GetCacheDiscount("openai")
+		if !ok {
+			t.Error("NewEmpty() should have default cache discounts for openai")
+		}
+		_, ok = calc.GetCacheDiscount("anthropic")
+		if !ok {
+			t.Error("NewEmpty() should have default cache discounts for anthropic")
+		}
+	})
+
+	t.Run("SetPricing works", func(t *testing.T) {
+		calc.SetPricing(ModelPricing{
+			Provider:         "custom",
+			Model:            "test-model",
+			InputPerMillion:  2.0,
+			OutputPerMillion: 4.0,
+		})
+		cost := calc.Calculate("custom", "test-model", 1_000_000, 1_000_000)
+		want := 6.0
+		if math.Abs(cost-want) > 0.001 {
+			t.Errorf("after SetPricing, Calculate = %f, want %f", cost, want)
+		}
+	})
+
+	t.Run("HasPricing false for unloaded model", func(t *testing.T) {
+		if calc.HasPricing("openai", "gpt-4o") {
+			t.Error("NewEmpty() should not have pricing for gpt-4o")
+		}
+	})
+}
+
 func TestCalculate(t *testing.T) {
 	calc := New()
 

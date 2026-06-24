@@ -228,8 +228,9 @@ func main() {
 	defer closeFn()
 	slog.Info("storage initialized", "backend", cfg.Storage.Backend, "sinks", len(writers))
 
-	// Initialize cost calculator with built-in defaults + config overrides.
-	calc := costcalc.New()
+	// Initialize cost calculator with no built-in defaults — pricing comes
+	// from the catalog database at runtime (or config overrides below).
+	calc := costcalc.NewEmpty()
 	if cfg.Pricing.DiscountPercent > 0 || len(cfg.Pricing.Models) > 0 {
 		calc.LoadFromConfig(cfg.Pricing)
 	}

@@ -49,45 +49,80 @@ func NewManager(rt Runtime, cfg ManagerConfig) *Manager {
 // Can be called after Stop to restart the Manager.
 func (m *Manager) Start(ctx context.Context) error {
 	// Cancel any previous health loop (enables restart after Stop).
-	if m.cancel != nil {
-		m.cancel()
-	}
+	m.cancelHealthLoop()
 
 	if m.autoStart {
-		slog.Info("starting runtime", "backend", m.rt.Name())
-		if err := m.rt.Start(ctx); err != nil {
+		if err := m.startRuntime(ctx); err != nil {
 			return err
 		}
-		m.mu.Lock()
-		m.startedAt = time.Now()
-		m.mu.Unlock()
 	}
 
-	// Start health check loop.
-	hctx, cancel := context.WithCancel(ctx)
-	m.cancel = cancel
-	go m.healthLoop(hctx)
+	hctx := m.startHealthLoop(ctx)
+	m.startAutoPull(hctx)
 
-	// Auto-pull configured models in the background.
+	return nil
+}
+
+// StartRuntime explicitly starts the runtime and begins health monitoring.
+// The runtime startup can use a short-lived request context, while monitoring
+// should use the application's long-lived context so UI RPC completion does not
+// cancel health polling.
+func (m *Manager) StartRuntime(startCtx, monitorCtx context.Context) error {
+	m.cancelHealthLoop()
+	if err := m.startRuntime(startCtx); err != nil {
+		return err
+	}
+	hctx := m.startHealthLoop(monitorCtx)
+	m.startAutoPull(hctx)
+	return nil
+}
+
+func (m *Manager) startRuntime(ctx context.Context) error {
+	slog.Info("starting runtime", "backend", m.rt.Name())
+	if err := m.rt.Start(ctx); err != nil {
+		return err
+	}
+	m.mu.Lock()
+	m.startedAt = time.Now()
+	m.mu.Unlock()
+	return nil
+}
+
+func (m *Manager) startHealthLoop(ctx context.Context) context.Context {
+	hctx, cancel := context.WithCancel(ctx)
+	m.mu.Lock()
+	m.cancel = cancel
+	m.mu.Unlock()
+	go m.healthLoop(hctx)
+	return hctx
+}
+
+func (m *Manager) cancelHealthLoop() {
+	m.mu.Lock()
+	cancel := m.cancel
+	m.cancel = nil
+	m.mu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
+}
+
+func (m *Manager) startAutoPull(ctx context.Context) {
 	if m.autoPull && len(m.models) > 0 {
 		go func() {
 			for _, model := range m.models {
 				slog.Info("pulling model", "model", model, "backend", m.rt.Name())
-				if err := m.rt.PullModel(hctx, model, nil); err != nil {
+				if err := m.rt.PullModel(ctx, model, nil); err != nil {
 					slog.Warn("failed to pull model", "model", model, "error", err)
 				}
 			}
 		}()
 	}
-
-	return nil
 }
 
 // Stop stops health monitoring and shuts down the runtime.
 func (m *Manager) Stop(ctx context.Context) error {
-	if m.cancel != nil {
-		m.cancel()
-	}
+	m.cancelHealthLoop()
 	err := m.rt.Stop(ctx)
 	// Update cached health immediately so GetHealth reflects the stopped state.
 	m.mu.Lock()

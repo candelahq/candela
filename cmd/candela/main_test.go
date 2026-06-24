@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"syscall"
 	"testing"
+	"time"
 )
 
 func TestLoadConfig_ValidFile(t *testing.T) {
@@ -300,9 +301,7 @@ func TestStopProcess_LiveProcess(t *testing.T) {
 	dir := t.TempDir()
 	pidPath := filepath.Join(dir, "candela.pid")
 
-	// Start a subprocess that responds to SIGTERM.
-	// Use bash with trap so SIGTERM causes a clean exit.
-	cmd := exec.Command("bash", "-c", `trap 'exit 0' TERM; while true; do sleep 1; done`)
+	cmd := helperProcessCommand("wait")
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("failed to start process: %v", err)
 	}
@@ -334,8 +333,7 @@ func TestStopProcess_LiveProcess(t *testing.T) {
 	<-waitDone
 
 	// Process should be dead now.
-	proc, _ := os.FindProcess(pid)
-	if proc.Signal(syscall.Signal(0)) == nil {
+	if processRunning(pid) {
 		t.Error("expected process to be dead after stopProcess")
 	}
 
@@ -351,7 +349,7 @@ func TestStopProcess_VerifiesExitBeforeReturn(t *testing.T) {
 
 	// Start a short-lived process that will exit on its own before
 	// the SIGTERM wait loop completes, testing the "dies mid-wait" path.
-	cmd := exec.Command("sleep", "0.1")
+	cmd := helperProcessCommand("short")
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("failed to start process: %v", err)
 	}
@@ -373,5 +371,30 @@ func TestStopProcess_VerifiesExitBeforeReturn(t *testing.T) {
 	// the race condition (cmdStart checks for existing PID files).
 	if _, err := os.Stat(pidPath); err == nil {
 		t.Error("PID file must be removed before stopProcess returns")
+	}
+}
+
+func helperProcessCommand(mode string) *exec.Cmd {
+	cmd := exec.Command(os.Args[0], "-test.run=TestHelperProcess", "--", mode)
+	cmd.Env = append(os.Environ(), "CANDELA_HELPER_PROCESS=1")
+	return cmd
+}
+
+func TestHelperProcess(t *testing.T) {
+	if os.Getenv("CANDELA_HELPER_PROCESS") != "1" {
+		return
+	}
+	if len(os.Args) == 0 {
+		os.Exit(2)
+	}
+	mode := os.Args[len(os.Args)-1]
+	switch mode {
+	case "wait":
+		select {}
+	case "short":
+		time.Sleep(100 * time.Millisecond)
+		os.Exit(0)
+	default:
+		os.Exit(2)
 	}
 }

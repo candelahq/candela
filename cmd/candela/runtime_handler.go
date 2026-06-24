@@ -63,14 +63,12 @@ func (h *runtimeHandler) StartRuntime(
 	if h.mgr == nil {
 		return nil, connect.NewError(connect.CodeFailedPrecondition, errNoRuntime)
 	}
-	// Always start the runtime when explicitly requested via RPC,
-	// regardless of the auto_start config flag.
-	if err := h.mgr.Runtime().Start(ctx); err != nil {
-		return nil, connect.NewError(connect.CodeInternal, err)
+	monitorCtx := h.appCtx
+	if monitorCtx == nil {
+		monitorCtx = context.Background()
 	}
-	// Re-start the health loop so it picks up the new state.
-	if err := h.mgr.Start(ctx); err != nil {
-		slog.Warn("failed to restart health loop", "error", err)
+	if err := h.mgr.StartRuntime(ctx, monitorCtx); err != nil {
+		return nil, connect.NewError(connect.CodeInternal, err)
 	}
 	return connect.NewResponse(&v1.StartRuntimeResponse{
 		Status: healthToProto(h.mgr.Health(), h.mgr.Runtime().Name()),

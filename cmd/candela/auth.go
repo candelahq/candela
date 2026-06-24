@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"strings"
-	"syscall"
 
 	"github.com/candelahq/candela/pkg/cloudauth"
 )
@@ -225,12 +224,7 @@ func isProxyRunning() bool {
 	if _, err := fmt.Sscanf(strings.TrimSpace(string(data)), "%d", &pid); err != nil || pid == 0 {
 		return false
 	}
-	process, err := os.FindProcess(pid)
-	if err != nil {
-		return false
-	}
-	// Signal 0 checks if process exists without sending a signal.
-	return process.Signal(syscall.Signal(0)) == nil
+	return processRunning(pid)
 }
 
 // restartProxy stops the running proxy and starts it again.

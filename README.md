@@ -153,7 +153,29 @@ brew install --cask candelahq/tap/candela-desktop
 
 > **💡 Tip**: `candela start` launches the proxy on `:8181` (proxy + UI at `/_local/`) + `:1234` (LM-compatible endpoint). Point your IDE or app at it immediately.
 
-### Option B: From Source
+### Option B: Windows ZIP
+
+Download the ZIP archive that matches your Windows CPU architecture from the
+GitHub Release and extract it:
+
+- `candela_<version>_Windows.zip` for Intel/AMD x64 PCs.
+- `candela_<version>_Windows_arm64.zip` for Windows on Arm PCs.
+
+Add the extracted folder to `PATH` if you want `candela` available from any
+terminal, or run `candela.exe` from the extracted directory:
+
+```powershell
+Expand-Archive .\candela_0.1.0_Windows.zip -DestinationPath .\candela
+cd .\candela
+.\candela.exe start
+Start-Process "http://127.0.0.1:8181/_local/"
+```
+
+The Windows desktop experience uses the same embedded browser UI as macOS and
+Linux. This branch does not install a desktop shell, installer, or launcher
+integration; that work is deferred to a desktop-specific branch.
+
+### Option C: From Source
 
 Ideal for contributors or custom builds. Uses **DuckDB** by default.
 

@@ -124,6 +124,69 @@ func (m *rpcMockRuntime) DeleteModel(_ context.Context, modelID string) error {
 	return nil
 }
 
+type contextAwareRuntime struct {
+	mu          sync.Mutex
+	healthy     bool
+	healthGate  chan struct{}
+	startCalled int
+}
+
+func (m *contextAwareRuntime) Name() string     { return "mock" }
+func (m *contextAwareRuntime) Endpoint() string { return "http://127.0.0.1:9999/v1" }
+
+func (m *contextAwareRuntime) Start(_ context.Context) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.healthy = true
+	m.startCalled++
+	return nil
+}
+
+func (m *contextAwareRuntime) Stop(_ context.Context) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.healthy = false
+	return nil
+}
+
+func (m *contextAwareRuntime) Health(ctx context.Context) (*runtime.Health, error) {
+	if m.healthGate != nil {
+		<-m.healthGate
+	}
+	m.mu.Lock()
+	healthy := m.healthy
+	m.mu.Unlock()
+	status := runtime.StatusStopped
+	if healthy && ctx.Err() == nil {
+		status = runtime.StatusRunning
+	}
+	return &runtime.Health{
+		Status:    status,
+		Endpoint:  "http://127.0.0.1:9999/v1",
+		CheckedAt: time.Now(),
+	}, nil
+}
+
+func (m *contextAwareRuntime) ListModels(_ context.Context) ([]runtime.Model, error) {
+	return nil, nil
+}
+
+func (m *contextAwareRuntime) PullModel(_ context.Context, _ string, _ chan<- runtime.PullProgress) error {
+	return nil
+}
+
+func (m *contextAwareRuntime) LoadModel(_ context.Context, _ string) error {
+	return nil
+}
+
+func (m *contextAwareRuntime) UnloadModel(_ context.Context, _ string) error {
+	return nil
+}
+
+func (m *contextAwareRuntime) DeleteModel(_ context.Context, _ string) error {
+	return nil
+}
+
 func setupRPCHandler(t *testing.T) (candelav1connect.RuntimeServiceClient, *rpcMockRuntime) {
 	t.Helper()
 
@@ -626,6 +689,60 @@ func TestRPC_StartRuntime_AlwaysStartsRegardlessOfAutoStart(t *testing.T) {
 	mock.mu.Unlock()
 	if !healthy {
 		t.Error("mock should be healthy after StartRuntime RPC")
+	}
+}
+
+func TestRPC_StartRuntime_HealthLoopOutlivesRequestContext(t *testing.T) {
+	mock := &contextAwareRuntime{
+		healthGate: make(chan struct{}),
+	}
+	mgr := runtime.NewManager(mock, runtime.ManagerConfig{
+		AutoStart:   false,
+		HealthCheck: time.Hour,
+	})
+	appCtx, appCancel := context.WithCancel(context.Background())
+	defer appCancel()
+	h := newRuntimeHandler(mgr, nil, appCtx)
+
+	reqCtx, reqCancel := context.WithCancel(context.Background())
+	_, err := h.StartRuntime(reqCtx, connect.NewRequest(&v1.StartRuntimeRequest{}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	reqCancel()
+	close(mock.healthGate)
+
+	for i := 0; i < 10; i++ {
+		if mgr.Health().Status == runtime.StatusRunning {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	if got := mgr.Health().Status; got != runtime.StatusRunning {
+		t.Fatalf("status after request context cancellation = %q, want running", got)
+	}
+}
+
+func TestRPC_StartRuntime_DoesNotDoubleStartWhenAutoStartEnabled(t *testing.T) {
+	mock := &rpcMockRuntime{healthy: false}
+	mgr := runtime.NewManager(mock, runtime.ManagerConfig{
+		AutoStart:   true,
+		HealthCheck: 10 * time.Second,
+	})
+	h := newRuntimeHandler(mgr, nil, context.Background())
+
+	_, err := h.StartRuntime(context.Background(),
+		connect.NewRequest(&v1.StartRuntimeRequest{}))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	mock.mu.Lock()
+	startCount := mock.startCalled
+	mock.mu.Unlock()
+	if startCount != 1 {
+		t.Fatalf("startCalled = %d, want 1", startCount)
 	}
 }
 

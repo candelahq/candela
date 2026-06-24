@@ -57,7 +57,7 @@ proxy:
   #   Claude Code (Bedrock):   ANTHROPIC_BASE_URL = http://localhost:8181/proxy/anthropic-bedrock
   #
   # Local models (Ollama/vLLM/LM Studio) are handled by candela-local.
-  # See ~/.candela.yaml for local runtime configuration.
+  # See ~/.config/candela/config.yaml for local runtime configuration.
   providers:
     - openai
     - google

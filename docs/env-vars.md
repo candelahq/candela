@@ -21,7 +21,7 @@ These are used by the container entrypoint (`deploy/entrypoint.sh`) to generate 
 |----------|---------|-------------|
 | `CANDELA_PROXY_ENABLED` | `false` | Enable the LLM API proxy |
 | `CANDELA_VERTEX_PROJECT` | _(empty)_ | GCP project for Vertex AI (required for Anthropic proxy) |
-| `CANDELA_VERTEX_REGION` | `us-east5` | Vertex AI region (must have Claude access) |
+| `CANDELA_VERTEX_REGION` | `us-east5` | Vertex AI region override (must have Claude access). Default: `us-central1` for sidecar, `us-east5` for server. |
 
 
 ### Authentication
@@ -43,6 +43,8 @@ These are used by the container entrypoint (`deploy/entrypoint.sh`) to generate 
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `CANDELA_CONFIG` | `config.yaml` | Path to the config file. In containers, set to `/etc/candela/config.yaml` by the entrypoint. |
+| `CANDELA_CATALOG_BACKEND` | `config` | Catalog backend: `config` (built-in defaults) or `firestore` (dynamic model management) |
+| `CANDELA_BUDGET_TIMEZONE` | _(empty / UTC)_ | Budget period timezone (IANA name, e.g. `America/New_York`). Controls when daily/weekly/monthly budgets roll over. |
 
 ---
 

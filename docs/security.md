@@ -297,6 +297,16 @@ See [docs/user-management.md](user-management.md) for the full validation rule r
 | HTTPS in production | ⚠️ | Handled by Cloud Run / load balancer |
 | Audit logging for admin actions | ✅ | Firestore `audit_log` collection |
 
+### v0.7.1 Security Hardening Notes
+
+The following issues were identified and resolved in the v0.7.1 security audit:
+
+| Issue | Severity | Description | Fix |
+|-------|----------|-------------|-----|
+| `GetJobLeaderboard` missing authorization | **HIGH** | The `GetJobLeaderboard` RPC was not included in the admin guard interceptor's ACL, allowing any authenticated user to query the leaderboard for all users. | Added to admin-only RPC list in `AdminInterceptor`. |
+| `UpdateUser` role escalation bypass | **MEDIUM-HIGH** | A developer-role user could call `UpdateUser` on their own record with `role: ADMIN` to escalate privileges. The admin guard only checked if the caller was admin for *other* users, not for self-updates. | Self-updates now reject `role` field changes; only admins can modify roles. |
+| Catalog `AdminEditable` UI leak | **MEDIUM** | The model catalog API returned `admin_editable: true/false` metadata to all users, leaking which fields are admin-configurable. While not directly exploitable, it reveals internal authorization boundaries. | `admin_editable` field is now stripped from responses for non-admin callers. |
+
 ---
 
 ## Implementation Files

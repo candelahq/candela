@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect, useCallback } from "react";
 import { create } from "@bufbuild/protobuf";
 import { useModels, type ModelSortKey } from "@/hooks/useModels";
 import { useCatalog } from "@/hooks/useCatalog";
@@ -126,8 +126,8 @@ interface AddModelForm {
   modelId: string;
   provider: string;
   displayName: string;
-  inputPerMillion: number;
-  outputPerMillion: number;
+  inputPerMillion: number | "";
+  outputPerMillion: number | "";
   providerModelId: string;
   region: string;
   category: string;
@@ -136,10 +136,10 @@ interface AddModelForm {
 
 const EMPTY_FORM: AddModelForm = {
   modelId: "",
-  provider: "anthropic",
+  provider: "",
   displayName: "",
-  inputPerMillion: 0,
-  outputPerMillion: 0,
+  inputPerMillion: "",
+  outputPerMillion: "",
   providerModelId: "",
   region: "",
   category: "",
@@ -181,16 +181,36 @@ function CatalogTab() {
     setEnabledOverrides((prev) => ({ ...prev, [key]: !currentEnabled }));
   };
 
+  const handleCloseModal = useCallback(() => {
+    setShowAddModal(false);
+    setAddForm(EMPTY_FORM);
+    setCreateError(null);
+    clearErrors();
+  }, [clearErrors]);
+
+  // Close modal on Escape key
+  useEffect(() => {
+    if (!showAddModal) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") handleCloseModal();
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [showAddModal, handleCloseModal]);
+
   const handleAddModel = async (e: React.FormEvent) => {
     e.preventDefault();
     setCreateError(null);
+
+    const inputPrice = addForm.inputPerMillion === "" ? 0 : addForm.inputPerMillion;
+    const outputPrice = addForm.outputPerMillion === "" ? 0 : addForm.outputPerMillion;
 
     const valid = await validate({
       modelId: addForm.modelId,
       provider: addForm.provider,
       displayName: addForm.displayName,
-      inputPerMillion: addForm.inputPerMillion,
-      outputPerMillion: addForm.outputPerMillion,
+      inputPerMillion: inputPrice,
+      outputPerMillion: outputPrice,
       enabled: addForm.enabled,
       category: addForm.category,
       providerModelId: addForm.providerModelId,
@@ -205,17 +225,15 @@ function CatalogTab() {
           modelId: addForm.modelId,
           provider: addForm.provider,
           displayName: addForm.displayName,
-          inputPerMillion: addForm.inputPerMillion,
-          outputPerMillion: addForm.outputPerMillion,
+          inputPerMillion: inputPrice,
+          outputPerMillion: outputPrice,
           enabled: addForm.enabled,
           category: addForm.category,
           providerModelId: addForm.providerModelId,
           region: addForm.region,
         }),
       });
-      setShowAddModal(false);
-      setAddForm(EMPTY_FORM);
-      clearErrors();
+      handleCloseModal();
       refresh();
     } catch (err: unknown) {
       setCreateError(err instanceof Error ? err.message : "Failed to add model");
@@ -422,11 +440,11 @@ function CatalogTab() {
 
       {/* Add Model Modal */}
       {showAddModal && (
-        <div className="modal-overlay" onClick={() => setShowAddModal(false)}>
+        <div className="modal-overlay" onClick={handleCloseModal} role="dialog" aria-modal="true" aria-label="Add Model">
           <div className="modal" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
               <h3>Add Model</h3>
-              <button className="modal-close" onClick={() => setShowAddModal(false)}>×</button>
+              <button className="modal-close" onClick={handleCloseModal} aria-label="Close dialog">×</button>
             </div>
             <form onSubmit={handleAddModel} className="modal-body">
               <div className="form-group">
@@ -444,17 +462,22 @@ function CatalogTab() {
               </div>
               <div className="form-group">
                 <label htmlFor="add-provider">Provider *</label>
-                <select
+                <input
                   id="add-provider"
+                  type="text"
                   required
+                  list="provider-options"
                   value={addForm.provider}
                   onChange={(e) => setAddForm({ ...addForm, provider: e.target.value })}
+                  placeholder="anthropic"
                   className="form-input"
-                >
+                  autoComplete="off"
+                />
+                <datalist id="provider-options">
                   {PROVIDERS.map((p) => (
-                    <option key={p} value={p}>{p}</option>
+                    <option key={p} value={p} />
                   ))}
-                </select>
+                </datalist>
                 {getError("provider") && <div className="form-field-error">{getError("provider")}</div>}
               </div>
               <div className="form-group">
@@ -477,8 +500,8 @@ function CatalogTab() {
                     required
                     min="0"
                     step="0.001"
-                    value={addForm.inputPerMillion || ""}
-                    onChange={(e) => setAddForm({ ...addForm, inputPerMillion: Number(e.target.value) })}
+                    value={addForm.inputPerMillion}
+                    onChange={(e) => setAddForm({ ...addForm, inputPerMillion: e.target.value === "" ? "" : Number(e.target.value) })}
                     placeholder="3.000"
                     className="form-input"
                   />
@@ -492,8 +515,8 @@ function CatalogTab() {
                     required
                     min="0"
                     step="0.001"
-                    value={addForm.outputPerMillion || ""}
-                    onChange={(e) => setAddForm({ ...addForm, outputPerMillion: Number(e.target.value) })}
+                    value={addForm.outputPerMillion}
+                    onChange={(e) => setAddForm({ ...addForm, outputPerMillion: e.target.value === "" ? "" : Number(e.target.value) })}
                     placeholder="15.000"
                     className="form-input"
                   />
@@ -548,7 +571,7 @@ function CatalogTab() {
               </div>
               {createError && <div className="form-error">{createError}</div>}
               <div className="modal-actions">
-                <button type="button" className="btn btn-ghost" onClick={() => setShowAddModal(false)}>
+                <button type="button" className="btn btn-ghost" onClick={handleCloseModal}>
                   Cancel
                 </button>
                 <button type="submit" className="btn btn-primary" disabled={submitting}>

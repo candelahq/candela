@@ -64,6 +64,7 @@ func loadCatalogFile(path string) ([]catalog.Entry, error) {
 		return nil, fmt.Errorf("catalog file %s contains no model entries", path)
 	}
 
+	seen := make(map[string]int, len(cf.Models))
 	entries := make([]catalog.Entry, 0, len(cf.Models))
 	for i, m := range cf.Models {
 		if m.Provider == "" || m.Model == "" {
@@ -72,6 +73,12 @@ func loadCatalogFile(path string) ([]catalog.Entry, error) {
 		if m.InputPerMillion <= 0 || m.OutputPerMillion <= 0 {
 			return nil, fmt.Errorf("catalog file entry %d (%s/%s): prices must be > 0", i, m.Provider, m.Model)
 		}
+
+		key := m.Provider + "/" + m.Model
+		if prevIdx, ok := seen[key]; ok {
+			return nil, fmt.Errorf("catalog file entry %d: duplicate model %s (first seen at entry %d)", i, key, prevIdx)
+		}
+		seen[key] = i
 
 		enabled := true
 		if m.Enabled != nil {

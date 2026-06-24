@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -271,6 +272,27 @@ func TestLoadCatalogFileMatchesPricingYAMLFormat(t *testing.T) {
 		if !e.Enabled {
 			t.Errorf("entry %s/%s should default to enabled=true", e.Provider, e.ModelID)
 		}
+	}
+}
+
+func TestLoadCatalogFileDuplicateEntries(t *testing.T) {
+	content := `models:
+  - provider: google
+    model: gemini-2.5-pro
+    input_per_million: 1.25
+    output_per_million: 10.00
+  - provider: google
+    model: gemini-2.5-pro
+    input_per_million: 2.50
+    output_per_million: 20.00
+`
+	path := writeTestFile(t, "duplicates.yaml", content)
+	_, err := loadCatalogFile(path)
+	if err == nil {
+		t.Fatal("expected error for duplicate entries, got nil")
+	}
+	if !strings.Contains(err.Error(), "duplicate") {
+		t.Errorf("error should mention 'duplicate': got %v", err)
 	}
 }
 

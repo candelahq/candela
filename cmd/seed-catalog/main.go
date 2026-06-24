@@ -29,6 +29,13 @@ import (
 	"github.com/candelahq/candela/pkg/costcalc"
 )
 
+// seedResult holds the outcome counters from a seedEntries run.
+type seedResult struct {
+	seeded  int
+	skipped int
+	errors  int
+}
+
 func main() {
 	projectID := flag.String("project-id", "", "GCP Project ID (required)")
 	databaseID := flag.String("database-id", "(default)", "Firestore database ID")
@@ -90,11 +97,43 @@ func main() {
 
 	store := catalog.NewFirestoreStore(client, *collection)
 
-	var (
-		seeded  int
-		skipped int
-		errCnt  int
-	)
+	result, err := seedEntries(ctx, store, entries, *merge)
+	if err != nil {
+		log.Fatalf("seeding: %v", err)
+	}
+
+	fmt.Printf("\n✅ Done — %d entries seeded", result.seeded)
+	if result.skipped > 0 {
+		fmt.Printf(", %d skipped (already exist)", result.skipped)
+	}
+	if result.errors > 0 {
+		fmt.Printf(", %d errors", result.errors)
+	}
+	fmt.Println(".")
+}
+
+// seedEntries writes catalog entries to the store. When merge is true, existing
+// entries are skipped (insert-only). All existing IDs are fetched in a single
+// List call to avoid N+1 per-entry lookups.
+func seedEntries(ctx context.Context, store catalog.ModelCatalogStore, entries []catalog.Entry, merge bool) (seedResult, error) {
+	var existing map[string]struct{}
+
+	// In merge mode, batch-fetch all existing entries upfront to build a
+	// lookup set. This replaces the previous N+1 store.Get() per entry.
+	if merge {
+		all, err := store.List(ctx, true) // include disabled
+		if err != nil {
+			return seedResult{}, fmt.Errorf("listing existing entries for merge: %w", err)
+		}
+		existing = make(map[string]struct{}, len(all))
+		for _, e := range all {
+			key := e.Provider + "/" + e.ModelID
+			existing[key] = struct{}{}
+		}
+		slog.Info("merge mode: loaded existing entries", "count", len(existing))
+	}
+
+	var result seedResult
 	for _, e := range entries {
 		if err := ctx.Err(); err != nil {
 			slog.Error("seeding cancelled", "error", err)
@@ -102,10 +141,11 @@ func main() {
 		}
 
 		// In merge mode, skip entries that already exist in the store.
-		if *merge {
-			if _, err := store.Get(ctx, e.Provider, e.ModelID); err == nil {
+		if merge {
+			key := e.Provider + "/" + e.ModelID
+			if _, ok := existing[key]; ok {
 				fmt.Printf("  [SKIP] %s/%s — already exists\n", e.Provider, e.ModelID)
-				skipped++
+				result.skipped++
 				continue
 			}
 		}
@@ -120,20 +160,13 @@ func main() {
 
 		if err := store.Update(ctx, e); err != nil {
 			fmt.Printf("  [ERR]  %s/%s: %v\n", e.Provider, e.ModelID, err)
-			errCnt++
+			result.errors++
 			continue
 		}
-		seeded++
+		result.seeded++
 	}
 
-	fmt.Printf("\n✅ Done — %d entries seeded", seeded)
-	if skipped > 0 {
-		fmt.Printf(", %d skipped (already exist)", skipped)
-	}
-	if errCnt > 0 {
-		fmt.Printf(", %d errors", errCnt)
-	}
-	fmt.Println(".")
+	return result, nil
 }
 
 // buildEntriesFromDefaults creates catalog entries from the compiled-in

@@ -1268,8 +1268,11 @@ func buildLocalProxy(upstream string) *httputil.ReverseProxy {
 // Uses Google ADC for authentication to Vertex AI endpoints (Gemini + Anthropic).
 func buildCloudProxy(cfg Config, submitter *processor.SpanProcessor) (*proxy.Proxy, map[string]string) {
 	region := cfg.VertexAI.Region
+	if env := os.Getenv("CANDELA_VERTEX_REGION"); env != "" {
+		region = env
+	}
 	if region == "" {
-		region = "us-central1"
+		region = "global"
 	}
 
 	// Check if any provider needs GCP credentials.

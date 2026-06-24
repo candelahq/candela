@@ -1,6 +1,8 @@
 package main
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -697,5 +699,97 @@ custom_providers:
 	}
 	if providers[0].AuthHeader != "x-api-key" {
 		t.Errorf("AuthHeader = %q, want %q", providers[0].AuthHeader, "x-api-key")
+	}
+}
+
+// ── CANDELA_VERTEX_REGION env var tests ──────────────────────────────────────
+
+func TestLoadConfig_VertexRegionEnvOverridesConfig(t *testing.T) {
+	// Write a temp config file with a region set.
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(cfgPath, []byte(`
+proxy:
+  vertex_ai:
+    region: "us-east5"
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv("CANDELA_CONFIG", cfgPath)
+	t.Setenv("CANDELA_VERTEX_REGION", "europe-west4")
+
+	cfg, err := loadConfig()
+	if err != nil {
+		t.Fatalf("loadConfig() error: %v", err)
+	}
+	if cfg.Proxy.VertexAI.Region != "europe-west4" {
+		t.Errorf("region = %q, want %q (env var should override config)",
+			cfg.Proxy.VertexAI.Region, "europe-west4")
+	}
+}
+
+func TestLoadConfig_VertexRegionDefaultsToGlobal(t *testing.T) {
+	// Write a config file with no region set.
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(cfgPath, []byte(`
+proxy:
+  vertex_ai:
+    project_id: "my-project"
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv("CANDELA_CONFIG", cfgPath)
+	t.Setenv("CANDELA_VERTEX_REGION", "")
+
+	cfg, err := loadConfig()
+	if err != nil {
+		t.Fatalf("loadConfig() error: %v", err)
+	}
+	if cfg.Proxy.VertexAI.Region != "global" {
+		t.Errorf("region = %q, want %q (should default to global)",
+			cfg.Proxy.VertexAI.Region, "global")
+	}
+}
+
+func TestLoadConfig_VertexRegionEnvNoConfigFile(t *testing.T) {
+	// Point to a non-existent config file — env var should still apply.
+	t.Setenv("CANDELA_CONFIG", filepath.Join(t.TempDir(), "does-not-exist.yaml"))
+	t.Setenv("CANDELA_VERTEX_REGION", "us-south1")
+
+	cfg, err := loadConfig()
+	if err != nil {
+		t.Fatalf("loadConfig() error: %v", err)
+	}
+	if cfg.Proxy.VertexAI.Region != "us-south1" {
+		t.Errorf("region = %q, want %q (env var should work without config file)",
+			cfg.Proxy.VertexAI.Region, "us-south1")
+	}
+}
+
+func TestLoadConfig_VertexRegionConfigPreservedWithoutEnv(t *testing.T) {
+	// When no env var is set, config file value should be preserved.
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(cfgPath, []byte(`
+proxy:
+  vertex_ai:
+    region: "us-east5"
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv("CANDELA_CONFIG", cfgPath)
+	t.Setenv("CANDELA_VERTEX_REGION", "")
+
+	cfg, err := loadConfig()
+	if err != nil {
+		t.Fatalf("loadConfig() error: %v", err)
+	}
+	if cfg.Proxy.VertexAI.Region != "us-east5" {
+		t.Errorf("region = %q, want %q (config value should be preserved)",
+			cfg.Proxy.VertexAI.Region, "us-east5")
 	}
 }

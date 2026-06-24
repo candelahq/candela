@@ -535,7 +535,7 @@ func main() {
 		if cfg.Proxy.VertexAI.ProjectID != "" {
 			region := cfg.Proxy.VertexAI.Region
 			if region == "" {
-				region = "us-central1"
+				region = "global"
 			}
 
 			for i, p := range allProviders {
@@ -1095,18 +1095,13 @@ func loadConfig() (*Config, error) {
 		cfgPath = "config.yaml"
 	}
 
+	var cfg Config
+
 	data, err := os.ReadFile(cfgPath)
 	if err != nil {
 		// No config file — use defaults (DuckDB, port 8181).
 		slog.Warn("config file not found, using defaults", "path", cfgPath)
-		cfg := &Config{}
-		cfg.Server.Port = 8181
-		cfg.Storage.Backend = "duckdb"
-		return cfg, nil
-	}
-
-	var cfg Config
-	if err := yaml.Unmarshal(data, &cfg); err != nil {
+	} else if err := yaml.Unmarshal(data, &cfg); err != nil {
 		return nil, fmt.Errorf("parsing config: %w", err)
 	}
 
@@ -1123,6 +1118,14 @@ func loadConfig() (*Config, error) {
 	}
 	if cfg.Catalog.Backend == "" {
 		cfg.Catalog.Backend = "config"
+	}
+
+	// Vertex AI region: env var override, then default to "global".
+	if env := os.Getenv("CANDELA_VERTEX_REGION"); env != "" {
+		cfg.Proxy.VertexAI.Region = env
+	}
+	if cfg.Proxy.VertexAI.Region == "" {
+		cfg.Proxy.VertexAI.Region = "global"
 	}
 
 	return &cfg, nil

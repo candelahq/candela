@@ -8,6 +8,7 @@ import {
   SetBudgetRequestSchema,
   CreateGrantRequestSchema,
 } from "@/gen/candela/v1/user_service_pb";
+import { ModelCatalogEntrySchema } from "@/gen/candela/types/model_catalog_pb";
 import type { GenMessage } from "@bufbuild/protobuf/codegenv2";
 import type { Message } from "@bufbuild/protobuf";
 
@@ -114,6 +115,40 @@ export function useCreateGrantValidation() {
       expiresAt?: unknown;
     }) => {
       const errs = await validateMessage(CreateGrantRequestSchema, values);
+      setErrors(errs);
+      return errs.length === 0;
+    },
+    [],
+  );
+
+  const getError = useCallback(
+    (field: string) => errors.find((e) => e.field === field)?.message,
+    [errors],
+  );
+
+  return { errors, validate, getError, clearErrors: () => setErrors([]) };
+}
+
+/**
+ * Hook for validating a ModelCatalogEntry before upserting via UpdateModelCatalogEntry.
+ * Validates the entry fields against the proto's buf/validate annotations.
+ */
+export function useCatalogEntryValidation() {
+  const [errors, setErrors] = useState<ValidationError[]>([]);
+
+  const validate = useCallback(
+    async (values: {
+      modelId: string;
+      provider: string;
+      displayName?: string;
+      inputPerMillion: number;
+      outputPerMillion: number;
+      enabled?: boolean;
+      category?: string;
+      providerModelId?: string;
+      region?: string;
+    }) => {
+      const errs = await validateMessage(ModelCatalogEntrySchema, values);
       setErrors(errs);
       return errs.length === 0;
     },

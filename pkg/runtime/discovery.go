@@ -28,22 +28,25 @@ var knownBackends = map[string]backendMeta{
 	"ollama": {
 		binary: "ollama",
 		installHint: map[string]string{
-			"darwin": "brew install ollama",
-			"linux":  "curl -fsSL https://ollama.com/install.sh | sh",
+			"darwin":  "brew install ollama",
+			"linux":   "curl -fsSL https://ollama.com/install.sh | sh",
+			"windows": "winget install Ollama.Ollama",
 		},
 	},
 	"vllm": {
 		binary: "vllm",
 		installHint: map[string]string{
-			"darwin": "pip install vllm",
-			"linux":  "pip install vllm",
+			"darwin":  "pip install vllm",
+			"linux":   "pip install vllm",
+			"windows": "Install a native Windows vLLM executable and ensure vllm is on PATH",
 		},
 	},
 	"lmstudio": {
 		binary: "lms",
 		installHint: map[string]string{
-			"darwin": "Download from https://lmstudio.ai",
-			"linux":  "Download from https://lmstudio.ai",
+			"darwin":  "Download from https://lmstudio.ai",
+			"linux":   "Download from https://lmstudio.ai",
+			"windows": "Download from https://lmstudio.ai",
 		},
 	},
 }

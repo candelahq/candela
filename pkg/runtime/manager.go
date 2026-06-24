@@ -54,33 +54,62 @@ func (m *Manager) Start(ctx context.Context) error {
 	}
 
 	if m.autoStart {
-		slog.Info("starting runtime", "backend", m.rt.Name())
-		if err := m.rt.Start(ctx); err != nil {
+		if err := m.startRuntime(ctx); err != nil {
 			return err
 		}
-		m.mu.Lock()
-		m.startedAt = time.Now()
-		m.mu.Unlock()
 	}
 
-	// Start health check loop.
+	hctx := m.startHealthLoop(ctx)
+	m.startAutoPull(hctx)
+
+	return nil
+}
+
+// StartRuntime explicitly starts the runtime and begins health monitoring.
+// The runtime startup can use a short-lived request context, while monitoring
+// should use the application's long-lived context so UI RPC completion does not
+// cancel health polling.
+func (m *Manager) StartRuntime(startCtx, monitorCtx context.Context) error {
+	if m.cancel != nil {
+		m.cancel()
+	}
+	if err := m.startRuntime(startCtx); err != nil {
+		return err
+	}
+	hctx := m.startHealthLoop(monitorCtx)
+	m.startAutoPull(hctx)
+	return nil
+}
+
+func (m *Manager) startRuntime(ctx context.Context) error {
+	slog.Info("starting runtime", "backend", m.rt.Name())
+	if err := m.rt.Start(ctx); err != nil {
+		return err
+	}
+	m.mu.Lock()
+	m.startedAt = time.Now()
+	m.mu.Unlock()
+	return nil
+}
+
+func (m *Manager) startHealthLoop(ctx context.Context) context.Context {
 	hctx, cancel := context.WithCancel(ctx)
 	m.cancel = cancel
 	go m.healthLoop(hctx)
+	return hctx
+}
 
-	// Auto-pull configured models in the background.
+func (m *Manager) startAutoPull(ctx context.Context) {
 	if m.autoPull && len(m.models) > 0 {
 		go func() {
 			for _, model := range m.models {
 				slog.Info("pulling model", "model", model, "backend", m.rt.Name())
-				if err := m.rt.PullModel(hctx, model, nil); err != nil {
+				if err := m.rt.PullModel(ctx, model, nil); err != nil {
 					slog.Warn("failed to pull model", "model", model, "error", err)
 				}
 			}
 		}()
 	}
-
-	return nil
 }
 
 // Stop stops health monitoring and shuts down the runtime.

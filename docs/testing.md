@@ -74,6 +74,12 @@ nix develop -c go test ./pkg/runtime/... -v
 # candela tests
 nix develop -c go test ./cmd/candela -v
 
+# Windows-native candela smoke tests
+go test ./cmd/candela -run "TestLoadConfig|TestStopProcess|TestParsePowerShellPortProcessOutput|TestConfigureBackgroundCommandWindows" -count=1
+go test ./pkg/runtime -run TestDiscover_WindowsInstallHints -count=1
+go build -o candela.exe ./cmd/candela
+$env:GOOS="windows"; $env:GOARCH="arm64"; go build -o candela-windows-arm64.exe ./cmd/candela
+
 # Integration tests (ConnectRPC handlers)
 nix develop -c go test ./pkg/connecthandlers -v -run TestIntegration
 ```
@@ -151,7 +157,7 @@ The `lefthook.yml` runs these checks on every `git commit`:
 
 ## CI Pipeline
 
-The GitHub Actions CI (`.github/workflows/ci.yml`) runs three jobs:
+The GitHub Actions CI (`.github/workflows/ci.yml`) runs these jobs:
 
 ### 1. `build-and-test` (Go)
 - Proto generation via Buf (remote, requires `BUF_TOKEN`)
@@ -173,6 +179,12 @@ The GitHub Actions CI (`.github/workflows/ci.yml`) runs three jobs:
 - Installs Playwright + Chromium
 - Runs all E2E tests
 - Uploads test report as artifact (7-day retention)
+
+### 4. `windows-candela`
+- Runs on `windows-latest`
+- Tests Windows-specific local CLI process and port discovery behavior
+- Tests Windows runtime discovery hints
+- Builds `candela.exe` for `windows/amd64` and `windows/arm64`
 
 ---
 

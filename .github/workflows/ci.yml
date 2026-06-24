@@ -144,6 +144,38 @@ jobs:
         continue-on-error: true
         run: nix develop . --command govulncheck ./...
 
+  # ── Windows native CLI smoke ────────────────────────────────────────────────
+  windows-candela:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Test candela CLI Windows behavior
+        run: go test ./cmd/candela -run "TestLoadConfig|TestStopProcess|TestParsePowerShellPortProcessOutput|TestConfigureBackgroundCommandWindows" -count=1
+
+      - name: Test runtime discovery Windows hints
+        run: go test ./pkg/runtime -run TestDiscover_WindowsInstallHints -count=1
+
+      - name: Build candela.exe (windows/amd64)
+        shell: pwsh
+        run: |
+          $env:GOOS = "windows"
+          $env:GOARCH = "amd64"
+          go build -o candela-windows.exe ./cmd/candela
+
+      - name: Build candela.exe (windows/arm64)
+        shell: pwsh
+        run: |
+          $env:GOOS = "windows"
+          $env:GOARCH = "arm64"
+          go build -o candela-windows-arm64.exe ./cmd/candela
+
   # ── UI build + lint ─────────────────────────────────────────────────────────
   ui-build-and-lint:
     runs-on: ubuntu-latest

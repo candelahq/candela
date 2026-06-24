@@ -150,6 +150,8 @@ JetBrains / Cline / curl
 
 ## Installation
 
+### macOS / Linux
+
 ```bash
 brew install candelahq/tap/candela
 ```
@@ -167,9 +169,40 @@ nix develop           # or ensure Go 1.26+ is installed
 go run ./cmd/candela
 ```
 
+### Windows
+
+Download the MSI that matches your Windows CPU architecture from the GitHub
+Release:
+
+- `Candela-<version>-windows.msi` for Intel/AMD x64 PCs.
+- `Candela-<version>-windows-arm64.msi` for Windows on Arm PCs.
+
+```powershell
+# Silent install (x64 example)
+msiexec /i Candela-0.1.0-windows.msi /qn /norestart
+
+# Optional desktop shortcut
+msiexec /i Candela-0.1.0-windows.msi /qn /norestart INSTALLDESKTOPSHORTCUT=1
+
+# Silent uninstall
+msiexec /x Candela-0.1.0-windows.msi /qn /norestart
+```
+
+The v1 MSI is unsigned, so Windows SmartScreen may warn before install. The MSI
+installs `candela.exe` under `Program Files\Candela`, adds that directory to the
+system `PATH`, and creates Start Menu shortcuts for starting Candela, stopping
+Candela, and opening the embedded UI.
+
+The Windows desktop experience is browser-based: `candela.exe start` runs the
+local proxy, and the UI opens at `http://127.0.0.1:8181/_local/`. There is no
+separate Electron, Tauri, or WebView shell.
+
 ## Configuration
 
-`candela` reads `~/.config/candela/config.yaml` by default. Override with `--config`:
+`candela` reads `~/.config/candela/config.yaml` by default. On Windows this is
+`%USERPROFILE%\.config\candela\config.yaml`; Candela also checks the native
+Windows config directory (`%AppData%\candela\config.yaml`). Override with
+`--config`:
 
 ```bash
 candela start                          # reads ~/.config/candela/config.yaml
@@ -320,6 +353,11 @@ Access at `http://localhost:8181/_local/`:
 | **Backends** | Auto-detected runtimes with install hints |
 | **Settings** | State DB path, reset |
 
+On Windows, backend discovery looks for native executables on `PATH`. Ollama and
+LM Studio have native Windows installers. vLLM is shown only as a native command
+requirement: install a native/community Windows `vllm` build and ensure `vllm`
+is on `PATH`. Candela does not fallback to WSL.
+
 ---
 
 ## IDE Integration
@@ -366,3 +404,4 @@ curl http://localhost:1234/v1/chat/completions \
 | "audience is required when remote is set" | Missing `audience` | Add IAP `audience` to `config.yaml` |
 | Traces card shows "Traces not available" | Team Mode (traces go to cloud) | Expected — check the cloud dashboard |
 | No models in `/v1/models` | Runtime not started | Start Ollama: `ollama serve` |
+| vLLM is not discovered on Windows | No native `vllm` executable on `PATH` | Install a native Windows vLLM build and ensure `vllm` is on `PATH` |

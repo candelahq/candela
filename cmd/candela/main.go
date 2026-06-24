@@ -194,12 +194,9 @@ func cmdStart() {
 	// Check if already running.
 	if data, err := os.ReadFile(pidPath); err == nil {
 		if pid, err := strconv.Atoi(strings.TrimSpace(string(data))); err == nil {
-			if process, err := os.FindProcess(pid); err == nil {
-				// Signal 0 checks if process exists.
-				if process.Signal(syscall.Signal(0)) == nil {
-					fmt.Printf("🕯️ candela is already running (PID %d)\n", pid)
-					return
-				}
+			if processRunning(pid) {
+				fmt.Printf("🕯️ candela is already running (PID %d)\n", pid)
+				return
 			}
 		}
 		// Stale PID file — clean up.
@@ -265,7 +262,7 @@ func cmdStart() {
 	cmd := exec.Command(exe, args...)
 	cmd.Stdout = logFile
 	cmd.Stderr = logFile
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	configureBackgroundCommand(cmd)
 
 	if err := cmd.Start(); err != nil {
 		slog.Error("failed to start candela", "error", err)
@@ -307,21 +304,20 @@ func cmdStop() {
 	}
 
 	process, err := os.FindProcess(pid)
-	if err != nil || process.Signal(syscall.Signal(0)) != nil {
+	if err != nil || !processRunning(pid) {
 		fmt.Println("candela is not running (stale PID file)")
 		_ = os.Remove(pidPath)
 		return
 	}
 
-	// Send SIGTERM for graceful shutdown.
-	if err := process.Signal(syscall.SIGTERM); err != nil {
+	if err := terminateProcess(process); err != nil {
 		slog.Error("failed to stop candela", "pid", pid, "error", err)
 		os.Exit(1)
 	}
 
 	// Wait for process to exit before removing PID file.
 	for i := 0; i < 10; i++ {
-		if process.Signal(syscall.Signal(0)) != nil {
+		if !processRunning(pid) {
 			break
 		}
 		time.Sleep(200 * time.Millisecond)
@@ -351,23 +347,22 @@ func stopProcess(pidPath string) error {
 	}
 
 	proc, err := os.FindProcess(pid)
-	if err != nil || proc.Signal(syscall.Signal(0)) != nil {
+	if err != nil || !processRunning(pid) {
 		// Process not running — clean up stale PID file.
 		_ = os.Remove(pidPath)
 		return nil
 	}
 
-	// Process is alive — send SIGTERM for graceful shutdown.
 	fmt.Printf("⏹  Stopping process %d...\n", pid)
-	if err := proc.Signal(syscall.SIGTERM); err != nil {
-		return fmt.Errorf("failed to send SIGTERM to PID %d: %w", pid, err)
+	if err := terminateProcess(proc); err != nil {
+		return fmt.Errorf("failed to stop PID %d: %w", pid, err)
 	}
 
 	// Wait for process to fully exit (up to 5 seconds).
 	exited := false
 	for i := 0; i < 50; i++ {
 		time.Sleep(100 * time.Millisecond)
-		if err := proc.Signal(syscall.Signal(0)); err != nil {
+		if !processRunning(pid) {
 			exited = true
 			break
 		}
@@ -375,11 +370,11 @@ func stopProcess(pidPath string) error {
 	if !exited {
 		// Force kill if graceful shutdown timed out.
 		fmt.Println("⚠  Graceful shutdown timed out, force killing...")
-		_ = proc.Signal(syscall.SIGKILL)
+		_ = forceKillProcess(proc)
 		// Wait for SIGKILL to take effect (up to 3 seconds).
 		for i := 0; i < 30; i++ {
 			time.Sleep(100 * time.Millisecond)
-			if err := proc.Signal(syscall.Signal(0)); err != nil {
+			if !processRunning(pid) {
 				break
 			}
 		}
@@ -431,8 +426,7 @@ func cmdStatus() {
 		return
 	}
 
-	process, err := os.FindProcess(pid)
-	if err != nil || process.Signal(syscall.Signal(0)) != nil {
+	if !processRunning(pid) {
 		fmt.Println("● candela: stopped (stale PID file)")
 		_ = os.Remove(pidPath)
 		return
@@ -556,8 +550,8 @@ func cmdDoctor() {
 			fmt.Printf("❌ could not find PID %d: %v\n", c.PID, err)
 			continue
 		}
-		if err := proc.Signal(syscall.SIGTERM); err != nil {
-			if err := proc.Signal(syscall.SIGKILL); err != nil {
+		if err := terminateProcess(proc); err != nil {
+			if err := forceKillProcess(proc); err != nil {
 				fmt.Printf("❌ could not kill PID %d: %v\n", c.PID, err)
 				continue
 			}
@@ -567,7 +561,7 @@ func cmdDoctor() {
 
 	// Clean up stale PID file only if the tracked process is no longer running.
 	if pidPath := pidFilePath(); pidPath != "" && ownPID > 0 {
-		if proc, err := os.FindProcess(ownPID); err != nil || proc.Signal(syscall.Signal(0)) != nil {
+		if !processRunning(ownPID) {
 			_ = os.Remove(pidPath)
 		}
 	}
@@ -575,59 +569,10 @@ func cmdDoctor() {
 	fmt.Println("\n✅ Ports cleared. Run 'candela start' to start fresh.")
 }
 
-// isLaunchdManaged checks whether a PID is managed by a launchd service
-// (e.g. homebrew.mxcl.candela). Killing a launchd-managed process will
-// cause launchd to respawn it immediately.
-func isLaunchdManaged(pid int) bool {
-	out, err := exec.Command("launchctl", "list").Output()
-	if err != nil {
-		return false
-	}
-	pidStr := strconv.Itoa(pid)
-	for _, line := range strings.Split(string(out), "\n") {
-		fields := strings.Fields(line)
-		if len(fields) >= 3 && fields[0] == pidStr {
-			label := fields[2]
-			if strings.Contains(label, "candela") || strings.Contains(label, "homebrew") {
-				return true
-			}
-		}
-	}
-	return false
-}
-
 // portProcessInfo holds info about a process listening on a port.
 type portProcessInfo struct {
 	pid     int
 	command string
-}
-
-// findProcessesOnPort uses lsof to find processes listening on a given TCP port.
-func findProcessesOnPort(port int) []portProcessInfo {
-	out, err := exec.Command("lsof", "-i", fmt.Sprintf("tcp:%d", port), "-sTCP:LISTEN", "-n", "-P").Output()
-	if err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
-			return nil // no processes found
-		}
-		fmt.Fprintf(os.Stderr, "⚠️  Warning: failed to run 'lsof': %v. Port conflict detection may be incomplete.\n", err)
-		return nil
-	}
-
-	var procs []portProcessInfo
-	seen := make(map[int]bool)
-	for _, line := range strings.Split(string(out), "\n") {
-		fields := strings.Fields(line)
-		if len(fields) < 2 || fields[0] == "COMMAND" {
-			continue
-		}
-		pid, err := strconv.Atoi(fields[1])
-		if err != nil || seen[pid] {
-			continue
-		}
-		seen[pid] = true
-		procs = append(procs, portProcessInfo{pid: pid, command: fields[0]})
-	}
-	return procs
 }
 
 // resolvePort returns the configured port by checking args then config file.

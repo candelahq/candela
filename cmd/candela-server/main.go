@@ -533,10 +533,7 @@ func main() {
 		// when Vertex AI is configured. Anthropic routes through regional
 		// Vertex AI publisher endpoints (rawPredict/streamRawPredict).
 		if cfg.Proxy.VertexAI.ProjectID != "" {
-			region := cfg.Proxy.VertexAI.Region
-			if region == "" {
-				region = "global"
-			}
+			region := cfg.Proxy.VertexAI.Region // guaranteed non-empty by loadConfig()
 
 			for i, p := range allProviders {
 				switch p.Name {
@@ -1120,12 +1117,14 @@ func loadConfig() (*Config, error) {
 		cfg.Catalog.Backend = "config"
 	}
 
-	// Vertex AI region: env var override, then default to "global".
+	// Vertex AI region: env var override, then default to "us-central1".
+	// We default to us-central1 (not "global") because regional MaaS
+	// providers like Mistral are NOT available on the global endpoint.
 	if env := os.Getenv("CANDELA_VERTEX_REGION"); env != "" {
 		cfg.Proxy.VertexAI.Region = env
 	}
 	if cfg.Proxy.VertexAI.Region == "" {
-		cfg.Proxy.VertexAI.Region = "global"
+		cfg.Proxy.VertexAI.Region = "us-central1"
 	}
 
 	return &cfg, nil

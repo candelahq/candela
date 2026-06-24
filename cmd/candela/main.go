@@ -1272,7 +1272,7 @@ func buildCloudProxy(cfg Config, submitter *processor.SpanProcessor) (*proxy.Pro
 		region = env
 	}
 	if region == "" {
-		region = "global"
+		region = "us-central1"
 	}
 
 	// Check if any provider needs GCP credentials.

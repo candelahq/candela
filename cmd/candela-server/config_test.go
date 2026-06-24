@@ -729,7 +729,7 @@ proxy:
 	}
 }
 
-func TestLoadConfig_VertexRegionDefaultsToGlobal(t *testing.T) {
+func TestLoadConfig_VertexRegionDefaultsToUSCentral1(t *testing.T) {
 	// Write a config file with no region set.
 	dir := t.TempDir()
 	cfgPath := filepath.Join(dir, "config.yaml")
@@ -748,9 +748,35 @@ proxy:
 	if err != nil {
 		t.Fatalf("loadConfig() error: %v", err)
 	}
-	if cfg.Proxy.VertexAI.Region != "global" {
-		t.Errorf("region = %q, want %q (should default to global)",
-			cfg.Proxy.VertexAI.Region, "global")
+	if cfg.Proxy.VertexAI.Region != "us-central1" {
+		t.Errorf("region = %q, want %q (should default to us-central1)",
+			cfg.Proxy.VertexAI.Region, "us-central1")
+	}
+}
+
+func TestLoadConfig_VertexRegionDefaultNotGlobal_MistralSafe(t *testing.T) {
+	// Mistral is a regional MaaS model that is NOT available on the
+	// "global" Vertex AI endpoint. Verify the default region is never
+	// "global" so that Mistral works out of the box.
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(cfgPath, []byte(`
+proxy:
+  vertex_ai:
+    project_id: "my-project"
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv("CANDELA_CONFIG", cfgPath)
+	t.Setenv("CANDELA_VERTEX_REGION", "")
+
+	cfg, err := loadConfig()
+	if err != nil {
+		t.Fatalf("loadConfig() error: %v", err)
+	}
+	if cfg.Proxy.VertexAI.Region == "global" {
+		t.Error("default region must not be 'global' — Mistral (regional MaaS) is not available on the global endpoint")
 	}
 }
 

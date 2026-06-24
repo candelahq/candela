@@ -153,37 +153,27 @@ brew install --cask candelahq/tap/candela-desktop
 
 > **💡 Tip**: `candela start` launches the proxy on `:8181` (proxy + UI at `/_local/`) + `:1234` (LM-compatible endpoint). Point your IDE or app at it immediately.
 
-### Option B: Windows MSI
+### Option B: Windows ZIP
 
-Download the MSI that matches your Windows CPU architecture from the GitHub
-Release and run the installer:
+Download the ZIP archive that matches your Windows CPU architecture from the
+GitHub Release and extract it:
 
-- `Candela-<version>-windows.msi` for Intel/AMD x64 PCs.
-- `Candela-<version>-windows-arm64.msi` for Windows on Arm PCs.
+- `candela_<version>_Windows.zip` for Intel/AMD x64 PCs.
+- `candela_<version>_Windows_arm64.zip` for Windows on Arm PCs.
 
-The first Windows MSI is unsigned, so Windows SmartScreen may show a warning
-before install.
+Add the extracted folder to `PATH` if you want `candela` available from any
+terminal, or run `candela.exe` from the extracted directory:
 
 ```powershell
-# Silent install (x64 example)
-msiexec /i Candela-0.1.0-windows.msi /qn /norestart
-
-# Add the optional desktop shortcut
-msiexec /i Candela-0.1.0-windows.msi /qn /norestart INSTALLDESKTOPSHORTCUT=1
-
-# Silent uninstall
-msiexec /x Candela-0.1.0-windows.msi /qn /norestart
+Expand-Archive .\candela_0.1.0_Windows.zip -DestinationPath .\candela
+cd .\candela
+.\candela.exe start
+Start-Process "http://127.0.0.1:8181/_local/"
 ```
 
-The MSI installs `candela.exe` under `Program Files\Candela`, adds that
-directory to the system `PATH`, and creates Start Menu shortcuts:
-
-- **Candela Start** — starts the local proxy in the background.
-- **Candela UI** — opens `http://127.0.0.1:8181/_local/` in the default browser.
-- **Candela Stop** — stops the local proxy.
-
 The Windows desktop experience uses the same embedded browser UI as macOS and
-Linux; it does not install an Electron, Tauri, or WebView shell.
+Linux. This branch does not install a desktop shell, installer, or launcher
+integration; that work is deferred to a desktop-specific branch.
 
 ### Option C: From Source
 

@@ -171,31 +171,27 @@ go run ./cmd/candela
 
 ### Windows
 
-Download the MSI that matches your Windows CPU architecture from the GitHub
-Release:
+Download the ZIP archive that matches your Windows CPU architecture from the
+GitHub Release:
 
-- `Candela-<version>-windows.msi` for Intel/AMD x64 PCs.
-- `Candela-<version>-windows-arm64.msi` for Windows on Arm PCs.
+- `candela_<version>_Windows.zip` for Intel/AMD x64 PCs.
+- `candela_<version>_Windows_arm64.zip` for Windows on Arm PCs.
 
 ```powershell
-# Silent install (x64 example)
-msiexec /i Candela-0.1.0-windows.msi /qn /norestart
-
-# Optional desktop shortcut
-msiexec /i Candela-0.1.0-windows.msi /qn /norestart INSTALLDESKTOPSHORTCUT=1
-
-# Silent uninstall
-msiexec /x Candela-0.1.0-windows.msi /qn /norestart
+Expand-Archive .\candela_0.1.0_Windows.zip -DestinationPath .\candela
+cd .\candela
+.\candela.exe start
+Start-Process "http://127.0.0.1:8181/_local/"
 ```
 
-The v1 MSI is unsigned, so Windows SmartScreen may warn before install. The MSI
-installs `candela.exe` under `Program Files\Candela`, adds that directory to the
-system `PATH`, and creates Start Menu shortcuts for starting Candela, stopping
-Candela, and opening the embedded UI.
+Add the extracted folder to `PATH` if you want `candela` available from any
+terminal.
 
 The Windows desktop experience is browser-based: `candela.exe start` runs the
 local proxy, and the UI opens at `http://127.0.0.1:8181/_local/`. There is no
-separate Electron, Tauri, or WebView shell.
+separate Electron, Tauri, WebView shell, installer, or launcher flow in this
+branch. Installed desktop launcher integration is deferred to a
+desktop-specific branch.
 
 ## Configuration
 

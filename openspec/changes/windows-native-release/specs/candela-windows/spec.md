@@ -44,16 +44,16 @@ must not terminate a successfully launched LM Studio or vLLM server process.
 `candela doctor` must detect Windows TCP listeners on the proxy and LM Studio
 compat ports using native Windows tooling.
 
-### Installer
+### Release Artifacts
 
-The Windows MSI must be produced for `windows/amd64` and `windows/arm64`. It
-must install `candela.exe` under `Program Files\Candela`, add that directory to
-the system `PATH`, add Start Menu shortcuts for start/open UI/stop, support
-silent install/uninstall, and remain unsigned for v1.
+The Windows release must publish ZIP artifacts for `windows/amd64` and
+`windows/arm64`. The public x64 artifact must use the default Windows name
+`candela_<version>_Windows.zip`; the Windows on Arm artifact must use
+`candela_<version>_Windows_arm64.zip`.
 
-The public x64 MSI artifact must use the default Windows name
-`Candela-<version>-windows.msi`; the Windows on Arm MSI artifact must use
-`Candela-<version>-windows-arm64.msi`.
+The Windows ZIP artifacts must contain `candela.exe` and must support manual
+startup with `candela.exe start`. This branch must not add a Windows installer,
+desktop shell, or launcher management.
 
 ### Runtime Discovery
 

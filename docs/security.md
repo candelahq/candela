@@ -303,7 +303,7 @@ The following issues were identified and resolved in the v0.7.1 security audit:
 
 | Issue | Severity | Description | Fix |
 |-------|----------|-------------|-----|
-| `GetJobLeaderboard` missing authorization | **HIGH** | The `GetJobLeaderboard` RPC was not included in the admin guard interceptor's ACL, allowing any authenticated user to query the leaderboard for all users. | Added to admin-only RPC list in `AdminInterceptor`. |
+| `GetJobLeaderboard` missing authorization | **HIGH** | The `GetJobLeaderboard` RPC had no authorization check, allowing any authenticated user to query the leaderboard for all users. | Added an in-handler `scopeUserID` guard that returns `PermissionDenied` for non-admin callers (see `dashboard_handler.go`). |
 | `UpdateUser` role escalation bypass | **MEDIUM-HIGH** | A developer-role user could call `UpdateUser` on their own record with `role: ADMIN` to escalate privileges. The admin guard only checked if the caller was admin for *other* users, not for self-updates. | Self-updates now reject `role` field changes; only admins can modify roles. |
 | Catalog `AdminEditable` UI leak | **MEDIUM** | The model catalog API returned `admin_editable: true/false` metadata to all users, leaking which fields are admin-configurable. While not directly exploitable, it reveals internal authorization boundaries. | `admin_editable` field is now stripped from responses for non-admin callers. |
 

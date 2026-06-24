@@ -367,6 +367,7 @@ proxy:
     - anthropic-vertex
     - anthropic-direct
     - gemini-oai
+    # - anthropic-bedrock
   vertex_ai:
     project_id: "my-gcp-project"
     region: "us-east5"

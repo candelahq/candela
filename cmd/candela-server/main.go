@@ -1127,6 +1127,11 @@ func loadConfig() (*Config, error) {
 		cfg.Catalog.Backend = "config"
 	}
 
+	// Budget timezone: env var override (no default — empty means UTC).
+	if env := os.Getenv("CANDELA_BUDGET_TIMEZONE"); env != "" {
+		cfg.Budget.Timezone = env
+	}
+
 	// Vertex AI region: env var override, then default to "us-central1".
 	// We default to us-central1 (not "global") because regional MaaS
 	// providers like Mistral are NOT available on the global endpoint.

@@ -1,0 +1,6 @@
+# Auto-detect text files and normalise line endings to LF on commit.
+* text=auto eol=lf
+
+# Windows batch scripts require CRLF for cmd.exe compatibility.
+*.bat text eol=crlf
+*.cmd text eol=crlf

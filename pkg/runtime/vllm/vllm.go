@@ -12,6 +12,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os/exec"
+	"sync"
 	"time"
 
 	"github.com/candelahq/candela/pkg/runtime"
@@ -30,7 +31,9 @@ type Runtime struct {
 	binary string
 	model  string // model is baked in at launch time
 	args   []string
-	cmd    *exec.Cmd
+
+	mu  sync.Mutex // protects cmd
+	cmd *exec.Cmd
 }
 
 // New creates a vLLM runtime with the given config.
@@ -77,16 +80,23 @@ func (r *Runtime) Start(ctx context.Context) error {
 	cmdArgs := []string{"serve", r.model, "--port", fmt.Sprintf("%d", r.port), "--host", r.host}
 	cmdArgs = append(cmdArgs, r.args...)
 
+	// Use exec.Command (not CommandContext) — the server process must outlive
+	// the short-lived RPC request context that triggers this start.
+	r.mu.Lock()
 	r.cmd = exec.Command(r.binary, cmdArgs...)
 	if err := r.cmd.Start(); err != nil {
+		r.mu.Unlock()
 		return fmt.Errorf("vllm: starting %q: %w", r.binary, err)
 	}
+	r.mu.Unlock()
 	// vLLM can take a while to load large models.
 	return runtime.WaitHealthy(ctx, r.baseURL()+"/health/ready", 2*time.Second, 5*time.Minute)
 }
 
 // Stop terminates the vLLM process.
 func (r *Runtime) Stop(ctx context.Context) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	if r.cmd == nil || r.cmd.Process == nil {
 		return nil
 	}

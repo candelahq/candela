@@ -315,12 +315,24 @@ func cmdStop() {
 		os.Exit(1)
 	}
 
-	// Wait for process to exit before removing PID file.
-	for i := 0; i < 10; i++ {
+	// Wait for graceful exit (up to 5 seconds).
+	exited := false
+	for i := 0; i < 50; i++ {
 		if !processRunning(pid) {
+			exited = true
 			break
 		}
-		time.Sleep(200 * time.Millisecond)
+		time.Sleep(100 * time.Millisecond)
+	}
+	if !exited {
+		fmt.Println("⚠  Graceful shutdown timed out, force killing...")
+		_ = forceKillProcess(process)
+		for i := 0; i < 30; i++ {
+			time.Sleep(100 * time.Millisecond)
+			if !processRunning(pid) {
+				break
+			}
+		}
 	}
 
 	_ = os.Remove(pidPath)
@@ -554,6 +566,17 @@ func cmdDoctor() {
 			if err := forceKillProcess(proc); err != nil {
 				fmt.Printf("❌ could not kill PID %d: %v\n", c.PID, err)
 				continue
+			}
+		} else {
+			// Give the process a moment to exit gracefully.
+			for i := 0; i < 20; i++ {
+				if !processRunning(c.PID) {
+					break
+				}
+				time.Sleep(100 * time.Millisecond)
+			}
+			if processRunning(c.PID) {
+				_ = forceKillProcess(proc)
 			}
 		}
 		fmt.Printf("🔪 killed PID %d (%s)\n", c.PID, c.Command)

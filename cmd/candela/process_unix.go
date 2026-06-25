@@ -23,7 +23,15 @@ func processRunning(pid int) bool {
 	if err != nil {
 		return false
 	}
-	return process.Signal(syscall.Signal(0)) == nil
+	err = process.Signal(syscall.Signal(0))
+	if err == nil {
+		return true
+	}
+	// EPERM means the process exists but belongs to another user.
+	if err == syscall.EPERM {
+		return true
+	}
+	return false
 }
 
 func terminateProcess(process *os.Process) error {

@@ -52,6 +52,9 @@ jobs:
       - name: Vet
         run: nix develop . --command go vet ./...
 
+      - name: Lint
+        run: nix develop . --command golangci-lint run --timeout=5m
+
   # ── tests — parallel matrix by package group ────────────────────────────────
   go-test:
     runs-on: ubuntu-latest
@@ -156,11 +159,14 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      - name: Test candela CLI Windows behavior
-        run: go test ./cmd/candela -run "TestLoadConfig|TestStopProcess|TestParsePowerShellPortProcessOutput|TestConfigureBackgroundCommandWindows" -count=1
+      - name: Install golangci-lint
+        uses: golangci/golangci-lint-action@v8
+        with:
+          args: --timeout=5m
+          skip-cache: true
 
-      - name: Test runtime discovery Windows hints
-        run: go test ./pkg/runtime -run TestDiscover_WindowsInstallHints -count=1
+      - name: Test Windows-relevant packages
+        run: go test ./cmd/candela/... ./pkg/runtime/... -count=1
 
       - name: Build candela.exe (windows/amd64)
         shell: pwsh

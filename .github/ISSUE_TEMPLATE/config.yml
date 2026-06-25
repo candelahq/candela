@@ -6,3 +6,6 @@ contact_links:
   - name: 💬 Discussions
     url: https://github.com/candelahq/candela/discussions
     about: Ask questions and share ideas
+  - name: 🔒 Security Vulnerability
+    url: https://github.com/candelahq/candela/security/advisories/new
+    about: Report security vulnerabilities privately

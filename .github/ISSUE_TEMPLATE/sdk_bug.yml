@@ -1,0 +1,48 @@
+name: 🔌 SDK / Integration Issue
+description: Report a bug with a Candela SDK or integration
+labels: ["bug", "sdk", "triage"]
+body:
+  - type: dropdown
+    id: sdk
+    attributes:
+      label: SDK / Integration
+      options:
+        - Python SDK
+        - TypeScript SDK
+        - Go SDK
+        - Kotlin SDK
+        - Rust SDK
+        - VS Code Extension
+        - JetBrains Plugin
+        - Desktop App
+        - OpenTelemetry Collector
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: sdk-version
+    attributes:
+      label: SDK / Extension Version
+      placeholder: v0.3.2
+  - type: input
+    id: provider
+    attributes:
+      label: LLM Provider
+      placeholder: OpenAI, Anthropic, Google, Bedrock, etc.
+  - type: textarea
+    id: description
+    attributes:
+      label: Bug Description
+      description: A clear description of the issue.
+    validations:
+      required: true
+  - type: textarea
+    id: code
+    attributes:
+      label: Code to Reproduce
+      description: Minimal code snippet showing the issue.
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant Logs / Errors
+      render: shell

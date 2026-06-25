@@ -9,7 +9,7 @@ body:
       description: Link to the page with the issue.
       placeholder: https://docs.candela.sh/...
     validations:
-      required: true
+      required: false
   - type: textarea
     id: description
     attributes:

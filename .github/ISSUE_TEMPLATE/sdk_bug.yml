@@ -41,7 +41,6 @@ body:
     attributes:
       label: Code to Reproduce
       description: Minimal code snippet showing the issue.
-      render: python
   - type: textarea
     id: logs
     attributes:

@@ -53,6 +53,8 @@ func (r *Runtime) baseURL() string {
 
 // Start launches the LM Studio server.
 func (r *Runtime) Start(ctx context.Context) error {
+	// Use exec.Command (not CommandContext) — the server process must outlive
+	// the short-lived RPC request context that triggers this start.
 	r.cmd = exec.Command(r.binary, "server", "start",
 		"--port", fmt.Sprintf("%d", r.port))
 	if err := r.cmd.Start(); err != nil {

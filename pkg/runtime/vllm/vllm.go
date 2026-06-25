@@ -77,6 +77,8 @@ func (r *Runtime) Start(ctx context.Context) error {
 	cmdArgs := []string{"serve", r.model, "--port", fmt.Sprintf("%d", r.port), "--host", r.host}
 	cmdArgs = append(cmdArgs, r.args...)
 
+	// Use exec.Command (not CommandContext) — the server process must outlive
+	// the short-lived RPC request context that triggers this start.
 	r.cmd = exec.Command(r.binary, cmdArgs...)
 	if err := r.cmd.Start(); err != nil {
 		return fmt.Errorf("vllm: starting %q: %w", r.binary, err)

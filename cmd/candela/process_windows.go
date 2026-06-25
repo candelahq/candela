@@ -14,6 +14,12 @@ import (
 const (
 	windowsStillActive             = 259
 	processQueryLimitedInformation = 0x1000
+	ctrlBreakEvent                 = 1 // CTRL_BREAK_EVENT
+)
+
+var (
+	kernel32                     = syscall.NewLazyDLL("kernel32.dll")
+	procGenerateConsoleCtrlEvent = kernel32.NewProc("GenerateConsoleCtrlEvent")
 )
 
 func configureBackgroundCommand(cmd *exec.Cmd) {
@@ -44,10 +50,23 @@ func processRunning(pid int) bool {
 	return exitCode == windowsStillActive
 }
 
+// terminateProcess sends CTRL_BREAK_EVENT to the process group for graceful
+// shutdown. This is the Windows equivalent of Unix SIGTERM. It requires the
+// child to have been started with CREATE_NEW_PROCESS_GROUP (see
+// configureBackgroundCommand).
 func terminateProcess(process *os.Process) error {
-	return process.Kill()
+	r1, _, err := procGenerateConsoleCtrlEvent.Call(
+		uintptr(ctrlBreakEvent),
+		uintptr(uint32(process.Pid)),
+	)
+	if r1 == 0 {
+		return fmt.Errorf("GenerateConsoleCtrlEvent: %w", err)
+	}
+	return nil
 }
 
+// forceKillProcess unconditionally terminates the process (Win32
+// TerminateProcess). Used as a fallback when graceful shutdown times out.
 func forceKillProcess(process *os.Process) error {
 	return process.Kill()
 }

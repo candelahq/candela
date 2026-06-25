@@ -182,8 +182,8 @@ The GitHub Actions CI (`.github/workflows/ci.yml`) runs these jobs:
 
 ### 4. `windows-candela`
 - Runs on `windows-latest`
-- Tests Windows-specific local CLI process and port discovery behavior
-- Tests Windows runtime discovery hints
+- Runs `golangci-lint` for Windows-specific lint coverage
+- Runs the full test suite (`go test ./... -count=1`)
 - Builds `candela.exe` for `windows/amd64` and `windows/arm64`
 
 ---

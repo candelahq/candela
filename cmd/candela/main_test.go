@@ -377,6 +377,7 @@ func TestStopProcess_VerifiesExitBeforeReturn(t *testing.T) {
 func helperProcessCommand(mode string) *exec.Cmd {
 	cmd := exec.Command(os.Args[0], "-test.run=TestHelperProcess", "--", mode)
 	cmd.Env = append(os.Environ(), "CANDELA_HELPER_PROCESS=1")
+	configureBackgroundCommand(cmd) // CREATE_NEW_PROCESS_GROUP on Windows — prevents CTRL_BREAK_EVENT from leaking to the parent shell
 	return cmd
 }
 

@@ -165,8 +165,8 @@ jobs:
           args: --timeout=5m
           skip-cache: true
 
-      - name: Test cmd/candela
-        run: go test ./cmd/candela/... -count=1
+      - name: Test Windows-relevant packages
+        run: go test ./cmd/candela/... ./pkg/runtime/... -count=1
 
       - name: Build candela.exe (windows/amd64)
         shell: pwsh

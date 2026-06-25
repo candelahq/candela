@@ -41,10 +41,7 @@ func processRunning(pid int) bool {
 		}
 		handle, err = syscall.OpenProcess(syscall.PROCESS_QUERY_INFORMATION, false, uint32(pid))
 		if err != nil {
-			if err == syscall.ERROR_ACCESS_DENIED {
-				return true
-			}
-			return false
+			return err == syscall.ERROR_ACCESS_DENIED
 		}
 	}
 	defer func() { _ = syscall.CloseHandle(handle) }()

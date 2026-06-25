@@ -13,6 +13,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os/exec"
+	"sync"
 	"time"
 
 	"github.com/candelahq/candela/pkg/runtime"
@@ -29,7 +30,9 @@ type Runtime struct {
 	host   string
 	port   int
 	binary string // "lms" (CLI) or "llmster" (headless)
-	cmd    *exec.Cmd
+
+	mu  sync.Mutex // protects cmd
+	cmd *exec.Cmd
 }
 
 // New creates an LM Studio runtime with the given config.
@@ -53,13 +56,16 @@ func (r *Runtime) baseURL() string {
 
 // Start launches the LM Studio server.
 func (r *Runtime) Start(ctx context.Context) error {
+	r.mu.Lock()
 	// Use exec.Command (not CommandContext) — the server process must outlive
 	// the short-lived RPC request context that triggers this start.
 	r.cmd = exec.Command(r.binary, "server", "start",
 		"--port", fmt.Sprintf("%d", r.port))
 	if err := r.cmd.Start(); err != nil {
+		r.mu.Unlock()
 		return fmt.Errorf("lmstudio: starting %q: %w", r.binary, err)
 	}
+	r.mu.Unlock()
 	return runtime.WaitHealthy(ctx, r.baseURL(), 500*time.Millisecond, 30*time.Second)
 }
 
@@ -69,12 +75,18 @@ func (r *Runtime) Stop(ctx context.Context) error {
 	stopCmd := exec.CommandContext(ctx, r.binary, "server", "stop")
 	if err := stopCmd.Run(); err != nil {
 		slog.Warn("lmstudio: graceful stop failed, killing process", "error", err)
+		r.mu.Lock()
 		if r.cmd != nil && r.cmd.Process != nil {
 			_ = r.cmd.Process.Kill()
 			_ = r.cmd.Wait()
 		}
+		r.cmd = nil
+		r.mu.Unlock()
+	} else {
+		r.mu.Lock()
+		r.cmd = nil
+		r.mu.Unlock()
 	}
-	r.cmd = nil
 	return nil
 }
 

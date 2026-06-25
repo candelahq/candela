@@ -1,0 +1,20 @@
+# Default owners for everything
+* @candelahq/maintainers
+
+# Core packages
+/pkg/proxy/          @candelahq/maintainers
+/pkg/costcalc/       @candelahq/maintainers
+/pkg/storage/        @candelahq/maintainers
+
+# Web UI
+/ui/                 @candelahq/maintainers
+
+# Rust sidecar
+/rust/               @candelahq/maintainers
+
+# Infrastructure
+/terraform/          @candelahq/maintainers
+/deploy/             @candelahq/maintainers
+
+# CI/CD
+/.github/            @candelahq/maintainers

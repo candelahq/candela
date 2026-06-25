@@ -1,0 +1,24 @@
+name: 📝 Documentation Issue
+description: Report incorrect, missing, or confusing documentation
+labels: ["documentation"]
+body:
+  - type: input
+    id: url
+    attributes:
+      label: Documentation URL
+      description: Link to the page with the issue.
+      placeholder: https://docs.candela.sh/...
+    validations:
+      required: true
+  - type: textarea
+    id: description
+    attributes:
+      label: What's Wrong
+      description: What is incorrect, missing, or confusing?
+    validations:
+      required: true
+  - type: textarea
+    id: suggestion
+    attributes:
+      label: Suggested Improvement
+      description: How should the docs be improved?

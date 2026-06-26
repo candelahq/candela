@@ -1502,11 +1502,11 @@ func (p *Proxy) handleStandardResponse(
 		spanCtx, spanCancel := context.WithTimeout(context.WithoutCancel(r.Context()), 30*time.Second)
 		select {
 		case p.spanSem <- struct{}{}:
-			go func() {
+			safeGo(func() {
 				defer func() { <-p.spanSem }()
 				defer spanCancel()
 				p.createSpan(spanCtx, provider, reqBody, respBody, startTime, endTime, resp.StatusCode, ttfb, requestID, sessionID, effectiveUserID, tenantID, jobID, traceCtx, proxySpanID, extendedTTL)
-			}()
+			})
 		default:
 			spanCancel()
 			p.droppedSpans.Add(1)
@@ -1662,11 +1662,11 @@ func (p *Proxy) handleStreamingResponse(
 		spanCtx, spanCancel := context.WithTimeout(context.WithoutCancel(r.Context()), 30*time.Second)
 		select {
 		case p.spanSem <- struct{}{}:
-			go func() {
+			safeGo(func() {
 				defer func() { <-p.spanSem }()
 				defer spanCancel()
 				p.createStreamingSpan(spanCtx, provider, reqBody, parseData, startTime, endTime, ttfb, ttft, requestID, sessionID, effectiveUserID, tenantID, jobID, streamStatus, traceCtx, proxySpanID, extendedTTL)
-			}()
+			})
 		default:
 			spanCancel()
 			p.droppedSpans.Add(1)
@@ -1798,14 +1798,14 @@ func (p *Proxy) deductBudget(ctx context.Context, provider Provider, model, user
 	// Best-effort: update the user's last-active timestamp (proxy usage).
 	select {
 	case p.asyncSem <- struct{}{}:
-		go func() {
+		safeGo(func() {
 			defer func() { <-p.asyncSem }()
 			bgCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
 			if err := p.users.TouchLastActive(bgCtx, userID); err != nil {
 				slog.Warn("touch_last_active failed", "user_id", userID, "error", err)
 			}
-		}()
+		})
 	default:
 		p.droppedAsync.Add(1)
 		slog.Debug("async op dropped: too many pending", "op", "touch_last_active", "user_id", userID)
@@ -1815,7 +1815,7 @@ func (p *Proxy) deductBudget(ctx context.Context, provider Provider, model, user
 	if p.budgetCk != nil {
 		select {
 		case p.asyncSem <- struct{}{}:
-			go func() {
+			safeGo(func() {
 				defer func() { <-p.asyncSem }()
 				bgCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 				defer cancel()
@@ -1832,7 +1832,7 @@ func (p *Proxy) deductBudget(ctx context.Context, provider Provider, model, user
 							LimitUSD: budget.LimitUSD,
 						})
 				}
-			}()
+			})
 		default:
 			p.droppedAsync.Add(1)
 			slog.Debug("async op dropped: too many pending", "op", "budget_notify", "user_id", userID)

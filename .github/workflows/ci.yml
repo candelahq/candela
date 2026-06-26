@@ -166,7 +166,8 @@ jobs:
           skip-cache: true
 
       - name: Test Windows-relevant packages
-        run: go test ./cmd/candela/... ./pkg/runtime/... -count=1
+        shell: pwsh
+        run: go test -v ./cmd/candela/... ./pkg/runtime/... -count=1
 
       - name: Build candela.exe (windows/amd64)
         shell: pwsh

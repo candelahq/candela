@@ -359,6 +359,15 @@ func (t *AnthropicFormatTranslator) TranslateResponse(body []byte, model string)
 
 	info := ParseModelName(model)
 
+	msg := openAIMessage{
+		Role:    "assistant",
+		Content: extractAnthropicText(anthResp.Content),
+	}
+
+	if toolCalls := extractAnthropicToolCalls(anthResp.Content); len(toolCalls) > 0 {
+		msg.ToolCalls = toolCalls
+	}
+
 	oaiResp := openAIResponse{
 		ID:      anthResp.ID,
 		Object:  "chat.completion",
@@ -366,11 +375,8 @@ func (t *AnthropicFormatTranslator) TranslateResponse(body []byte, model string)
 		Model:   info.Display,
 		Choices: []openAIChoice{
 			{
-				Index: 0,
-				Message: openAIMessage{
-					Role:    "assistant",
-					Content: extractAnthropicText(anthResp.Content),
-				},
+				Index:        0,
+				Message:      msg,
 				FinishReason: mapStopReason(anthResp.StopReason),
 			},
 		},
@@ -737,8 +743,9 @@ type openAIChoice struct {
 }
 
 type openAIMessage struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
+	Role      string           `json:"role"`
+	Content   string           `json:"content"`
+	ToolCalls []openAIToolCall `json:"tool_calls,omitempty"`
 }
 
 type openAIUsage struct {
@@ -802,8 +809,11 @@ type anthropicResponse struct {
 }
 
 type anthropicContent struct {
-	Type string `json:"type"`
-	Text string `json:"text"`
+	Type  string          `json:"type"`
+	Text  string          `json:"text,omitempty"`
+	ID    string          `json:"id,omitempty"`
+	Name  string          `json:"name,omitempty"`
+	Input json.RawMessage `json:"input,omitempty"`
 }
 
 type anthropicUsage struct {
@@ -821,6 +831,31 @@ func extractAnthropicText(content []anthropicContent) string {
 		}
 	}
 	return strings.Join(parts, "")
+}
+
+// extractAnthropicToolCalls converts Anthropic tool_use content blocks into
+// OpenAI-format tool calls. The Anthropic "input" (a JSON object) is marshaled
+// to a string for the OpenAI "arguments" field.
+func extractAnthropicToolCalls(content []anthropicContent) []openAIToolCall {
+	var calls []openAIToolCall
+	for _, c := range content {
+		if c.Type != "tool_use" {
+			continue
+		}
+		args := "{}"
+		if len(c.Input) > 0 {
+			args = string(c.Input)
+		}
+		calls = append(calls, openAIToolCall{
+			ID:   c.ID,
+			Type: "function",
+			Function: openAIToolCallFn{
+				Name:      c.Name,
+				Arguments: args,
+			},
+		})
+	}
+	return calls
 }
 
 func mapStopReason(reason string) string {

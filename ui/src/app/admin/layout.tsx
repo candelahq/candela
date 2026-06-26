@@ -44,11 +44,13 @@ export default function AdminLayout({
   }
 
   return (
-    <div className="admin-container">
-      <div className="admin-header">
+    <>
+      <div className="main-header">
         <h1 className="admin-title">Administration</h1>
       </div>
-      {children}
-    </div>
+      <div className="main-body">
+        {children}
+      </div>
+    </>
   );
 }

@@ -25,7 +25,6 @@ export default function LeaderboardPage() {
         </div>
       </div>
 
-      <div className="main-body">
         {error && (
           <ErrorBanner title="Leaderboard Error">
             Could not fetch team data: {error}
@@ -117,7 +116,6 @@ export default function LeaderboardPage() {
             </table>
           )}
         </div>
-      </div>
     </div>
 
       <style jsx>{`

@@ -57,7 +57,11 @@ type FormatTranslator interface {
 	TranslateResponse(body []byte, model string) ([]byte, error)
 
 	// TranslateStreamChunk converts a single upstream SSE data payload to client format.
-	TranslateStreamChunk(chunk []byte, model string) ([]byte, error)
+	// streamID is a pointer to a string that persists across calls for a single stream.
+	// On the first call it should point to an empty string; the function will populate
+	// it (from the Anthropic message_start ID or a generated fallback) and reuse it
+	// on subsequent calls so every chunk in the stream shares the same ID.
+	TranslateStreamChunk(chunk []byte, model string, streamID *string) ([]byte, error)
 }
 
 // PathRewriter rewrites the upstream URL path for provider-specific routing
@@ -1549,6 +1553,7 @@ func (p *Proxy) handleStreamingResponse(
 
 	// Determine model name for stream chunk translation.
 	var streamModel string
+	var streamID string // consistent ID across all chunks in this stream
 	if provider.FormatTranslator != nil {
 		streamModel, _ = extractRequestInfo(provider.Name, reqBody)
 	}
@@ -1593,7 +1598,7 @@ func (p *Proxy) handleStreamingResponse(
 
 			// Translate chunk if provider has a FormatTranslator.
 			if provider.FormatTranslator != nil {
-				translated, transErr := provider.FormatTranslator.TranslateStreamChunk(chunk, streamModel)
+				translated, transErr := provider.FormatTranslator.TranslateStreamChunk(chunk, streamModel, &streamID)
 				if transErr != nil {
 					slog.Debug("stream chunk translation failed", "error", transErr)
 					// Forward raw chunk on error.

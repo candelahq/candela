@@ -670,10 +670,11 @@ func TestTranslateResponse_ToolUseOnly(t *testing.T) {
 
 func TestTranslateStreamChunk_ContentDelta(t *testing.T) {
 	translator := &AnthropicFormatTranslator{}
+	var streamID string
 
 	chunk := `data: {"type":"content_block_delta","delta":{"type":"text_delta","text":"Hello"}}`
 
-	translated, err := translator.TranslateStreamChunk([]byte(chunk), "claude-sonnet-4-20250514")
+	translated, err := translator.TranslateStreamChunk([]byte(chunk), "claude-sonnet-4-20250514", &streamID)
 	if err != nil {
 		t.Fatalf("TranslateStreamChunk failed: %v", err)
 	}
@@ -689,16 +690,135 @@ func TestTranslateStreamChunk_ContentDelta(t *testing.T) {
 
 func TestTranslateStreamChunk_MessageStop(t *testing.T) {
 	translator := &AnthropicFormatTranslator{}
+	var streamID string
 
 	chunk := `data: {"type":"message_stop"}`
 
-	translated, err := translator.TranslateStreamChunk([]byte(chunk), "claude-sonnet-4-20250514")
+	translated, err := translator.TranslateStreamChunk([]byte(chunk), "claude-sonnet-4-20250514", &streamID)
 	if err != nil {
 		t.Fatalf("TranslateStreamChunk failed: %v", err)
 	}
 
 	if !strings.Contains(string(translated), "data: [DONE]") {
 		t.Errorf("expected [DONE], got: %s", translated)
+	}
+}
+
+func TestTranslateStreamChunk_ConsistentID(t *testing.T) {
+	translator := &AnthropicFormatTranslator{}
+
+	// Simulate a multi-chunk Anthropic stream split across TCP reads.
+	chunks := []string{
+		// First TCP read: message_start with Anthropic message ID.
+		`event: message_start
+data: {"type":"message_start","message":{"id":"msg_abc123","type":"message","role":"assistant","content":[],"model":"claude-sonnet-4-20250514","stop_reason":null,"usage":{"input_tokens":10,"output_tokens":0}}}`,
+		// Second TCP read: content delta.
+		`event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Hello"}}`,
+		// Third TCP read: another content delta.
+		`event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" world"}}`,
+		// Fourth TCP read: message_delta with usage and stop.
+		`event: message_delta
+data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":5}}`,
+	}
+
+	var streamID string
+	var allIDs []string
+
+	for _, c := range chunks {
+		translated, err := translator.TranslateStreamChunk([]byte(c), "claude-sonnet-4-20250514", &streamID)
+		if err != nil {
+			t.Fatalf("TranslateStreamChunk failed: %v", err)
+		}
+
+		// Extract all "id" fields from the translated SSE data lines.
+		for _, line := range strings.Split(string(translated), "\n") {
+			if !strings.HasPrefix(line, "data: ") {
+				continue
+			}
+			payload := strings.TrimPrefix(line, "data: ")
+			if payload == "[DONE]" {
+				continue
+			}
+			var obj map[string]interface{}
+			if err := json.Unmarshal([]byte(payload), &obj); err != nil {
+				t.Fatalf("failed to parse translated chunk: %v", err)
+			}
+			if id, ok := obj["id"].(string); ok {
+				allIDs = append(allIDs, id)
+			}
+		}
+	}
+
+	if len(allIDs) == 0 {
+		t.Fatal("expected at least one chunk with an ID")
+	}
+
+	// All IDs should be the Anthropic message ID from message_start.
+	expectedID := "msg_abc123"
+	for i, id := range allIDs {
+		if id != expectedID {
+			t.Errorf("chunk %d: got id %q, want %q", i, id, expectedID)
+		}
+	}
+
+	// The streamID pointer should also reflect the Anthropic message ID.
+	if streamID != expectedID {
+		t.Errorf("streamID pointer: got %q, want %q", streamID, expectedID)
+	}
+}
+
+func TestTranslateStreamChunk_ConsistentID_NoMessageStart(t *testing.T) {
+	translator := &AnthropicFormatTranslator{}
+
+	// Simulate a stream where message_start has no ID — should fall back to
+	// a generated ID and keep it consistent across calls.
+	chunks := []string{
+		`data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Hello"}}`,
+		`data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" world"}}`,
+	}
+
+	var streamID string
+	var allIDs []string
+
+	for _, c := range chunks {
+		translated, err := translator.TranslateStreamChunk([]byte(c), "claude-sonnet-4-20250514", &streamID)
+		if err != nil {
+			t.Fatalf("TranslateStreamChunk failed: %v", err)
+		}
+		for _, line := range strings.Split(string(translated), "\n") {
+			if !strings.HasPrefix(line, "data: ") {
+				continue
+			}
+			payload := strings.TrimPrefix(line, "data: ")
+			if payload == "[DONE]" {
+				continue
+			}
+			var obj map[string]interface{}
+			if err := json.Unmarshal([]byte(payload), &obj); err != nil {
+				t.Fatalf("failed to parse translated chunk: %v", err)
+			}
+			if id, ok := obj["id"].(string); ok {
+				allIDs = append(allIDs, id)
+			}
+		}
+	}
+
+	if len(allIDs) < 2 {
+		t.Fatalf("expected at least 2 IDs, got %d", len(allIDs))
+	}
+
+	// All IDs must be identical (generated fallback).
+	for i := 1; i < len(allIDs); i++ {
+		if allIDs[i] != allIDs[0] {
+			t.Errorf("chunk %d id %q != chunk 0 id %q", i, allIDs[i], allIDs[0])
+		}
+	}
+
+	// Should have the chatcmpl- prefix.
+	if !strings.HasPrefix(allIDs[0], "chatcmpl-") {
+		t.Errorf("expected chatcmpl- prefix, got %q", allIDs[0])
 	}
 }
 

@@ -1016,6 +1016,11 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 		// small reservation prevents unlimited concurrent overdraft.
 		budgetReserved = budgetCheckFloor
 		p.pendingSpend.Reserve(effectiveUserID, budgetReserved)
+		defer func() {
+			if budgetReserved > 0 {
+				p.pendingSpend.Release(effectiveUserID, budgetReserved)
+			}
+		}()
 	}
 
 	// ── Per-request cost cap (#277) ──
@@ -1362,9 +1367,9 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if isStreaming && resp.StatusCode == http.StatusOK {
-		p.handleStreamingResponse(w, r, resp, provider, reqBody, startTime, ttfb, requestID, sessionID, effectiveUserID, tenantID, jobID, cbAllow, traceCtx, proxySpanID, extendedTTL, budgetReserved)
+		p.handleStreamingResponse(w, r, resp, provider, reqBody, startTime, ttfb, requestID, sessionID, effectiveUserID, tenantID, jobID, cbAllow, traceCtx, proxySpanID, extendedTTL, &budgetReserved)
 	} else {
-		p.handleStandardResponse(w, r, resp, provider, reqBody, startTime, ttfb, requestID, sessionID, effectiveUserID, tenantID, jobID, cbAllow, traceCtx, proxySpanID, extendedTTL, budgetReserved)
+		p.handleStandardResponse(w, r, resp, provider, reqBody, startTime, ttfb, requestID, sessionID, effectiveUserID, tenantID, jobID, cbAllow, traceCtx, proxySpanID, extendedTTL, &budgetReserved)
 	}
 }
 
@@ -1400,7 +1405,7 @@ func (p *Proxy) handleStandardResponse(
 	traceCtx *traceContext,
 	proxySpanID string,
 	extendedTTL bool, // true = Anthropic 1h TTL (2.0× cache creation rate)
-	budgetReserved float64, // pending-spend reservation to release after DeductSpend
+	budgetReserved *float64, // pending-spend reservation to release after DeductSpend
 ) {
 	// Read the full response (reject if over 10MB to prevent OOM under concurrent load).
 	// CRIT-15: Previously 50MB — with 100 concurrent requests that's 5GB of heap.
@@ -1472,10 +1477,12 @@ func (p *Proxy) handleStandardResponse(
 		deductCtx, deductCancel := context.WithTimeout(context.WithoutCancel(r.Context()), 15*time.Second)
 		p.deductBudget(deductCtx, provider, model, effectiveUserID, inputTokens, outputTokens)
 		deductCancel()
-		// Release the pending-spend reservation now that DeductSpend has
-		// recorded the actual cost in Firestore.
-		if budgetReserved > 0 {
-			p.pendingSpend.Release(effectiveUserID, budgetReserved)
+		// Clear the pending-spend reservation now that DeductSpend has
+		// recorded the actual cost in Firestore. The deferred Release in
+		// ServeHTTP will see 0 and become a no-op.
+		if budgetReserved != nil && *budgetReserved > 0 {
+			p.pendingSpend.Release(effectiveUserID, *budgetReserved)
+			*budgetReserved = 0
 		}
 	} else if p.spendTracker != nil {
 		// Solo mode: no UserStore but spend tracker is active.
@@ -1531,7 +1538,7 @@ func (p *Proxy) handleStreamingResponse(
 	traceCtx *traceContext,
 	proxySpanID string,
 	extendedTTL bool, // true = Anthropic 1h TTL (2.0× cache creation rate)
-	budgetReserved float64, // pending-spend reservation to release after DeductSpend
+	budgetReserved *float64, // pending-spend reservation to release after DeductSpend
 ) {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
@@ -1636,8 +1643,9 @@ func (p *Proxy) handleStreamingResponse(
 		deductCtx, deductCancel := context.WithTimeout(context.WithoutCancel(r.Context()), 15*time.Second)
 		p.deductBudget(deductCtx, provider, model, effectiveUserID, inputTokens, outputTokens)
 		deductCancel()
-		if budgetReserved > 0 {
-			p.pendingSpend.Release(effectiveUserID, budgetReserved)
+		if budgetReserved != nil && *budgetReserved > 0 {
+			p.pendingSpend.Release(effectiveUserID, *budgetReserved)
+			*budgetReserved = 0
 		}
 	} else if p.spendTracker != nil {
 		// Solo mode: record per-model spend for daily limits.

@@ -80,11 +80,12 @@ type Config struct {
 	RuntimeManage  runtime.ManagerConfig `yaml:"runtime_manage"`  // Auto-start, auto-pull, models
 
 	// Direct cloud providers (solo mode — call Gemini/Claude without a server).
-	Providers      []LocalProvider          `yaml:"providers"`
-	VertexAI       VertexAIConfig           `yaml:"vertex_ai"`
-	AWS            AWSConfig                `yaml:"aws"`
-	MaxRequestCost float64                  `yaml:"max_request_cost_usd"` // Per-request cost cap (0 = disabled)
-	DailyLimits    []proxy.SpendLimitConfig `yaml:"daily_limits"`         // Per-model daily spend limits
+	Providers        []LocalProvider          `yaml:"providers"`
+	VertexAI         VertexAIConfig           `yaml:"vertex_ai"`
+	AWS              AWSConfig                `yaml:"aws"`
+	MaxRequestCost   float64                  `yaml:"max_request_cost_usd"` // Per-request cost cap (0 = disabled)
+	DailyLimits      []proxy.SpendLimitConfig `yaml:"daily_limits"`         // Per-model daily spend limits
+	DefaultMaxTokens int                      `yaml:"default_max_tokens"`   // Injected when client omits max_tokens (default: 8192)
 }
 
 // LocalProvider configures a direct cloud provider for solo mode.
@@ -1036,7 +1037,7 @@ func runForeground() {
 		cloudCalc = costcalc.New()
 	}
 
-	lmH := newLMHandler(mgr, remoteProxy, runtimeLocalProxy, localHandler, cloudProxy, cloudModels, cloudCalc, soloMode)
+	lmH := newLMHandler(mgr, remoteProxy, runtimeLocalProxy, localHandler, cloudProxy, cloudModels, cloudCalc, soloMode, cfg.DefaultMaxTokens)
 	lmAddr := fmt.Sprintf("127.0.0.1:%d", lmPort)
 
 	// ── Graceful shutdown ──

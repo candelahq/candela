@@ -24,14 +24,15 @@ import (
 // It intercepts /v1/models (merging local + remote + cloud models) and
 // /v1/chat/completions (routing to local runtime, cloud proxy, or remote server).
 type lmHandler struct {
-	mgr          *runtime.Manager       // local runtime manager (may be nil)
-	remoteProxy  *httputil.ReverseProxy // proxy to remote Candela server
-	localProxy   *httputil.ReverseProxy // proxy to local runtime (e.g. Ollama)
-	localHandler http.Handler           // localProxy wrapped with optional span capture
-	cloudProxy   *proxy.Proxy           // direct cloud proxy (solo + cloud mode)
-	cloudModels  map[string]string      // model ID → provider name
-	calc         *costcalc.Calculator   // pricing calculator (for filtering unpriced models)
-	soloMode     bool                   // true = solo mode (use embedded cloud models), false = team mode
+	mgr              *runtime.Manager       // local runtime manager (may be nil)
+	remoteProxy      *httputil.ReverseProxy // proxy to remote Candela server
+	localProxy       *httputil.ReverseProxy // proxy to local runtime (e.g. Ollama)
+	localHandler     http.Handler           // localProxy wrapped with optional span capture
+	cloudProxy       *proxy.Proxy           // direct cloud proxy (solo + cloud mode)
+	cloudModels      map[string]string      // model ID → provider name
+	calc             *costcalc.Calculator   // pricing calculator (for filtering unpriced models)
+	soloMode         bool                   // true = solo mode (use embedded cloud models), false = team mode
+	defaultMaxTokens int                    // injected when client omits max_tokens (default: 8192)
 
 	// Model caches stored as atomic.Value holding map[string]bool.
 	// Updated atomically by swapping the entire map — no in-place mutation.
@@ -49,23 +50,27 @@ type lmHandler struct {
 
 // newLMHandler creates a smart LM compat handler that merges local + remote + cloud
 // models and routes chat completions to the correct backend.
-func newLMHandler(mgr *runtime.Manager, remoteProxy, localProxy *httputil.ReverseProxy, localHandler http.Handler, cloudProxy *proxy.Proxy, cloudModels map[string]string, calc *costcalc.Calculator, soloMode bool) *lmHandler {
+func newLMHandler(mgr *runtime.Manager, remoteProxy, localProxy *httputil.ReverseProxy, localHandler http.Handler, cloudProxy *proxy.Proxy, cloudModels map[string]string, calc *costcalc.Calculator, soloMode bool, defaultMaxTokens int) *lmHandler {
 	if localHandler == nil && localProxy != nil {
 		localHandler = localProxy
 	}
 	if cloudModels == nil {
 		cloudModels = make(map[string]string)
 	}
+	if defaultMaxTokens <= 0 {
+		defaultMaxTokens = 8192
+	}
 	h := &lmHandler{
-		mgr:          mgr,
-		remoteProxy:  remoteProxy,
-		localProxy:   localProxy,
-		localHandler: localHandler,
-		cloudProxy:   cloudProxy,
-		cloudModels:  cloudModels,
-		calc:         calc,
-		soloMode:     soloMode,
-		stopCh:       make(chan struct{}),
+		mgr:              mgr,
+		remoteProxy:      remoteProxy,
+		localProxy:       localProxy,
+		localHandler:     localHandler,
+		cloudProxy:       cloudProxy,
+		cloudModels:      cloudModels,
+		calc:             calc,
+		soloMode:         soloMode,
+		defaultMaxTokens: defaultMaxTokens,
+		stopCh:           make(chan struct{}),
 	}
 
 	// Initialize empty maps in atomic values.
@@ -158,6 +163,8 @@ func (h *lmHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case r.URL.Path == "/api/v0/models" && r.Method == http.MethodGet:
 		h.serveModels(w, r)
 	case r.URL.Path == "/v1/chat/completions" && r.Method == http.MethodPost:
+		h.serveChat(w, r)
+	case r.URL.Path == "/api/v0/chat/completions" && r.Method == http.MethodPost:
 		h.serveChat(w, r)
 	default:
 		if h.remoteProxy != nil {
@@ -307,9 +314,23 @@ func (h *lmHandler) serveChat(w http.ResponseWriter, r *http.Request) {
 	_ = r.Body.Close()
 
 	var req struct {
-		Model string `json:"model"`
+		Model     string `json:"model"`
+		MaxTokens *int   `json:"max_tokens,omitempty"`
 	}
 	_ = json.Unmarshal(body, &req)
+
+	// Inject max_tokens if absent or non-positive — some clients (JetBrains)
+	// don't send it, but providers like Anthropic require it.
+	if req.MaxTokens == nil || *req.MaxTokens <= 0 {
+		var raw map[string]json.RawMessage
+		if err := json.Unmarshal(body, &raw); err == nil {
+			defaultMax := h.defaultMaxTokens
+			if b, err := json.Marshal(defaultMax); err == nil {
+				raw["max_tokens"] = b
+				body, _ = json.Marshal(raw)
+			}
+		}
+	}
 
 	// Resolve model aliases (e.g. "claude-sonnet-4" → "claude-sonnet-4-20250514").
 	resolved := h.resolveModel(req.Model)
@@ -344,6 +365,7 @@ func (h *lmHandler) serveChat(w http.ResponseWriter, r *http.Request) {
 
 	// 3. Remote server → team mode proxy.
 	if h.remoteProxy != nil {
+		r.URL.Path = "/v1/chat/completions" // normalize — remote only serves /v1/
 		h.remoteProxy.ServeHTTP(w, r)
 		return
 	}

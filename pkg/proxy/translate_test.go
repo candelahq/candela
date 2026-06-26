@@ -430,6 +430,163 @@ func TestTranslateRequest_Stream(t *testing.T) {
 }
 
 // ====================================================================
+// Multi-modal Image Translation: OpenAI → Anthropic
+// ====================================================================
+
+func TestTranslateRequest_ImageBase64(t *testing.T) {
+	translator := &AnthropicFormatTranslator{}
+	translator.SetCachingMode(CachingOff)
+
+	body := `{
+		"model": "claude-sonnet-4-20250514",
+		"messages": [
+			{"role": "user", "content": [
+				{"type": "image_url", "image_url": {"url": "data:image/png;base64,iVBORw0KGgo="}}
+			]}
+		]
+	}`
+
+	translated, _, err := translator.TranslateRequest([]byte(body))
+	if err != nil {
+		t.Fatalf("TranslateRequest failed: %v", err)
+	}
+
+	var raw map[string]interface{}
+	if err := json.Unmarshal(translated, &raw); err != nil {
+		t.Fatalf("failed to unmarshal: %v", err)
+	}
+
+	messages := raw["messages"].([]interface{})
+	if len(messages) != 1 {
+		t.Fatalf("messages len = %d, want 1", len(messages))
+	}
+
+	msg := messages[0].(map[string]interface{})
+	content := msg["content"].([]interface{})
+	if len(content) != 1 {
+		t.Fatalf("content len = %d, want 1", len(content))
+	}
+
+	block := content[0].(map[string]interface{})
+	if block["type"] != "image" {
+		t.Errorf("type = %v, want image", block["type"])
+	}
+
+	source := block["source"].(map[string]interface{})
+	if source["type"] != "base64" {
+		t.Errorf("source.type = %v, want base64", source["type"])
+	}
+	if source["media_type"] != "image/png" {
+		t.Errorf("source.media_type = %v, want image/png", source["media_type"])
+	}
+	if source["data"] != "iVBORw0KGgo=" {
+		t.Errorf("source.data = %v, want iVBORw0KGgo=", source["data"])
+	}
+}
+
+func TestTranslateRequest_ImageURL(t *testing.T) {
+	translator := &AnthropicFormatTranslator{}
+	translator.SetCachingMode(CachingOff)
+
+	body := `{
+		"model": "claude-sonnet-4-20250514",
+		"messages": [
+			{"role": "user", "content": [
+				{"type": "image_url", "image_url": {"url": "https://example.com/photo.jpg"}}
+			]}
+		]
+	}`
+
+	translated, _, err := translator.TranslateRequest([]byte(body))
+	if err != nil {
+		t.Fatalf("TranslateRequest failed: %v", err)
+	}
+
+	var raw map[string]interface{}
+	if err := json.Unmarshal(translated, &raw); err != nil {
+		t.Fatalf("failed to unmarshal: %v", err)
+	}
+
+	messages := raw["messages"].([]interface{})
+	msg := messages[0].(map[string]interface{})
+	content := msg["content"].([]interface{})
+	if len(content) != 1 {
+		t.Fatalf("content len = %d, want 1", len(content))
+	}
+
+	block := content[0].(map[string]interface{})
+	if block["type"] != "image" {
+		t.Errorf("type = %v, want image", block["type"])
+	}
+
+	source := block["source"].(map[string]interface{})
+	if source["type"] != "url" {
+		t.Errorf("source.type = %v, want url", source["type"])
+	}
+	if source["url"] != "https://example.com/photo.jpg" {
+		t.Errorf("source.url = %v, want https://example.com/photo.jpg", source["url"])
+	}
+}
+
+func TestTranslateRequest_MixedTextAndImage(t *testing.T) {
+	translator := &AnthropicFormatTranslator{}
+	translator.SetCachingMode(CachingOff)
+
+	body := `{
+		"model": "claude-sonnet-4-20250514",
+		"messages": [
+			{"role": "user", "content": [
+				{"type": "text", "text": "What is in this image?"},
+				{"type": "image_url", "image_url": {"url": "data:image/jpeg;base64,/9j/4AAQ=="}}
+			]}
+		]
+	}`
+
+	translated, _, err := translator.TranslateRequest([]byte(body))
+	if err != nil {
+		t.Fatalf("TranslateRequest failed: %v", err)
+	}
+
+	var raw map[string]interface{}
+	if err := json.Unmarshal(translated, &raw); err != nil {
+		t.Fatalf("failed to unmarshal: %v", err)
+	}
+
+	messages := raw["messages"].([]interface{})
+	msg := messages[0].(map[string]interface{})
+	content := msg["content"].([]interface{})
+	if len(content) != 2 {
+		t.Fatalf("content len = %d, want 2", len(content))
+	}
+
+	// First block: text (passed through as-is).
+	textBlock := content[0].(map[string]interface{})
+	if textBlock["type"] != "text" {
+		t.Errorf("content[0].type = %v, want text", textBlock["type"])
+	}
+	if textBlock["text"] != "What is in this image?" {
+		t.Errorf("content[0].text = %v, want 'What is in this image?'", textBlock["text"])
+	}
+
+	// Second block: image (translated from image_url).
+	imgBlock := content[1].(map[string]interface{})
+	if imgBlock["type"] != "image" {
+		t.Errorf("content[1].type = %v, want image", imgBlock["type"])
+	}
+
+	source := imgBlock["source"].(map[string]interface{})
+	if source["type"] != "base64" {
+		t.Errorf("source.type = %v, want base64", source["type"])
+	}
+	if source["media_type"] != "image/jpeg" {
+		t.Errorf("source.media_type = %v, want image/jpeg", source["media_type"])
+	}
+	if source["data"] != "/9j/4AAQ==" {
+		t.Errorf("source.data = %v, want /9j/4AAQ==", source["data"])
+	}
+}
+
+// ====================================================================
 // Response Translation: Anthropic → OpenAI
 // ====================================================================
 

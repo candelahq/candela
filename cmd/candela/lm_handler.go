@@ -9,7 +9,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httputil"
-	"regexp"
+
 	"strings"
 	"sync/atomic"
 	"time"
@@ -412,11 +412,10 @@ func (h *lmHandler) resolveModel(model string) string {
 }
 
 // rewriteModelInBody replaces the "model" field value in a JSON request body.
-// Consistent with pkg/proxy/proxy.go's rewriteModelField: parse the body to
-// find the actual current model string, then build a targeted regex that
-// handles any whitespace around the colon and any valid JSON encoding of the
-// old value (including \uXXXX escapes). Uses ReplaceAll with a ${1} backreference
-// so the whitespace between the key and value is preserved.
+// It parses the body to find the current model string, then locates the
+// "model" key via bytes.Index and splices in the new JSON-encoded value.
+// This avoids per-request regex compilation while still handling whitespace
+// around the colon and replacing only the first matching occurrence.
 func rewriteModelInBody(body []byte, _, newModel string) []byte {
 	// Parse to get the ground-truth model string (handles all JSON encodings).
 	var req struct {
@@ -427,22 +426,38 @@ func rewriteModelInBody(body []byte, _, newModel string) []byte {
 	}
 	oldJSON, _ := json.Marshal(req.Model)
 	newJSON, _ := json.Marshal(newModel)
-	// Match "model"\s*:\s*<current-json-value>, preserving key+whitespace via capture group.
-	// Use FindSubmatchIndex + manual splice so only the FIRST occurrence is replaced,
-	// leaving any nested "model" keys in message content untouched.
-	pattern := regexp.MustCompile(`("model"\s*:\s*)` + regexp.QuoteMeta(string(oldJSON)))
-	loc := pattern.FindSubmatchIndex(body)
-	if loc == nil {
-		return body
+
+	// Scan through all occurrences of the "model" key. The word "model" may
+	// appear inside user message content before the actual JSON key, so we
+	// must verify each hit has a colon + matching value before splicing.
+	key := []byte(`"model"`)
+	offset := 0
+	for {
+		idx := bytes.Index(body[offset:], key)
+		if idx < 0 {
+			return body // no more occurrences
+		}
+		idx += offset // absolute position
+
+		// Skip whitespace and colon after the key.
+		afterKey := body[idx+len(key):]
+		valueStart := 0
+		for valueStart < len(afterKey) && (afterKey[valueStart] == ' ' || afterKey[valueStart] == '\t' || afterKey[valueStart] == '\n' || afterKey[valueStart] == '\r' || afterKey[valueStart] == ':') {
+			valueStart++
+		}
+		// Check if the value at this position matches the old JSON-encoded model.
+		if valueStart+len(oldJSON) <= len(afterKey) && bytes.Equal(afterKey[valueStart:valueStart+len(oldJSON)], oldJSON) {
+			// Found it — splice.
+			absValueStart := idx + len(key) + valueStart
+			result := make([]byte, 0, len(body)+len(newJSON)-len(oldJSON))
+			result = append(result, body[:absValueStart]...)
+			result = append(result, newJSON...)
+			result = append(result, body[absValueStart+len(oldJSON):]...)
+			return result
+		}
+		// Move past this occurrence and keep searching.
+		offset = idx + len(key)
 	}
-	// loc[0]:loc[1] = full match; loc[2]:loc[3] = capture group (key+whitespace).
-	// Rebuild: everything before match + key+whitespace + newJSON + everything after match.
-	result := make([]byte, 0, len(body)+(len(newJSON)-len(oldJSON)))
-	result = append(result, body[:loc[2]]...)       // up to start of capture group
-	result = append(result, body[loc[2]:loc[3]]...) // key + whitespace (the ${1} part)
-	result = append(result, newJSON...)
-	result = append(result, body[loc[1]:]...)
-	return result
 }
 
 // responseRecorder captures a proxy response for parsing.

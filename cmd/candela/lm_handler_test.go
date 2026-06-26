@@ -297,14 +297,11 @@ func TestLMHandler_Chat_UnknownModelDefaultsToRemote(t *testing.T) {
 	}
 }
 
-func TestLMHandler_Passthrough(t *testing.T) {
-	remoteSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]string{"path": r.URL.Path})
-	}))
-	defer remoteSrv.Close()
-
-	h := newLMHandler(nil, proxyTo(remoteSrv.URL), nil, nil, nil, nil, nil, false)
+func TestLMHandler_APIV0Models(t *testing.T) {
+	// /api/v0/models should return a model list (same as /v1/models), not passthrough.
+	// Use solo mode with a cloud model to ensure there's at least one model in the response.
+	cloudModels := map[string]string{"test-model": "test-provider"}
+	h := newLMHandler(nil, nil, nil, nil, nil, cloudModels, nil, true)
 	srv := httptest.NewServer(h)
 	defer srv.Close()
 
@@ -315,8 +312,104 @@ func TestLMHandler_Passthrough(t *testing.T) {
 	defer func() { _ = resp.Body.Close() }()
 
 	body, _ := io.ReadAll(resp.Body)
-	if !strings.Contains(string(body), "/api/v0/models") {
-		t.Errorf("passthrough failed, got: %s", body)
+	if !strings.Contains(string(body), `"object":"list"`) {
+		t.Errorf("/api/v0/models should return model list, got: %s", body)
+	}
+	if !strings.Contains(string(body), `"arch"`) {
+		t.Errorf("/api/v0/models response missing arch field, got: %s", body)
+	}
+}
+
+func TestLMHandler_ModelFields(t *testing.T) {
+	// Verify that LM Studio compat fields (arch, type, state, etc.) are present
+	// on both local and cloud models in the /v1/models response.
+	localModels := []runtime.Model{{ID: "llama3.2:3b"}}
+
+	// Set up a solo-mode handler with a cloud model so we test both paths.
+	remoteSrv := mockRemoteServer(t, nil)
+	localSrv := mockLocalServer(t)
+
+	mock := &lmMockRuntime{models: localModels}
+	mgr := runtime.NewManager(mock, runtime.ManagerConfig{HealthCheck: 10 * 1e9})
+	if err := mgr.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = mgr.Stop(context.Background()) })
+
+	cloudModels := map[string]string{"gpt-4o": "openai"}
+	h := newLMHandler(mgr, proxyTo(remoteSrv.URL), proxyTo(localSrv.URL), nil, nil, cloudModels, nil, true)
+	srv := httptest.NewServer(h)
+	t.Cleanup(srv.Close)
+
+	resp, err := http.Get(srv.URL + "/v1/models")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+
+	// Parse into generic structure to check field presence.
+	var raw struct {
+		Data []map[string]interface{} `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&raw); err != nil {
+		t.Fatal(err)
+	}
+
+	if len(raw.Data) < 2 {
+		t.Fatalf("got %d models, want at least 2 (local + cloud)", len(raw.Data))
+	}
+
+	for i, m := range raw.Data {
+		id, _ := m["id"].(string)
+
+		// arch must be "auto"
+		arch, ok := m["arch"]
+		if !ok {
+			t.Errorf("model[%d] %q: missing arch field", i, id)
+		} else if arch != "auto" {
+			t.Errorf("model[%d] %q: arch = %q, want \"auto\"", i, id, arch)
+		}
+
+		// type must be "llm"
+		typ, ok := m["type"]
+		if !ok {
+			t.Errorf("model[%d] %q: missing type field", i, id)
+		} else if typ != "llm" {
+			t.Errorf("model[%d] %q: type = %q, want \"llm\"", i, id, typ)
+		}
+
+		// state must be "loaded"
+		state, ok := m["state"]
+		if !ok {
+			t.Errorf("model[%d] %q: missing state field", i, id)
+		} else if state != "loaded" {
+			t.Errorf("model[%d] %q: state = %q, want \"loaded\"", i, id, state)
+		}
+
+		// max_context_length must be > 0
+		mcl, ok := m["max_context_length"]
+		if !ok {
+			t.Errorf("model[%d] %q: missing max_context_length field", i, id)
+		} else if mclVal, isNum := mcl.(float64); !isNum || mclVal <= 0 {
+			t.Errorf("model[%d] %q: max_context_length = %v, want > 0", i, id, mcl)
+		}
+
+		// publisher must be non-empty
+		pub, ok := m["publisher"]
+		if !ok {
+			t.Errorf("model[%d] %q: missing publisher field", i, id)
+		} else if pub == "" {
+			t.Errorf("model[%d] %q: publisher is empty", i, id)
+		}
+
+		// compatibility_type must be present
+		if _, ok := m["compatibility_type"]; !ok {
+			t.Errorf("model[%d] %q: missing compatibility_type field", i, id)
+		}
 	}
 }
 

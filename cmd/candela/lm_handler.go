@@ -155,6 +155,8 @@ func (h *lmHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case r.URL.Path == "/v1/models" && r.Method == http.MethodGet:
 		h.serveModels(w, r)
+	case r.URL.Path == "/api/v0/models" && r.Method == http.MethodGet:
+		h.serveModels(w, r)
 	case r.URL.Path == "/v1/chat/completions" && r.Method == http.MethodPost:
 		h.serveChat(w, r)
 	default:
@@ -169,10 +171,18 @@ func (h *lmHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 // openaiModel represents a model in the OpenAI /v1/models response.
+// Includes LM Studio extension fields required by JetBrains AI Chat.
 type openaiModel struct {
-	ID      string `json:"id"`
-	Object  string `json:"object"`
-	OwnedBy string `json:"owned_by"`
+	ID                string `json:"id"`
+	Object            string `json:"object"`
+	Created           int64  `json:"created"`
+	OwnedBy           string `json:"owned_by"`
+	Type              string `json:"type"`               // "llm"
+	Publisher         string `json:"publisher"`          // provider name
+	Arch              string `json:"arch"`               // "auto" — required by JetBrains
+	CompatibilityType string `json:"compatibility_type"` // "gguf"
+	State             string `json:"state"`              // "loaded"
+	MaxContextLength  int    `json:"max_context_length"` // 128000
 }
 
 // openaiModelList is the OpenAI /v1/models response format.
@@ -196,9 +206,16 @@ func (h *lmHandler) serveModels(w http.ResponseWriter, r *http.Request) {
 			newSet := make(map[string]bool, len(models))
 			for _, m := range models {
 				merged = append(merged, openaiModel{
-					ID:      m.ID,
-					Object:  "model",
-					OwnedBy: backendName,
+					ID:                m.ID,
+					Object:            "model",
+					Created:           1700000000, // fixed epoch for stable responses
+					OwnedBy:           backendName,
+					Type:              "llm",
+					Publisher:         backendName,
+					Arch:              "auto",
+					CompatibilityType: "gguf",
+					State:             "loaded",
+					MaxContextLength:  128000,
 				})
 				newSet[m.ID] = true
 			}
@@ -215,9 +232,16 @@ func (h *lmHandler) serveModels(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 			merged = append(merged, openaiModel{
-				ID:      modelID,
-				Object:  "model",
-				OwnedBy: providerName,
+				ID:                modelID,
+				Object:            "model",
+				Created:           1700000000, // fixed epoch for stable responses
+				OwnedBy:           providerName,
+				Type:              "llm",
+				Publisher:         providerName,
+				Arch:              "auto",
+				CompatibilityType: "gguf",
+				State:             "loaded",
+				MaxContextLength:  128000,
 			})
 		}
 	}
@@ -256,6 +280,7 @@ func (h *lmHandler) fetchRemoteModels(r *http.Request) []openaiModel {
 
 	rec := &responseRecorder{headers: make(http.Header)}
 	req := r.Clone(ctx)
+	req.URL.Path = "/v1/models" // normalize — remote only serves /v1/models
 	h.remoteProxy.ServeHTTP(rec, req)
 
 	if rec.statusCode != http.StatusOK {

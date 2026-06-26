@@ -163,9 +163,7 @@ func (h *lmHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if h.remoteProxy != nil {
 			h.remoteProxy.ServeHTTP(w, r)
 		} else {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusNotFound)
-			_ = json.NewEncoder(w).Encode(map[string]string{"error": "solo mode — no remote server configured"})
+			proxy.ProxyErrorResponse(w, http.StatusNotFound, "solo mode — no remote server configured", "invalid_request_error")
 		}
 	}
 }
@@ -301,7 +299,7 @@ func (h *lmHandler) serveChat(w http.ResponseWriter, r *http.Request) {
 	// Read body to peek at the model field (10MB limit to prevent OOM).
 	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 10<<20))
 	if err != nil {
-		http.Error(w, `{"error":"request body too large or unreadable"}`, http.StatusRequestEntityTooLarge)
+		proxy.ProxyErrorResponse(w, http.StatusRequestEntityTooLarge, "request body too large or unreadable", "invalid_request_error")
 		return
 	}
 	_ = r.Body.Close()
@@ -349,9 +347,7 @@ func (h *lmHandler) serveChat(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 4. No handler found.
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusNotFound)
-	_ = json.NewEncoder(w).Encode(map[string]string{"error": "model not found locally and no remote server configured"})
+	proxy.ProxyErrorResponse(w, http.StatusNotFound, "model not found locally and no remote server configured", "invalid_request_error")
 }
 
 // isLocalModel checks if a model is served by the local runtime.

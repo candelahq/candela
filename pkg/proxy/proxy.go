@@ -559,9 +559,9 @@ func (p *Proxy) RegisterCompatRoutes(mux *http.ServeMux, models []CompatModel) {
 		if err != nil {
 			var maxErr *http.MaxBytesError
 			if errors.As(err, &maxErr) {
-				http.Error(w, "request body too large", http.StatusRequestEntityTooLarge)
+				ProxyErrorResponse(w, http.StatusRequestEntityTooLarge, "request body too large", "invalid_request_error")
 			} else {
-				http.Error(w, "failed to read request body", http.StatusBadRequest)
+				ProxyErrorResponse(w, http.StatusBadRequest, "failed to read request body", "invalid_request_error")
 			}
 			return
 		}
@@ -838,7 +838,7 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 	// Extract provider from path: /proxy/{provider}/v1/...
 	parts := strings.SplitN(strings.TrimPrefix(r.URL.Path, "/proxy/"), "/", 2)
 	if len(parts) < 2 {
-		http.Error(w, "invalid proxy path", http.StatusBadRequest)
+		ProxyErrorResponse(w, http.StatusBadRequest, "invalid proxy path", "invalid_request_error")
 		return
 	}
 	providerName := parts[0]
@@ -846,7 +846,7 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 
 	provider, ok := p.providers[providerName]
 	if !ok {
-		http.Error(w, "unknown provider", http.StatusBadRequest)
+		ProxyErrorResponse(w, http.StatusBadRequest, "unknown provider", "invalid_request_error")
 		return
 	}
 
@@ -865,7 +865,7 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 		if rlErr != nil {
 			slog.Error("rate limit check failed, blocking request",
 				"user_id", effectiveUserID, "error", rlErr)
-			http.Error(w, `{"error":{"message":"rate limit check unavailable — try again shortly","type":"service_error","code":503}}`, http.StatusServiceUnavailable)
+			ProxyErrorResponse(w, http.StatusServiceUnavailable, "rate limit check unavailable — try again shortly", "service_error")
 			return
 		} else if !allowed {
 			w.Header().Set("Content-Type", "application/json")
@@ -903,9 +903,9 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		var maxErr *http.MaxBytesError
 		if errors.As(err, &maxErr) {
-			http.Error(w, "request body too large", http.StatusRequestEntityTooLarge)
+			ProxyErrorResponse(w, http.StatusRequestEntityTooLarge, "request body too large", "invalid_request_error")
 		} else {
-			http.Error(w, "failed to read request body", http.StatusBadRequest)
+			ProxyErrorResponse(w, http.StatusBadRequest, "failed to read request body", "invalid_request_error")
 		}
 		return
 	}
@@ -979,12 +979,12 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			slog.Error("budget check failed, blocking request",
 				"user_id", effectiveUserID, "error", err)
-			http.Error(w, `{"error":{"message":"budget check unavailable — try again shortly","type":"service_error","code":503}}`, http.StatusServiceUnavailable)
+			ProxyErrorResponse(w, http.StatusServiceUnavailable, "budget check unavailable — try again shortly", "service_error")
 			return
 		} else if check == nil {
 			slog.Error("budget check returned nil result, blocking request",
 				"user_id", effectiveUserID)
-			http.Error(w, `{"error":{"message":"budget check failed — try again shortly","type":"service_error","code":503}}`, http.StatusServiceUnavailable)
+			ProxyErrorResponse(w, http.StatusServiceUnavailable, "budget check failed — try again shortly", "service_error")
 			return
 		} else if !check.Allowed {
 			w.Header().Set("Content-Type", "application/json")
@@ -1103,7 +1103,7 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 			upstreamBody, translatedModel, err = provider.FormatTranslator.TranslateRequest(reqBody)
 		}
 		if err != nil {
-			http.Error(w, fmt.Sprintf("request translation error: %v", err), http.StatusBadRequest)
+			ProxyErrorResponse(w, http.StatusBadRequest, fmt.Sprintf("request translation error: %v", err), "invalid_request_error")
 			return
 		}
 
@@ -1267,7 +1267,7 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 	defer streamCancel()
 	upstreamReq, err := http.NewRequestWithContext(upstreamCtx, r.Method, upstreamURL, bytes.NewReader(upstreamBody))
 	if err != nil {
-		http.Error(w, "failed to create upstream request", http.StatusInternalServerError)
+		ProxyErrorResponse(w, http.StatusInternalServerError, "failed to create upstream request", "server_error")
 		return
 	}
 
@@ -1291,14 +1291,14 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 	if provider.RequestSigner != nil {
 		if signErr := provider.RequestSigner.SignRequest(r.Context(), upstreamReq, upstreamBody); signErr != nil {
 			slog.Error("failed to sign request", "provider", providerName, "error", signErr)
-			http.Error(w, "failed to sign upstream request", http.StatusInternalServerError)
+			ProxyErrorResponse(w, http.StatusInternalServerError, "failed to sign upstream request", "server_error")
 			return
 		}
 	} else if provider.TokenSource != nil {
 		token, tokenErr := provider.TokenSource.Token()
 		if tokenErr != nil {
 			slog.Error("failed to get auth token", "provider", providerName, "error", tokenErr)
-			http.Error(w, "failed to obtain cloud credentials", http.StatusInternalServerError)
+			ProxyErrorResponse(w, http.StatusInternalServerError, "failed to obtain cloud credentials", "server_error")
 			return
 		}
 		upstreamReq.Header.Set("Authorization", "Bearer "+token.AccessToken)
@@ -1319,7 +1319,7 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		// CRITICAL: Don't leak internal URLs/DNS/network info to the client.
 		slog.Error("upstream request failed", "provider", providerName, "error", err)
-		http.Error(w, `{"error":{"message":"upstream provider unavailable","type":"upstream_error"}}`, http.StatusBadGateway)
+		ProxyErrorResponse(w, http.StatusBadGateway, "upstream provider unavailable", "upstream_error")
 		p.recordCircuitBreaker(providerName, true)
 		return
 	}
@@ -1408,11 +1408,11 @@ func (p *Proxy) handleStandardResponse(
 	const respLimit = int64(10 << 20)
 	respBody, err := io.ReadAll(io.LimitReader(resp.Body, respLimit+1))
 	if err != nil {
-		http.Error(w, "failed to read upstream response", http.StatusBadGateway)
+		ProxyErrorResponse(w, http.StatusBadGateway, "failed to read upstream response", "upstream_error")
 		return
 	}
 	if int64(len(respBody)) > respLimit {
-		http.Error(w, "upstream response too large", http.StatusBadGateway)
+		ProxyErrorResponse(w, http.StatusBadGateway, "upstream response too large", "upstream_error")
 		return
 	}
 
@@ -1535,7 +1535,7 @@ func (p *Proxy) handleStreamingResponse(
 ) {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
-		http.Error(w, "streaming not supported", http.StatusInternalServerError)
+		ProxyErrorResponse(w, http.StatusInternalServerError, "streaming not supported", "server_error")
 		return
 	}
 

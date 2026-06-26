@@ -7,23 +7,23 @@ import (
 // ── Tests for audit v2 fixes ──
 
 func TestGenerateTraceID_Length(t *testing.T) {
-	id := generateTraceID()
+	id := GenerateTraceID()
 	if len(id) != 32 {
-		t.Errorf("generateTraceID() length = %d, want 32", len(id))
+		t.Errorf("GenerateTraceID() length = %d, want 32", len(id))
 	}
 }
 
 func TestGenerateSpanID_Length(t *testing.T) {
-	id := generateSpanID()
+	id := GenerateSpanID()
 	if len(id) != 16 {
-		t.Errorf("generateSpanID() length = %d, want 16", len(id))
+		t.Errorf("GenerateSpanID() length = %d, want 16", len(id))
 	}
 }
 
 func TestGenerateIDs_Unique(t *testing.T) {
 	seen := make(map[string]bool, 1000)
 	for range 1000 {
-		id := generateTraceID()
+		id := GenerateTraceID()
 		if seen[id] {
 			t.Fatalf("collision detected after <1000 IDs: %s", id)
 		}

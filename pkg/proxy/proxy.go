@@ -788,7 +788,7 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 	// CRITICAL: Validate to prevent log/trace injection.
 	requestID := r.Header.Get("X-Request-ID")
 	if requestID == "" || !requestIDPattern.MatchString(requestID) {
-		requestID = generateTraceID() // 32-char hex
+		requestID = GenerateTraceID() // 32-char hex
 	}
 
 	// Accept session ID from candela-local (or other clients).
@@ -1277,7 +1277,7 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 	// Pre-generate the span ID that buildSpan will use for this proxy span.
 	// We need it now so the outgoing traceparent to the upstream LLM
 	// references the sidecar's span as its parent.
-	proxySpanID := generateSpanID()
+	proxySpanID := GenerateSpanID()
 
 	// Inject an outgoing traceparent so the upstream LLM API (if it
 	// supports OTel) creates spans as children of the sidecar span.
@@ -1879,7 +1879,7 @@ func (p *Proxy) buildSpan(ctx context.Context, params spanParams) {
 
 	// Use caller's trace context if present (W3C Trace Context propagation).
 	// This nests the proxy span under the caller's OTel span.
-	traceID := generateTraceID()
+	traceID := GenerateTraceID()
 	parentSpanID := ""
 	if params.traceCtx != nil {
 		traceID = params.traceCtx.traceID

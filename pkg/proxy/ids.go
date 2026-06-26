@@ -9,10 +9,10 @@ import (
 	"time"
 )
 
-// generateTraceID returns a random 32-char hex trace ID (16 bytes).
+// GenerateTraceID returns a random 32-char hex trace ID (16 bytes).
 // Falls back to a time-based ID if crypto/rand fails (should never happen
 // in practice, but avoids crashing the entire production server).
-func generateTraceID() string {
+func GenerateTraceID() string {
 	b := make([]byte, 16)
 	if _, err := rand.Read(b); err != nil {
 		// Fallback: time-based ID is not cryptographically random but
@@ -23,8 +23,8 @@ func generateTraceID() string {
 	return hex.EncodeToString(b)
 }
 
-// generateSpanID returns a random 16-char hex span ID (8 bytes).
-func generateSpanID() string {
+// GenerateSpanID returns a random 16-char hex span ID (8 bytes).
+func GenerateSpanID() string {
 	b := make([]byte, 8)
 	if _, err := rand.Read(b); err != nil {
 		return fmt.Sprintf("%016x", time.Now().UnixNano())

@@ -512,6 +512,158 @@ func TestTranslateResponse_MaxTokensStop(t *testing.T) {
 	}
 }
 
+func TestTranslateResponse_ToolUse(t *testing.T) {
+	translator := &AnthropicFormatTranslator{}
+
+	anthResp := `{
+		"id": "msg_123",
+		"type": "message",
+		"role": "assistant",
+		"content": [
+			{"type": "text", "text": "I'll look that up."},
+			{"type": "tool_use", "id": "toolu_abc", "name": "get_weather", "input": {"location": "San Francisco"}}
+		],
+		"model": "claude-sonnet-4-20250514",
+		"stop_reason": "tool_use",
+		"usage": {"input_tokens": 100, "output_tokens": 50}
+	}`
+
+	translated, err := translator.TranslateResponse([]byte(anthResp), "claude-sonnet-4-20250514")
+	if err != nil {
+		t.Fatalf("TranslateResponse failed: %v", err)
+	}
+
+	var result openAIResponse
+	if err := json.Unmarshal(translated, &result); err != nil {
+		t.Fatalf("failed to unmarshal: %v", err)
+	}
+
+	if len(result.Choices) != 1 {
+		t.Fatalf("choices len = %d, want 1", len(result.Choices))
+	}
+	choice := result.Choices[0]
+
+	// Text content should still be extracted.
+	if choice.Message.Content != "I'll look that up." {
+		t.Errorf("content = %q, want %q", choice.Message.Content, "I'll look that up.")
+	}
+
+	// Tool calls should be populated.
+	if len(choice.Message.ToolCalls) != 1 {
+		t.Fatalf("tool_calls len = %d, want 1", len(choice.Message.ToolCalls))
+	}
+	tc := choice.Message.ToolCalls[0]
+
+	if tc.ID != "toolu_abc" {
+		t.Errorf("tool_call id = %q, want %q", tc.ID, "toolu_abc")
+	}
+	if tc.Type != "function" {
+		t.Errorf("tool_call type = %q, want %q", tc.Type, "function")
+	}
+	if tc.Function.Name != "get_weather" {
+		t.Errorf("tool_call function.name = %q, want %q", tc.Function.Name, "get_weather")
+	}
+
+	// Arguments must be a valid JSON string containing the input.
+	var args map[string]interface{}
+	if err := json.Unmarshal([]byte(tc.Function.Arguments), &args); err != nil {
+		t.Fatalf("tool_call function.arguments is not valid JSON: %v", err)
+	}
+	if loc, ok := args["location"].(string); !ok || loc != "San Francisco" {
+		t.Errorf("tool_call arguments location = %v, want %q", args["location"], "San Francisco")
+	}
+
+	// Anthropic "tool_use" stop_reason maps to OpenAI "tool_calls" finish_reason.
+	if choice.FinishReason != "tool_calls" {
+		t.Errorf("finish_reason = %q, want %q", choice.FinishReason, "tool_calls")
+	}
+
+	if result.Usage.PromptTokens != 100 {
+		t.Errorf("prompt_tokens = %d, want 100", result.Usage.PromptTokens)
+	}
+	if result.Usage.CompletionTokens != 50 {
+		t.Errorf("completion_tokens = %d, want 50", result.Usage.CompletionTokens)
+	}
+}
+
+func TestTranslateResponse_ToolUseOnly(t *testing.T) {
+	translator := &AnthropicFormatTranslator{}
+
+	// Response with only tool_use blocks, no text content.
+	anthResp := `{
+		"id": "msg_456",
+		"type": "message",
+		"role": "assistant",
+		"content": [
+			{"type": "tool_use", "id": "toolu_001", "name": "search", "input": {"query": "weather"}},
+			{"type": "tool_use", "id": "toolu_002", "name": "calendar", "input": {"date": "2025-01-01"}}
+		],
+		"stop_reason": "tool_use",
+		"usage": {"input_tokens": 20, "output_tokens": 30}
+	}`
+
+	translated, err := translator.TranslateResponse([]byte(anthResp), "claude-sonnet-4-20250514")
+	if err != nil {
+		t.Fatalf("TranslateResponse failed: %v", err)
+	}
+
+	var result openAIResponse
+	if err := json.Unmarshal(translated, &result); err != nil {
+		t.Fatalf("failed to unmarshal: %v", err)
+	}
+
+	if len(result.Choices) != 1 {
+		t.Fatalf("choices len = %d, want 1", len(result.Choices))
+	}
+	choice := result.Choices[0]
+
+	// No text content — should be empty string.
+	if choice.Message.Content != "" {
+		t.Errorf("content = %q, want empty string", choice.Message.Content)
+	}
+
+	// Should have 2 tool calls.
+	if len(choice.Message.ToolCalls) != 2 {
+		t.Fatalf("tool_calls len = %d, want 2", len(choice.Message.ToolCalls))
+	}
+
+	// Verify first tool call.
+	tc0 := choice.Message.ToolCalls[0]
+	if tc0.ID != "toolu_001" {
+		t.Errorf("tool_calls[0].id = %q, want %q", tc0.ID, "toolu_001")
+	}
+	if tc0.Function.Name != "search" {
+		t.Errorf("tool_calls[0].function.name = %q, want %q", tc0.Function.Name, "search")
+	}
+	var args0 map[string]interface{}
+	if err := json.Unmarshal([]byte(tc0.Function.Arguments), &args0); err != nil {
+		t.Fatalf("tool_calls[0].function.arguments is not valid JSON: %v", err)
+	}
+	if q, ok := args0["query"].(string); !ok || q != "weather" {
+		t.Errorf("tool_calls[0] arguments query = %v, want %q", args0["query"], "weather")
+	}
+
+	// Verify second tool call.
+	tc1 := choice.Message.ToolCalls[1]
+	if tc1.ID != "toolu_002" {
+		t.Errorf("tool_calls[1].id = %q, want %q", tc1.ID, "toolu_002")
+	}
+	if tc1.Function.Name != "calendar" {
+		t.Errorf("tool_calls[1].function.name = %q, want %q", tc1.Function.Name, "calendar")
+	}
+	var args1 map[string]interface{}
+	if err := json.Unmarshal([]byte(tc1.Function.Arguments), &args1); err != nil {
+		t.Fatalf("tool_calls[1].function.arguments is not valid JSON: %v", err)
+	}
+	if d, ok := args1["date"].(string); !ok || d != "2025-01-01" {
+		t.Errorf("tool_calls[1] arguments date = %v, want %q", args1["date"], "2025-01-01")
+	}
+
+	if choice.FinishReason != "tool_calls" {
+		t.Errorf("finish_reason = %q, want %q", choice.FinishReason, "tool_calls")
+	}
+}
+
 // ====================================================================
 // Stream Chunk Translation: Anthropic SSE → OpenAI SSE
 // ====================================================================

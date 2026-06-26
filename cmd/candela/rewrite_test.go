@@ -70,3 +70,16 @@ func TestRewriteModelInBody_CompactJSONRoundTrip(t *testing.T) {
 		t.Errorf("model not replaced: got %q", parsed.Model)
 	}
 }
+
+// U4: rewriteModelInBody must still rewrite the "model" JSON key even when
+// the word "model" appears in user message content before the actual key.
+func TestRewriteModelInBody_ModelInContent(t *testing.T) {
+	body := []byte(`{"messages":[{"role":"user","content":"The model is great"}],"model":"claude-sonnet-4","temperature":0.7}`)
+	result := rewriteModelInBody(body, "claude-sonnet-4", "claude-sonnet-4-20250514")
+	if !bytes.Contains(result, []byte(`"claude-sonnet-4-20250514"`)) {
+		t.Errorf("expected model to be rewritten, got: %s", result)
+	}
+	if !bytes.Contains(result, []byte(`The model is great`)) {
+		t.Errorf("user content should be preserved, got: %s", result)
+	}
+}

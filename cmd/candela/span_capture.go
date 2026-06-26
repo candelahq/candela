@@ -5,9 +5,11 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
+	"runtime/debug"
 	"time"
 
 	"github.com/candelahq/candela/pkg/attribution"
@@ -104,7 +106,17 @@ func (s *spanCapture) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	duration := time.Since(start)
 
 	// Build the span asynchronously to not block the response.
-	go s.buildSpan(chatReq.Model, chatReq.Stream, inputContent, rec.body.Bytes(), rec.statusCode, start, duration, sessionID, tenantID, jobID)
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				slog.Error("recovered panic in async goroutine",
+					"panic", r,
+					"stack", string(debug.Stack()),
+				)
+			}
+		}()
+		s.buildSpan(chatReq.Model, chatReq.Stream, inputContent, rec.body.Bytes(), rec.statusCode, start, duration, sessionID, tenantID, jobID)
+	}()
 }
 
 func (s *spanCapture) buildSpan(model string, stream *bool, inputContent string, respBody []byte, statusCode int, start time.Time, duration time.Duration, sessionID, tenantID, jobID string) {
@@ -254,8 +266,11 @@ func (r *responseCapture) Flush() {
 func generateID(size int) string {
 	b := make([]byte, size)
 	if _, err := rand.Read(b); err != nil {
-		// crypto/rand should never fail on supported platforms.
-		panic("crypto/rand failed: " + err.Error())
+		// Fallback: time-based ID is not cryptographically random but
+		// keeps the server alive instead of panicking.
+		slog.Warn("crypto/rand failed, using time-based fallback", "error", err)
+		now := time.Now().UnixNano()
+		return fmt.Sprintf("%0*x", size*2, now)[:size*2]
 	}
 	return hex.EncodeToString(b)
 }

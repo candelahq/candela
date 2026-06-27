@@ -330,12 +330,41 @@ func (h *lmHandler) serveChat(w http.ResponseWriter, r *http.Request) {
 
 	// Inject max_tokens if absent or non-positive — some clients (JetBrains)
 	// don't send it, but providers like Anthropic require it.
-	if req.MaxTokens == nil || *req.MaxTokens <= 0 {
+	// Also strip empty tools array (JetBrains sends "tools":[] which causes
+	// 422 on strict backends like Mistral) and stream_options (not all
+	// upstreams support it).
+	{
 		var raw map[string]json.RawMessage
 		if err := json.Unmarshal(body, &raw); err == nil && raw != nil {
-			defaultMax := h.defaultMaxTokens
-			if b, err := json.Marshal(defaultMax); err == nil {
-				raw["max_tokens"] = b
+			needRewrite := false
+
+			// Inject max_tokens if absent or non-positive.
+			if req.MaxTokens == nil || *req.MaxTokens <= 0 {
+				defaultMax := h.defaultMaxTokens
+				if b, err := json.Marshal(defaultMax); err == nil {
+					raw["max_tokens"] = b
+					needRewrite = true
+				}
+			}
+
+			// Strip empty "tools":[] — JetBrains sends it in every request,
+			// but Mistral/vLLM reject it with HTTP 422.
+			if toolsRaw, ok := raw["tools"]; ok {
+				var tools []json.RawMessage
+				if json.Unmarshal(toolsRaw, &tools) == nil && len(tools) == 0 {
+					delete(raw, "tools")
+					delete(raw, "tool_choice")
+					needRewrite = true
+				}
+			}
+
+			// Strip stream_options — not all upstreams support it.
+			if _, ok := raw["stream_options"]; ok {
+				delete(raw, "stream_options")
+				needRewrite = true
+			}
+
+			if needRewrite {
 				body, _ = json.Marshal(raw)
 			}
 		}
@@ -583,7 +612,18 @@ func (n *sseNormalizer) WriteHeader(code int) {
 		// is present, ktor tries fixed-length body reading instead of
 		// streaming, causing "fixed content-length: N, bytes received: 0".
 		n.header.Del("Content-Length")
+
+		// Strip upstream provider headers that LM Studio wouldn't send.
+		// Scoped to SSE responses only — non-SSE error responses keep their headers.
+		for _, h := range []string{
+			"Server", "Alt-Svc", "Via",
+			"X-Frame-Options", "X-Xss-Protection", "X-Accel-Buffering",
+			"X-Vertex-Ai-Received-Request-Id", "Request-Id",
+		} {
+			n.header.Del(h)
+		}
 	}
+
 	n.w.WriteHeader(code)
 }
 
@@ -671,6 +711,28 @@ func (n *sseNormalizer) normalizeEvent(event []byte) []byte {
 		var delta map[string]json.RawMessage
 		if err := json.Unmarshal(deltaRaw, &delta); err != nil {
 			continue
+		}
+
+		// LM Studio spec: final chunk should have empty delta {} with
+		// finish_reason "stop". Normalize providers that include content
+		// in the final chunk.
+		if frRaw, hasFR := choices[i]["finish_reason"]; hasFR {
+			var fr string
+			if json.Unmarshal(frRaw, &fr) == nil && fr == "stop" {
+				// Clear the delta to match LM Studio's format.
+				for k := range delta {
+					delete(delta, k)
+				}
+				modified = true
+				if b, err := json.Marshal(delta); err == nil {
+					choices[i]["delta"] = b
+				}
+				// Remove non-standard choice-level fields before continuing.
+				for _, field := range []string{"matched_stop"} {
+					delete(choices[i], field)
+				}
+				continue
+			}
 		}
 
 		// Ensure delta.content is always a string (Claude sends role-only

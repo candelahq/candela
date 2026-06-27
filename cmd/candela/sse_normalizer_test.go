@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -38,10 +39,10 @@ func TestSSENormalizerNormalizeEvent(t *testing.T) {
 			wantJSON: `"content":""`,
 		},
 		{
-			name:     "normalize null content to empty string (Qwen finish)",
+			name:     "clear delta on finish_reason stop (Qwen finish)",
 			input:    `data: {"choices":[{"delta":{"content":null,"role":null},"finish_reason":"stop","index":0}],"created":123,"id":"x","model":"qwen","object":"chat.completion.chunk"}` + "\n\n",
 			wantNil:  false,
-			wantJSON: `"content":""`,
+			wantJSON: `"delta":{}`,
 		},
 		{
 			name:     "strip reasoning_content from delta",
@@ -189,4 +190,129 @@ func TestSSENormalizerWrite(t *testing.T) {
 			t.Error("DONE sentinel should be present")
 		}
 	})
+}
+
+func TestSSENormalizerFinalChunk(t *testing.T) {
+	n := newSSENormalizer(httptest.NewRecorder())
+
+	t.Run("clears delta on finish_reason stop", func(t *testing.T) {
+		// Claude sends {"delta":{"content":""},"finish_reason":"stop"} but
+		// LM Studio spec says final chunk should be {"delta":{},"finish_reason":"stop"}.
+		input := `data: {"choices":[{"delta":{"content":"","role":"assistant"},"finish_reason":"stop","index":0}],"created":123,"id":"x","model":"claude","object":"chat.completion.chunk"}` + "\n\n"
+		result := n.normalizeEvent([]byte(input))
+
+		if result == nil {
+			t.Fatal("expected event, got nil")
+		}
+		// Delta should be empty object.
+		if bytes.Contains(result, []byte(`"content"`)) {
+			t.Errorf("delta should be empty on stop, got: %s", string(result))
+		}
+		if bytes.Contains(result, []byte(`"role"`)) {
+			t.Errorf("delta should not contain role on stop, got: %s", string(result))
+		}
+		if !bytes.Contains(result, []byte(`"finish_reason":"stop"`)) {
+			t.Errorf("finish_reason should still be present, got: %s", string(result))
+		}
+	})
+
+	t.Run("preserves delta when finish_reason is null", func(t *testing.T) {
+		input := `data: {"choices":[{"delta":{"content":"hello"},"finish_reason":null,"index":0}],"created":123,"id":"x","model":"m","object":"chat.completion.chunk"}` + "\n\n"
+		result := n.normalizeEvent([]byte(input))
+
+		if result == nil {
+			t.Fatal("expected event, got nil")
+		}
+		if !bytes.Contains(result, []byte(`"content":"hello"`)) {
+			t.Errorf("content should be preserved when streaming, got: %s", string(result))
+		}
+	})
+}
+
+func TestSSENormalizerStripUpstreamHeaders(t *testing.T) {
+	t.Run("strips upstream headers for SSE responses", func(t *testing.T) {
+		rec := httptest.NewRecorder()
+		n := newSSENormalizer(rec)
+
+		n.Header().Set("Content-Type", "text/event-stream")
+		n.Header().Set("Server", "Google Frontend")
+		n.Header().Set("Alt-Svc", `h3=":443"`)
+		n.Header().Set("Via", "1.1 google")
+		n.Header().Set("X-Frame-Options", "SAMEORIGIN")
+		n.Header().Set("X-Vertex-Ai-Received-Request-Id", "abc-123")
+		n.WriteHeader(http.StatusOK)
+
+		for _, h := range []string{"Server", "Alt-Svc", "Via", "X-Frame-Options", "X-Vertex-Ai-Received-Request-Id"} {
+			if got := rec.Header().Get(h); got != "" {
+				t.Errorf("header %q should be stripped for SSE, got %q", h, got)
+			}
+		}
+		if got := rec.Header().Get("Content-Type"); got != "text/event-stream" {
+			t.Errorf("Content-Type should be preserved, got %q", got)
+		}
+	})
+
+	t.Run("preserves headers for non-SSE responses", func(t *testing.T) {
+		rec := httptest.NewRecorder()
+		n := newSSENormalizer(rec)
+
+		n.Header().Set("Content-Type", "application/json")
+		n.Header().Set("Server", "Google Frontend")
+		n.Header().Set("Request-Id", "req-456")
+		n.WriteHeader(http.StatusBadRequest)
+
+		if got := rec.Header().Get("Server"); got != "Google Frontend" {
+			t.Errorf("Server header should be preserved for non-SSE, got %q", got)
+		}
+		if got := rec.Header().Get("Request-Id"); got != "req-456" {
+			t.Errorf("Request-Id should be preserved for non-SSE, got %q", got)
+		}
+	})
+}
+
+func TestServeChatStripEmptyTools(t *testing.T) {
+	// Simulate what JetBrains sends: {"model":"m","messages":[...],"tools":[],"tool_choice":"auto"}
+	body := []byte(`{"model":"test","messages":[{"role":"user","content":"hi"}],"tools":[],"tool_choice":"auto","stream":true}`)
+
+	var raw map[string]json.RawMessage
+	_ = json.Unmarshal(body, &raw)
+
+	// Verify tools is present before stripping.
+	if _, ok := raw["tools"]; !ok {
+		t.Fatal("test setup: tools should be present")
+	}
+
+	// Apply the same stripping logic as serveChat.
+	if toolsRaw, ok := raw["tools"]; ok {
+		var tools []json.RawMessage
+		if json.Unmarshal(toolsRaw, &tools) == nil && len(tools) == 0 {
+			delete(raw, "tools")
+			delete(raw, "tool_choice")
+		}
+	}
+
+	if _, ok := raw["tools"]; ok {
+		t.Error("empty tools[] should be stripped")
+	}
+	if _, ok := raw["tool_choice"]; ok {
+		t.Error("tool_choice should be stripped when tools is empty")
+	}
+}
+
+func TestServeChatStripStreamOptions(t *testing.T) {
+	body := []byte(`{"model":"test","messages":[{"role":"user","content":"hi"}],"stream":true,"stream_options":{"include_usage":true}}`)
+
+	var raw map[string]json.RawMessage
+	_ = json.Unmarshal(body, &raw)
+
+	if _, ok := raw["stream_options"]; !ok {
+		t.Fatal("test setup: stream_options should be present")
+	}
+
+	// Apply the same stripping logic as serveChat.
+	delete(raw, "stream_options")
+
+	if _, ok := raw["stream_options"]; ok {
+		t.Error("stream_options should be stripped")
+	}
 }

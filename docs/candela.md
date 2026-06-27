@@ -364,17 +364,6 @@ is on `PATH`. Candela does not fallback to WSL.
 2. URL is pre-configured to `http://localhost:1234` — just works!
 3. Select any model from the dropdown (local + cloud)
 
-Candela automatically handles JetBrains-specific compatibility:
-
-- **Request sanitization** — strips empty `tools:[]`, per-message `tool_calls:[]`,
-  `format`, `keep_alive`, `options`, and `stream_options` fields that JetBrains
-  sends but strict backends (Mistral, vLLM) reject with HTTP 422.
-- **`max_tokens` injection** — JetBrains omits this field, but providers like
-  Anthropic require it. Candela injects a default (32768) when absent.
-- **Ktor SSE workaround** — JetBrains uses ktor's HTTP client, which treats
-  Go's chunked transfer encoding terminator as "unexpected EOF". Candela
-  detects ktor and prevents this via TCP connection hijacking.
-
 ### VS Code (Continue, Cline)
 
 ```json
@@ -412,5 +401,3 @@ curl http://localhost:1234/v1/chat/completions \
 | Traces card shows "Traces not available" | Team Mode (traces go to cloud) | Expected — check the cloud dashboard |
 | No models in `/v1/models` | Runtime not started | Start Ollama: `ollama serve` |
 | vLLM is not discovered on Windows | No native `vllm` executable on `PATH` | Install a native Windows vLLM build and ensure `vllm` is on `PATH` |
-| JetBrains "unexpected EOF" | Ktor SSE parser bug with chunked encoding | Handled automatically — Candela hijacks the TCP connection for ktor clients |
-| JetBrains HTTP 422 | Strict backends reject extra fields JetBrains sends | Handled automatically — Candela strips incompatible fields from requests |

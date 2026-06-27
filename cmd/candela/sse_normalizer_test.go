@@ -271,10 +271,10 @@ func TestSSENormalizerStripUpstreamHeaders(t *testing.T) {
 	})
 }
 
-func TestSSELiteNormalizer(t *testing.T) {
-	t.Run("fixes headers and injects missing content", func(t *testing.T) {
+func TestSSEHeaderNormalizerPassthrough(t *testing.T) {
+	t.Run("fixes headers without modifying events", func(t *testing.T) {
 		rec := httptest.NewRecorder()
-		n := newSSELiteNormalizer(rec)
+		n := newSSEHeaderNormalizer(rec)
 
 		n.Header().Set("Content-Type", "text/event-stream; charset=utf-8")
 		n.Header().Set("Content-Length", "12345")
@@ -292,68 +292,19 @@ func TestSSELiteNormalizer(t *testing.T) {
 			t.Errorf("Server should be stripped for SSE, got %q", got)
 		}
 
-		// Claude's first chunk: delta has role but no content.
-		roleOnly := `data: {"choices":[{"delta":{"role":"assistant"},"index":0}],"id":"x","model":"m","object":"chat.completion.chunk"}` + "\n\n"
-		_, _ = n.Write([]byte(roleOnly))
-
-		body := rec.Body.String()
-		if !strings.Contains(body, `"content":""`) {
-			t.Errorf("should inject content:\"\", got: %s", body)
-		}
-		if !strings.Contains(body, `"role":"assistant"`) {
-			t.Errorf("should preserve role, got: %s", body)
-		}
-	})
-
-	t.Run("passes through normal content unchanged", func(t *testing.T) {
-		rec := httptest.NewRecorder()
-		n := newSSELiteNormalizer(rec)
-
-		n.Header().Set("Content-Type", "text/event-stream")
-		n.WriteHeader(http.StatusOK)
-
-		event := `data: {"choices":[{"delta":{"content":"hello"},"index":0}],"id":"x","model":"m","object":"chat.completion.chunk"}` + "\n\n"
+		// Verify events pass through unchanged (no buffering, no modification).
+		event := `data: {"choices":[{"delta":{"content":"hello"},"finish_reason":null,"index":0}],"id":"x","model":"m","object":"chat.completion.chunk"}` + "\n\n"
 		_, _ = n.Write([]byte(event))
 
 		body := rec.Body.String()
-		// Should not re-serialize if content already exists.
-		if !strings.Contains(body, `"content":"hello"`) {
-			t.Errorf("content should be preserved, got: %s", body)
-		}
-	})
-
-	t.Run("does not drop empty choices", func(t *testing.T) {
-		rec := httptest.NewRecorder()
-		n := newSSELiteNormalizer(rec)
-		n.Header().Set("Content-Type", "text/event-stream")
-		n.WriteHeader(http.StatusOK)
-
-		// Unlike the full normalizer, empty choices should pass through.
-		event := `data: {"choices":[],"id":"x","model":"m","object":"chat.completion.chunk"}` + "\n\n"
-		_, _ = n.Write([]byte(event))
-
-		if rec.Body.Len() == 0 {
-			t.Error("lite normalizer should NOT drop events with empty choices")
-		}
-	})
-
-	t.Run("passes through DONE unchanged", func(t *testing.T) {
-		rec := httptest.NewRecorder()
-		n := newSSELiteNormalizer(rec)
-		n.Header().Set("Content-Type", "text/event-stream")
-		n.WriteHeader(http.StatusOK)
-
-		done := "data: [DONE]\n\n"
-		_, _ = n.Write([]byte(done))
-
-		if rec.Body.String() != done {
-			t.Errorf("DONE should pass through unchanged, got: %q", rec.Body.String())
+		if body != event {
+			t.Errorf("event should pass through unchanged.\ngot:  %q\nwant: %q", body, event)
 		}
 	})
 
 	t.Run("preserves headers for non-SSE responses", func(t *testing.T) {
 		rec := httptest.NewRecorder()
-		n := newSSELiteNormalizer(rec)
+		n := newSSEHeaderNormalizer(rec)
 
 		n.Header().Set("Content-Type", "application/json")
 		n.Header().Set("Server", "Google Frontend")

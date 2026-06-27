@@ -812,6 +812,24 @@ func runForeground() {
 				w.WriteHeader(http.StatusBadGateway)
 				_ = json.NewEncoder(w).Encode(map[string]string{"error": "remote server unavailable"})
 			},
+			// Normalize SSE response headers for ktor compatibility.
+			// Runs before the response is written to the client.
+			ModifyResponse: func(resp *http.Response) error {
+				ct := resp.Header.Get("Content-Type")
+				if strings.HasPrefix(ct, "text/event-stream") {
+					if ct != "text/event-stream" {
+						resp.Header.Set("Content-Type", "text/event-stream")
+					}
+					resp.Header.Del("Content-Length")
+					// Strip upstream provider headers that LM Studio wouldn't send.
+					for _, h := range []string{"Server", "Alt-Svc", "Via",
+						"X-Frame-Options", "X-Xss-Protection", "X-Accel-Buffering",
+						"X-Vertex-Ai-Received-Request-Id", "Request-Id"} {
+						resp.Header.Del(h)
+					}
+				}
+				return nil
+			},
 			// Flush immediately so SSE chunks stream to the client without
 			// buffering. Without this, responses are fully buffered and slow
 			// models (Claude, Qwen) cause client-side timeouts.

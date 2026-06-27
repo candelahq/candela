@@ -159,14 +159,30 @@ func (h *lmHandler) loadRemoteModels() map[string]bool {
 
 func (h *lmHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch {
+	// ── Model discovery ──
 	case r.URL.Path == "/v1/models" && r.Method == http.MethodGet:
 		h.serveModels(w, r)
 	case r.URL.Path == "/api/v0/models" && r.Method == http.MethodGet:
 		h.serveModels(w, r)
+
+	// ── Chat completions ──
 	case r.URL.Path == "/v1/chat/completions" && r.Method == http.MethodPost:
 		h.serveChat(w, r)
 	case r.URL.Path == "/api/v0/chat/completions" && r.Method == http.MethodPost:
 		h.serveChat(w, r)
+	case r.URL.Path == "/chat/completions" && r.Method == http.MethodPost:
+		h.serveChat(w, r)
+
+	// ── LM Studio / OpenAI compat stubs ──
+	case r.URL.Path == "/v1/completions" && r.Method == http.MethodPost:
+		h.serveCompletionsStub(w, r)
+	case r.URL.Path == "/v1/embeddings" && r.Method == http.MethodPost:
+		h.serveEmbeddingsStub(w, r)
+
+	// ── LM Studio diagnostics ──
+	case r.URL.Path == "/lmstudio/diagnostics" && r.Method == http.MethodGet:
+		h.serveDiagnostics(w, r)
+
 	default:
 		if h.remoteProxy != nil {
 			h.remoteProxy.ServeHTTP(w, r)
@@ -783,4 +799,57 @@ func (n *sseNormalizer) normalizeEvent(event []byte) []byte {
 	}
 
 	return event // fallback: pass through
+}
+
+// ── LM Studio compat endpoint stubs ──
+
+// serveCompletionsStub returns 501 for the legacy /v1/completions endpoint.
+// Candela is a chat-completions proxy and does not support the legacy
+// completions API. This prevents confusing 404s.
+func (h *lmHandler) serveCompletionsStub(w http.ResponseWriter, _ *http.Request) {
+	proxy.ProxyErrorResponse(w, http.StatusNotImplemented,
+		"legacy /v1/completions is not supported — use /v1/chat/completions",
+		"invalid_request_error")
+}
+
+// serveEmbeddingsStub returns 501 for the /v1/embeddings endpoint.
+// Candela does not currently support embedding generation. This prevents
+// confusing 404s when clients probe for capabilities.
+func (h *lmHandler) serveEmbeddingsStub(w http.ResponseWriter, _ *http.Request) {
+	proxy.ProxyErrorResponse(w, http.StatusNotImplemented,
+		"/v1/embeddings is not currently supported",
+		"invalid_request_error")
+}
+
+// serveDiagnostics returns a lightweight JSON health check compatible with
+// LM Studio's /lmstudio/diagnostics endpoint. JetBrains and other clients
+// may use this to verify the server is alive before sending requests.
+func (h *lmHandler) serveDiagnostics(w http.ResponseWriter, _ *http.Request) {
+	localCount := 0
+	if m := h.loadLocalModels(); m != nil {
+		localCount = len(m)
+	}
+	remoteCount := 0
+	if m := h.loadRemoteModels(); m != nil {
+		remoteCount = len(m)
+	}
+	cloudCount := len(h.cloudModels)
+
+	runtimeBackend := "none"
+	if h.mgr != nil {
+		runtimeBackend = h.mgr.Runtime().Name()
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"status":  "ok",
+		"version": "candela",
+		"models": map[string]int{
+			"local":  localCount,
+			"remote": remoteCount,
+			"cloud":  cloudCount,
+			"total":  localCount + remoteCount + cloudCount,
+		},
+		"runtime": runtimeBackend,
+	})
 }

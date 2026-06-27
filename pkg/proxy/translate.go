@@ -330,7 +330,10 @@ func (t *AnthropicFormatTranslator) translateRequestFull(body []byte, mode Cachi
 			})
 
 		default:
-			anthReq.Messages = append(anthReq.Messages, anthropicMessage(msg.toAnthropicMessage()))
+			anthReq.Messages = append(anthReq.Messages, anthropicMessage{
+				Role:    msg.Role,
+				Content: translateContentToAnthropic(msg.Content),
+			})
 		}
 	}
 
@@ -406,7 +409,7 @@ func (t *AnthropicFormatTranslator) TranslateStreamChunk(data []byte, model stri
 	// The caller passes a pointer to a string that persists across calls for
 	// the entire stream, so every chunk shares the same ID.
 	if *streamID == "" {
-		*streamID = "chatcmpl-" + generateSpanID()
+		*streamID = "chatcmpl-" + GenerateSpanID()
 	}
 
 	for _, line := range strings.Split(string(data), "\n") {
@@ -831,6 +834,106 @@ type anthropicUsage struct {
 }
 
 // --- Helpers ---
+
+// translateContentToAnthropic converts OpenAI message content (string or
+// []content_part) to Anthropic format, translating image_url parts to
+// Anthropic image blocks.
+func translateContentToAnthropic(content interface{}) interface{} {
+	switch c := content.(type) {
+	case string:
+		return c
+	case []interface{}:
+		var blocks []interface{}
+		for _, part := range c {
+			partMap, ok := part.(map[string]interface{})
+			if !ok {
+				blocks = append(blocks, part)
+				continue
+			}
+			partType, _ := partMap["type"].(string)
+			switch partType {
+			case "image_url":
+				block, err := translateImageURLToAnthropic(partMap)
+				if err != nil {
+					slog.Warn("skipping invalid image_url content part", "error", err)
+					continue
+				}
+				blocks = append(blocks, block)
+			default:
+				// Pass through text and other types as-is.
+				blocks = append(blocks, part)
+			}
+		}
+		return blocks
+	default:
+		return content
+	}
+}
+
+// translateImageURLToAnthropic converts an OpenAI image_url content part to
+// an Anthropic image content block.
+//
+// OpenAI format:
+//
+//	{"type": "image_url", "image_url": {"url": "data:image/png;base64,iVBOR..."}}
+//	{"type": "image_url", "image_url": {"url": "https://example.com/img.png"}}
+//
+// Anthropic format:
+//
+//	{"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": "iVBOR..."}}
+//	{"type": "image", "source": {"type": "url", "url": "https://example.com/img.png"}}
+func translateImageURLToAnthropic(part map[string]interface{}) (map[string]interface{}, error) {
+	imgURLObj, ok := part["image_url"].(map[string]interface{})
+	if !ok {
+		return nil, fmt.Errorf("image_url field is missing or not an object")
+	}
+	url, _ := imgURLObj["url"].(string)
+	if url == "" {
+		return nil, fmt.Errorf("image_url.url is empty")
+	}
+
+	if strings.HasPrefix(url, "data:") {
+		mediaType, data, ok := parseDataURL(url)
+		if !ok {
+			return nil, fmt.Errorf("failed to parse data URL")
+		}
+		return map[string]interface{}{
+			"type": "image",
+			"source": map[string]interface{}{
+				"type":       "base64",
+				"media_type": mediaType,
+				"data":       data,
+			},
+		}, nil
+	}
+
+	// Anthropic does not support URL-based image sources — only base64-encoded
+	// data URLs are accepted. Return an error so callers can handle gracefully.
+	return nil, fmt.Errorf("anthropic does not support URL image sources (got %q); only base64 data URLs are supported", url)
+}
+
+// parseDataURL parses a data URL of the form "data:<mediaType>;base64,<data>"
+// and returns the media type and base64-encoded data.
+func parseDataURL(url string) (mediaType, data string, ok bool) {
+	// Strip "data:" prefix.
+	rest := strings.TrimPrefix(url, "data:")
+
+	// Split on ";base64," to get media type and data.
+	idx := strings.Index(rest, ";base64,")
+	if idx < 0 {
+		return "", "", false
+	}
+
+	mediaType = rest[:idx]
+	// Strip extra MIME parameters (e.g. "image/png;charset=utf-8" → "image/png")
+	// since Anthropic expects a clean media type.
+	mediaType = strings.SplitN(mediaType, ";", 2)[0]
+	data = rest[idx+len(";base64,"):]
+	if mediaType == "" || data == "" {
+		return "", "", false
+	}
+	return mediaType, data, true
+}
 
 func extractAnthropicText(content []anthropicContent) string {
 	var parts []string

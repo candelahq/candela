@@ -2,10 +2,7 @@ package main
 
 import (
 	"bytes"
-	"crypto/rand"
-	"encoding/hex"
 	"encoding/json"
-	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -14,6 +11,7 @@ import (
 
 	"github.com/candelahq/candela/pkg/attribution"
 	"github.com/candelahq/candela/pkg/processor"
+	"github.com/candelahq/candela/pkg/proxy"
 	"github.com/candelahq/candela/pkg/session"
 	"github.com/candelahq/candela/pkg/storage"
 )
@@ -153,8 +151,8 @@ func (s *spanCapture) buildSpan(model string, stream *bool, inputContent string,
 	}
 
 	span := storage.Span{
-		SpanID:    generateID(8),
-		TraceID:   generateID(16),
+		SpanID:    proxy.GenerateSpanID(),
+		TraceID:   proxy.GenerateTraceID(),
 		Name:      "chat " + model,
 		Kind:      storage.SpanKindLLM,
 		Status:    spanStatus,
@@ -259,18 +257,4 @@ func (r *responseCapture) Flush() {
 	if f, ok := r.ResponseWriter.(http.Flusher); ok {
 		f.Flush()
 	}
-}
-
-// generateID returns a random hex string of the given byte size.
-// Use 8 for OTel SpanIDs (16 hex chars) and 16 for TraceIDs (32 hex chars).
-func generateID(size int) string {
-	b := make([]byte, size)
-	if _, err := rand.Read(b); err != nil {
-		// Fallback: time-based ID is not cryptographically random but
-		// keeps the server alive instead of panicking.
-		slog.Warn("crypto/rand failed, using time-based fallback", "error", err)
-		now := time.Now().UnixNano()
-		return fmt.Sprintf("%0*x", size*2, now)[:size*2]
-	}
-	return hex.EncodeToString(b)
 }

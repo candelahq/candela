@@ -316,6 +316,7 @@ func (h *lmHandler) serveChat(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Model     string `json:"model"`
 		MaxTokens *int   `json:"max_tokens,omitempty"`
+		Stream    bool   `json:"stream"`
 	}
 	_ = json.Unmarshal(body, &req)
 
@@ -351,6 +352,14 @@ func (h *lmHandler) serveChat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// For streaming requests, wrap the ResponseWriter with an SSE normalizer
+	// that filters out malformed chunks (empty choices, missing delta.content)
+	// which crash JetBrains' LM Studio SSE parser.
+	writer := w
+	if req.Stream {
+		writer = newSSENormalizer(w)
+	}
+
 	// 2. Cloud model → direct cloud proxy (solo mode only).
 	// In team mode, all cloud traffic must go through the remote server
 	// so the server catalog remains the single source of truth.
@@ -358,7 +367,7 @@ func (h *lmHandler) serveChat(w http.ResponseWriter, r *http.Request) {
 		if providerName, ok := h.cloudModels[req.Model]; ok && h.cloudProxy != nil {
 			slog.Debug("lm handler: routing to cloud provider", "model", req.Model, "provider", providerName)
 			r.URL.Path = fmt.Sprintf("/proxy/%s/v1/chat/completions", providerName)
-			h.cloudProxy.ServeHTTP(w, r)
+			h.cloudProxy.ServeHTTP(writer, r)
 			return
 		}
 	}
@@ -366,7 +375,7 @@ func (h *lmHandler) serveChat(w http.ResponseWriter, r *http.Request) {
 	// 3. Remote server → team mode proxy.
 	if h.remoteProxy != nil {
 		r.URL.Path = "/v1/chat/completions" // normalize — remote only serves /v1/
-		h.remoteProxy.ServeHTTP(w, r)
+		h.remoteProxy.ServeHTTP(writer, r)
 		return
 	}
 
@@ -537,3 +546,173 @@ func (r *responseRecorder) Write(b []byte) (int, error) {
 	return len(b), nil
 }
 func (r *responseRecorder) WriteHeader(code int) { r.statusCode = code }
+
+// sseNormalizer wraps an http.ResponseWriter to intercept SSE events and
+// normalize them for JetBrains compatibility. It filters out chunks with
+// empty choices arrays (Qwen) and ensures delta.content is always present
+// (Claude sends chunks with only delta.role).
+type sseNormalizer struct {
+	w      http.ResponseWriter
+	buf    []byte // accumulates partial writes until we have a complete SSE event
+	header http.Header
+}
+
+func newSSENormalizer(w http.ResponseWriter) *sseNormalizer {
+	return &sseNormalizer{w: w, header: w.Header()}
+}
+
+func (n *sseNormalizer) Header() http.Header { return n.header }
+
+func (n *sseNormalizer) WriteHeader(code int) {
+	// Normalize Content-Type: JetBrains' ktor SSE parser requires exactly
+	// "text/event-stream" and rejects "text/event-stream; charset=utf-8"
+	// (which Claude/Anthropic sends via Vertex AI).
+	ct := n.header.Get("Content-Type")
+	if strings.HasPrefix(ct, "text/event-stream") {
+		if ct != "text/event-stream" {
+			n.header.Set("Content-Type", "text/event-stream")
+		}
+		// Remove Content-Length: the upstream may include it, but SSE
+		// responses must use chunked transfer encoding. If Content-Length
+		// is present, ktor tries fixed-length body reading instead of
+		// streaming, causing "fixed content-length: N, bytes received: 0".
+		n.header.Del("Content-Length")
+	}
+	n.w.WriteHeader(code)
+}
+
+func (n *sseNormalizer) Flush() {
+	if f, ok := n.w.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
+func (n *sseNormalizer) Write(b []byte) (int, error) {
+	originalLen := len(b)
+	n.buf = append(n.buf, b...)
+
+	// Process complete SSE events (delimited by \n\n).
+	// Batch all events from this Write call into a single output write
+	// to minimize the number of HTTP/1.1 chunked frames.
+	var out bytes.Buffer
+	for {
+		idx := bytes.Index(n.buf, []byte("\n\n"))
+		if idx == -1 {
+			break
+		}
+		event := n.buf[:idx+2] // include the \n\n
+		n.buf = n.buf[idx+2:]
+
+		normalized := n.normalizeEvent(event)
+		if normalized != nil {
+			out.Write(normalized)
+		}
+	}
+	if out.Len() > 0 {
+		if _, err := n.w.Write(out.Bytes()); err != nil {
+			return originalLen, err
+		}
+		n.Flush()
+	}
+	return originalLen, nil
+}
+
+// normalizeEvent processes a single SSE event. Returns nil to suppress the event.
+func (n *sseNormalizer) normalizeEvent(event []byte) []byte {
+	line := bytes.TrimSpace(event)
+
+	// Pass through non-data lines (comments, empty lines, "data: [DONE]").
+	if !bytes.HasPrefix(line, []byte("data: ")) {
+		return event
+	}
+	payload := bytes.TrimPrefix(line, []byte("data: "))
+
+	// Pass through [DONE] sentinel.
+	if bytes.Equal(payload, []byte("[DONE]")) {
+		return event
+	}
+
+	// Parse the JSON chunk.
+	var chunk map[string]json.RawMessage
+	if err := json.Unmarshal(payload, &chunk); err != nil {
+		return event // pass through unparseable events
+	}
+
+	// Parse choices array.
+	choicesRaw, ok := chunk["choices"]
+	if !ok {
+		return event
+	}
+
+	var choices []map[string]json.RawMessage
+	if err := json.Unmarshal(choicesRaw, &choices); err != nil {
+		return event
+	}
+
+	// Drop events with empty choices array (Qwen final usage-only chunk).
+	if len(choices) == 0 {
+		return nil
+	}
+
+	modified := false
+
+	for i := range choices {
+		deltaRaw, hasDelta := choices[i]["delta"]
+		if !hasDelta {
+			continue
+		}
+
+		var delta map[string]json.RawMessage
+		if err := json.Unmarshal(deltaRaw, &delta); err != nil {
+			continue
+		}
+
+		// Ensure delta.content is always a string (Claude sends role-only
+		// first chunk; Qwen sends content:null on its finish chunk).
+		contentRaw, hasContent := delta["content"]
+		if !hasContent || bytes.Equal(contentRaw, []byte("null")) {
+			delta["content"] = json.RawMessage(`""`)
+			modified = true
+		}
+
+		// Remove non-standard fields that may confuse strict parsers.
+		for _, field := range []string{"reasoning_content", "tool_calls", "matched_stop"} {
+			if _, has := delta[field]; has {
+				delete(delta, field)
+				modified = true
+			}
+		}
+
+		// Remove non-standard choice-level fields.
+		for _, field := range []string{"matched_stop"} {
+			if _, has := choices[i][field]; has {
+				delete(choices[i], field)
+				modified = true
+			}
+		}
+
+		if modified {
+			if b, err := json.Marshal(delta); err == nil {
+				choices[i]["delta"] = b
+			}
+		}
+	}
+
+	if !modified {
+		return event
+	}
+
+	// Re-serialize.
+	if b, err := json.Marshal(choices); err == nil {
+		chunk["choices"] = b
+	}
+	if b, err := json.Marshal(chunk); err == nil {
+		var out bytes.Buffer
+		out.WriteString("data: ")
+		out.Write(b)
+		out.WriteString("\n\n")
+		return out.Bytes()
+	}
+
+	return event // fallback: pass through
+}

@@ -387,39 +387,10 @@ func (h *lmHandler) serveChat(w http.ResponseWriter, r *http.Request) {
 				needRewrite = true
 			}
 
-			// Strip LM Studio / Ollama-specific fields that strict
-			// backends (Mistral, vLLM) reject with HTTP 422.
-			for _, field := range []string{"format", "keep_alive", "options"} {
-				if _, ok := raw[field]; ok {
-					delete(raw, field)
-					needRewrite = true
-				}
-			}
-
-			// Strip per-message "tool_calls":[] — JetBrains adds an empty
-			// tool_calls array to every message (system, user, assistant).
-			// Mistral rejects these with "Extra inputs are not permitted".
-			if msgsRaw, ok := raw["messages"]; ok {
-				var msgs []map[string]json.RawMessage
-				if json.Unmarshal(msgsRaw, &msgs) == nil {
-					stripped := false
-					for i := range msgs {
-						if tcRaw, hasTc := msgs[i]["tool_calls"]; hasTc {
-							var tc []json.RawMessage
-							if json.Unmarshal(tcRaw, &tc) == nil && len(tc) == 0 {
-								delete(msgs[i], "tool_calls")
-								stripped = true
-							}
-						}
-					}
-					if stripped {
-						if b, err := json.Marshal(msgs); err == nil {
-							raw["messages"] = b
-							needRewrite = true
-						}
-					}
-				}
-			}
+			// NOTE: LM Studio / Ollama-specific fields (format, keep_alive,
+			// options) are NOT stripped here because local runtimes need them.
+			// They are stripped later, only for cloud/remote routes.
+			// See stripRemoteOnlyFields below.
 
 			if needRewrite {
 				body, _ = json.Marshal(raw)
@@ -440,11 +411,20 @@ func (h *lmHandler) serveChat(w http.ResponseWriter, r *http.Request) {
 	r.ContentLength = int64(len(body))
 
 	// 1. Local model → local runtime (with span capture).
+	// Local runtimes (Ollama, LM Studio) understand fields like format,
+	// keep_alive, and options — don't strip them.
 	if h.isLocalModel(req.Model) {
 		slog.Debug("lm handler: routing to local runtime", "model", req.Model)
 		h.localHandler.ServeHTTP(w, r)
 		return
 	}
+
+	// Strip LM Studio / Ollama-specific fields that strict cloud/remote
+	// backends (Mistral, vLLM) reject with HTTP 422. This runs AFTER
+	// local-model routing so local runtimes keep their native fields.
+	body = stripRemoteOnlyFields(body)
+	r.Body = io.NopCloser(bytes.NewReader(body))
+	r.ContentLength = int64(len(body))
 
 	// 2. Cloud model → direct cloud proxy (solo mode only).
 	// In team mode, all cloud traffic must go through the remote server
@@ -467,10 +447,16 @@ func (h *lmHandler) serveChat(w http.ResponseWriter, r *http.Request) {
 
 	// 3. Remote server → team mode proxy.
 	if h.remoteProxy != nil {
-		// The remote Candela server already returns clean OpenAI-compatible
-		// SSE — no chunk normalization needed. Header normalization is
-		// handled by the proxy's ModifyResponse callback.
-		h.remoteProxy.ServeHTTP(w, r)
+		// The remote Candela server returns clean OpenAI-compatible SSE.
+		// Apply lightweight normalization: the sseLiteNormalizer ensures
+		// delta.content is always present (ktor crashes on role-only
+		// chunks), and the proxy's ModifyResponse callback handles
+		// header normalization.
+		writer := http.ResponseWriter(w)
+		if req.Stream {
+			writer = newSSELiteNormalizer(w)
+		}
+		h.remoteProxy.ServeHTTP(writer, r)
 
 		// ── Ktor chunked-encoding workaround ──
 		//
@@ -497,10 +483,11 @@ func (h *lmHandler) serveChat(w http.ResponseWriter, r *http.Request) {
 		// timeout fires.
 		//
 		// Scope: Only applied for ktor-client (JetBrains) on streaming
-		// requests. Other clients handle chunked encoding correctly and
-		// get normal Go HTTP behavior.
+		// requests that actually returned SSE. Error responses (4xx/5xx
+		// JSON) are excluded — ktor handles those correctly.
 		isKtor := strings.Contains(r.UserAgent(), "ktor")
-		if req.Stream && isKtor {
+		respondedSSE := strings.HasPrefix(w.Header().Get("Content-Type"), "text/event-stream")
+		if req.Stream && isKtor && respondedSSE {
 			if hj, ok := w.(http.Hijacker); ok {
 				conn, buf, err := hj.Hijack()
 				if err == nil {
@@ -521,6 +508,57 @@ func (h *lmHandler) serveChat(w http.ResponseWriter, r *http.Request) {
 
 	// 4. No handler found.
 	proxy.ProxyErrorResponse(w, http.StatusNotFound, "model not found locally and no remote server configured", "invalid_request_error")
+}
+
+// stripRemoteOnlyFields removes LM Studio / Ollama-specific fields from the
+// request body that strict cloud/remote backends (Mistral, vLLM) reject with
+// HTTP 422. This should only be called for non-local routes — local runtimes
+// understand these fields natively.
+func stripRemoteOnlyFields(body []byte) []byte {
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(body, &raw); err != nil {
+		return body
+	}
+
+	changed := false
+	for _, field := range []string{"format", "keep_alive", "options"} {
+		if _, ok := raw[field]; ok {
+			delete(raw, field)
+			changed = true
+		}
+	}
+
+	// Strip per-message "tool_calls":[] — JetBrains adds an empty
+	// tool_calls array to every message (system, user, assistant).
+	// Mistral rejects these with "Extra inputs are not permitted".
+	if msgsRaw, ok := raw["messages"]; ok {
+		var msgs []map[string]json.RawMessage
+		if json.Unmarshal(msgsRaw, &msgs) == nil {
+			stripped := false
+			for i := range msgs {
+				if tcRaw, hasTc := msgs[i]["tool_calls"]; hasTc {
+					var tc []json.RawMessage
+					if json.Unmarshal(tcRaw, &tc) == nil && len(tc) == 0 {
+						delete(msgs[i], "tool_calls")
+						stripped = true
+					}
+				}
+			}
+			if stripped {
+				if b, err := json.Marshal(msgs); err == nil {
+					raw["messages"] = b
+					changed = true
+				}
+			}
+		}
+	}
+
+	if changed {
+		if b, err := json.Marshal(raw); err == nil {
+			return b
+		}
+	}
+	return body
 }
 
 // isLocalModel checks if a model is served by the local runtime.

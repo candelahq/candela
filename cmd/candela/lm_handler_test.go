@@ -562,10 +562,15 @@ func TestLMHandler_SoloMode_PassthroughNoPanic(t *testing.T) {
 		t.Errorf("status = %d, want 404 (solo mode passthrough)", resp.StatusCode)
 	}
 
-	// Verify it's proper JSON.
-	var result map[string]string
+	// Verify it's proper OpenAI-format JSON error.
+	var result struct {
+		Error struct {
+			Message string `json:"message"`
+			Type    string `json:"type"`
+		} `json:"error"`
+	}
 	_ = json.NewDecoder(resp.Body).Decode(&result)
-	if result["error"] == "" {
+	if result.Error.Message == "" {
 		t.Error("expected JSON error body")
 	}
 }
@@ -811,9 +816,14 @@ func TestLMHandler_UnknownModelSoloCloudMode(t *testing.T) {
 		t.Errorf("status = %d, want 404 for unknown model in solo+cloud mode", resp.StatusCode)
 	}
 
-	var result map[string]string
+	var result struct {
+		Error struct {
+			Message string `json:"message"`
+			Type    string `json:"type"`
+		} `json:"error"`
+	}
 	_ = json.NewDecoder(resp.Body).Decode(&result)
-	if result["error"] == "" {
+	if result.Error.Message == "" {
 		t.Error("expected error message in response body")
 	}
 }

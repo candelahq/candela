@@ -563,9 +563,9 @@ func (p *Proxy) RegisterCompatRoutes(mux *http.ServeMux, models []CompatModel) {
 		if err != nil {
 			var maxErr *http.MaxBytesError
 			if errors.As(err, &maxErr) {
-				http.Error(w, "request body too large", http.StatusRequestEntityTooLarge)
+				ProxyErrorResponse(w, http.StatusRequestEntityTooLarge, "request body too large", "invalid_request_error")
 			} else {
-				http.Error(w, "failed to read request body", http.StatusBadRequest)
+				ProxyErrorResponse(w, http.StatusBadRequest, "failed to read request body", "invalid_request_error")
 			}
 			return
 		}
@@ -574,9 +574,7 @@ func (p *Proxy) RegisterCompatRoutes(mux *http.ServeMux, models []CompatModel) {
 			Model string `json:"model"`
 		}
 		if err := json.Unmarshal(body, &req); err != nil || req.Model == "" {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusBadRequest)
-			_, _ = w.Write([]byte(`{"error":{"message":"missing or invalid model field","type":"invalid_request_error"}}`))
+			ProxyErrorResponse(w, http.StatusBadRequest, "missing or invalid model field", "invalid_request_error")
 			return
 		}
 
@@ -602,15 +600,7 @@ func (p *Proxy) RegisterCompatRoutes(mux *http.ServeMux, models []CompatModel) {
 			}
 		}
 		if !ok {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusBadRequest)
-			errResp, _ := json.Marshal(map[string]interface{}{
-				"error": map[string]interface{}{
-					"message": fmt.Sprintf("unknown model: %s. Configure it in proxy.lmstudio.models", req.Model),
-					"type":    "invalid_request_error",
-				},
-			})
-			_, _ = w.Write(errResp)
+			ProxyErrorResponse(w, http.StatusBadRequest, fmt.Sprintf("unknown model: %s. Configure it in proxy.lmstudio.models", req.Model), "invalid_request_error")
 			return
 		}
 
@@ -842,7 +832,7 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 	// Extract provider from path: /proxy/{provider}/v1/...
 	parts := strings.SplitN(strings.TrimPrefix(r.URL.Path, "/proxy/"), "/", 2)
 	if len(parts) < 2 {
-		http.Error(w, "invalid proxy path", http.StatusBadRequest)
+		ProxyErrorResponse(w, http.StatusBadRequest, "invalid proxy path", "invalid_request_error")
 		return
 	}
 	providerName := parts[0]
@@ -850,7 +840,7 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 
 	provider, ok := p.providers[providerName]
 	if !ok {
-		http.Error(w, "unknown provider", http.StatusBadRequest)
+		ProxyErrorResponse(w, http.StatusBadRequest, "unknown provider", "invalid_request_error")
 		return
 	}
 
@@ -869,7 +859,7 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 		if rlErr != nil {
 			slog.Error("rate limit check failed, blocking request",
 				"user_id", effectiveUserID, "error", rlErr)
-			http.Error(w, `{"error":{"message":"rate limit check unavailable — try again shortly","type":"service_error","code":503}}`, http.StatusServiceUnavailable)
+			ProxyErrorResponse(w, http.StatusServiceUnavailable, "rate limit check unavailable — try again shortly", "service_error")
 			return
 		} else if !allowed {
 			w.Header().Set("Content-Type", "application/json")
@@ -907,9 +897,9 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		var maxErr *http.MaxBytesError
 		if errors.As(err, &maxErr) {
-			http.Error(w, "request body too large", http.StatusRequestEntityTooLarge)
+			ProxyErrorResponse(w, http.StatusRequestEntityTooLarge, "request body too large", "invalid_request_error")
 		} else {
-			http.Error(w, "failed to read request body", http.StatusBadRequest)
+			ProxyErrorResponse(w, http.StatusBadRequest, "failed to read request body", "invalid_request_error")
 		}
 		return
 	}
@@ -938,16 +928,7 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 	// This runs for ALL requests (solo, team, local) to prevent untracked
 	// API calls that would show $0 cost. Only "local" provider is exempt.
 	if requestModel != "" && strings.ToLower(providerName) != "local" && !p.calc.HasPricing(pricingProvider(providerName), requestModel) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusPaymentRequired)
-		errBody, _ := json.Marshal(map[string]any{
-			"error": map[string]any{
-				"message": "no pricing configured for model " + requestModel + " — contact your admin",
-				"type":    "pricing_not_configured",
-				"code":    402,
-			},
-		})
-		_, _ = w.Write(errBody)
+		ProxyErrorResponse(w, http.StatusPaymentRequired, "no pricing configured for model "+requestModel+" — contact your admin", "pricing_not_configured")
 		slog.Warn("blocked request: no pricing for model",
 			"user_id", effectiveUserID, "provider", providerName, "model", requestModel)
 		return
@@ -957,16 +938,7 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 	// Blocks models not in the configured allowlist. Runs after pricing gate
 	// and before budget checks. Empty/missing policy = all models allowed.
 	if requestModel != "" && !p.policy.IsAllowed(providerName, requestModel) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusForbidden)
-		errBody, _ := json.Marshal(map[string]any{
-			"error": map[string]any{
-				"message": "model not allowed by policy",
-				"type":    "forbidden",
-				"code":    403,
-			},
-		})
-		_, _ = w.Write(errBody)
+		ProxyErrorResponse(w, http.StatusForbidden, "model not allowed by policy", "forbidden")
 		slog.Warn("model blocked by policy",
 			"provider", providerName, "model", requestModel, "user", effectiveUserID)
 		return
@@ -983,17 +955,15 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			slog.Error("budget check failed, blocking request",
 				"user_id", effectiveUserID, "error", err)
-			http.Error(w, `{"error":{"message":"budget check unavailable — try again shortly","type":"service_error","code":503}}`, http.StatusServiceUnavailable)
+			ProxyErrorResponse(w, http.StatusServiceUnavailable, "budget check unavailable — try again shortly", "service_error")
 			return
 		} else if check == nil {
 			slog.Error("budget check returned nil result, blocking request",
 				"user_id", effectiveUserID)
-			http.Error(w, `{"error":{"message":"budget check failed — try again shortly","type":"service_error","code":503}}`, http.StatusServiceUnavailable)
+			ProxyErrorResponse(w, http.StatusServiceUnavailable, "budget check failed — try again shortly", "service_error")
 			return
 		} else if !check.Allowed {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusPaymentRequired)
-			_, _ = w.Write([]byte(`{"error":{"message":"budget exhausted — contact your admin for a grant or budget increase","type":"insufficient_budget","code":402}}`))
+			ProxyErrorResponse(w, http.StatusPaymentRequired, "budget exhausted — contact your admin for a grant or budget increase", "insufficient_budget")
 			slog.Info("blocked request: budget exhausted",
 				"user_id", effectiveUserID, "remaining_usd", check.RemainingUSD)
 			return
@@ -1004,9 +974,7 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 		// Subtract their pending spend from the effective remaining balance.
 		effectiveRemaining := check.RemainingUSD - p.pendingSpend.Get(effectiveUserID)
 		if effectiveRemaining < budgetCheckFloor {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusPaymentRequired)
-			_, _ = w.Write([]byte(`{"error":{"message":"budget exhausted (concurrent requests in flight) — try again shortly","type":"insufficient_budget","code":402}}`))
+			ProxyErrorResponse(w, http.StatusPaymentRequired, "budget exhausted (concurrent requests in flight) — try again shortly", "insufficient_budget")
 			slog.Info("blocked request: budget exhausted after pending spend",
 				"user_id", effectiveUserID,
 				"firestore_remaining", check.RemainingUSD,
@@ -1020,6 +988,8 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 		// small reservation prevents unlimited concurrent overdraft.
 		budgetReserved = budgetCheckFloor
 		p.pendingSpend.Reserve(effectiveUserID, budgetReserved)
+		// Release the reservation if we return before the response handlers
+		// (handleStreamingResponse / handleStandardResponse) take ownership.
 		defer func() {
 			if budgetReserved > 0 {
 				p.pendingSpend.Release(effectiveUserID, budgetReserved)
@@ -1034,17 +1004,8 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 	if p.config.MaxRequestCost > 0 && requestModel != "" {
 		estimatedCost = estimateRequestCost(p.calc, providerName, requestModel, reqBody)
 		if estimatedCost > p.config.MaxRequestCost {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusPaymentRequired)
-			errBody, _ := json.Marshal(map[string]any{
-				"error": map[string]any{
-					"message": fmt.Sprintf("estimated request cost $%.2f exceeds cap $%.2f for model %s",
-						estimatedCost, p.config.MaxRequestCost, requestModel),
-					"type": "request_cost_exceeded",
-					"code": 402,
-				},
-			})
-			_, _ = w.Write(errBody)
+			ProxyErrorResponse(w, http.StatusPaymentRequired, fmt.Sprintf("estimated request cost $%.2f exceeds cap $%.2f for model %s",
+				estimatedCost, p.config.MaxRequestCost, requestModel), "request_cost_exceeded")
 			slog.Info("blocked request: estimated cost exceeds cap",
 				"user_id", effectiveUserID, "provider", providerName,
 				"model", requestModel, "estimated_usd", estimatedCost,
@@ -1063,17 +1024,8 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 		}
 		allowed, spent, limit := p.spendTracker.Check(limitUser, requestModel, p.config.DailyLimits, estimatedCost)
 		if !allowed {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusPaymentRequired)
-			errBody, _ := json.Marshal(map[string]any{
-				"error": map[string]any{
-					"message": fmt.Sprintf("daily spend limit for %s reached ($%.2f/$%.2f)",
-						requestModel, spent, limit),
-					"type": "daily_limit_exceeded",
-					"code": 402,
-				},
-			})
-			_, _ = w.Write(errBody)
+			ProxyErrorResponse(w, http.StatusPaymentRequired, fmt.Sprintf("daily spend limit for %s reached ($%.2f/$%.2f)",
+				requestModel, spent, limit), "daily_limit_exceeded")
 			slog.Info("blocked request: daily model spend limit exceeded",
 				"user_id", limitUser, "model", requestModel,
 				"spent_usd", spent, "limit_usd", limit)
@@ -1112,7 +1064,7 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 			upstreamBody, translatedModel, err = provider.FormatTranslator.TranslateRequest(reqBody)
 		}
 		if err != nil {
-			http.Error(w, fmt.Sprintf("request translation error: %v", err), http.StatusBadRequest)
+			ProxyErrorResponse(w, http.StatusBadRequest, fmt.Sprintf("request translation error: %v", err), "invalid_request_error")
 			return
 		}
 
@@ -1240,9 +1192,7 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 	if modelForPath != "" && !isSafeModelName(modelForPath) {
 		slog.Warn("blocked request: invalid model name (possible path traversal)",
 			"model", modelForPath, "provider", providerName, "user_id", effectiveUserID)
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusBadRequest)
-		_, _ = w.Write([]byte(`{"error":{"message":"invalid model name","type":"invalid_request_error","code":400}}`))
+		ProxyErrorResponse(w, http.StatusBadRequest, "invalid model name", "invalid_request_error")
 		return
 	}
 	if provider.PathRewriter != nil && modelForPath != "" {
@@ -1276,7 +1226,7 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 	defer streamCancel()
 	upstreamReq, err := http.NewRequestWithContext(upstreamCtx, r.Method, upstreamURL, bytes.NewReader(upstreamBody))
 	if err != nil {
-		http.Error(w, "failed to create upstream request", http.StatusInternalServerError)
+		ProxyErrorResponse(w, http.StatusInternalServerError, "failed to create upstream request", "server_error")
 		return
 	}
 
@@ -1306,14 +1256,14 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 	if provider.RequestSigner != nil {
 		if signErr := provider.RequestSigner.SignRequest(r.Context(), upstreamReq, upstreamBody); signErr != nil {
 			slog.Error("failed to sign request", "provider", providerName, "error", signErr)
-			http.Error(w, "failed to sign upstream request", http.StatusInternalServerError)
+			ProxyErrorResponse(w, http.StatusInternalServerError, "failed to sign upstream request", "server_error")
 			return
 		}
 	} else if provider.TokenSource != nil {
 		token, tokenErr := provider.TokenSource.Token()
 		if tokenErr != nil {
 			slog.Error("failed to get auth token", "provider", providerName, "error", tokenErr)
-			http.Error(w, "failed to obtain cloud credentials", http.StatusInternalServerError)
+			ProxyErrorResponse(w, http.StatusInternalServerError, "failed to obtain cloud credentials", "server_error")
 			return
 		}
 		upstreamReq.Header.Set("Authorization", "Bearer "+token.AccessToken)
@@ -1334,7 +1284,7 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		// CRITICAL: Don't leak internal URLs/DNS/network info to the client.
 		slog.Error("upstream request failed", "provider", providerName, "error", err)
-		http.Error(w, `{"error":{"message":"upstream provider unavailable","type":"upstream_error"}}`, http.StatusBadGateway)
+		ProxyErrorResponse(w, http.StatusBadGateway, "upstream provider unavailable", "upstream_error")
 		p.recordCircuitBreaker(providerName, true)
 		return
 	}
@@ -1376,10 +1326,15 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 		extendedTTL = extractAnthropicCacheTTL(reqBody)
 	}
 
+	// Transfer budget reservation ownership to the response handler.
+	// Zero out so the deferred release guard (above) becomes a no-op.
+	reserved := budgetReserved
+	budgetReserved = 0
+
 	if isStreaming && resp.StatusCode == http.StatusOK {
-		p.handleStreamingResponse(w, r, resp, provider, reqBody, startTime, ttfb, requestID, sessionID, effectiveUserID, tenantID, jobID, cbAllow, traceCtx, proxySpanID, extendedTTL, &budgetReserved)
+		p.handleStreamingResponse(w, r, resp, provider, reqBody, startTime, ttfb, requestID, sessionID, effectiveUserID, tenantID, jobID, cbAllow, traceCtx, proxySpanID, extendedTTL, &reserved)
 	} else {
-		p.handleStandardResponse(w, r, resp, provider, reqBody, startTime, ttfb, requestID, sessionID, effectiveUserID, tenantID, jobID, cbAllow, traceCtx, proxySpanID, extendedTTL, &budgetReserved)
+		p.handleStandardResponse(w, r, resp, provider, reqBody, startTime, ttfb, requestID, sessionID, effectiveUserID, tenantID, jobID, cbAllow, traceCtx, proxySpanID, extendedTTL, &reserved)
 	}
 }
 
@@ -1423,11 +1378,11 @@ func (p *Proxy) handleStandardResponse(
 	const respLimit = int64(10 << 20)
 	respBody, err := io.ReadAll(io.LimitReader(resp.Body, respLimit+1))
 	if err != nil {
-		http.Error(w, "failed to read upstream response", http.StatusBadGateway)
+		ProxyErrorResponse(w, http.StatusBadGateway, "failed to read upstream response", "upstream_error")
 		return
 	}
 	if int64(len(respBody)) > respLimit {
-		http.Error(w, "upstream response too large", http.StatusBadGateway)
+		ProxyErrorResponse(w, http.StatusBadGateway, "upstream response too large", "upstream_error")
 		return
 	}
 
@@ -1552,7 +1507,7 @@ func (p *Proxy) handleStreamingResponse(
 ) {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
-		http.Error(w, "streaming not supported", http.StatusInternalServerError)
+		ProxyErrorResponse(w, http.StatusInternalServerError, "streaming not supported", "server_error")
 		return
 	}
 

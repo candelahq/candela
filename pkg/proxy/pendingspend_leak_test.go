@@ -7,11 +7,27 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/candelahq/candela/pkg/auth"
 	"github.com/candelahq/candela/pkg/costcalc"
 	"github.com/candelahq/candela/pkg/storage"
 )
+
+// assertEventually polls check every 10ms until it returns true or timeout
+// elapses. This avoids races where the HTTP response arrives before the
+// server's deferred Release() has completed.
+func assertEventually(t *testing.T, check func() bool, timeout time.Duration, msg string) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if check() {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal(msg)
+}
 
 // TestPendingSpend_ReleasedOnCostCapEarlyReturn verifies that the pending-spend
 // reservation is released when the request is rejected by the per-request cost
@@ -75,9 +91,9 @@ func TestPendingSpend_ReleasedOnCostCapEarlyReturn(t *testing.T) {
 	}
 
 	// CRITICAL: pending spend must be zero — the deferred Release should have cleaned it up.
-	if got := p.pendingSpend.Get(userID); got != 0 {
-		t.Errorf("pending spend after cost-cap rejection = %f, want 0 (reservation leaked!)", got)
-	}
+	assertEventually(t, func() bool {
+		return p.pendingSpend.Get(userID) == 0
+	}, 2*time.Second, fmt.Sprintf("pending spend after cost-cap rejection = %f, want 0 (reservation leaked!)", p.pendingSpend.Get(userID)))
 }
 
 // TestPendingSpend_ReleasedOnDailyLimitEarlyReturn verifies that the pending-spend
@@ -143,9 +159,9 @@ func TestPendingSpend_ReleasedOnDailyLimitEarlyReturn(t *testing.T) {
 	}
 
 	// CRITICAL: pending spend must be zero.
-	if got := p.pendingSpend.Get(userID); got != 0 {
-		t.Errorf("pending spend after daily-limit rejection = %f, want 0 (reservation leaked!)", got)
-	}
+	assertEventually(t, func() bool {
+		return p.pendingSpend.Get(userID) == 0
+	}, 2*time.Second, fmt.Sprintf("pending spend after daily-limit rejection = %f, want 0 (reservation leaked!)", p.pendingSpend.Get(userID)))
 }
 
 // TestPendingSpend_ReleasedOnUpstreamFailure verifies that the pending-spend
@@ -205,9 +221,9 @@ func TestPendingSpend_ReleasedOnUpstreamFailure(t *testing.T) {
 	}
 
 	// CRITICAL: pending spend must be zero.
-	if got := p.pendingSpend.Get(userID); got != 0 {
-		t.Errorf("pending spend after upstream failure = %f, want 0 (reservation leaked!)", got)
-	}
+	assertEventually(t, func() bool {
+		return p.pendingSpend.Get(userID) == 0
+	}, 2*time.Second, fmt.Sprintf("pending spend after upstream failure = %f, want 0 (reservation leaked!)", p.pendingSpend.Get(userID)))
 }
 
 // TestPendingSpend_ReleasedOnSuccessfulRequest verifies that the defer does not
@@ -261,7 +277,12 @@ func TestPendingSpend_ReleasedOnSuccessfulRequest(t *testing.T) {
 	}
 
 	// After successful request, pending spend must be zero (no double-release, no leak).
-	if got := p.pendingSpend.Get(userID); got != 0 {
-		t.Errorf("pending spend after successful request = %f, want 0", got)
+	assertEventually(t, func() bool {
+		return p.pendingSpend.Get(userID) == 0
+	}, 2*time.Second, fmt.Sprintf("pending spend after successful request = %f, want 0", p.pendingSpend.Get(userID)))
+
+	// Verify no double-release drove the value negative.
+	if got := p.pendingSpend.Get(userID); got < 0 {
+		t.Errorf("pending spend after successful request = %f, want >= 0 (double-release detected!)", got)
 	}
 }

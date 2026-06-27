@@ -396,6 +396,12 @@ func (t *AnthropicFormatTranslator) TranslateStreamChunk(data []byte, model stri
 	info := ParseModelName(model)
 	var result strings.Builder
 
+	// Guard against nil streamID to prevent a nil-pointer dereference.
+	if streamID == nil {
+		fallback := ""
+		streamID = &fallback
+	}
+
 	// Populate the stream ID on first call if not yet set.
 	// The caller passes a pointer to a string that persists across calls for
 	// the entire stream, so every chunk shares the same ID.

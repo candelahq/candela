@@ -320,11 +320,15 @@ func (h *lmHandler) serveChat(w http.ResponseWriter, r *http.Request) {
 	}
 	_ = json.Unmarshal(body, &req)
 
+	// Normalize path early so all backends (local, cloud, remote) receive
+	// the standard /v1/ path regardless of what the client sent.
+	r.URL.Path = "/v1/chat/completions"
+
 	// Inject max_tokens if absent or non-positive — some clients (JetBrains)
 	// don't send it, but providers like Anthropic require it.
 	if req.MaxTokens == nil || *req.MaxTokens <= 0 {
 		var raw map[string]json.RawMessage
-		if err := json.Unmarshal(body, &raw); err == nil {
+		if err := json.Unmarshal(body, &raw); err == nil && raw != nil {
 			defaultMax := h.defaultMaxTokens
 			if b, err := json.Marshal(defaultMax); err == nil {
 				raw["max_tokens"] = b
@@ -374,7 +378,7 @@ func (h *lmHandler) serveChat(w http.ResponseWriter, r *http.Request) {
 
 	// 3. Remote server → team mode proxy.
 	if h.remoteProxy != nil {
-		r.URL.Path = "/v1/chat/completions" // normalize — remote only serves /v1/
+		// Path already normalized at top of serveChat.
 		h.remoteProxy.ServeHTTP(writer, r)
 		return
 	}

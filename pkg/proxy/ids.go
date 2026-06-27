@@ -6,28 +6,37 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"sync/atomic"
 	"time"
 )
 
-// generateTraceID returns a random 32-char hex trace ID (16 bytes).
-// Falls back to a time-based ID if crypto/rand fails (should never happen
-// in practice, but avoids crashing the entire production server).
-func generateTraceID() string {
+// fallbackCounter provides monotonically-increasing uniqueness for the
+// extremely unlikely case that crypto/rand fails. Combined with UnixNano
+// it makes collisions virtually impossible even under concurrent calls.
+var fallbackCounter atomic.Uint64
+
+// GenerateTraceID returns a random 32-char hex trace ID (16 bytes).
+// Falls back to a time+counter-based ID if crypto/rand fails (should never
+// happen in practice, but avoids crashing the entire production server).
+func GenerateTraceID() string {
 	b := make([]byte, 16)
 	if _, err := rand.Read(b); err != nil {
-		// Fallback: time-based ID is not cryptographically random but
-		// keeps the server alive instead of panicking.
+		// Fallback: combine timestamp with an atomic counter so that
+		// concurrent calls never collide, even at nanosecond granularity.
 		now := time.Now().UnixNano()
-		return fmt.Sprintf("%016x%016x", now, now^0xdeadbeef)
+		seq := fallbackCounter.Add(1)
+		return fmt.Sprintf("%016x%016x", now, seq)
 	}
 	return hex.EncodeToString(b)
 }
 
-// generateSpanID returns a random 16-char hex span ID (8 bytes).
-func generateSpanID() string {
+// GenerateSpanID returns a random 16-char hex span ID (8 bytes).
+func GenerateSpanID() string {
 	b := make([]byte, 8)
 	if _, err := rand.Read(b); err != nil {
-		return fmt.Sprintf("%016x", time.Now().UnixNano())
+		now := time.Now().UnixNano()
+		seq := fallbackCounter.Add(1)
+		return fmt.Sprintf("%08x%08x", uint32(now), uint32(seq))
 	}
 	return hex.EncodeToString(b)
 }

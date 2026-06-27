@@ -98,7 +98,7 @@ func setupLMHandler(t *testing.T, localModels []runtime.Model, remoteModels []op
 	}
 	t.Cleanup(func() { _ = mgr.Stop(context.Background()) })
 
-	h := newLMHandler(mgr, proxyTo(remoteSrv.URL), proxyTo(localSrv.URL), nil, nil, nil, nil, false)
+	h := newLMHandler(mgr, proxyTo(remoteSrv.URL), proxyTo(localSrv.URL), nil, nil, nil, nil, false, 0)
 
 	srv := httptest.NewServer(h)
 	t.Cleanup(srv.Close)
@@ -160,7 +160,7 @@ func TestLMHandler_Models_NoRuntime(t *testing.T) {
 
 	remoteSrv := mockRemoteServer(t, remoteModels)
 
-	h := newLMHandler(nil, proxyTo(remoteSrv.URL), nil, nil, nil, nil, nil, false)
+	h := newLMHandler(nil, proxyTo(remoteSrv.URL), nil, nil, nil, nil, nil, false, 0)
 	srv := httptest.NewServer(h)
 	defer srv.Close()
 
@@ -197,7 +197,7 @@ func TestLMHandler_Models_RemoteDown(t *testing.T) {
 	_ = mgr.Start(context.Background())
 	defer func() { _ = mgr.Stop(context.Background()) }()
 
-	h := newLMHandler(mgr, proxyTo(failSrv.URL), proxyTo(localSrv.URL), nil, nil, nil, nil, false)
+	h := newLMHandler(mgr, proxyTo(failSrv.URL), proxyTo(localSrv.URL), nil, nil, nil, nil, false, 0)
 	srv := httptest.NewServer(h)
 	defer srv.Close()
 
@@ -301,7 +301,7 @@ func TestLMHandler_APIV0Models(t *testing.T) {
 	// /api/v0/models should return a model list (same as /v1/models), not passthrough.
 	// Use solo mode with a cloud model to ensure there's at least one model in the response.
 	cloudModels := map[string]string{"test-model": "test-provider"}
-	h := newLMHandler(nil, nil, nil, nil, nil, cloudModels, nil, true)
+	h := newLMHandler(nil, nil, nil, nil, nil, cloudModels, nil, true, 0)
 	srv := httptest.NewServer(h)
 	defer srv.Close()
 
@@ -337,7 +337,7 @@ func TestLMHandler_ModelFields(t *testing.T) {
 	t.Cleanup(func() { _ = mgr.Stop(context.Background()) })
 
 	cloudModels := map[string]string{"gpt-4o": "openai"}
-	h := newLMHandler(mgr, proxyTo(remoteSrv.URL), proxyTo(localSrv.URL), nil, nil, cloudModels, nil, true)
+	h := newLMHandler(mgr, proxyTo(remoteSrv.URL), proxyTo(localSrv.URL), nil, nil, cloudModels, nil, true, 0)
 	srv := httptest.NewServer(h)
 	t.Cleanup(srv.Close)
 
@@ -475,7 +475,7 @@ func setupSoloLMHandler(t *testing.T, localModels []runtime.Model) *httptest.Ser
 	t.Cleanup(func() { _ = mgr.Stop(context.Background()) })
 
 	// Solo mode: nil remote proxy.
-	h := newLMHandler(mgr, nil, proxyTo(localSrv.URL), nil, nil, nil, nil, true)
+	h := newLMHandler(mgr, nil, proxyTo(localSrv.URL), nil, nil, nil, nil, true, 0)
 
 	srv := httptest.NewServer(h)
 	t.Cleanup(srv.Close)
@@ -582,7 +582,7 @@ func TestLMHandler_CloudModelsIncluded(t *testing.T) {
 		"claude-sonnet-4-20250514": "anthropic",
 	}
 
-	h := newLMHandler(nil, nil, nil, nil, nil, cloudModels, costcalc.New(), true)
+	h := newLMHandler(nil, nil, nil, nil, nil, cloudModels, costcalc.New(), true, 0)
 	srv := httptest.NewServer(h)
 	defer srv.Close()
 
@@ -647,7 +647,7 @@ func TestLMHandler_CloudChatRouting(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	h := newLMHandler(nil, nil, nil, nil, cp, cloudModels, calc, true)
+	h := newLMHandler(nil, nil, nil, nil, cp, cloudModels, calc, true, 0)
 	srv := httptest.NewServer(h)
 	defer srv.Close()
 
@@ -692,7 +692,7 @@ func TestLMHandler_LocalPreference(t *testing.T) {
 	defer func() { _ = mgr.Stop(context.Background()) }()
 
 	localProxy := proxyTo(localSrv.URL)
-	h := newLMHandler(mgr, nil, localProxy, localProxy, nil, cloudModels, costcalc.New(), true)
+	h := newLMHandler(mgr, nil, localProxy, localProxy, nil, cloudModels, costcalc.New(), true, 0)
 	srv := httptest.NewServer(h)
 	defer srv.Close()
 
@@ -735,7 +735,7 @@ func TestLMHandler_CloudAndLocalModelsMerged(t *testing.T) {
 	defer func() { _ = mgr.Stop(context.Background()) }()
 
 	localProxy := proxyTo(localSrv.URL)
-	h := newLMHandler(mgr, nil, localProxy, nil, nil, cloudModels, costcalc.New(), true)
+	h := newLMHandler(mgr, nil, localProxy, nil, nil, cloudModels, costcalc.New(), true, 0)
 	srv := httptest.NewServer(h)
 	defer srv.Close()
 
@@ -769,7 +769,7 @@ func TestLMHandler_CloudModelWhenProxyNil(t *testing.T) {
 	// models should still appear in /v1/models but chat should 404.
 	cloudModels := map[string]string{"gemini-2.5-pro": "gemini-oai"}
 
-	h := newLMHandler(nil, nil, nil, nil, nil, cloudModels, costcalc.New(), true) // no cloudProxy
+	h := newLMHandler(nil, nil, nil, nil, nil, cloudModels, costcalc.New(), true, 0) // no cloudProxy
 	srv := httptest.NewServer(h)
 	defer srv.Close()
 
@@ -801,7 +801,7 @@ func TestLMHandler_UnknownModelSoloCloudMode(t *testing.T) {
 	// cloudModels should return 404 (not panic or route incorrectly).
 	cloudModels := map[string]string{"gemini-2.5-pro": "gemini-oai"}
 
-	h := newLMHandler(nil, nil, nil, nil, nil, cloudModels, costcalc.New(), true)
+	h := newLMHandler(nil, nil, nil, nil, nil, cloudModels, costcalc.New(), true, 0)
 	srv := httptest.NewServer(h)
 	defer srv.Close()
 
@@ -884,7 +884,7 @@ func TestLMHandler_ModelAlias_PrefixResolvesRemote(t *testing.T) {
 	}
 
 	remoteSrv := mockRemoteServer(t, remoteModels)
-	h := newLMHandler(nil, proxyTo(remoteSrv.URL), nil, nil, nil, nil, nil, false)
+	h := newLMHandler(nil, proxyTo(remoteSrv.URL), nil, nil, nil, nil, nil, false, 0)
 	srv := httptest.NewServer(h)
 	defer srv.Close()
 
@@ -935,7 +935,7 @@ func TestLMHandler_ModelAlias_BodyRewritten(t *testing.T) {
 	}))
 	defer remoteSrv.Close()
 
-	h := newLMHandler(nil, proxyTo(remoteSrv.URL), nil, nil, nil, nil, nil, false)
+	h := newLMHandler(nil, proxyTo(remoteSrv.URL), nil, nil, nil, nil, nil, false, 0)
 	srv := httptest.NewServer(h)
 	defer srv.Close()
 
@@ -959,7 +959,7 @@ func TestLMHandler_ModelAlias_AmbiguousPrefixNoResolve(t *testing.T) {
 	}
 
 	remoteSrv := mockRemoteServer(t, remoteModels)
-	h := newLMHandler(nil, proxyTo(remoteSrv.URL), nil, nil, nil, nil, nil, false)
+	h := newLMHandler(nil, proxyTo(remoteSrv.URL), nil, nil, nil, nil, nil, false, 0)
 	srv := httptest.NewServer(h)
 	defer srv.Close()
 
@@ -985,7 +985,7 @@ func TestLMHandler_ModelAlias_ExactMatchSkipsResolution(t *testing.T) {
 	}
 
 	remoteSrv := mockRemoteServer(t, remoteModels)
-	h := newLMHandler(nil, proxyTo(remoteSrv.URL), nil, nil, nil, nil, nil, false)
+	h := newLMHandler(nil, proxyTo(remoteSrv.URL), nil, nil, nil, nil, nil, false, 0)
 	srv := httptest.NewServer(h)
 	defer srv.Close()
 
@@ -1033,7 +1033,7 @@ func TestLMHandler_ModelAlias_CloudModel(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	h := newLMHandler(nil, nil, nil, nil, cp, cloudModels, calc, true)
+	h := newLMHandler(nil, nil, nil, nil, cp, cloudModels, calc, true, 0)
 	srv := httptest.NewServer(h)
 	defer srv.Close()
 
@@ -1120,7 +1120,7 @@ func TestTeamMode_ExcludesCloudModels(t *testing.T) {
 	}
 
 	// Team mode: soloMode=false
-	h := newLMHandler(nil, proxyTo(remoteSrv.URL), nil, nil, nil, cloudModels, costcalc.New(), false)
+	h := newLMHandler(nil, proxyTo(remoteSrv.URL), nil, nil, nil, cloudModels, costcalc.New(), false, 0)
 	t.Cleanup(h.Close)
 	srv := httptest.NewServer(h)
 	t.Cleanup(srv.Close)
@@ -1162,7 +1162,7 @@ func TestSoloMode_IncludesCloudModels(t *testing.T) {
 	}
 
 	// Solo mode: soloMode=true, no remote
-	h := newLMHandler(nil, nil, nil, nil, nil, cloudModels, costcalc.New(), true)
+	h := newLMHandler(nil, nil, nil, nil, nil, cloudModels, costcalc.New(), true, 0)
 	t.Cleanup(h.Close)
 	srv := httptest.NewServer(h)
 	t.Cleanup(srv.Close)
@@ -1197,7 +1197,7 @@ func TestLMHandler_Close(t *testing.T) {
 	t.Cleanup(remoteSrv.Close)
 
 	// Team mode starts a background goroutine.
-	h := newLMHandler(nil, proxyTo(remoteSrv.URL), nil, nil, nil, nil, nil, false)
+	h := newLMHandler(nil, proxyTo(remoteSrv.URL), nil, nil, nil, nil, nil, false, 0)
 	// Close should not block or panic.
 	h.Close()
 	// Calling Close again should be safe.
@@ -1206,7 +1206,7 @@ func TestLMHandler_Close(t *testing.T) {
 
 // TestAtomicModelCache verifies that the atomic model caches work correctly.
 func TestAtomicModelCache(t *testing.T) {
-	h := newLMHandler(nil, nil, nil, nil, nil, nil, nil, true)
+	h := newLMHandler(nil, nil, nil, nil, nil, nil, nil, true, 0)
 	t.Cleanup(h.Close)
 
 	// Initially empty.
@@ -1269,7 +1269,7 @@ func TestTeamMode_ChatRejectsCloudRouting(t *testing.T) {
 	cloudModels := map[string]string{"claude-sonnet-4": "anthropic"}
 
 	// Team mode: soloMode=false — cloud routing should be bypassed.
-	h := newLMHandler(nil, proxyTo(remoteSrv.URL), nil, nil, nil, cloudModels, nil, false)
+	h := newLMHandler(nil, proxyTo(remoteSrv.URL), nil, nil, nil, cloudModels, nil, false, 0)
 	t.Cleanup(h.Close)
 	srv := httptest.NewServer(h)
 	t.Cleanup(srv.Close)
@@ -1309,7 +1309,7 @@ func TestRemoteEmptyResponse_ClearsCache(t *testing.T) {
 	}))
 	t.Cleanup(remoteSrv.Close)
 
-	h := newLMHandler(nil, proxyTo(remoteSrv.URL), nil, nil, nil, nil, nil, false)
+	h := newLMHandler(nil, proxyTo(remoteSrv.URL), nil, nil, nil, nil, nil, false, 0)
 	t.Cleanup(h.Close)
 	srv := httptest.NewServer(h)
 	t.Cleanup(srv.Close)
@@ -1347,7 +1347,7 @@ func TestRemoteDown_PreservesStaleCache(t *testing.T) {
 	}))
 	t.Cleanup(remoteSrv.Close)
 
-	h := newLMHandler(nil, proxyTo(remoteSrv.URL), nil, nil, nil, nil, nil, false)
+	h := newLMHandler(nil, proxyTo(remoteSrv.URL), nil, nil, nil, nil, nil, false, 0)
 	t.Cleanup(h.Close)
 	srv := httptest.NewServer(h)
 	t.Cleanup(srv.Close)

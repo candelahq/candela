@@ -80,11 +80,12 @@ type Config struct {
 	RuntimeManage  runtime.ManagerConfig `yaml:"runtime_manage"`  // Auto-start, auto-pull, models
 
 	// Direct cloud providers (solo mode — call Gemini/Claude without a server).
-	Providers      []LocalProvider          `yaml:"providers"`
-	VertexAI       VertexAIConfig           `yaml:"vertex_ai"`
-	AWS            AWSConfig                `yaml:"aws"`
-	MaxRequestCost float64                  `yaml:"max_request_cost_usd"` // Per-request cost cap (0 = disabled)
-	DailyLimits    []proxy.SpendLimitConfig `yaml:"daily_limits"`         // Per-model daily spend limits
+	Providers        []LocalProvider          `yaml:"providers"`
+	VertexAI         VertexAIConfig           `yaml:"vertex_ai"`
+	AWS              AWSConfig                `yaml:"aws"`
+	MaxRequestCost   float64                  `yaml:"max_request_cost_usd"` // Per-request cost cap (0 = disabled)
+	DailyLimits      []proxy.SpendLimitConfig `yaml:"daily_limits"`         // Per-model daily spend limits
+	DefaultMaxTokens int                      `yaml:"default_max_tokens"`   // Injected when client omits max_tokens (default: 8192)
 }
 
 // LocalProvider configures a direct cloud provider for solo mode.
@@ -797,6 +798,13 @@ func runForeground() {
 				if _, ok := req.Header["User-Agent"]; !ok {
 					req.Header.Set("User-Agent", "candela/1.0")
 				}
+
+				// Strip hop-by-hop headers that break HTTP/2 upstream.
+				// Clients (JetBrains/ktor) may send Upgrade: h2c which causes
+				// "http2: invalid Upgrade request header" on the remote connection.
+				req.Header.Del("Upgrade")
+				req.Header.Del("Connection")
+				req.Header.Del("HTTP2-Settings")
 			},
 			ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
 				slog.Error("proxy error", "path", r.URL.Path, "error", err)
@@ -804,6 +812,10 @@ func runForeground() {
 				w.WriteHeader(http.StatusBadGateway)
 				_ = json.NewEncoder(w).Encode(map[string]string{"error": "remote server unavailable"})
 			},
+			// Flush immediately so SSE chunks stream to the client without
+			// buffering. Without this, responses are fully buffered and slow
+			// models (Claude, Qwen) cause client-side timeouts.
+			FlushInterval: -1, // -1 = flush every chunk immediately
 		}
 
 		// Initialize local traces store for offline sync.
@@ -1036,7 +1048,7 @@ func runForeground() {
 		cloudCalc = costcalc.New()
 	}
 
-	lmH := newLMHandler(mgr, remoteProxy, runtimeLocalProxy, localHandler, cloudProxy, cloudModels, cloudCalc, soloMode)
+	lmH := newLMHandler(mgr, remoteProxy, runtimeLocalProxy, localHandler, cloudProxy, cloudModels, cloudCalc, soloMode, cfg.DefaultMaxTokens)
 	lmAddr := fmt.Sprintf("127.0.0.1:%d", lmPort)
 
 	// ── Graceful shutdown ──

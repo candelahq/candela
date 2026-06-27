@@ -158,6 +158,7 @@ func (h *lmHandler) loadRemoteModels() map[string]bool {
 }
 
 func (h *lmHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	slog.Info("lm: request", "method", r.Method, "path", r.URL.Path, "remote", r.RemoteAddr, "ua", r.UserAgent())
 	switch {
 	// ── Model discovery ──
 	case r.URL.Path == "/v1/models" && r.Method == http.MethodGet:
@@ -340,6 +341,12 @@ func (h *lmHandler) serveChat(w http.ResponseWriter, r *http.Request) {
 	}
 	_ = json.Unmarshal(body, &req)
 
+	slog.Debug("lm: chat request",
+		"model", req.Model,
+		"stream", req.Stream,
+		"path", r.URL.Path,
+		"ua", r.UserAgent())
+
 	// Normalize path early so all backends (local, cloud, remote) receive
 	// the standard /v1/ path regardless of what the client sent.
 	r.URL.Path = "/v1/chat/completions"
@@ -380,6 +387,11 @@ func (h *lmHandler) serveChat(w http.ResponseWriter, r *http.Request) {
 				needRewrite = true
 			}
 
+			// NOTE: LM Studio / Ollama-specific fields (format, keep_alive,
+			// options) are NOT stripped here because local runtimes need them.
+			// They are stripped later, only for cloud/remote routes.
+			// See stripRemoteOnlyFields below.
+
 			if needRewrite {
 				body, _ = json.Marshal(raw)
 			}
@@ -399,11 +411,20 @@ func (h *lmHandler) serveChat(w http.ResponseWriter, r *http.Request) {
 	r.ContentLength = int64(len(body))
 
 	// 1. Local model → local runtime (with span capture).
+	// Local runtimes (Ollama, LM Studio) understand fields like format,
+	// keep_alive, and options — don't strip them.
 	if h.isLocalModel(req.Model) {
 		slog.Debug("lm handler: routing to local runtime", "model", req.Model)
 		h.localHandler.ServeHTTP(w, r)
 		return
 	}
+
+	// Strip LM Studio / Ollama-specific fields that strict cloud/remote
+	// backends (Mistral, vLLM) reject with HTTP 422. This runs AFTER
+	// local-model routing so local runtimes keep their native fields.
+	body = stripRemoteOnlyFields(body)
+	r.Body = io.NopCloser(bytes.NewReader(body))
+	r.ContentLength = int64(len(body))
 
 	// 2. Cloud model → direct cloud proxy (solo mode only).
 	// In team mode, all cloud traffic must go through the remote server
@@ -426,19 +447,118 @@ func (h *lmHandler) serveChat(w http.ResponseWriter, r *http.Request) {
 
 	// 3. Remote server → team mode proxy.
 	if h.remoteProxy != nil {
-		// The remote Candela server already returns clean OpenAI-compatible
-		// SSE — no chunk normalization needed. Only apply lightweight header
-		// fixes (Content-Type charset, Content-Length) that ktor requires.
-		writer := w
+		// The remote Candela server returns clean OpenAI-compatible SSE.
+		// Apply lightweight normalization: the sseLiteNormalizer ensures
+		// delta.content is always present (ktor crashes on role-only
+		// chunks), and the proxy's ModifyResponse callback handles
+		// header normalization.
+		writer := http.ResponseWriter(w)
 		if req.Stream {
-			writer = newSSEHeaderNormalizer(w)
+			writer = newSSELiteNormalizer(w)
 		}
 		h.remoteProxy.ServeHTTP(writer, r)
+
+		// ── Ktor chunked-encoding workaround ──
+		//
+		// Background: Go's net/http uses chunked transfer encoding for
+		// streaming responses. When this handler returns, Go writes the
+		// chunked terminator ("0\r\n\r\n") to signal end-of-body.
+		//
+		// Problem: JetBrains' AI Assistant uses ktor's LMStudioClientAPI
+		// for its "LM Studio" provider mode. Ktor's SSE parser treats the
+		// chunked terminator as an unexpected EOF, even though the stream
+		// already sent "data: [DONE]". This is a ktor client bug — all
+		// other HTTP clients (curl, Continue, Cursor) handle this correctly.
+		//
+		// Evidence: Models whose upstream keeps the response body open
+		// indefinitely (like Gemini via Google Frontend) work fine because
+		// Go never writes the terminator. Models that close promptly
+		// (Claude, Qwen, Mistral) all trigger "unexpected EOF".
+		//
+		// Fix: After the proxy finishes writing the SSE stream, hijack the
+		// TCP connection. This transfers socket ownership from Go's HTTP
+		// server to us, preventing the chunked terminator from ever being
+		// written. We then hold the connection open until the client
+		// disconnects (ktor closes after processing [DONE]) or a safety
+		// timeout fires.
+		//
+		// Scope: Only applied for ktor-client (JetBrains) on streaming
+		// requests that actually returned SSE. Error responses (4xx/5xx
+		// JSON) are excluded — ktor handles those correctly.
+		isKtor := strings.Contains(r.UserAgent(), "ktor")
+		respondedSSE := strings.HasPrefix(w.Header().Get("Content-Type"), "text/event-stream")
+		if req.Stream && isKtor && respondedSSE {
+			if hj, ok := w.(http.Hijacker); ok {
+				conn, buf, err := hj.Hijack()
+				if err == nil {
+					// Flush any pending data in the bufio.Writer.
+					if buf != nil {
+						_ = buf.Flush()
+					}
+					// Wait for ktor to close the connection (with safety timeout).
+					_ = conn.SetReadDeadline(time.Now().Add(30 * time.Second))
+					tmp := make([]byte, 1)
+					_, _ = conn.Read(tmp) // blocks until client disconnect or timeout
+					_ = conn.Close()
+				}
+			}
+		}
 		return
 	}
 
 	// 4. No handler found.
 	proxy.ProxyErrorResponse(w, http.StatusNotFound, "model not found locally and no remote server configured", "invalid_request_error")
+}
+
+// stripRemoteOnlyFields removes LM Studio / Ollama-specific fields from the
+// request body that strict cloud/remote backends (Mistral, vLLM) reject with
+// HTTP 422. This should only be called for non-local routes — local runtimes
+// understand these fields natively.
+func stripRemoteOnlyFields(body []byte) []byte {
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(body, &raw); err != nil {
+		return body
+	}
+
+	changed := false
+	for _, field := range []string{"format", "keep_alive", "options"} {
+		if _, ok := raw[field]; ok {
+			delete(raw, field)
+			changed = true
+		}
+	}
+
+	// Strip per-message "tool_calls":[] — JetBrains adds an empty
+	// tool_calls array to every message (system, user, assistant).
+	// Mistral rejects these with "Extra inputs are not permitted".
+	if msgsRaw, ok := raw["messages"]; ok {
+		var msgs []map[string]json.RawMessage
+		if json.Unmarshal(msgsRaw, &msgs) == nil {
+			stripped := false
+			for i := range msgs {
+				if tcRaw, hasTc := msgs[i]["tool_calls"]; hasTc {
+					var tc []json.RawMessage
+					if json.Unmarshal(tcRaw, &tc) == nil && len(tc) == 0 {
+						delete(msgs[i], "tool_calls")
+						stripped = true
+					}
+				}
+			}
+			if stripped {
+				if b, err := json.Marshal(msgs); err == nil {
+					raw["messages"] = b
+					changed = true
+				}
+			}
+		}
+	}
+
+	if changed {
+		if b, err := json.Marshal(raw); err == nil {
+			return b
+		}
+	}
+	return body
 }
 
 // isLocalModel checks if a model is served by the local runtime.
@@ -628,22 +748,30 @@ func normalizeSSEHeaders(header http.Header) {
 	}
 }
 
-// sseHeaderNormalizer wraps an http.ResponseWriter to fix SSE response headers
-// without modifying the event stream. Used for remote proxy traffic where the
-// upstream already returns clean OpenAI-compatible chunks.
-type sseHeaderNormalizer struct {
+// sseLiteNormalizer wraps an http.ResponseWriter to fix SSE response headers
+// and ensure delta.content is always present. Used for remote proxy traffic
+// where the upstream returns clean OpenAI-compatible chunks but may omit
+// delta.content in role-only chunks (e.g., Claude's first chunk has only
+// delta.role, which crashes JetBrains' ktor SSE parser).
+//
+// Unlike the full sseNormalizer, this does NOT:
+//   - Filter/drop events (no empty-choices suppression)
+//   - Clear deltas on finish_reason
+//   - Strip reasoning_content or tool_calls
+type sseLiteNormalizer struct {
 	w           http.ResponseWriter
+	buf         []byte
 	header      http.Header
 	wroteHeader bool
 }
 
-func newSSEHeaderNormalizer(w http.ResponseWriter) *sseHeaderNormalizer {
-	return &sseHeaderNormalizer{w: w, header: w.Header()}
+func newSSELiteNormalizer(w http.ResponseWriter) *sseLiteNormalizer {
+	return &sseLiteNormalizer{w: w, header: w.Header()}
 }
 
-func (n *sseHeaderNormalizer) Header() http.Header { return n.header }
+func (n *sseLiteNormalizer) Header() http.Header { return n.header }
 
-func (n *sseHeaderNormalizer) WriteHeader(code int) {
+func (n *sseLiteNormalizer) WriteHeader(code int) {
 	if n.wroteHeader {
 		return
 	}
@@ -652,14 +780,96 @@ func (n *sseHeaderNormalizer) WriteHeader(code int) {
 	n.w.WriteHeader(code)
 }
 
-func (n *sseHeaderNormalizer) Write(b []byte) (int, error) {
+func (n *sseLiteNormalizer) Write(b []byte) (int, error) {
 	if !n.wroteHeader {
 		n.WriteHeader(http.StatusOK)
 	}
-	return n.w.Write(b) // pass through unchanged
+
+	originalLen := len(b)
+	n.buf = append(n.buf, b...)
+
+	var out bytes.Buffer
+	for {
+		idx := bytes.Index(n.buf, []byte("\n\n"))
+		if idx == -1 {
+			break
+		}
+		event := n.buf[:idx+2]
+		n.buf = n.buf[idx+2:]
+
+		patched := n.ensureContent(event)
+		out.Write(patched)
+	}
+	if out.Len() > 0 {
+		if _, err := n.w.Write(out.Bytes()); err != nil {
+			return originalLen, err
+		}
+		n.Flush()
+	}
+	return originalLen, nil
 }
 
-func (n *sseHeaderNormalizer) Flush() {
+// ensureContent adds delta.content:"" if missing or null, which ktor requires.
+func (n *sseLiteNormalizer) ensureContent(event []byte) []byte {
+	line := bytes.TrimSpace(event)
+	if !bytes.HasPrefix(line, []byte("data: ")) {
+		return event
+	}
+	payload := bytes.TrimPrefix(line, []byte("data: "))
+	if bytes.Equal(payload, []byte("[DONE]")) {
+		return event
+	}
+
+	var chunk map[string]json.RawMessage
+	if err := json.Unmarshal(payload, &chunk); err != nil {
+		return event
+	}
+	choicesRaw, ok := chunk["choices"]
+	if !ok {
+		return event
+	}
+	var choices []map[string]json.RawMessage
+	if err := json.Unmarshal(choicesRaw, &choices); err != nil {
+		return event
+	}
+
+	modified := false
+	for i := range choices {
+		deltaRaw, hasDelta := choices[i]["delta"]
+		if !hasDelta {
+			continue
+		}
+		var delta map[string]json.RawMessage
+		if err := json.Unmarshal(deltaRaw, &delta); err != nil {
+			continue
+		}
+		contentRaw, hasContent := delta["content"]
+		if !hasContent || bytes.Equal(contentRaw, []byte("null")) {
+			delta["content"] = json.RawMessage(`""`)
+			modified = true
+			if b, err := json.Marshal(delta); err == nil {
+				choices[i]["delta"] = b
+			}
+		}
+	}
+
+	if !modified {
+		return event
+	}
+	if b, err := json.Marshal(choices); err == nil {
+		chunk["choices"] = b
+	}
+	if b, err := json.Marshal(chunk); err == nil {
+		var out bytes.Buffer
+		out.WriteString("data: ")
+		out.Write(b)
+		out.WriteString("\n\n")
+		return out.Bytes()
+	}
+	return event
+}
+
+func (n *sseLiteNormalizer) Flush() {
 	if f, ok := n.w.(http.Flusher); ok {
 		f.Flush()
 	}

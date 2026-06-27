@@ -2,6 +2,17 @@
 
 All notable changes to Candela are documented here, organized by development phase. PRs are merged to `main`.
 
+## v0.9.4 — 2026-06-27
+
+### JetBrains AI Assistant Compatibility
+
+- **Ktor SSE EOF workaround**: JetBrains' ktor HTTP client treats Go's chunked transfer encoding terminator as "unexpected EOF", breaking Claude, Qwen, and Mistral streaming. Candela now detects ktor clients and hijacks the TCP connection post-stream to prevent the terminator from being written (#452)
+- **Request body sanitization**: Strip fields that strict backends reject — empty per-message `tool_calls:[]` (Mistral 422), and LM Studio/Ollama-specific fields (`format`, `keep_alive`, `options`) for cloud/remote routes only (#452)
+- **`sseLiteNormalizer` wired for remote proxy**: Ensures `delta.content` is always present in SSE chunks — ktor crashes on role-only deltas from Claude (#452)
+- **Hijack guard on SSE responses**: Only hijack when upstream actually returned `text/event-stream`, not on 4xx/5xx JSON errors (#452)
+- **Local runtime field preservation**: `format`, `keep_alive`, `options` are now only stripped for cloud/remote routes — local Ollama/LM Studio runtimes keep their native API fields (#452)
+- **Remote proxy header normalization**: `ModifyResponse` callback strips charset from Content-Type, removes Content-Length, and cleans upstream provider headers for SSE responses (#452)
+
 ## v0.7.1 — 2026-06-16
 
 ### Security Fixes

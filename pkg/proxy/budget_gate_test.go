@@ -133,7 +133,7 @@ func TestBudgetGate_BlocksExhaustedBudget(t *testing.T) {
 		Error struct {
 			Message string `json:"message"`
 			Type    string `json:"type"`
-			Code    int    `json:"code"`
+			Code    string `json:"code"`
 		} `json:"error"`
 	}
 	body, _ := io.ReadAll(resp.Body)

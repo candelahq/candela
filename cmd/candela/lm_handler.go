@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -299,7 +300,12 @@ func (h *lmHandler) serveChat(w http.ResponseWriter, r *http.Request) {
 	// Read body to peek at the model field (10MB limit to prevent OOM).
 	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 10<<20))
 	if err != nil {
-		proxy.ProxyErrorResponse(w, http.StatusRequestEntityTooLarge, "request body too large or unreadable", "invalid_request_error")
+		var maxErr *http.MaxBytesError
+		if errors.As(err, &maxErr) {
+			proxy.ProxyErrorResponse(w, http.StatusRequestEntityTooLarge, "request body too large", "invalid_request_error")
+		} else {
+			proxy.ProxyErrorResponse(w, http.StatusBadRequest, "failed to read request body", "invalid_request_error")
+		}
 		return
 	}
 	_ = r.Body.Close()

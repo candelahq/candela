@@ -570,9 +570,7 @@ func (p *Proxy) RegisterCompatRoutes(mux *http.ServeMux, models []CompatModel) {
 			Model string `json:"model"`
 		}
 		if err := json.Unmarshal(body, &req); err != nil || req.Model == "" {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusBadRequest)
-			_, _ = w.Write([]byte(`{"error":{"message":"missing or invalid model field","type":"invalid_request_error"}}`))
+			ProxyErrorResponse(w, http.StatusBadRequest, "missing or invalid model field", "invalid_request_error")
 			return
 		}
 
@@ -598,15 +596,7 @@ func (p *Proxy) RegisterCompatRoutes(mux *http.ServeMux, models []CompatModel) {
 			}
 		}
 		if !ok {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusBadRequest)
-			errResp, _ := json.Marshal(map[string]interface{}{
-				"error": map[string]interface{}{
-					"message": fmt.Sprintf("unknown model: %s. Configure it in proxy.lmstudio.models", req.Model),
-					"type":    "invalid_request_error",
-				},
-			})
-			_, _ = w.Write(errResp)
+			ProxyErrorResponse(w, http.StatusBadRequest, fmt.Sprintf("unknown model: %s. Configure it in proxy.lmstudio.models", req.Model), "invalid_request_error")
 			return
 		}
 
@@ -934,16 +924,7 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 	// This runs for ALL requests (solo, team, local) to prevent untracked
 	// API calls that would show $0 cost. Only "local" provider is exempt.
 	if requestModel != "" && strings.ToLower(providerName) != "local" && !p.calc.HasPricing(pricingProvider(providerName), requestModel) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusPaymentRequired)
-		errBody, _ := json.Marshal(map[string]any{
-			"error": map[string]any{
-				"message": "no pricing configured for model " + requestModel + " — contact your admin",
-				"type":    "pricing_not_configured",
-				"code":    402,
-			},
-		})
-		_, _ = w.Write(errBody)
+		ProxyErrorResponse(w, http.StatusPaymentRequired, "no pricing configured for model "+requestModel+" — contact your admin", "pricing_not_configured")
 		slog.Warn("blocked request: no pricing for model",
 			"user_id", effectiveUserID, "provider", providerName, "model", requestModel)
 		return
@@ -953,16 +934,7 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 	// Blocks models not in the configured allowlist. Runs after pricing gate
 	// and before budget checks. Empty/missing policy = all models allowed.
 	if requestModel != "" && !p.policy.IsAllowed(providerName, requestModel) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusForbidden)
-		errBody, _ := json.Marshal(map[string]any{
-			"error": map[string]any{
-				"message": "model not allowed by policy",
-				"type":    "forbidden",
-				"code":    403,
-			},
-		})
-		_, _ = w.Write(errBody)
+		ProxyErrorResponse(w, http.StatusForbidden, "model not allowed by policy", "forbidden")
 		slog.Warn("model blocked by policy",
 			"provider", providerName, "model", requestModel, "user", effectiveUserID)
 		return
@@ -987,9 +959,7 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 			ProxyErrorResponse(w, http.StatusServiceUnavailable, "budget check failed — try again shortly", "service_error")
 			return
 		} else if !check.Allowed {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusPaymentRequired)
-			_, _ = w.Write([]byte(`{"error":{"message":"budget exhausted — contact your admin for a grant or budget increase","type":"insufficient_budget","code":402}}`))
+			ProxyErrorResponse(w, http.StatusPaymentRequired, "budget exhausted — contact your admin for a grant or budget increase", "insufficient_budget")
 			slog.Info("blocked request: budget exhausted",
 				"user_id", effectiveUserID, "remaining_usd", check.RemainingUSD)
 			return
@@ -1000,9 +970,7 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 		// Subtract their pending spend from the effective remaining balance.
 		effectiveRemaining := check.RemainingUSD - p.pendingSpend.Get(effectiveUserID)
 		if effectiveRemaining < budgetCheckFloor {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusPaymentRequired)
-			_, _ = w.Write([]byte(`{"error":{"message":"budget exhausted (concurrent requests in flight) — try again shortly","type":"insufficient_budget","code":402}}`))
+			ProxyErrorResponse(w, http.StatusPaymentRequired, "budget exhausted (concurrent requests in flight) — try again shortly", "insufficient_budget")
 			slog.Info("blocked request: budget exhausted after pending spend",
 				"user_id", effectiveUserID,
 				"firestore_remaining", check.RemainingUSD,
@@ -1016,6 +984,13 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 		// small reservation prevents unlimited concurrent overdraft.
 		budgetReserved = budgetCheckFloor
 		p.pendingSpend.Reserve(effectiveUserID, budgetReserved)
+		// Release the reservation if we return before the response handlers
+		// (handleStreamingResponse / handleStandardResponse) take ownership.
+		defer func() {
+			if budgetReserved > 0 {
+				p.pendingSpend.Release(effectiveUserID, budgetReserved)
+			}
+		}()
 	}
 
 	// ── Per-request cost cap (#277) ──
@@ -1025,17 +1000,8 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 	if p.config.MaxRequestCost > 0 && requestModel != "" {
 		estimatedCost = estimateRequestCost(p.calc, providerName, requestModel, reqBody)
 		if estimatedCost > p.config.MaxRequestCost {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusPaymentRequired)
-			errBody, _ := json.Marshal(map[string]any{
-				"error": map[string]any{
-					"message": fmt.Sprintf("estimated request cost $%.2f exceeds cap $%.2f for model %s",
-						estimatedCost, p.config.MaxRequestCost, requestModel),
-					"type": "request_cost_exceeded",
-					"code": 402,
-				},
-			})
-			_, _ = w.Write(errBody)
+			ProxyErrorResponse(w, http.StatusPaymentRequired, fmt.Sprintf("estimated request cost $%.2f exceeds cap $%.2f for model %s",
+				estimatedCost, p.config.MaxRequestCost, requestModel), "request_cost_exceeded")
 			slog.Info("blocked request: estimated cost exceeds cap",
 				"user_id", effectiveUserID, "provider", providerName,
 				"model", requestModel, "estimated_usd", estimatedCost,
@@ -1054,17 +1020,8 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 		}
 		allowed, spent, limit := p.spendTracker.Check(limitUser, requestModel, p.config.DailyLimits, estimatedCost)
 		if !allowed {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusPaymentRequired)
-			errBody, _ := json.Marshal(map[string]any{
-				"error": map[string]any{
-					"message": fmt.Sprintf("daily spend limit for %s reached ($%.2f/$%.2f)",
-						requestModel, spent, limit),
-					"type": "daily_limit_exceeded",
-					"code": 402,
-				},
-			})
-			_, _ = w.Write(errBody)
+			ProxyErrorResponse(w, http.StatusPaymentRequired, fmt.Sprintf("daily spend limit for %s reached ($%.2f/$%.2f)",
+				requestModel, spent, limit), "daily_limit_exceeded")
 			slog.Info("blocked request: daily model spend limit exceeded",
 				"user_id", limitUser, "model", requestModel,
 				"spent_usd", spent, "limit_usd", limit)
@@ -1231,9 +1188,7 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 	if modelForPath != "" && !isSafeModelName(modelForPath) {
 		slog.Warn("blocked request: invalid model name (possible path traversal)",
 			"model", modelForPath, "provider", providerName, "user_id", effectiveUserID)
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusBadRequest)
-		_, _ = w.Write([]byte(`{"error":{"message":"invalid model name","type":"invalid_request_error","code":400}}`))
+		ProxyErrorResponse(w, http.StatusBadRequest, "invalid model name", "invalid_request_error")
 		return
 	}
 	if provider.PathRewriter != nil && modelForPath != "" {
@@ -1361,10 +1316,15 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 		extendedTTL = extractAnthropicCacheTTL(reqBody)
 	}
 
+	// Transfer budget reservation ownership to the response handler.
+	// Zero out so the deferred release guard (above) becomes a no-op.
+	reserved := budgetReserved
+	budgetReserved = 0
+
 	if isStreaming && resp.StatusCode == http.StatusOK {
-		p.handleStreamingResponse(w, r, resp, provider, reqBody, startTime, ttfb, requestID, sessionID, effectiveUserID, tenantID, jobID, cbAllow, traceCtx, proxySpanID, extendedTTL, budgetReserved)
+		p.handleStreamingResponse(w, r, resp, provider, reqBody, startTime, ttfb, requestID, sessionID, effectiveUserID, tenantID, jobID, cbAllow, traceCtx, proxySpanID, extendedTTL, reserved)
 	} else {
-		p.handleStandardResponse(w, r, resp, provider, reqBody, startTime, ttfb, requestID, sessionID, effectiveUserID, tenantID, jobID, cbAllow, traceCtx, proxySpanID, extendedTTL, budgetReserved)
+		p.handleStandardResponse(w, r, resp, provider, reqBody, startTime, ttfb, requestID, sessionID, effectiveUserID, tenantID, jobID, cbAllow, traceCtx, proxySpanID, extendedTTL, reserved)
 	}
 }
 

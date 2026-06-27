@@ -2,6 +2,7 @@ package proxy
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -67,7 +68,7 @@ func TestProxyErrorResponse(t *testing.T) {
 				Error struct {
 					Message string `json:"message"`
 					Type    string `json:"type"`
-					Code    int    `json:"code"`
+					Code    string `json:"code"`
 				} `json:"error"`
 			}
 			if err := json.Unmarshal(w.Body.Bytes(), &parsed); err != nil {
@@ -80,8 +81,8 @@ func TestProxyErrorResponse(t *testing.T) {
 			if parsed.Error.Type != tt.errorType {
 				t.Errorf("error.type = %q, want %q", parsed.Error.Type, tt.errorType)
 			}
-			if parsed.Error.Code != tt.status {
-				t.Errorf("error.code = %d, want %d", parsed.Error.Code, tt.status)
+			if parsed.Error.Code != fmt.Sprintf("%d", tt.status) {
+				t.Errorf("error.code = %q, want %q", parsed.Error.Code, fmt.Sprintf("%d", tt.status))
 			}
 		})
 	}

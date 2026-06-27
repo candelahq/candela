@@ -1279,12 +1279,18 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 	// references the sidecar's span as its parent.
 	proxySpanID := GenerateSpanID()
 
+	// Ensure we always have a trace context — either from the caller's
+	// incoming traceparent or a freshly-generated root trace ID. This
+	// guarantees every upstream request gets a traceparent, enabling
+	// end-to-end trace correlation even when the caller has no OTel.
+	if traceCtx == nil {
+		traceCtx = &traceContext{traceID: GenerateTraceID()}
+	}
+
 	// Inject an outgoing traceparent so the upstream LLM API (if it
 	// supports OTel) creates spans as children of the sidecar span.
-	if traceCtx != nil {
-		upstreamReq.Header.Set("Traceparent",
-			fmt.Sprintf("00-%s-%s-01", traceCtx.traceID, proxySpanID))
-	}
+	upstreamReq.Header.Set("Traceparent",
+		fmt.Sprintf("00-%s-%s-01", traceCtx.traceID, proxySpanID))
 
 	// --- Auth injection ---
 	// RequestSigner (e.g., AWS SigV4) takes precedence over TokenSource (Bearer tokens).

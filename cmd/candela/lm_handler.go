@@ -603,17 +603,38 @@ func (r *responseRecorder) Write(b []byte) (int, error) {
 }
 func (r *responseRecorder) WriteHeader(code int) { r.statusCode = code }
 
+// sseHeadersToStrip lists upstream provider headers that LM Studio wouldn't
+// send. Shared between sseHeaderNormalizer and sseNormalizer to keep the
+// header cleanup policy in sync.
+var sseHeadersToStrip = []string{
+	"Server", "Alt-Svc", "Via",
+	"X-Frame-Options", "X-Xss-Protection", "X-Accel-Buffering",
+	"X-Vertex-Ai-Received-Request-Id", "Request-Id",
+}
+
+// normalizeSSEHeaders fixes SSE response headers for ktor compatibility:
+// strips Content-Type charset, removes Content-Length, and cleans provider headers.
+func normalizeSSEHeaders(header http.Header) {
+	ct := header.Get("Content-Type")
+	if !strings.HasPrefix(ct, "text/event-stream") {
+		return
+	}
+	if ct != "text/event-stream" {
+		header.Set("Content-Type", "text/event-stream")
+	}
+	header.Del("Content-Length")
+	for _, h := range sseHeadersToStrip {
+		header.Del(h)
+	}
+}
+
 // sseHeaderNormalizer wraps an http.ResponseWriter to fix SSE response headers
 // without modifying the event stream. Used for remote proxy traffic where the
 // upstream already returns clean OpenAI-compatible chunks.
-//
-// Fixes:
-//   - Content-Type: strips charset suffix (ktor requires bare text/event-stream)
-//   - Content-Length: removed for SSE (ktor needs chunked transfer encoding)
-//   - Provider headers: stripped for clean LM Studio-like responses
 type sseHeaderNormalizer struct {
-	w      http.ResponseWriter
-	header http.Header
+	w           http.ResponseWriter
+	header      http.Header
+	wroteHeader bool
 }
 
 func newSSEHeaderNormalizer(w http.ResponseWriter) *sseHeaderNormalizer {
@@ -623,26 +644,18 @@ func newSSEHeaderNormalizer(w http.ResponseWriter) *sseHeaderNormalizer {
 func (n *sseHeaderNormalizer) Header() http.Header { return n.header }
 
 func (n *sseHeaderNormalizer) WriteHeader(code int) {
-	ct := n.header.Get("Content-Type")
-	if strings.HasPrefix(ct, "text/event-stream") {
-		if ct != "text/event-stream" {
-			n.header.Set("Content-Type", "text/event-stream")
-		}
-		n.header.Del("Content-Length")
-
-		// Strip upstream provider headers that LM Studio wouldn't send.
-		for _, h := range []string{
-			"Server", "Alt-Svc", "Via",
-			"X-Frame-Options", "X-Xss-Protection", "X-Accel-Buffering",
-			"X-Vertex-Ai-Received-Request-Id", "Request-Id",
-		} {
-			n.header.Del(h)
-		}
+	if n.wroteHeader {
+		return
 	}
+	n.wroteHeader = true
+	normalizeSSEHeaders(n.header)
 	n.w.WriteHeader(code)
 }
 
 func (n *sseHeaderNormalizer) Write(b []byte) (int, error) {
+	if !n.wroteHeader {
+		n.WriteHeader(http.StatusOK)
+	}
 	return n.w.Write(b) // pass through unchanged
 }
 
@@ -669,31 +682,7 @@ func newSSENormalizer(w http.ResponseWriter) *sseNormalizer {
 func (n *sseNormalizer) Header() http.Header { return n.header }
 
 func (n *sseNormalizer) WriteHeader(code int) {
-	// Normalize Content-Type: JetBrains' ktor SSE parser requires exactly
-	// "text/event-stream" and rejects "text/event-stream; charset=utf-8"
-	// (which Claude/Anthropic sends via Vertex AI).
-	ct := n.header.Get("Content-Type")
-	if strings.HasPrefix(ct, "text/event-stream") {
-		if ct != "text/event-stream" {
-			n.header.Set("Content-Type", "text/event-stream")
-		}
-		// Remove Content-Length: the upstream may include it, but SSE
-		// responses must use chunked transfer encoding. If Content-Length
-		// is present, ktor tries fixed-length body reading instead of
-		// streaming, causing "fixed content-length: N, bytes received: 0".
-		n.header.Del("Content-Length")
-
-		// Strip upstream provider headers that LM Studio wouldn't send.
-		// Scoped to SSE responses only — non-SSE error responses keep their headers.
-		for _, h := range []string{
-			"Server", "Alt-Svc", "Via",
-			"X-Frame-Options", "X-Xss-Protection", "X-Accel-Buffering",
-			"X-Vertex-Ai-Received-Request-Id", "Request-Id",
-		} {
-			n.header.Del(h)
-		}
-	}
-
+	normalizeSSEHeaders(n.header)
 	n.w.WriteHeader(code)
 }
 

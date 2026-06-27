@@ -159,14 +159,30 @@ func (h *lmHandler) loadRemoteModels() map[string]bool {
 
 func (h *lmHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch {
+	// ── Model discovery ──
 	case r.URL.Path == "/v1/models" && r.Method == http.MethodGet:
 		h.serveModels(w, r)
 	case r.URL.Path == "/api/v0/models" && r.Method == http.MethodGet:
 		h.serveModels(w, r)
+
+	// ── Chat completions ──
 	case r.URL.Path == "/v1/chat/completions" && r.Method == http.MethodPost:
 		h.serveChat(w, r)
 	case r.URL.Path == "/api/v0/chat/completions" && r.Method == http.MethodPost:
 		h.serveChat(w, r)
+	case r.URL.Path == "/chat/completions" && r.Method == http.MethodPost:
+		h.serveChat(w, r)
+
+	// ── LM Studio / OpenAI compat stubs ──
+	case r.URL.Path == "/v1/completions" && r.Method == http.MethodPost:
+		h.serveCompletionsStub(w, r)
+	case r.URL.Path == "/v1/embeddings" && r.Method == http.MethodPost:
+		h.serveEmbeddingsStub(w, r)
+
+	// ── LM Studio diagnostics ──
+	case r.URL.Path == "/lmstudio/diagnostics" && r.Method == http.MethodGet:
+		h.serveDiagnostics(w, r)
+
 	default:
 		if h.remoteProxy != nil {
 			h.remoteProxy.ServeHTTP(w, r)
@@ -389,14 +405,6 @@ func (h *lmHandler) serveChat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// For streaming requests, wrap the ResponseWriter with an SSE normalizer
-	// that filters out malformed chunks (empty choices, missing delta.content)
-	// which crash JetBrains' LM Studio SSE parser.
-	writer := w
-	if req.Stream {
-		writer = newSSENormalizer(w)
-	}
-
 	// 2. Cloud model → direct cloud proxy (solo mode only).
 	// In team mode, all cloud traffic must go through the remote server
 	// so the server catalog remains the single source of truth.
@@ -404,6 +412,13 @@ func (h *lmHandler) serveChat(w http.ResponseWriter, r *http.Request) {
 		if providerName, ok := h.cloudModels[req.Model]; ok && h.cloudProxy != nil {
 			slog.Debug("lm handler: routing to cloud provider", "model", req.Model, "provider", providerName)
 			r.URL.Path = fmt.Sprintf("/proxy/%s/v1/chat/completions", providerName)
+			// Use the full SSE normalizer for solo cloud routes — raw provider
+			// responses need chunk normalization (Claude role-only deltas,
+			// Qwen content:null, empty choices, etc.).
+			writer := w
+			if req.Stream {
+				writer = newSSENormalizer(w)
+			}
 			h.cloudProxy.ServeHTTP(writer, r)
 			return
 		}
@@ -411,7 +426,13 @@ func (h *lmHandler) serveChat(w http.ResponseWriter, r *http.Request) {
 
 	// 3. Remote server → team mode proxy.
 	if h.remoteProxy != nil {
-		// Path already normalized at top of serveChat.
+		// The remote Candela server already returns clean OpenAI-compatible
+		// SSE — no chunk normalization needed. Only apply lightweight header
+		// fixes (Content-Type charset, Content-Length) that ktor requires.
+		writer := w
+		if req.Stream {
+			writer = newSSEHeaderNormalizer(w)
+		}
 		h.remoteProxy.ServeHTTP(writer, r)
 		return
 	}
@@ -581,6 +602,55 @@ func (r *responseRecorder) Write(b []byte) (int, error) {
 	return len(b), nil
 }
 func (r *responseRecorder) WriteHeader(code int) { r.statusCode = code }
+
+// sseHeaderNormalizer wraps an http.ResponseWriter to fix SSE response headers
+// without modifying the event stream. Used for remote proxy traffic where the
+// upstream already returns clean OpenAI-compatible chunks.
+//
+// Fixes:
+//   - Content-Type: strips charset suffix (ktor requires bare text/event-stream)
+//   - Content-Length: removed for SSE (ktor needs chunked transfer encoding)
+//   - Provider headers: stripped for clean LM Studio-like responses
+type sseHeaderNormalizer struct {
+	w      http.ResponseWriter
+	header http.Header
+}
+
+func newSSEHeaderNormalizer(w http.ResponseWriter) *sseHeaderNormalizer {
+	return &sseHeaderNormalizer{w: w, header: w.Header()}
+}
+
+func (n *sseHeaderNormalizer) Header() http.Header { return n.header }
+
+func (n *sseHeaderNormalizer) WriteHeader(code int) {
+	ct := n.header.Get("Content-Type")
+	if strings.HasPrefix(ct, "text/event-stream") {
+		if ct != "text/event-stream" {
+			n.header.Set("Content-Type", "text/event-stream")
+		}
+		n.header.Del("Content-Length")
+
+		// Strip upstream provider headers that LM Studio wouldn't send.
+		for _, h := range []string{
+			"Server", "Alt-Svc", "Via",
+			"X-Frame-Options", "X-Xss-Protection", "X-Accel-Buffering",
+			"X-Vertex-Ai-Received-Request-Id", "Request-Id",
+		} {
+			n.header.Del(h)
+		}
+	}
+	n.w.WriteHeader(code)
+}
+
+func (n *sseHeaderNormalizer) Write(b []byte) (int, error) {
+	return n.w.Write(b) // pass through unchanged
+}
+
+func (n *sseHeaderNormalizer) Flush() {
+	if f, ok := n.w.(http.Flusher); ok {
+		f.Flush()
+	}
+}
 
 // sseNormalizer wraps an http.ResponseWriter to intercept SSE events and
 // normalize them for JetBrains compatibility. It filters out chunks with
@@ -783,4 +853,57 @@ func (n *sseNormalizer) normalizeEvent(event []byte) []byte {
 	}
 
 	return event // fallback: pass through
+}
+
+// ── LM Studio compat endpoint stubs ──
+
+// serveCompletionsStub returns 501 for the legacy /v1/completions endpoint.
+// Candela is a chat-completions proxy and does not support the legacy
+// completions API. This prevents confusing 404s.
+func (h *lmHandler) serveCompletionsStub(w http.ResponseWriter, _ *http.Request) {
+	proxy.ProxyErrorResponse(w, http.StatusNotImplemented,
+		"legacy /v1/completions is not supported — use /v1/chat/completions",
+		"invalid_request_error")
+}
+
+// serveEmbeddingsStub returns 501 for the /v1/embeddings endpoint.
+// Candela does not currently support embedding generation. This prevents
+// confusing 404s when clients probe for capabilities.
+func (h *lmHandler) serveEmbeddingsStub(w http.ResponseWriter, _ *http.Request) {
+	proxy.ProxyErrorResponse(w, http.StatusNotImplemented,
+		"/v1/embeddings is not currently supported",
+		"invalid_request_error")
+}
+
+// serveDiagnostics returns a lightweight JSON health check compatible with
+// LM Studio's /lmstudio/diagnostics endpoint. JetBrains and other clients
+// may use this to verify the server is alive before sending requests.
+func (h *lmHandler) serveDiagnostics(w http.ResponseWriter, _ *http.Request) {
+	localCount := 0
+	if m := h.loadLocalModels(); m != nil {
+		localCount = len(m)
+	}
+	remoteCount := 0
+	if m := h.loadRemoteModels(); m != nil {
+		remoteCount = len(m)
+	}
+	cloudCount := len(h.cloudModels)
+
+	runtimeBackend := "none"
+	if h.mgr != nil {
+		runtimeBackend = h.mgr.Runtime().Name()
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"status":  "ok",
+		"version": "candela",
+		"models": map[string]int{
+			"local":  localCount,
+			"remote": remoteCount,
+			"cloud":  cloudCount,
+			"total":  localCount + remoteCount + cloudCount,
+		},
+		"runtime": runtimeBackend,
+	})
 }

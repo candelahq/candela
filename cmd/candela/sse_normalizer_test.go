@@ -271,6 +271,51 @@ func TestSSENormalizerStripUpstreamHeaders(t *testing.T) {
 	})
 }
 
+func TestSSEHeaderNormalizerPassthrough(t *testing.T) {
+	t.Run("fixes headers without modifying events", func(t *testing.T) {
+		rec := httptest.NewRecorder()
+		n := newSSEHeaderNormalizer(rec)
+
+		n.Header().Set("Content-Type", "text/event-stream; charset=utf-8")
+		n.Header().Set("Content-Length", "12345")
+		n.Header().Set("Server", "Google Frontend")
+		n.WriteHeader(http.StatusOK)
+
+		// Verify header fixes.
+		if got := rec.Header().Get("Content-Type"); got != "text/event-stream" {
+			t.Errorf("Content-Type should be normalized, got %q", got)
+		}
+		if got := rec.Header().Get("Content-Length"); got != "" {
+			t.Errorf("Content-Length should be stripped, got %q", got)
+		}
+		if got := rec.Header().Get("Server"); got != "" {
+			t.Errorf("Server should be stripped for SSE, got %q", got)
+		}
+
+		// Verify events pass through unchanged (no buffering, no modification).
+		event := `data: {"choices":[{"delta":{"content":"hello"},"finish_reason":null,"index":0}],"id":"x","model":"m","object":"chat.completion.chunk"}` + "\n\n"
+		_, _ = n.Write([]byte(event))
+
+		body := rec.Body.String()
+		if body != event {
+			t.Errorf("event should pass through unchanged.\ngot:  %q\nwant: %q", body, event)
+		}
+	})
+
+	t.Run("preserves headers for non-SSE responses", func(t *testing.T) {
+		rec := httptest.NewRecorder()
+		n := newSSEHeaderNormalizer(rec)
+
+		n.Header().Set("Content-Type", "application/json")
+		n.Header().Set("Server", "Google Frontend")
+		n.WriteHeader(http.StatusBadRequest)
+
+		if got := rec.Header().Get("Server"); got != "Google Frontend" {
+			t.Errorf("Server should be preserved for non-SSE, got %q", got)
+		}
+	})
+}
+
 func TestServeChatStripEmptyTools(t *testing.T) {
 	// Simulate what JetBrains sends: {"model":"m","messages":[...],"tools":[],"tool_choice":"auto"}
 	body := []byte(`{"model":"test","messages":[{"role":"user","content":"hi"}],"tools":[],"tool_choice":"auto","stream":true}`)

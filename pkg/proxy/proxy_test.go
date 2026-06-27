@@ -240,19 +240,19 @@ func TestProxyEndToEndAnthropic(t *testing.T) {
 }
 
 func TestGenerateIDs(t *testing.T) {
-	traceID := generateTraceID()
+	traceID := GenerateTraceID()
 	if len(traceID) != 32 {
 		t.Errorf("trace ID len = %d, want 32", len(traceID))
 	}
 
-	spanID := generateSpanID()
+	spanID := GenerateSpanID()
 	if len(spanID) != 16 {
 		t.Errorf("span ID len = %d, want 16", len(spanID))
 	}
 
 	// Should be unique.
-	id1 := generateTraceID()
-	id2 := generateTraceID()
+	id1 := GenerateTraceID()
+	id2 := GenerateTraceID()
 	if id1 == id2 {
 		t.Error("trace IDs should be unique")
 	}

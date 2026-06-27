@@ -115,7 +115,7 @@ func TestStreamID_UniqueUnderConcurrency(t *testing.T) {
 		wg.Add(1)
 		go func(idx int) {
 			defer wg.Done()
-			ids[idx] = "chatcmpl-" + generateSpanID()
+			ids[idx] = "chatcmpl-" + GenerateSpanID()
 		}(i)
 	}
 	wg.Wait()

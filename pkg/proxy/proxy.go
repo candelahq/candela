@@ -788,7 +788,7 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 	// CRITICAL: Validate to prevent log/trace injection.
 	requestID := r.Header.Get("X-Request-ID")
 	if requestID == "" || !requestIDPattern.MatchString(requestID) {
-		requestID = generateTraceID() // 32-char hex
+		requestID = GenerateTraceID() // 32-char hex
 	}
 
 	// Accept session ID from candela-local (or other clients).
@@ -1277,14 +1277,20 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 	// Pre-generate the span ID that buildSpan will use for this proxy span.
 	// We need it now so the outgoing traceparent to the upstream LLM
 	// references the sidecar's span as its parent.
-	proxySpanID := generateSpanID()
+	proxySpanID := GenerateSpanID()
+
+	// Ensure we always have a trace context — either from the caller's
+	// incoming traceparent or a freshly-generated root trace ID. This
+	// guarantees every upstream request gets a traceparent, enabling
+	// end-to-end trace correlation even when the caller has no OTel.
+	if traceCtx == nil {
+		traceCtx = &traceContext{traceID: GenerateTraceID()}
+	}
 
 	// Inject an outgoing traceparent so the upstream LLM API (if it
 	// supports OTel) creates spans as children of the sidecar span.
-	if traceCtx != nil {
-		upstreamReq.Header.Set("Traceparent",
-			fmt.Sprintf("00-%s-%s-01", traceCtx.traceID, proxySpanID))
-	}
+	upstreamReq.Header.Set("Traceparent",
+		fmt.Sprintf("00-%s-%s-01", traceCtx.traceID, proxySpanID))
 
 	// --- Auth injection ---
 	// RequestSigner (e.g., AWS SigV4) takes precedence over TokenSource (Bearer tokens).
@@ -1879,7 +1885,7 @@ func (p *Proxy) buildSpan(ctx context.Context, params spanParams) {
 
 	// Use caller's trace context if present (W3C Trace Context propagation).
 	// This nests the proxy span under the caller's OTel span.
-	traceID := generateTraceID()
+	traceID := GenerateTraceID()
 	parentSpanID := ""
 	if params.traceCtx != nil {
 		traceID = params.traceCtx.traceID

@@ -844,10 +844,12 @@ func translateContentToAnthropic(content interface{}) interface{} {
 			partType, _ := partMap["type"].(string)
 			switch partType {
 			case "image_url":
-				block := translateImageURLToAnthropic(partMap)
-				if block != nil {
-					blocks = append(blocks, block)
+				block, err := translateImageURLToAnthropic(partMap)
+				if err != nil {
+					slog.Warn("skipping invalid image_url content part", "error", err)
+					continue
 				}
+				blocks = append(blocks, block)
 			default:
 				// Pass through text and other types as-is.
 				blocks = append(blocks, part)
@@ -871,20 +873,20 @@ func translateContentToAnthropic(content interface{}) interface{} {
 //
 //	{"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": "iVBOR..."}}
 //	{"type": "image", "source": {"type": "url", "url": "https://example.com/img.png"}}
-func translateImageURLToAnthropic(part map[string]interface{}) map[string]interface{} {
+func translateImageURLToAnthropic(part map[string]interface{}) (map[string]interface{}, error) {
 	imgURLObj, ok := part["image_url"].(map[string]interface{})
 	if !ok {
-		return nil
+		return nil, fmt.Errorf("image_url field is missing or not an object")
 	}
 	url, _ := imgURLObj["url"].(string)
 	if url == "" {
-		return nil
+		return nil, fmt.Errorf("image_url.url is empty")
 	}
 
 	if strings.HasPrefix(url, "data:") {
 		mediaType, data, ok := parseDataURL(url)
 		if !ok {
-			return nil
+			return nil, fmt.Errorf("failed to parse data URL")
 		}
 		return map[string]interface{}{
 			"type": "image",
@@ -893,17 +895,12 @@ func translateImageURLToAnthropic(part map[string]interface{}) map[string]interf
 				"media_type": mediaType,
 				"data":       data,
 			},
-		}
+		}, nil
 	}
 
-	// Regular URL.
-	return map[string]interface{}{
-		"type": "image",
-		"source": map[string]interface{}{
-			"type": "url",
-			"url":  url,
-		},
-	}
+	// Anthropic does not support URL-based image sources — only base64-encoded
+	// data URLs are accepted. Return an error so callers can handle gracefully.
+	return nil, fmt.Errorf("anthropic does not support URL image sources (got %q); only base64 data URLs are supported", url)
 }
 
 // parseDataURL parses a data URL of the form "data:<mediaType>;base64,<data>"
@@ -919,6 +916,9 @@ func parseDataURL(url string) (mediaType, data string, ok bool) {
 	}
 
 	mediaType = rest[:idx]
+	// Strip extra MIME parameters (e.g. "image/png;charset=utf-8" → "image/png")
+	// since Anthropic expects a clean media type.
+	mediaType = strings.SplitN(mediaType, ";", 2)[0]
 	data = rest[idx+len(";base64,"):]
 	if mediaType == "" || data == "" {
 		return "", "", false

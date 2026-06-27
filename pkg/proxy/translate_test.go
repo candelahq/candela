@@ -485,6 +485,8 @@ func TestTranslateRequest_ImageBase64(t *testing.T) {
 }
 
 func TestTranslateRequest_ImageURL(t *testing.T) {
+	// Anthropic does not support URL-based image sources — only base64 data
+	// URLs are accepted. URL image_url parts should be skipped with a warning.
 	translator := &AnthropicFormatTranslator{}
 	translator.SetCachingMode(CachingOff)
 
@@ -509,22 +511,9 @@ func TestTranslateRequest_ImageURL(t *testing.T) {
 
 	messages := raw["messages"].([]interface{})
 	msg := messages[0].(map[string]interface{})
-	content := msg["content"].([]interface{})
-	if len(content) != 1 {
-		t.Fatalf("content len = %d, want 1", len(content))
-	}
-
-	block := content[0].(map[string]interface{})
-	if block["type"] != "image" {
-		t.Errorf("type = %v, want image", block["type"])
-	}
-
-	source := block["source"].(map[string]interface{})
-	if source["type"] != "url" {
-		t.Errorf("source.type = %v, want url", source["type"])
-	}
-	if source["url"] != "https://example.com/photo.jpg" {
-		t.Errorf("source.url = %v, want https://example.com/photo.jpg", source["url"])
+	content, _ := msg["content"].([]interface{})
+	if len(content) != 0 {
+		t.Fatalf("content len = %d, want 0 (URL image sources are not supported by Anthropic)", len(content))
 	}
 }
 

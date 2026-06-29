@@ -1,5 +1,6 @@
 //! candela-harness — IDE sidecar for AI-assisted development.
 
+use std::io::Write;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -113,12 +114,14 @@ async fn serve_stdio(handler: RpcHandler) -> anyhow::Result<()> {
                     "Parse error".to_string(),
                 );
                 println!("{}", serde_json::to_string(&resp)?);
+                std::io::stdout().flush()?;
                 continue;
             }
         };
 
         if let Some(response) = handler.handle(request).await {
             println!("{}", serde_json::to_string(&response)?);
+            std::io::stdout().flush()?;
         }
     }
 

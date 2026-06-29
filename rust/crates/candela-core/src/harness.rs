@@ -19,6 +19,8 @@ pub struct HarnessConfig {
     /// Default model identifier.
     pub model: String,
     /// Budget limit in USD. 0 = unlimited.
+    // TODO: Consider using integer micro-units (i64 microdollars) instead of f64
+    // to avoid floating-point rounding in budget calculations.
     pub budget_limit_usd: f64,
     /// Device ID for cross-device sync.
     pub device_id: String,

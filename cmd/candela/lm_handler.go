@@ -450,8 +450,8 @@ func (h *lmHandler) serveChat(w http.ResponseWriter, r *http.Request) {
 		// The remote Candela server returns clean OpenAI-compatible SSE.
 		// Apply lightweight normalization: the sseLiteNormalizer ensures
 		// delta.content is always present (ktor crashes on role-only
-		// chunks), and the proxy's ModifyResponse callback handles
-		// header normalization.
+		// chunks), injects system_fingerprint (required by JetBrains'
+		// ChatCompletionResponse DTO), and normalizes SSE headers.
 		var liteNorm *sseLiteNormalizer
 		writer := http.ResponseWriter(w)
 		if req.Stream {
@@ -465,57 +465,6 @@ func (h *lmHandler) serveChat(w http.ResponseWriter, r *http.Request) {
 		// event boundaries and would otherwise stay buffered forever.
 		if liteNorm != nil {
 			liteNorm.FlushRemaining()
-		}
-
-		// ── Ktor chunked-encoding workaround ──
-		//
-		// Background: Go's net/http uses chunked transfer encoding for
-		// streaming responses. When this handler returns, Go writes the
-		// chunked terminator ("0\r\n\r\n") to signal end-of-body.
-		//
-		// Problem: JetBrains' AI Assistant uses ktor's LMStudioClientAPI
-		// for its "LM Studio" provider mode. Ktor's SSE parser treats the
-		// chunked terminator as an unexpected EOF, even though the stream
-		// already sent "data: [DONE]". This is a ktor client bug — all
-		// other HTTP clients (curl, Continue, Cursor) handle this correctly.
-		//
-		// Evidence: Models whose upstream keeps the response body open
-		// indefinitely (like Gemini via Google Frontend) work fine because
-		// Go never writes the terminator. Models that close promptly
-		// (Claude, Qwen, Mistral) all trigger "unexpected EOF".
-		//
-		// Fix: After the proxy finishes writing the SSE stream, hijack the
-		// TCP connection. This transfers socket ownership from Go's HTTP
-		// server to us, preventing the chunked terminator from ever being
-		// written. We then hold the connection open until the client
-		// disconnects (ktor closes after processing [DONE]) or a safety
-		// timeout fires.
-		//
-		// Scope: Only applied for ktor-client (JetBrains) on streaming
-		// requests that actually returned SSE. Error responses (4xx/5xx
-		// JSON) are excluded — ktor handles those fine and hijacking
-		// would hang the connection for 30s.
-		//
-		// NOTE: We check writer.Header() (the sseLiteNormalizer's header
-		// map) rather than w.Header(), because the proxy writes upstream
-		// headers to the writer, not the underlying ResponseWriter.
-		isKtor := strings.Contains(r.UserAgent(), "ktor")
-		respondedSSE := strings.HasPrefix(writer.Header().Get("Content-Type"), "text/event-stream")
-		if req.Stream && isKtor && respondedSSE {
-			if hj, ok := w.(http.Hijacker); ok {
-				conn, buf, err := hj.Hijack()
-				if err == nil {
-					// Flush any pending data in the bufio.Writer.
-					if buf != nil {
-						_ = buf.Flush()
-					}
-					// Wait for ktor to close the connection (with safety timeout).
-					_ = conn.SetReadDeadline(time.Now().Add(30 * time.Second))
-					tmp := make([]byte, 1)
-					_, _ = conn.Read(tmp) // blocks until client disconnect or timeout
-					_ = conn.Close()
-				}
-			}
 		}
 		return
 	}
@@ -824,6 +773,7 @@ func (n *sseLiteNormalizer) Write(b []byte) (int, error) {
 }
 
 // ensureContent adds delta.content:"" if missing or null, which ktor requires.
+// It also injects system_fingerprint (required by JetBrains' DTO).
 func (n *sseLiteNormalizer) ensureContent(event []byte) []byte {
 	line := bytes.TrimSpace(event)
 	if !bytes.HasPrefix(line, []byte("data: ")) {
@@ -838,40 +788,48 @@ func (n *sseLiteNormalizer) ensureContent(event []byte) []byte {
 	if err := json.Unmarshal(payload, &chunk); err != nil {
 		return event
 	}
-	choicesRaw, ok := chunk["choices"]
-	if !ok {
-		return event
-	}
-	var choices []map[string]json.RawMessage
-	if err := json.Unmarshal(choicesRaw, &choices); err != nil {
-		return event
-	}
 
 	modified := false
-	for i := range choices {
-		deltaRaw, hasDelta := choices[i]["delta"]
-		if !hasDelta {
-			continue
-		}
-		var delta map[string]json.RawMessage
-		if err := json.Unmarshal(deltaRaw, &delta); err != nil {
-			continue
-		}
-		contentRaw, hasContent := delta["content"]
-		if !hasContent || bytes.Equal(contentRaw, []byte("null")) {
-			delta["content"] = json.RawMessage(`""`)
-			modified = true
-			if b, err := json.Marshal(delta); err == nil {
-				choices[i]["delta"] = b
+
+	// Inject system_fingerprint if missing — JetBrains' kotlinx.serialization
+	// DTO (ChatCompletionResponse) marks this field as required. Without it,
+	// deserialization fails with "Field 'system_fingerprint' is required" and
+	// the error cascades into "unexpected EOF".
+	if fpRaw, hasFP := chunk["system_fingerprint"]; !hasFP || bytes.Equal(fpRaw, []byte("null")) {
+		chunk["system_fingerprint"] = json.RawMessage(`"fp_candela"`)
+		modified = true
+	}
+
+	choicesRaw, ok := chunk["choices"]
+	if ok {
+		var choices []map[string]json.RawMessage
+		if err := json.Unmarshal(choicesRaw, &choices); err == nil {
+			for i := range choices {
+				deltaRaw, hasDelta := choices[i]["delta"]
+				if !hasDelta {
+					continue
+				}
+				var delta map[string]json.RawMessage
+				if err := json.Unmarshal(deltaRaw, &delta); err != nil {
+					continue
+				}
+				contentRaw, hasContent := delta["content"]
+				if !hasContent || bytes.Equal(contentRaw, []byte("null")) {
+					delta["content"] = json.RawMessage(`""`)
+					modified = true
+					if b, err := json.Marshal(delta); err == nil {
+						choices[i]["delta"] = b
+					}
+				}
+			}
+			if b, err := json.Marshal(choices); err == nil {
+				chunk["choices"] = b
 			}
 		}
 	}
 
 	if !modified {
 		return event
-	}
-	if b, err := json.Marshal(choices); err == nil {
-		chunk["choices"] = b
 	}
 	if b, err := json.Marshal(chunk); err == nil {
 		var out bytes.Buffer
@@ -978,84 +936,90 @@ func (n *sseNormalizer) normalizeEvent(event []byte) []byte {
 		return event // pass through unparseable events
 	}
 
-	// Parse choices array.
-	choicesRaw, ok := chunk["choices"]
-	if !ok {
-		return event
-	}
-
-	var choices []map[string]json.RawMessage
-	if err := json.Unmarshal(choicesRaw, &choices); err != nil {
-		return event
-	}
-
-	// Drop events with empty choices array (Qwen final usage-only chunk).
-	if len(choices) == 0 {
-		return nil
-	}
-
 	modified := false
 
-	for i := range choices {
-		deltaRaw, hasDelta := choices[i]["delta"]
-		if !hasDelta {
-			continue
-		}
+	// Inject system_fingerprint if missing or null — JetBrains requires it.
+	if fpRaw, hasFP := chunk["system_fingerprint"]; !hasFP || bytes.Equal(fpRaw, []byte("null")) {
+		chunk["system_fingerprint"] = json.RawMessage(`"fp_candela"`)
+		modified = true
+	}
 
-		var delta map[string]json.RawMessage
-		if err := json.Unmarshal(deltaRaw, &delta); err != nil {
-			continue
-		}
+	// Parse choices array.
+	choicesRaw, ok := chunk["choices"]
+	if ok {
+		var choices []map[string]json.RawMessage
+		if err := json.Unmarshal(choicesRaw, &choices); err == nil {
+			// Drop events with empty choices array (Qwen final usage-only chunk).
+			if len(choices) == 0 {
+				return nil
+			}
 
-		// LM Studio spec: final chunk should have empty delta {} with
-		// finish_reason "stop". Normalize providers that include content
-		// in the final chunk.
-		if frRaw, hasFR := choices[i]["finish_reason"]; hasFR {
-			var fr string
-			if json.Unmarshal(frRaw, &fr) == nil && fr == "stop" {
-				// Clear the delta to match LM Studio's format.
-				for k := range delta {
-					delete(delta, k)
+			for i := range choices {
+				deltaRaw, hasDelta := choices[i]["delta"]
+				if !hasDelta {
+					continue
 				}
-				modified = true
-				if b, err := json.Marshal(delta); err == nil {
-					choices[i]["delta"] = b
+
+				var delta map[string]json.RawMessage
+				if err := json.Unmarshal(deltaRaw, &delta); err != nil {
+					continue
 				}
-				// Remove non-standard choice-level fields before continuing.
+
+				// LM Studio spec: final chunk should have empty delta {} with
+				// finish_reason "stop". Normalize providers that include content
+				// in the final chunk.
+				if frRaw, hasFR := choices[i]["finish_reason"]; hasFR {
+					var fr string
+					if json.Unmarshal(frRaw, &fr) == nil && fr == "stop" {
+						// Clear the delta to match LM Studio's format.
+						for k := range delta {
+							delete(delta, k)
+						}
+						modified = true
+						if b, err := json.Marshal(delta); err == nil {
+							choices[i]["delta"] = b
+						}
+						// Remove non-standard choice-level fields before continuing.
+						for _, field := range []string{"matched_stop"} {
+							delete(choices[i], field)
+						}
+						continue
+					}
+				}
+
+				// Ensure delta.content is always a string (Claude sends role-only
+				// first chunk; Qwen sends content:null on its finish chunk).
+				contentRaw, hasContent := delta["content"]
+				if !hasContent || bytes.Equal(contentRaw, []byte("null")) {
+					delta["content"] = json.RawMessage(`""`)
+					modified = true
+				}
+
+				// Remove non-standard fields that may confuse strict parsers.
+				for _, field := range []string{"reasoning_content", "tool_calls", "matched_stop"} {
+					if _, has := delta[field]; has {
+						delete(delta, field)
+						modified = true
+					}
+				}
+
+				// Remove non-standard choice-level fields.
 				for _, field := range []string{"matched_stop"} {
-					delete(choices[i], field)
+					if _, has := choices[i][field]; has {
+						delete(choices[i], field)
+						modified = true
+					}
 				}
-				continue
+
+				if modified {
+					if b, err := json.Marshal(delta); err == nil {
+						choices[i]["delta"] = b
+					}
+				}
 			}
-		}
 
-		// Ensure delta.content is always a string (Claude sends role-only
-		// first chunk; Qwen sends content:null on its finish chunk).
-		contentRaw, hasContent := delta["content"]
-		if !hasContent || bytes.Equal(contentRaw, []byte("null")) {
-			delta["content"] = json.RawMessage(`""`)
-			modified = true
-		}
-
-		// Remove non-standard fields that may confuse strict parsers.
-		for _, field := range []string{"reasoning_content", "tool_calls", "matched_stop"} {
-			if _, has := delta[field]; has {
-				delete(delta, field)
-				modified = true
-			}
-		}
-
-		// Remove non-standard choice-level fields.
-		for _, field := range []string{"matched_stop"} {
-			if _, has := choices[i][field]; has {
-				delete(choices[i], field)
-				modified = true
-			}
-		}
-
-		if modified {
-			if b, err := json.Marshal(delta); err == nil {
-				choices[i]["delta"] = b
+			if b, err := json.Marshal(choices); err == nil {
+				chunk["choices"] = b
 			}
 		}
 	}
@@ -1065,9 +1029,6 @@ func (n *sseNormalizer) normalizeEvent(event []byte) []byte {
 	}
 
 	// Re-serialize.
-	if b, err := json.Marshal(choices); err == nil {
-		chunk["choices"] = b
-	}
 	if b, err := json.Marshal(chunk); err == nil {
 		var out bytes.Buffer
 		out.WriteString("data: ")

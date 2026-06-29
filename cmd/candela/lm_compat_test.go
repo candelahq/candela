@@ -308,6 +308,10 @@ func TestSSELiteNormalizerDeltaContent(t *testing.T) {
 		if !strings.Contains(body, `"role":"assistant"`) {
 			t.Errorf("expected role to be preserved, got: %s", body)
 		}
+		// Must contain system_fingerprint.
+		if !strings.Contains(body, `"system_fingerprint"`) {
+			t.Errorf("expected system_fingerprint to be injected, got: %s", body)
+		}
 
 		// Verify the output is valid SSE (starts with "data: " and ends with "\n\n").
 		if !strings.HasPrefix(body, "data: ") {
@@ -322,6 +326,72 @@ func TestSSELiteNormalizerDeltaContent(t *testing.T) {
 		var parsed map[string]json.RawMessage
 		if err := json.Unmarshal([]byte(payload), &parsed); err != nil {
 			t.Errorf("output JSON is invalid: %v\npayload: %s", err, payload)
+		}
+	})
+
+	// Regression: JetBrains' ChatCompletionResponse DTO requires
+	// system_fingerprint. Without it, kotlinx.serialization throws
+	// "Field 'system_fingerprint' is required" → cascades to "unexpected EOF".
+	t.Run("injects system_fingerprint when missing", func(t *testing.T) {
+		rec := httptest.NewRecorder()
+		n := newSSELiteNormalizer(rec)
+		n.Header().Set("Content-Type", "text/event-stream")
+		n.WriteHeader(http.StatusOK)
+
+		// A normal content chunk without system_fingerprint.
+		chunk := `data: {"id":"chatcmpl-abc","object":"chat.completion.chunk","created":1234567890,"model":"claude-sonnet-4.6","choices":[{"index":0,"delta":{"content":"hello"}}]}` + "\n\n"
+		_, err := n.Write([]byte(chunk))
+		if err != nil {
+			t.Fatalf("Write failed: %v", err)
+		}
+
+		body := rec.Body.String()
+
+		// Must inject system_fingerprint.
+		if !strings.Contains(body, `"system_fingerprint"`) {
+			t.Fatalf("system_fingerprint should be injected, got: %s", body)
+		}
+
+		// Verify the output is valid JSON.
+		payload := strings.TrimPrefix(strings.TrimSuffix(body, "\n\n"), "data: ")
+		var parsed map[string]json.RawMessage
+		if err := json.Unmarshal([]byte(payload), &parsed); err != nil {
+			t.Fatalf("output JSON is invalid: %v\npayload: %s", err, payload)
+		}
+
+		// system_fingerprint should be a string.
+		var fp string
+		if err := json.Unmarshal(parsed["system_fingerprint"], &fp); err != nil {
+			t.Fatalf("system_fingerprint is not a string: %v", err)
+		}
+		if fp == "" {
+			t.Error("system_fingerprint should not be empty")
+		}
+
+		// Original content should be preserved.
+		if !strings.Contains(body, `"content":"hello"`) {
+			t.Errorf("content should be preserved, got: %s", body)
+		}
+	})
+
+	t.Run("preserves existing system_fingerprint", func(t *testing.T) {
+		rec := httptest.NewRecorder()
+		n := newSSELiteNormalizer(rec)
+		n.Header().Set("Content-Type", "text/event-stream")
+		n.WriteHeader(http.StatusOK)
+
+		// A chunk that already has system_fingerprint (from OpenAI).
+		chunk := `data: {"id":"chatcmpl-abc","object":"chat.completion.chunk","created":1234567890,"model":"gpt-4","system_fingerprint":"fp_abc123","choices":[{"index":0,"delta":{"content":"hi"}}]}` + "\n\n"
+		_, err := n.Write([]byte(chunk))
+		if err != nil {
+			t.Fatalf("Write failed: %v", err)
+		}
+
+		body := rec.Body.String()
+
+		// Must preserve the original fingerprint, not overwrite it.
+		if !strings.Contains(body, `"fp_abc123"`) {
+			t.Errorf("original system_fingerprint should be preserved, got: %s", body)
 		}
 	})
 

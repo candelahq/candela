@@ -2,6 +2,18 @@
 
 All notable changes to Candela are documented here, organized by development phase. PRs are merged to `main`.
 
+## v0.9.6 — 2026-06-28
+
+### Bug Fix — JetBrains "unexpected EOF" resolved
+
+- **Root cause**: JetBrains' AI Assistant uses kotlinx.serialization with strict mode. Their `ChatCompletionResponse` DTO marks `system_fingerprint` as a **required field**. Non-OpenAI providers (Claude, Gemini, Mistral) don't include this field, causing deserialization to fail — which surfaced as "unexpected EOF" (#455)
+- **Fix**: Both `sseLiteNormalizer` (remote/team) and `sseNormalizer` (cloud/solo) now inject `"system_fingerprint":"fp_candela"` into every SSE chunk that lacks it. Existing fingerprints (e.g., from OpenAI) are preserved. Null values are also handled defensively (#455)
+- **Removed**: TCP hijack workaround from v0.9.4/v0.9.5 — it was based on the incorrect theory that chunked transfer encoding caused the EOF and was actually making things worse (#455)
+
+### Tests
+
+- 3 new test cases: `system_fingerprint` injection, preservation, and null defense (#455)
+
 ## v0.9.5 — 2026-06-28
 
 ### Bug Fix

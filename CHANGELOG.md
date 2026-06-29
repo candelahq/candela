@@ -2,6 +2,18 @@
 
 All notable changes to Candela are documented here, organized by development phase. PRs are merged to `main`.
 
+## v0.9.5 — 2026-06-28
+
+### Bug Fix
+
+- **Fix hijack Content-Type guard**: v0.9.4's `respondedSSE` guard checked `w.Header()` but `sseLiteNormalizer` has its own header map — so `w.Header()` was always empty and the hijack never fired. Now checks `writer.Header()` (the normalizer's map where the proxy writes upstream headers) (#454)
+- **Fix normalizer buffering for error responses**: `sseLiteNormalizer` buffered non-SSE responses (JSON errors) forever because they don't contain `\n\n` event boundaries. Added `FlushRemaining()` to drain the buffer after the proxy finishes (#454)
+
+### Tests
+
+- **Go unit tests** (`lm_compat_test.go`): `TestStripRemoteOnlyFields` (5 cases), `TestKtorSSEHijack` (raw TCP verification), `TestSSELiteNormalizerDeltaContent` (5 cases including `FlushRemaining` regression + hijack guard regression) (#454)
+- **Hurl integration tests** (`jetbrains_compat.hurl`): 6 protocol-level tests for JetBrains/ktor client compatibility — model listing, request sanitization, max_tokens handling, endpoint stubs (#454)
+
 ## v0.9.4 — 2026-06-27
 
 ### JetBrains AI Assistant Compatibility

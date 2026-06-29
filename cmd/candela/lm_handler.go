@@ -795,7 +795,7 @@ func (n *sseLiteNormalizer) ensureContent(event []byte) []byte {
 	// DTO (ChatCompletionResponse) marks this field as required. Without it,
 	// deserialization fails with "Field 'system_fingerprint' is required" and
 	// the error cascades into "unexpected EOF".
-	if _, hasFP := chunk["system_fingerprint"]; !hasFP {
+	if fpRaw, hasFP := chunk["system_fingerprint"]; !hasFP || bytes.Equal(fpRaw, []byte("null")) {
 		chunk["system_fingerprint"] = json.RawMessage(`"fp_candela"`)
 		modified = true
 	}
@@ -936,84 +936,90 @@ func (n *sseNormalizer) normalizeEvent(event []byte) []byte {
 		return event // pass through unparseable events
 	}
 
-	// Parse choices array.
-	choicesRaw, ok := chunk["choices"]
-	if !ok {
-		return event
-	}
-
-	var choices []map[string]json.RawMessage
-	if err := json.Unmarshal(choicesRaw, &choices); err != nil {
-		return event
-	}
-
-	// Drop events with empty choices array (Qwen final usage-only chunk).
-	if len(choices) == 0 {
-		return nil
-	}
-
 	modified := false
 
-	for i := range choices {
-		deltaRaw, hasDelta := choices[i]["delta"]
-		if !hasDelta {
-			continue
-		}
+	// Inject system_fingerprint if missing or null — JetBrains requires it.
+	if fpRaw, hasFP := chunk["system_fingerprint"]; !hasFP || bytes.Equal(fpRaw, []byte("null")) {
+		chunk["system_fingerprint"] = json.RawMessage(`"fp_candela"`)
+		modified = true
+	}
 
-		var delta map[string]json.RawMessage
-		if err := json.Unmarshal(deltaRaw, &delta); err != nil {
-			continue
-		}
+	// Parse choices array.
+	choicesRaw, ok := chunk["choices"]
+	if ok {
+		var choices []map[string]json.RawMessage
+		if err := json.Unmarshal(choicesRaw, &choices); err == nil {
+			// Drop events with empty choices array (Qwen final usage-only chunk).
+			if len(choices) == 0 {
+				return nil
+			}
 
-		// LM Studio spec: final chunk should have empty delta {} with
-		// finish_reason "stop". Normalize providers that include content
-		// in the final chunk.
-		if frRaw, hasFR := choices[i]["finish_reason"]; hasFR {
-			var fr string
-			if json.Unmarshal(frRaw, &fr) == nil && fr == "stop" {
-				// Clear the delta to match LM Studio's format.
-				for k := range delta {
-					delete(delta, k)
+			for i := range choices {
+				deltaRaw, hasDelta := choices[i]["delta"]
+				if !hasDelta {
+					continue
 				}
-				modified = true
-				if b, err := json.Marshal(delta); err == nil {
-					choices[i]["delta"] = b
+
+				var delta map[string]json.RawMessage
+				if err := json.Unmarshal(deltaRaw, &delta); err != nil {
+					continue
 				}
-				// Remove non-standard choice-level fields before continuing.
+
+				// LM Studio spec: final chunk should have empty delta {} with
+				// finish_reason "stop". Normalize providers that include content
+				// in the final chunk.
+				if frRaw, hasFR := choices[i]["finish_reason"]; hasFR {
+					var fr string
+					if json.Unmarshal(frRaw, &fr) == nil && fr == "stop" {
+						// Clear the delta to match LM Studio's format.
+						for k := range delta {
+							delete(delta, k)
+						}
+						modified = true
+						if b, err := json.Marshal(delta); err == nil {
+							choices[i]["delta"] = b
+						}
+						// Remove non-standard choice-level fields before continuing.
+						for _, field := range []string{"matched_stop"} {
+							delete(choices[i], field)
+						}
+						continue
+					}
+				}
+
+				// Ensure delta.content is always a string (Claude sends role-only
+				// first chunk; Qwen sends content:null on its finish chunk).
+				contentRaw, hasContent := delta["content"]
+				if !hasContent || bytes.Equal(contentRaw, []byte("null")) {
+					delta["content"] = json.RawMessage(`""`)
+					modified = true
+				}
+
+				// Remove non-standard fields that may confuse strict parsers.
+				for _, field := range []string{"reasoning_content", "tool_calls", "matched_stop"} {
+					if _, has := delta[field]; has {
+						delete(delta, field)
+						modified = true
+					}
+				}
+
+				// Remove non-standard choice-level fields.
 				for _, field := range []string{"matched_stop"} {
-					delete(choices[i], field)
+					if _, has := choices[i][field]; has {
+						delete(choices[i], field)
+						modified = true
+					}
 				}
-				continue
+
+				if modified {
+					if b, err := json.Marshal(delta); err == nil {
+						choices[i]["delta"] = b
+					}
+				}
 			}
-		}
 
-		// Ensure delta.content is always a string (Claude sends role-only
-		// first chunk; Qwen sends content:null on its finish chunk).
-		contentRaw, hasContent := delta["content"]
-		if !hasContent || bytes.Equal(contentRaw, []byte("null")) {
-			delta["content"] = json.RawMessage(`""`)
-			modified = true
-		}
-
-		// Remove non-standard fields that may confuse strict parsers.
-		for _, field := range []string{"reasoning_content", "tool_calls", "matched_stop"} {
-			if _, has := delta[field]; has {
-				delete(delta, field)
-				modified = true
-			}
-		}
-
-		// Remove non-standard choice-level fields.
-		for _, field := range []string{"matched_stop"} {
-			if _, has := choices[i][field]; has {
-				delete(choices[i], field)
-				modified = true
-			}
-		}
-
-		if modified {
-			if b, err := json.Marshal(delta); err == nil {
-				choices[i]["delta"] = b
+			if b, err := json.Marshal(choices); err == nil {
+				chunk["choices"] = b
 			}
 		}
 	}
@@ -1023,9 +1029,6 @@ func (n *sseNormalizer) normalizeEvent(event []byte) []byte {
 	}
 
 	// Re-serialize.
-	if b, err := json.Marshal(choices); err == nil {
-		chunk["choices"] = b
-	}
 	if b, err := json.Marshal(chunk); err == nil {
 		var out bytes.Buffer
 		out.WriteString("data: ")

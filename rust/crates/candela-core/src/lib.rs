@@ -12,6 +12,7 @@ use std::time::Duration;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
+pub mod harness;
 pub mod proto;
 
 // ── Error Types ──

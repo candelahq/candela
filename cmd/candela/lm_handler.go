@@ -452,11 +452,20 @@ func (h *lmHandler) serveChat(w http.ResponseWriter, r *http.Request) {
 		// delta.content is always present (ktor crashes on role-only
 		// chunks), and the proxy's ModifyResponse callback handles
 		// header normalization.
+		var liteNorm *sseLiteNormalizer
 		writer := http.ResponseWriter(w)
 		if req.Stream {
-			writer = newSSELiteNormalizer(w)
+			liteNorm = newSSELiteNormalizer(w)
+			writer = liteNorm
 		}
 		h.remoteProxy.ServeHTTP(writer, r)
+
+		// Flush any data remaining in the normalizer's buffer. This handles
+		// non-SSE responses (e.g., JSON errors) that don't contain \n\n
+		// event boundaries and would otherwise stay buffered forever.
+		if liteNorm != nil {
+			liteNorm.FlushRemaining()
+		}
 
 		// ── Ktor chunked-encoding workaround ──
 		//
@@ -484,9 +493,14 @@ func (h *lmHandler) serveChat(w http.ResponseWriter, r *http.Request) {
 		//
 		// Scope: Only applied for ktor-client (JetBrains) on streaming
 		// requests that actually returned SSE. Error responses (4xx/5xx
-		// JSON) are excluded — ktor handles those correctly.
+		// JSON) are excluded — ktor handles those fine and hijacking
+		// would hang the connection for 30s.
+		//
+		// NOTE: We check writer.Header() (the sseLiteNormalizer's header
+		// map) rather than w.Header(), because the proxy writes upstream
+		// headers to the writer, not the underlying ResponseWriter.
 		isKtor := strings.Contains(r.UserAgent(), "ktor")
-		respondedSSE := strings.HasPrefix(w.Header().Get("Content-Type"), "text/event-stream")
+		respondedSSE := strings.HasPrefix(writer.Header().Get("Content-Type"), "text/event-stream")
 		if req.Stream && isKtor && respondedSSE {
 			if hj, ok := w.(http.Hijacker); ok {
 				conn, buf, err := hj.Hijack()
@@ -872,6 +886,17 @@ func (n *sseLiteNormalizer) ensureContent(event []byte) []byte {
 func (n *sseLiteNormalizer) Flush() {
 	if f, ok := n.w.(http.Flusher); ok {
 		f.Flush()
+	}
+}
+
+// FlushRemaining writes any data left in the buffer that doesn't end with
+// \n\n. This handles non-SSE responses (e.g., JSON error bodies) that pass
+// through the normalizer without matching the event boundary pattern.
+func (n *sseLiteNormalizer) FlushRemaining() {
+	if len(n.buf) > 0 {
+		_, _ = n.w.Write(n.buf)
+		n.buf = n.buf[:0]
+		n.Flush()
 	}
 }
 

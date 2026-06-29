@@ -6,8 +6,13 @@ members = [
     "crates/candela-processor",
     "crates/candela-storage",
     "crates/candela-transparent",
+    "crates/candela-harness-storage",
+    "crates/candela-harness-chat",
+    "crates/candela-harness-mcp",
+    "crates/candela-harness-rpc",
     "bins/candela-proxy",
     "bins/candela-sidecar",
+    "bins/candela-harness",
 ]
 
 [workspace.package]
@@ -67,12 +72,21 @@ url = "2"
 # Testing
 tokio-test = "0.4"
 
+# Harness deps
+rusqlite = { version = "0.35", features = ["bundled", "chrono"] }
+clap = { version = "4", features = ["derive"] }
+dirs = "6"
+
 # Workspace crates
 candela-core = { path = "crates/candela-core" }
 candela-proxy = { path = "crates/candela-proxy" }
 candela-processor = { path = "crates/candela-processor" }
 candela-storage = { path = "crates/candela-storage" }
 candela-transparent = { path = "crates/candela-transparent" }
+candela-harness-storage = { path = "crates/candela-harness-storage" }
+candela-harness-chat = { path = "crates/candela-harness-chat" }
+candela-harness-mcp = { path = "crates/candela-harness-mcp" }
+candela-harness-rpc = { path = "crates/candela-harness-rpc" }
 
 [profile.release]
 lto = true

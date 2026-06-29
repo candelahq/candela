@@ -3,6 +3,7 @@
 use std::path::Path;
 
 use candela_core::harness::{HarnessError, Message, MessageRole, Session};
+use chrono::{DateTime, Utc};
 use rusqlite::{Connection, params};
 use tracing::info;
 
@@ -15,6 +16,8 @@ impl Database {
     /// Open or create the database at the given path.
     pub fn open(path: &Path) -> Result<Self, HarnessError> {
         let conn = Connection::open(path).map_err(|e| HarnessError::Storage(e.to_string()))?;
+        conn.execute_batch("PRAGMA foreign_keys = ON;")
+            .map_err(|e| HarnessError::Storage(e.to_string()))?;
         let db = Self { conn };
         db.init_schema()?;
         info!(path = %path.display(), "database opened");
@@ -25,6 +28,8 @@ impl Database {
     pub fn open_in_memory() -> Result<Self, HarnessError> {
         let conn =
             Connection::open_in_memory().map_err(|e| HarnessError::Storage(e.to_string()))?;
+        conn.execute_batch("PRAGMA foreign_keys = ON;")
+            .map_err(|e| HarnessError::Storage(e.to_string()))?;
         let db = Self { conn };
         db.init_schema()?;
         Ok(db)
@@ -114,11 +119,9 @@ impl Database {
                     total_tokens: row.get(4)?,
                     total_cost_usd: row.get(5)?,
                     device_id: row.get(6)?,
-                    created_at: row.get::<_, String>(7)?.parse().unwrap_or_default(),
-                    updated_at: row.get::<_, String>(8)?.parse().unwrap_or_default(),
-                    deleted_at: row
-                        .get::<_, Option<String>>(9)?
-                        .and_then(|s| s.parse().ok()),
+                    created_at: row.get::<_, DateTime<Utc>>(7)?,
+                    updated_at: row.get::<_, DateTime<Utc>>(8)?,
+                    deleted_at: row.get::<_, Option<DateTime<Utc>>>(9)?,
                 })
             })
             .map_err(|e| HarnessError::Storage(e.to_string()))?
@@ -147,30 +150,38 @@ impl Database {
     // -- Messages --
 
     /// Insert a message and increment session counters.
-    pub fn insert_message(&self, msg: &Message) -> Result<i64, HarnessError> {
-        self.conn
-            .execute(
-                "INSERT INTO messages (session_id, role, content, model, token_count, cost_usd, created_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-                params![
-                    msg.session_id,
-                    serde_json::to_string(&msg.role)
-                        .unwrap_or_default()
-                        .trim_matches('"'),
-                    msg.content,
-                    msg.model,
-                    msg.token_count,
-                    msg.cost_usd,
-                    msg.created_at.to_rfc3339(),
-                ],
-            )
+    ///
+    /// Uses a transaction to ensure atomicity between the message insert and
+    /// session counter update. Verifies the target session exists and is not
+    /// soft-deleted.
+    pub fn insert_message(&mut self, msg: &Message) -> Result<i64, HarnessError> {
+        let tx = self
+            .conn
+            .transaction()
             .map_err(|e| HarnessError::Storage(e.to_string()))?;
-        let id = self.conn.last_insert_rowid();
 
-        // Update session counters
-        self.conn
+        tx.execute(
+            "INSERT INTO messages (session_id, role, content, model, token_count, cost_usd, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            params![
+                msg.session_id,
+                serde_json::to_string(&msg.role)
+                    .unwrap_or_default()
+                    .trim_matches('"'),
+                msg.content,
+                msg.model,
+                msg.token_count,
+                msg.cost_usd,
+                msg.created_at.to_rfc3339(),
+            ],
+        )
+        .map_err(|e| HarnessError::Storage(e.to_string()))?;
+        let id = tx.last_insert_rowid();
+
+        // Update session counters — only for non-deleted sessions.
+        let rows_updated = tx
             .execute(
-                "UPDATE sessions SET message_count = message_count + 1, updated_at = ?1, total_tokens = total_tokens + ?2, total_cost_usd = total_cost_usd + ?3 WHERE id = ?4",
+                "UPDATE sessions SET message_count = message_count + 1, updated_at = ?1, total_tokens = total_tokens + ?2, total_cost_usd = total_cost_usd + ?3 WHERE id = ?4 AND deleted_at IS NULL",
                 params![
                     chrono::Utc::now().to_rfc3339(),
                     msg.token_count.unwrap_or(0),
@@ -178,6 +189,13 @@ impl Database {
                     msg.session_id,
                 ],
             )
+            .map_err(|e| HarnessError::Storage(e.to_string()))?;
+
+        if rows_updated != 1 {
+            return Err(HarnessError::SessionNotFound(msg.session_id.clone()));
+        }
+
+        tx.commit()
             .map_err(|e| HarnessError::Storage(e.to_string()))?;
 
         Ok(id)
@@ -214,7 +232,7 @@ impl Database {
                     model: row.get(4)?,
                     token_count: row.get(5)?,
                     cost_usd: row.get(6)?,
-                    created_at: row.get::<_, String>(7)?.parse().unwrap_or_default(),
+                    created_at: row.get::<_, DateTime<Utc>>(7)?,
                 })
             })
             .map_err(|e| HarnessError::Storage(e.to_string()))?
@@ -256,7 +274,7 @@ mod tests {
 
     #[test]
     fn test_insert_and_get_messages() {
-        let db = Database::open_in_memory().unwrap();
+        let mut db = Database::open_in_memory().unwrap();
         let session = Session::new("test-model", "device-1");
         db.create_session(&session).unwrap();
 

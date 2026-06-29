@@ -29,10 +29,6 @@ struct Cli {
     #[arg(long)]
     save_dir: Option<PathBuf>,
 
-    /// Resume a conversation by ID
-    #[arg(long)]
-    conversation_id: Option<String>,
-
     /// Default model
     #[arg(long, default_value = "gemini-2.0-flash")]
     model: String,
@@ -48,6 +44,12 @@ async fn main() -> anyhow::Result<()> {
 
     let cli = Cli::parse();
 
+    let transport = match cli.transport.as_str() {
+        "stdio" => TransportMode::Stdio,
+        "http" => TransportMode::Http,
+        other => anyhow::bail!("unsupported transport: {other:?} (expected \"stdio\" or \"http\")"),
+    };
+
     let config = HarnessConfig {
         save_dir: cli.save_dir.unwrap_or_else(|| {
             dirs::home_dir()
@@ -56,10 +58,7 @@ async fn main() -> anyhow::Result<()> {
                 .join("sessions")
         }),
         model: cli.model,
-        transport: match cli.transport.as_str() {
-            "http" => TransportMode::Http,
-            _ => TransportMode::Stdio,
-        },
+        transport,
         http_port: cli.port,
         ..Default::default()
     };
@@ -72,7 +71,7 @@ async fn main() -> anyhow::Result<()> {
     let db = Database::open(&db_path)?;
     let db = Arc::new(std::sync::Mutex::new(db));
 
-    let handler = RpcHandler::new(db);
+    let handler = RpcHandler::new(db, config.model.clone());
 
     info!(
         transport = ?config.transport,
@@ -84,8 +83,8 @@ async fn main() -> anyhow::Result<()> {
     match config.transport {
         TransportMode::Stdio => serve_stdio(handler).await?,
         TransportMode::Http => {
-            info!(port = config.http_port, "HTTP mode not yet implemented");
             // TODO: Axum HTTP server
+            anyhow::bail!("HTTP transport is not yet implemented");
         }
     }
 
@@ -118,8 +117,9 @@ async fn serve_stdio(handler: RpcHandler) -> anyhow::Result<()> {
             }
         };
 
-        let response = handler.handle(request).await;
-        println!("{}", serde_json::to_string(&response)?);
+        if let Some(response) = handler.handle(request).await {
+            println!("{}", serde_json::to_string(&response)?);
+        }
     }
 
     Ok(())

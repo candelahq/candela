@@ -1,6 +1,7 @@
 //! FTS5 full-text search index for messages.
 
 use candela_core::harness::{HarnessError, MessageRole, SearchResult};
+use chrono::{DateTime, Utc};
 use rusqlite::{Connection, params};
 use tracing::info;
 
@@ -39,6 +40,11 @@ impl SearchIndex {
                 role UNINDEXED,
                 created_at UNINDEXED
             );
+
+            -- Track soft-deleted sessions so we can exclude them from search.
+            CREATE TABLE IF NOT EXISTS deleted_sessions (
+                session_id TEXT PRIMARY KEY
+            );
         ",
             )
             .map_err(|e| HarnessError::Storage(e.to_string()))?;
@@ -63,15 +69,27 @@ impl SearchIndex {
         Ok(())
     }
 
-    /// Search messages across all sessions.
+    /// Mark a session as deleted, excluding its messages from future searches.
+    pub fn mark_session_deleted(&self, session_id: &str) -> Result<(), HarnessError> {
+        self.conn
+            .execute(
+                "INSERT OR IGNORE INTO deleted_sessions (session_id) VALUES (?1)",
+                params![session_id],
+            )
+            .map_err(|e| HarnessError::Storage(e.to_string()))?;
+        Ok(())
+    }
+
+    /// Search messages across all non-deleted sessions.
     pub fn search(&self, query: &str, limit: i64) -> Result<Vec<SearchResult>, HarnessError> {
         let mut stmt = self
             .conn
             .prepare(
-                "SELECT content, session_id, session_title, role, created_at, rank
-             FROM message_fts
-             WHERE message_fts MATCH ?1
-             ORDER BY rank
+                "SELECT f.content, f.session_id, f.session_title, f.role, f.created_at, f.rank
+             FROM message_fts f
+             WHERE f.message_fts MATCH ?1
+               AND f.session_id NOT IN (SELECT session_id FROM deleted_sessions)
+             ORDER BY f.rank
              LIMIT ?2",
             )
             .map_err(|e| HarnessError::Storage(e.to_string()))?;
@@ -91,7 +109,7 @@ impl SearchIndex {
                     session_id: row.get(1)?,
                     session_title: row.get(2)?,
                     role,
-                    created_at: row.get::<_, String>(4)?.parse().unwrap_or_default(),
+                    created_at: row.get::<_, DateTime<Utc>>(4)?,
                     score: row.get(5)?,
                 })
             })
@@ -130,5 +148,29 @@ mod tests {
         let results = idx.search("refactor auth", 10).unwrap();
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].session_id, "session-1");
+    }
+
+    #[test]
+    fn test_deleted_sessions_excluded_from_search() {
+        let idx = SearchIndex::open_in_memory().unwrap();
+        idx.index_message(
+            "How do I refactor the auth module?",
+            "session-1",
+            "Auth Refactor",
+            "user",
+            "2025-01-01T00:00:00Z",
+        )
+        .unwrap();
+
+        // Before deletion, the message is findable.
+        let results = idx.search("refactor auth", 10).unwrap();
+        assert_eq!(results.len(), 1);
+
+        // Mark session as deleted.
+        idx.mark_session_deleted("session-1").unwrap();
+
+        // After deletion, the message is excluded.
+        let results = idx.search("refactor auth", 10).unwrap();
+        assert_eq!(results.len(), 0);
     }
 }

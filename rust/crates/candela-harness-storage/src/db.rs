@@ -168,6 +168,37 @@ impl Database {
         Ok(sessions)
     }
 
+    /// Get a single session by ID.
+    pub fn get_session(&self, id: &str) -> Result<Session, HarnessError> {
+        self.conn
+            .query_row(
+                "SELECT id, title, model, message_count, total_tokens, total_cost_usd, device_id, created_at, updated_at, deleted_at
+                 FROM sessions
+                 WHERE id = ?1 AND deleted_at IS NULL",
+                params![id],
+                |row| {
+                    Ok(Session {
+                        id: row.get(0)?,
+                        title: row.get(1)?,
+                        model: row.get(2)?,
+                        message_count: row.get(3)?,
+                        total_tokens: row.get(4)?,
+                        total_cost_usd: row.get(5)?,
+                        device_id: row.get(6)?,
+                        created_at: row.get::<_, DateTime<Utc>>(7)?,
+                        updated_at: row.get::<_, DateTime<Utc>>(8)?,
+                        deleted_at: row.get::<_, Option<DateTime<Utc>>>(9)?,
+                    })
+                },
+            )
+            .map_err(|e| match e {
+                rusqlite::Error::QueryReturnedNoRows => {
+                    HarnessError::SessionNotFound(id.to_string())
+                }
+                other => HarnessError::Storage(other.to_string()),
+            })
+    }
+
     /// Soft-delete a session.
     pub fn delete_session(&self, id: &str) -> Result<(), HarnessError> {
         let now = chrono::Utc::now().to_rfc3339();
@@ -436,5 +467,35 @@ mod tests {
             msgs_s2[0].sequence, 1,
             "session 2 sequence should start at 1 independently"
         );
+    }
+
+    #[test]
+    fn test_get_session() {
+        let db = Database::open_in_memory().unwrap();
+        let session = new_session("test-model", "device-1");
+        db.create_session(&session).unwrap();
+
+        let found = db.get_session(&session.id).unwrap();
+        assert_eq!(found.id, session.id);
+        assert_eq!(found.model, "test-model");
+    }
+
+    #[test]
+    fn test_get_session_not_found() {
+        let db = Database::open_in_memory().unwrap();
+        let err = db.get_session("nonexistent").unwrap_err();
+        assert!(matches!(err, HarnessError::SessionNotFound(_)));
+    }
+
+    #[test]
+    fn test_get_session_deleted() {
+        let db = Database::open_in_memory().unwrap();
+        let session = new_session("test-model", "device-1");
+        db.create_session(&session).unwrap();
+        db.delete_session(&session.id).unwrap();
+
+        // Soft-deleted session should not be found
+        let err = db.get_session(&session.id).unwrap_err();
+        assert!(matches!(err, HarnessError::SessionNotFound(_)));
     }
 }

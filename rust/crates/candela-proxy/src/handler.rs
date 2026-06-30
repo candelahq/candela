@@ -188,6 +188,146 @@ pub async fn proxy_handler(
 
     let upstream_result = upstream_req.send().await;
 
+    // ── 8a. Streaming path — passthrough SSE without buffering ──
+    if is_streaming {
+        let resp = match upstream_result {
+            Ok(resp) => resp,
+            Err(e) => {
+                error!(error = %e, provider = %provider_name, upstream = %upstream_url, "upstream request failed");
+                state.proxy.record_failure(&provider_name).await;
+                return (StatusCode::BAD_GATEWAY, format!("upstream error: {e}")).into_response();
+            }
+        };
+
+        let status = resp.status();
+        let content_type = resp
+            .headers()
+            .get("content-type")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("text/event-stream")
+            .to_string();
+
+        if status.is_success() {
+            state.proxy.record_success(&provider_name).await;
+        } else {
+            state.proxy.record_failure(&provider_name).await;
+        }
+
+        // Build a lightweight span for streaming requests.
+        // We can't extract token usage or output content without buffering,
+        // so those fields are left empty. Clients should report usage separately.
+        let elapsed = start.elapsed();
+        let end_time = Utc::now();
+
+        let input_content =
+            String::from_utf8_lossy(&request_bytes[..request_bytes.len().min(16384)])
+                .chars()
+                .take(4096)
+                .collect::<String>();
+
+        let span_status = if status.is_success() {
+            SpanStatus::Ok
+        } else {
+            SpanStatus::Error
+        };
+        let status_message = if !status.is_success() {
+            Some(format!("HTTP {}", status.as_u16()))
+        } else {
+            None
+        };
+
+        let trace_ctx =
+            extract_header_str(&headers, "traceparent").and_then(|tp| parse_traceparent(&tp));
+        let request_id = extract_header_str(&headers, "x-request-id")
+            .filter(|id| validate_request_id(id))
+            .unwrap_or_else(new_trace_id);
+        let user_id = extract_header_str(&headers, "x-user-id");
+        let session_id =
+            extract_header_str(&headers, "x-session-id").filter(|id| validate_request_id(id));
+        let tenant_id = extract_baggage_value(&headers, "candela.tenant_id");
+        let job_id = extract_baggage_value(&headers, "candela.job_id");
+
+        let mut attributes = BTreeMap::new();
+        attributes.insert("http.method".into(), "POST".into());
+        attributes.insert("http.url".into(), upstream_url.clone());
+        attributes.insert("http.status_code".into(), status.as_u16().to_string());
+        attributes.insert("http.duration_ms".into(), elapsed.as_millis().to_string());
+        attributes.insert("http.request_id".into(), request_id.clone());
+        attributes.insert("llm.provider".into(), provider_name.clone());
+        attributes.insert("llm.streaming".into(), "true".into());
+        if let Some(ref tid) = tenant_id {
+            attributes.insert("candela.tenant_id".into(), tid.clone());
+        }
+
+        let (trace_id, parent_span_id) = if let Some(ref ctx) = trace_ctx {
+            (ctx.trace_id.clone(), Some(ctx.parent_span_id.clone()))
+        } else {
+            (
+                extract_header_str(&headers, "x-trace-id").unwrap_or_else(new_trace_id),
+                extract_header_str(&headers, "x-parent-span-id"),
+            )
+        };
+
+        let span = Span {
+            span_id: new_span_id(),
+            trace_id,
+            parent_span_id,
+            name: format!("llm.{provider_name}.chat"),
+            kind: SpanKind::Llm,
+            status: span_status,
+            status_message,
+            start_time,
+            end_time,
+            duration: elapsed,
+            gen_ai: if model.is_empty() {
+                None
+            } else {
+                Some(GenAIAttributes {
+                    model: model.clone(),
+                    provider: provider_name.clone(),
+                    input_content,
+                    ..Default::default()
+                })
+            },
+            attributes,
+            project_id: state.proxy.project_id().to_string(),
+            environment: extract_header_str(&headers, "x-environment"),
+            service_name: extract_header_str(&headers, "x-service-name"),
+            user_id,
+            session_id,
+            tenant_id,
+            job_id,
+        };
+
+        let submitter = Arc::clone(&state.submitter);
+        tokio::spawn(async move {
+            submitter.submit_batch(vec![span]);
+        });
+
+        info!(
+            provider = %provider_name,
+            model = %model,
+            status = %status.as_u16(),
+            duration_ms = %elapsed.as_millis(),
+            streaming = true,
+            "proxied streaming request"
+        );
+
+        // Stream the response body through without buffering.
+        let byte_stream = resp.bytes_stream();
+        let body = Body::from_stream(byte_stream);
+
+        let mut response = Response::builder()
+            .status(StatusCode::from_u16(status.as_u16()).unwrap_or(StatusCode::OK));
+        response = response.header("content-type", content_type);
+        response = response.header("x-request-id", &request_id);
+
+        return response
+            .body(body)
+            .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response());
+    }
+
+    // ── 8b. Non-streaming path — buffer response for observability ──
     let (response_status, response_bytes, upstream_content_type) = match upstream_result {
         Ok(resp) => {
             let status = resp.status();
@@ -226,7 +366,7 @@ pub async fn proxy_handler(
         }
     };
 
-    // ── 8. Optionally translate response ──
+    // ── 9. Optionally translate response ──
     let client_body = if let Some(ref translator) = provider.format_translator {
         match translator.translate_response(&response_bytes, &model) {
             Ok(translated) => Bytes::from(translated),
@@ -239,12 +379,12 @@ pub async fn proxy_handler(
         response_bytes.clone()
     };
 
-    // ── 9. Extract token usage (provider-aware) ──
+    // ── 10. Extract token usage (provider-aware) ──
     let (output_content_parsed, usage) =
         parsers::extract_response_usage(&provider_name, &response_bytes);
     let cache_tokens = parsers::extract_cache_tokens(&provider_name, &response_bytes);
 
-    // ── 10. Build span ──
+    // ── 11. Build span ──
     let elapsed = start.elapsed();
     let end_time = Utc::now();
 
@@ -300,9 +440,6 @@ pub async fn proxy_handler(
     attributes.insert("http.duration_ms".into(), elapsed.as_millis().to_string());
     attributes.insert("http.request_id".into(), request_id.clone());
     attributes.insert("llm.provider".into(), provider_name.clone());
-    if is_streaming {
-        attributes.insert("llm.streaming".into(), "true".into());
-    }
     if let Some(ref tid) = tenant_id {
         attributes.insert("candela.tenant_id".into(), tid.clone());
     }
@@ -355,7 +492,7 @@ pub async fn proxy_handler(
         job_id,
     };
 
-    // ── 11. Submit span asynchronously ──
+    // ── 12. Submit span asynchronously ──
     let submitter = Arc::clone(&state.submitter);
     tokio::spawn(async move {
         submitter.submit_batch(vec![span]);
@@ -371,7 +508,7 @@ pub async fn proxy_handler(
         "proxied request"
     );
 
-    // ── 12. Return response to client ──
+    // ── 13. Return response to client ──
     // Forward the upstream Content-Type header instead of hardcoding.
     let mut response = Response::builder()
         .status(StatusCode::from_u16(response_status.as_u16()).unwrap_or(StatusCode::OK));

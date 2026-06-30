@@ -7,6 +7,11 @@ license.workspace = true
 [dependencies]
 candela-core = { workspace = true }
 candela-harness-storage = { workspace = true }
+reqwest = { workspace = true }
+bytes = { workspace = true }
+futures-core = { workspace = true }
+tokio-stream = { workspace = true }
+pin-project-lite = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 tokio = { workspace = true }

@@ -1,20 +1,35 @@
 //! JSON-RPC request handler — dispatches method calls.
 
-use candela_core::harness::{HarnessError, new_session};
+use candela_core::harness::{ChatEvent, HarnessError, new_session};
+use candela_harness_chat::ChatRuntime;
 use candela_harness_storage::Database;
+use std::sync::Arc;
+use tokio::sync::mpsc;
 use tracing::info;
 
 use crate::protocol::*;
 
 /// Handles JSON-RPC requests from IDE plugins.
 pub struct RpcHandler {
-    db: std::sync::Arc<std::sync::Mutex<Database>>,
+    db: Arc<std::sync::Mutex<Database>>,
+    chat: Arc<ChatRuntime>,
+    notify_tx: mpsc::UnboundedSender<JsonRpcNotification>,
     default_model: String,
 }
 
 impl RpcHandler {
-    pub fn new(db: std::sync::Arc<std::sync::Mutex<Database>>, default_model: String) -> Self {
-        Self { db, default_model }
+    pub fn new(
+        db: Arc<std::sync::Mutex<Database>>,
+        chat: Arc<ChatRuntime>,
+        notify_tx: mpsc::UnboundedSender<JsonRpcNotification>,
+        default_model: String,
+    ) -> Self {
+        Self {
+            db,
+            chat,
+            notify_tx,
+            default_model,
+        }
     }
 
     /// Dispatch a JSON-RPC request to the appropriate handler.
@@ -134,14 +149,59 @@ impl RpcHandler {
     async fn handle_chat_send(
         &self,
         id: Option<serde_json::Value>,
-        _params: serde_json::Value,
+        params: serde_json::Value,
     ) -> JsonRpcResponse {
-        // TODO: Wire up ChatRuntime
+        let session_id = match params.get("session_id").and_then(|v| v.as_str()) {
+            Some(sid) => sid.to_string(),
+            None => {
+                return JsonRpcResponse::error(
+                    id,
+                    INVALID_PARAMS,
+                    "session_id required".to_string(),
+                );
+            }
+        };
+        let content = match params.get("content").and_then(|v| v.as_str()) {
+            Some(c) => c.to_string(),
+            None => {
+                return JsonRpcResponse::error(id, INVALID_PARAMS, "content required".to_string());
+            }
+        };
+
+        let stream_id = uuid::Uuid::new_v4().to_string();
+        let chat = self.chat.clone();
+        let tx = self.notify_tx.clone();
+        let sid = stream_id.clone();
+
+        // Spawn the streaming task — response comes back immediately
+        tokio::spawn(async move {
+            let notify_tx = tx.clone();
+            let on_event = move |event: ChatEvent| {
+                let notif = JsonRpcNotification::new(
+                    "chat.event",
+                    serde_json::to_value(&event).unwrap_or_default(),
+                );
+                let _ = notify_tx.send(notif);
+            };
+
+            if let Err(e) = chat.send_message(&session_id, &content, on_event).await {
+                let error_notif = JsonRpcNotification::new(
+                    "chat.event",
+                    serde_json::json!({
+                        "type": "error",
+                        "stream_id": sid,
+                        "message": e.to_string(),
+                    }),
+                );
+                let _ = tx.send(error_notif);
+            }
+        });
+
         JsonRpcResponse::success(
             id,
             serde_json::json!({
                 "status": "accepted",
-                "stream_id": uuid::Uuid::new_v4().to_string(),
+                "stream_id": stream_id,
             }),
         )
     }
@@ -150,19 +210,27 @@ impl RpcHandler {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Arc;
+    use candela_core::harness::HarnessConfig;
+    use candela_harness_storage::SearchIndex;
 
-    fn test_handler() -> RpcHandler {
+    fn test_handler() -> (RpcHandler, mpsc::UnboundedReceiver<JsonRpcNotification>) {
         let db = Database::open_in_memory().unwrap();
-        RpcHandler::new(
-            Arc::new(std::sync::Mutex::new(db)),
-            "test-model".to_string(),
-        )
+        let db = Arc::new(std::sync::Mutex::new(db));
+        let search = SearchIndex::open_in_memory().unwrap();
+        let search = Arc::new(std::sync::Mutex::new(search));
+        let config = HarnessConfig {
+            model: "test-model".to_string(),
+            ..Default::default()
+        };
+        let chat = Arc::new(ChatRuntime::new(config, db.clone(), search));
+        let (tx, rx) = mpsc::unbounded_channel();
+        let handler = RpcHandler::new(db, chat, tx, "test-model".to_string());
+        (handler, rx)
     }
 
     #[tokio::test]
     async fn test_initialize() {
-        let handler = test_handler();
+        let (handler, _rx) = test_handler();
         let req = JsonRpcRequest {
             jsonrpc: "2.0".to_string(),
             id: Some(serde_json::json!(1)),
@@ -178,7 +246,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_notification_returns_none() {
-        let handler = test_handler();
+        let (handler, _rx) = test_handler();
         let req = JsonRpcRequest {
             jsonrpc: "2.0".to_string(),
             id: None,
@@ -191,7 +259,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_session_lifecycle() {
-        let handler = test_handler();
+        let (handler, _rx) = test_handler();
 
         // Create
         let req = JsonRpcRequest {
@@ -227,7 +295,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_session_delete_not_found() {
-        let handler = test_handler();
+        let (handler, _rx) = test_handler();
         let req = JsonRpcRequest {
             jsonrpc: "2.0".to_string(),
             id: Some(serde_json::json!(1)),
@@ -241,7 +309,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_unknown_method() {
-        let handler = test_handler();
+        let (handler, _rx) = test_handler();
         let req = JsonRpcRequest {
             jsonrpc: "2.0".to_string(),
             id: Some(serde_json::json!(1)),
@@ -255,7 +323,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_session_create_uses_default_model() {
-        let handler = test_handler();
+        let (handler, _rx) = test_handler();
         let req = JsonRpcRequest {
             jsonrpc: "2.0".to_string(),
             id: Some(serde_json::json!(1)),
@@ -269,7 +337,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_negative_limit_clamped() {
-        let handler = test_handler();
+        let (handler, _rx) = test_handler();
         let req = JsonRpcRequest {
             jsonrpc: "2.0".to_string(),
             id: Some(serde_json::json!(1)),
@@ -279,5 +347,63 @@ mod tests {
         let resp = handler.handle(req).await.unwrap();
         // Should not error — clamped to 0
         assert!(resp.error.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_chat_send_validates_params() {
+        let (handler, _rx) = test_handler();
+
+        // Missing session_id
+        let req = JsonRpcRequest {
+            jsonrpc: "2.0".to_string(),
+            id: Some(serde_json::json!(1)),
+            method: "chat.send".to_string(),
+            params: serde_json::json!({ "content": "hello" }),
+        };
+        let resp = handler.handle(req).await.unwrap();
+        assert!(resp.error.is_some());
+        assert_eq!(resp.error.unwrap().code, INVALID_PARAMS);
+
+        // Missing content
+        let req = JsonRpcRequest {
+            jsonrpc: "2.0".to_string(),
+            id: Some(serde_json::json!(2)),
+            method: "chat.send".to_string(),
+            params: serde_json::json!({ "session_id": "test" }),
+        };
+        let resp = handler.handle(req).await.unwrap();
+        assert!(resp.error.is_some());
+        assert_eq!(resp.error.unwrap().code, INVALID_PARAMS);
+    }
+
+    #[tokio::test]
+    async fn test_chat_send_returns_accepted() {
+        let (handler, _rx) = test_handler();
+
+        // Create a session first
+        let req = JsonRpcRequest {
+            jsonrpc: "2.0".to_string(),
+            id: Some(serde_json::json!(1)),
+            method: "session.create".to_string(),
+            params: serde_json::json!({}),
+        };
+        let resp = handler.handle(req).await.unwrap();
+        let session_id = resp.result.unwrap()["id"].as_str().unwrap().to_string();
+
+        // Send chat — should immediately return accepted (even though model call will fail)
+        let req = JsonRpcRequest {
+            jsonrpc: "2.0".to_string(),
+            id: Some(serde_json::json!(2)),
+            method: "chat.send".to_string(),
+            params: serde_json::json!({
+                "session_id": session_id,
+                "content": "hello"
+            }),
+        };
+        let resp = handler.handle(req).await.unwrap();
+        assert!(resp.error.is_none());
+        let result = resp.result.unwrap();
+        assert_eq!(result["status"], "accepted");
+        assert!(result["stream_id"].is_string());
     }
 }

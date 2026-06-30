@@ -5,9 +5,14 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use candela_core::harness::{HarnessConfig, TransportMode};
-use candela_harness_rpc::{RpcHandler, protocol::JsonRpcRequest};
-use candela_harness_storage::Database;
+use candela_harness_chat::ChatRuntime;
+use candela_harness_rpc::{
+    RpcHandler,
+    protocol::{JsonRpcNotification, JsonRpcRequest},
+};
+use candela_harness_storage::{Database, SearchIndex};
 use clap::Parser;
+use tokio::sync::mpsc;
 use tracing::info;
 use tracing_subscriber::EnvFilter;
 
@@ -33,6 +38,10 @@ struct Cli {
     /// Default model
     #[arg(long, default_value = "gemini-2.0-flash")]
     model: String,
+
+    /// LLM API base URL (e.g. http://localhost:8080/proxy/openai or https://api.openai.com)
+    #[arg(long, env = "CANDELA_PROXY_URL")]
+    proxy_url: Option<String>,
 }
 
 #[tokio::main]
@@ -61,6 +70,7 @@ async fn main() -> anyhow::Result<()> {
         model: cli.model,
         transport,
         http_port: cli.port,
+        proxy_url: cli.proxy_url,
         ..Default::default()
     };
 
@@ -72,17 +82,30 @@ async fn main() -> anyhow::Result<()> {
     let db = Database::open(&db_path)?;
     let db = Arc::new(std::sync::Mutex::new(db));
 
-    let handler = RpcHandler::new(db, config.model.clone());
+    // Open search index
+    let search_path = config.save_dir.join("search.db");
+    let search = SearchIndex::open(&search_path)?;
+    let search = Arc::new(std::sync::Mutex::new(search));
+
+    // Create notification channel for streaming events
+    let (notify_tx, notify_rx) = mpsc::unbounded_channel::<JsonRpcNotification>();
+
+    // Create chat runtime
+    let chat = Arc::new(ChatRuntime::new(config.clone(), db.clone(), search));
+
+    // Create RPC handler
+    let handler = RpcHandler::new(db, chat, notify_tx, config.model.clone());
 
     info!(
         transport = ?config.transport,
         model = %config.model,
         save_dir = %config.save_dir.display(),
+        proxy_url = ?config.proxy_url,
         "candela-harness started"
     );
 
     match config.transport {
-        TransportMode::Stdio => serve_stdio(handler).await?,
+        TransportMode::Stdio => serve_stdio(handler, notify_rx).await?,
         TransportMode::Http => {
             // TODO: Axum HTTP server
             anyhow::bail!("HTTP transport is not yet implemented");
@@ -92,13 +115,28 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Read JSON-RPC from stdin, write responses to stdout.
-async fn serve_stdio(handler: RpcHandler) -> anyhow::Result<()> {
+/// Read JSON-RPC from stdin, write responses + notifications to stdout.
+async fn serve_stdio(
+    handler: RpcHandler,
+    mut notify_rx: mpsc::UnboundedReceiver<JsonRpcNotification>,
+) -> anyhow::Result<()> {
     use tokio::io::{AsyncBufReadExt, BufReader};
 
     let stdin = tokio::io::stdin();
     let reader = BufReader::new(stdin);
     let mut lines = reader.lines();
+
+    // Spawn a task to write notifications to stdout.
+    // This runs independently of the request/response loop so streaming
+    // events can be emitted while the main loop waits for the next request.
+    let stdout_notify = tokio::spawn(async move {
+        while let Some(notif) = notify_rx.recv().await {
+            if let Ok(json) = serde_json::to_string(&notif) {
+                let _ = writeln!(std::io::stdout(), "{json}");
+                let _ = std::io::stdout().flush();
+            }
+        }
+    });
 
     while let Some(line) = lines.next_line().await? {
         if line.trim().is_empty() {
@@ -124,6 +162,9 @@ async fn serve_stdio(handler: RpcHandler) -> anyhow::Result<()> {
             std::io::stdout().flush()?;
         }
     }
+
+    // Clean up notification task
+    stdout_notify.abort();
 
     Ok(())
 }

@@ -50,7 +50,7 @@ impl std::fmt::Display for MessageRole {
 ///
 /// Storage: SQLite (local harness), Firestore (cloud sync)
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-#[non_exhaustive]
+
 pub struct Session {
     pub id: String,
     pub title: String,
@@ -69,7 +69,7 @@ pub struct Session {
 ///
 /// Message is a single turn in a chat session.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-#[non_exhaustive]
+
 pub struct Message {
     pub id: String,
     pub session_id: String,
@@ -89,7 +89,7 @@ pub struct Message {
 ///
 /// SearchResult is a ranked match from full-text search across sessions.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-#[non_exhaustive]
+
 pub struct SearchResult {
     pub session_id: String,
     pub message_id: String,

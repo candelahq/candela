@@ -1,11 +1,48 @@
 //! Domain types, configuration, and errors for the candela-harness IDE sidecar.
 //!
-//! These types were originally in the standalone `harness-core` crate and have
-//! been merged into `candela-core` so that every harness crate depends on a
-//! single shared type library.
+//! Session, Message, MessageRole, SearchResult, and UsageSummary are
+//! re-exported from `candela-types` (generated from candela-protos).
+//! HarnessConfig, HarnessError, TransportMode, and ChatEvent remain
+//! harness-specific and are defined here.
 
-use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+
+// ── Re-exported proto-generated types ──
+
+pub use candela_types::chat::UsageSummary;
+pub use candela_types::session::{Message, MessageRole, SearchResult, Session};
+
+// ── Session constructor ──
+
+/// Extension methods for creating new sessions.
+pub fn new_session(model: &str, device_id: &str) -> Session {
+    let now = chrono::Utc::now();
+    let id = uuid::Uuid::new_v4().to_string();
+    Session {
+        id,
+        title: "New Chat".to_string(),
+        model: model.to_string(),
+        message_count: 0,
+        total_tokens: 0,
+        total_cost_usd: 0.0,
+        device_id: device_id.to_string(),
+        created_at: now,
+        updated_at: now,
+        deleted_at: None,
+    }
+}
+
+/// Create a new user message for a session.
+pub fn new_message(session_id: &str, role: MessageRole, content: &str) -> Message {
+    Message {
+        id: uuid::Uuid::new_v4().to_string(),
+        session_id: session_id.to_string(),
+        role,
+        content: content.to_string(),
+        created_at: chrono::Utc::now(),
+        ..Default::default()
+    }
+}
 
 // ── Configuration ──
 
@@ -79,70 +116,14 @@ pub enum HarnessError {
     Other(#[from] anyhow::Error),
 }
 
-// ── Domain Types ──
-
-/// A chat session (conversation).
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Session {
-    pub id: String,
-    pub title: String,
-    pub model: String,
-    pub message_count: i32,
-    pub total_tokens: i64,
-    pub total_cost_usd: f64,
-    pub device_id: String,
-    pub created_at: DateTime<Utc>,
-    pub updated_at: DateTime<Utc>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub deleted_at: Option<DateTime<Utc>>,
-}
-
-impl Session {
-    pub fn new(model: &str, device_id: &str) -> Self {
-        let now = Utc::now();
-        let id = uuid::Uuid::new_v4().to_string();
-        Self {
-            id,
-            title: "New Chat".to_string(),
-            model: model.to_string(),
-            message_count: 0,
-            total_tokens: 0,
-            total_cost_usd: 0.0,
-            device_id: device_id.to_string(),
-            created_at: now,
-            updated_at: now,
-            deleted_at: None,
-        }
-    }
-}
-
-/// A single chat message.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Message {
-    pub id: i64,
-    pub session_id: String,
-    pub role: MessageRole,
-    pub content: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub model: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub token_count: Option<i32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub cost_usd: Option<f64>,
-    pub created_at: DateTime<Utc>,
-}
-
-/// Message roles.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum MessageRole {
-    User,
-    Assistant,
-    System,
-    Tool,
-}
+// ── Streaming Chat Events (wire format) ──
 
 /// Streaming chat events sent as JSON-RPC notifications.
+///
+/// This type defines the JSON-RPC wire format for streaming. It intentionally
+/// differs from the proto-generated `ChatEvent` (which uses struct + oneof)
+/// because the JSON-RPC protocol needs a flat tagged enum for ergonomic
+/// serialization over stdio.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ChatEvent {
@@ -172,33 +153,13 @@ pub enum ChatEvent {
     Error { stream_id: String, message: String },
 }
 
-/// Token/cost usage summary.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct UsageSummary {
-    pub prompt_tokens: i64,
-    pub completion_tokens: i64,
-    pub total_tokens: i64,
-    pub total_cost_usd: f64,
-}
-
-/// Search result from FTS5 index.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SearchResult {
-    pub session_id: String,
-    pub session_title: String,
-    pub message_preview: String,
-    pub role: MessageRole,
-    pub score: f64,
-    pub created_at: DateTime<Utc>,
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn session_new_has_valid_defaults() {
-        let session = Session::new("gemini-2.0-flash", "device-1");
+        let session = new_session("gemini-2.0-flash", "device-1");
         assert_eq!(session.title, "New Chat");
         assert_eq!(session.model, "gemini-2.0-flash");
         assert_eq!(session.message_count, 0);
@@ -208,7 +169,7 @@ mod tests {
 
     #[test]
     fn session_json_round_trip() {
-        let session = Session::new("test-model", "dev-1");
+        let session = new_session("test-model", "dev-1");
         let json = serde_json::to_string(&session).unwrap();
         let restored: Session = serde_json::from_str(&json).unwrap();
         assert_eq!(restored.id, session.id);
@@ -227,11 +188,11 @@ mod tests {
     }
 
     #[test]
-    fn message_role_serde() {
-        let json = serde_json::to_string(&MessageRole::Assistant).unwrap();
-        assert_eq!(json, "\"assistant\"");
-        let restored: MessageRole = serde_json::from_str(&json).unwrap();
-        assert_eq!(restored, MessageRole::Assistant);
+    fn message_new_has_uuid() {
+        let msg = new_message("sess-1", MessageRole::User, "hello");
+        assert!(!msg.id.is_empty());
+        assert_eq!(msg.session_id, "sess-1");
+        assert_eq!(msg.content, "hello");
     }
 
     #[test]

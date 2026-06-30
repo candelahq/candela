@@ -8,7 +8,7 @@ import type { User, UserBudget, BudgetGrant } from "@/gen/candela/types/user_pb"
 import { UserRole, UserStatus, BudgetPeriod } from "@/gen/candela/types/user_pb";
 import { timestampFromDate } from "@bufbuild/protobuf/wkt";
 
-const PAGE_SIZE = 25;
+const PAGE_SIZE = 10;
 
 interface UsersState {
   users: User[];

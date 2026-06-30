@@ -425,10 +425,34 @@ func (s *Store) ListUsers(ctx context.Context, statusFilter string, limit, offse
 		return nil, 0, fmt.Errorf("firestoredb: listing users: %w", err)
 	}
 
-	// If aggregation count returned 0 but we fetched users, use the
-	// fetched length as a fallback (handles count API mismatches).
-	if total == 0 && len(snaps) > 0 {
-		total = len(snaps)
+	// If aggregation count returned 0 but we have reason to believe
+	// users exist, count via a metadata-only iterator. Select() with no
+	// field paths avoids transferring field data; iterating (rather than
+	// GetAll) avoids loading every snapshot into memory at once.
+	// The offset > 0 guard catches past-last-page requests where snaps
+	// is empty but the collection is not.
+	if total == 0 && (len(snaps) > 0 || offset > 0 || limit == 0) {
+		iter := q.Select().Documents(ctx)
+		defer iter.Stop()
+		count := 0
+		var countErr error
+		for {
+			_, err := iter.Next()
+			if err == iterator.Done {
+				break
+			}
+			if err != nil {
+				countErr = err
+				break
+			}
+			count++
+		}
+		if countErr == nil {
+			total = count
+		} else {
+			slog.Warn("firestoredb: count fallback query failed", "error", countErr)
+			total = len(snaps)
+		}
 	}
 
 	users := make([]*storage.UserRecord, 0, len(snaps))

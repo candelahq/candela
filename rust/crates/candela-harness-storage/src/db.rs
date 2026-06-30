@@ -7,6 +7,28 @@ use chrono::{DateTime, Utc};
 use rusqlite::{Connection, params};
 use tracing::info;
 
+/// Convert a MessageRole to a lowercase string for DB storage.
+fn role_to_str(role: &MessageRole) -> &'static str {
+    match role {
+        MessageRole::User => "user",
+        MessageRole::Assistant => "assistant",
+        MessageRole::System => "system",
+        MessageRole::Tool => "tool",
+        MessageRole::Unspecified => "unspecified",
+    }
+}
+
+/// Parse a role string from the DB back to MessageRole.
+fn role_from_str(s: &str) -> MessageRole {
+    match s {
+        "user" => MessageRole::User,
+        "assistant" => MessageRole::Assistant,
+        "system" => MessageRole::System,
+        "tool" => MessageRole::Tool,
+        _ => MessageRole::Unspecified,
+    }
+}
+
 /// SQLite database for session and message storage.
 pub struct Database {
     conn: Connection,
@@ -167,7 +189,7 @@ impl Database {
             params![
                 msg.id,
                 msg.session_id,
-                format!("{}", msg.role).to_lowercase(),
+                role_to_str(&msg.role),
                 msg.content,
                 msg.model,
                 msg.token_count,
@@ -209,7 +231,7 @@ impl Database {
                 "SELECT id, session_id, role, content, model, token_count, cost_usd, created_at, sequence
              FROM messages
              WHERE session_id = ?1
-             ORDER BY sequence ASC
+             ORDER BY sequence ASC, created_at ASC
              LIMIT ?2",
             )
             .map_err(|e| HarnessError::Storage(e.to_string()))?;
@@ -217,13 +239,7 @@ impl Database {
         let messages = stmt
             .query_map(params![session_id, limit], |row| {
                 let role_str: String = row.get(2)?;
-                let role = match role_str.as_str() {
-                    "user" => MessageRole::User,
-                    "assistant" => MessageRole::Assistant,
-                    "system" => MessageRole::System,
-                    "tool" => MessageRole::Tool,
-                    _ => MessageRole::Unspecified,
-                };
+                let role = role_from_str(&role_str);
                 Ok(Message {
                     id: row.get(0)?,
                     session_id: row.get(1)?,

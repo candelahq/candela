@@ -201,4 +201,61 @@ mod tests {
         assert_eq!(config.model, "gemini-2.0-flash");
         assert_eq!(config.http_port, 8200);
     }
+
+    #[test]
+    fn test_chat_event_all_variants_serde() {
+        let events = vec![
+            ChatEvent::Chunk {
+                stream_id: "s1".into(),
+                delta: "Hello".into(),
+            },
+            ChatEvent::ToolCall {
+                stream_id: "s1".into(),
+                call_id: "c1".into(),
+                tool: "read_file".into(),
+                args: serde_json::json!({"path": "/tmp/test"}),
+                requires_approval: true,
+            },
+            ChatEvent::Status {
+                stream_id: "s1".into(),
+                text: "Analyzing...".into(),
+                agent: Some("sub-1".into()),
+            },
+            ChatEvent::Error {
+                stream_id: "s1".into(),
+                message: "rate limit".into(),
+            },
+        ];
+
+        for event in &events {
+            let json = serde_json::to_string(event).unwrap();
+            let restored: ChatEvent = serde_json::from_str(&json).unwrap();
+            // Verify the variant tag survived the round-trip.
+            let tag = |e: &ChatEvent| match e {
+                ChatEvent::Chunk { .. } => "chunk",
+                ChatEvent::ToolCall { .. } => "tool_call",
+                ChatEvent::Status { .. } => "status",
+                ChatEvent::Done { .. } => "done",
+                ChatEvent::Error { .. } => "error",
+            };
+            assert_eq!(
+                tag(event),
+                tag(&restored),
+                "variant mismatch for json: {json}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_new_message_sets_defaults() {
+        let msg = new_message("sess-1", MessageRole::Assistant, "hi");
+        // model should be None (from Default).
+        assert_eq!(msg.model, None);
+        // token_count should be None.
+        assert_eq!(msg.token_count, None);
+        // sequence defaults to 0 (DB auto-assigns on insert).
+        assert_eq!(msg.sequence, 0);
+        // cost_usd should be None.
+        assert_eq!(msg.cost_usd, None);
+    }
 }

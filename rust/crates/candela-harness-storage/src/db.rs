@@ -325,4 +325,116 @@ mod tests {
         assert_eq!(messages.len(), 1);
         assert_eq!(messages[0].content, "Hello!");
     }
+
+    #[test]
+    fn test_message_sequence_auto_assign() {
+        let mut db = Database::open_in_memory().unwrap();
+        let session = new_session("test-model", "device-1");
+        db.create_session(&session).unwrap();
+
+        let m1 = new_message(&session.id, MessageRole::User, "first");
+        let m2 = new_message(&session.id, MessageRole::Assistant, "second");
+        let m3 = new_message(&session.id, MessageRole::User, "third");
+        db.insert_message(&m1).unwrap();
+        db.insert_message(&m2).unwrap();
+        db.insert_message(&m3).unwrap();
+
+        let messages = db.get_messages(&session.id, 50).unwrap();
+        assert_eq!(messages.len(), 3);
+        assert_eq!(messages[0].sequence, 1);
+        assert_eq!(messages[1].sequence, 2);
+        assert_eq!(messages[2].sequence, 3);
+    }
+
+    #[test]
+    fn test_message_role_round_trip() {
+        let mut db = Database::open_in_memory().unwrap();
+        let session = new_session("test-model", "device-1");
+        db.create_session(&session).unwrap();
+
+        let roles = [
+            MessageRole::User,
+            MessageRole::Assistant,
+            MessageRole::System,
+            MessageRole::Tool,
+            MessageRole::Unspecified,
+        ];
+
+        for role in &roles {
+            let msg = new_message(&session.id, *role, "content");
+            db.insert_message(&msg).unwrap();
+        }
+
+        let messages = db.get_messages(&session.id, 50).unwrap();
+        assert_eq!(messages.len(), roles.len());
+        for (msg, expected_role) in messages.iter().zip(roles.iter()) {
+            assert_eq!(
+                msg.role, *expected_role,
+                "role mismatch for {:?}",
+                expected_role
+            );
+        }
+    }
+
+    #[test]
+    fn test_insert_message_returns_uuid() {
+        let mut db = Database::open_in_memory().unwrap();
+        let session = new_session("test-model", "device-1");
+        db.create_session(&session).unwrap();
+
+        let msg = new_message(&session.id, MessageRole::User, "hello");
+        let returned_id = db.insert_message(&msg).unwrap();
+
+        assert!(!returned_id.is_empty());
+        assert_eq!(returned_id, msg.id);
+    }
+
+    #[test]
+    fn test_session_not_found_on_insert() {
+        let mut db = Database::open_in_memory().unwrap();
+
+        let msg = new_message("non-existent-session", MessageRole::User, "hello");
+        let result = db.insert_message(&msg);
+
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        // The FK constraint on session_id fires before the manual row-count check,
+        // so we get a Storage error containing "FOREIGN KEY".
+        assert!(
+            matches!(err, HarnessError::Storage(ref s) if s.contains("FOREIGN KEY"))
+                || matches!(err, HarnessError::SessionNotFound(_)),
+            "expected FK or SessionNotFound error, got: {err:?}"
+        );
+    }
+
+    #[test]
+    fn test_multiple_sessions_independent_sequence() {
+        let mut db = Database::open_in_memory().unwrap();
+
+        let s1 = new_session("model-a", "device-1");
+        let s2 = new_session("model-b", "device-1");
+        db.create_session(&s1).unwrap();
+        db.create_session(&s2).unwrap();
+
+        // Insert 2 messages in session 1, then 1 in session 2.
+        db.insert_message(&new_message(&s1.id, MessageRole::User, "s1-m1"))
+            .unwrap();
+        db.insert_message(&new_message(&s1.id, MessageRole::Assistant, "s1-m2"))
+            .unwrap();
+        db.insert_message(&new_message(&s2.id, MessageRole::User, "s2-m1"))
+            .unwrap();
+
+        let msgs_s1 = db.get_messages(&s1.id, 50).unwrap();
+        let msgs_s2 = db.get_messages(&s2.id, 50).unwrap();
+
+        assert_eq!(msgs_s1.len(), 2);
+        assert_eq!(msgs_s1[0].sequence, 1);
+        assert_eq!(msgs_s1[1].sequence, 2);
+
+        assert_eq!(msgs_s2.len(), 1);
+        assert_eq!(
+            msgs_s2[0].sequence, 1,
+            "session 2 sequence should start at 1 independently"
+        );
+    }
 }

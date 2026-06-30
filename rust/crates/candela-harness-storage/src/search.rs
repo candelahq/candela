@@ -193,4 +193,46 @@ mod tests {
         let results = idx.search("refactor auth", 10).unwrap();
         assert_eq!(results.len(), 0);
     }
+
+    #[test]
+    fn test_search_returns_message_id() {
+        let idx = SearchIndex::open_in_memory().unwrap();
+        idx.index_message(
+            "The quick brown fox jumps over the lazy dog",
+            "session-42",
+            "msg-abc-123",
+            "Fox Session",
+            "user",
+            "2025-06-15T12:00:00Z",
+        )
+        .unwrap();
+
+        let results = idx.search("quick brown fox", 10).unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].message_id, "msg-abc-123");
+        assert_eq!(results[0].session_id, "session-42");
+        assert_eq!(results[0].session_title, "Fox Session");
+    }
+
+    #[test]
+    fn test_search_score_is_negative_rank() {
+        let idx = SearchIndex::open_in_memory().unwrap();
+        idx.index_message(
+            "Rust language is fast and safe",
+            "s1",
+            "m1",
+            "Rust Chat",
+            "assistant",
+            "2025-03-01T00:00:00Z",
+        )
+        .unwrap();
+
+        let results = idx.search("Rust", 10).unwrap();
+        assert_eq!(results.len(), 1);
+        assert!(
+            results[0].score < 0.0,
+            "expected negative score from FTS5 rank, got {}",
+            results[0].score
+        );
+    }
 }

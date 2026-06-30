@@ -229,10 +229,9 @@ mod tests {
 
         let results = idx.search("Rust", 10).unwrap();
         assert_eq!(results.len(), 1);
-        // FTS5 rank is negative (lower = better match); verify it's non-zero.
         assert!(
-            results[0].score != 0.0,
-            "expected non-zero score from FTS5 rank, got {}",
+            results[0].score < 0.0,
+            "expected negative score from FTS5 rank, got {}",
             results[0].score
         );
     }

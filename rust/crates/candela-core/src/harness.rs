@@ -225,6 +225,10 @@ mod tests {
                 stream_id: "s1".into(),
                 message: "rate limit".into(),
             },
+            ChatEvent::Done {
+                stream_id: "s1".into(),
+                usage: UsageSummary::default(),
+            },
         ];
 
         for event in &events {

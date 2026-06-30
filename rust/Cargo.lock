@@ -257,6 +257,7 @@ name = "candela-core"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "candela-types",
  "chrono",
  "prost",
  "prost-types",

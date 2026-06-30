@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 /// ModelCatalogEntry represents a single model in the catalog with its
 /// pricing, metadata, and visibility state.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-#[non_exhaustive]
+
 pub struct ModelCatalogEntry {
     pub model_id: String,
     pub provider: String,

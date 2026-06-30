@@ -1,6 +1,6 @@
 //! JSON-RPC request handler — dispatches method calls.
 
-use candela_core::harness::{HarnessError, Session};
+use candela_core::harness::{HarnessError, new_session};
 use candela_harness_storage::Database;
 use tracing::info;
 
@@ -99,7 +99,7 @@ impl RpcHandler {
             .and_then(|v| v.as_str())
             .unwrap_or("");
 
-        let session = Session::new(model, device_id);
+        let session = new_session(model, device_id);
         match self.db.lock().unwrap().create_session(&session) {
             Ok(()) => JsonRpcResponse::success(id, serde_json::json!(session)),
             Err(e) => JsonRpcResponse::error(id, INTERNAL_ERROR, e.to_string()),

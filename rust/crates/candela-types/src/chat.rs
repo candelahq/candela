@@ -28,7 +28,7 @@ pub enum ChatEventEvent {
 /// Each event carries a stream_id that correlates it to the originating
 /// chat.send request.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-#[non_exhaustive]
+
 pub struct ChatEvent {
     pub stream_id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -39,7 +39,7 @@ pub struct ChatEvent {
 ///
 /// ChunkEvent is a text delta from the model's streaming response.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-#[non_exhaustive]
+
 pub struct ChunkEvent {
     pub delta: String,
 }
@@ -48,7 +48,7 @@ pub struct ChunkEvent {
 ///
 /// ToolCallEvent is emitted when the model requests a tool invocation.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-#[non_exhaustive]
+
 pub struct ToolCallEvent {
     pub call_id: String,
     pub tool: String,
@@ -60,7 +60,7 @@ pub struct ToolCallEvent {
 ///
 /// StatusEvent provides a progress update during generation.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-#[non_exhaustive]
+
 pub struct StatusEvent {
     pub text: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -71,7 +71,7 @@ pub struct StatusEvent {
 ///
 /// DoneEvent signals successful completion of the stream.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-#[non_exhaustive]
+
 pub struct DoneEvent {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub usage: Option<Box<UsageSummary>>,
@@ -81,7 +81,7 @@ pub struct DoneEvent {
 ///
 /// ErrorEvent signals that the stream terminated with an error.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-#[non_exhaustive]
+
 pub struct ErrorEvent {
     pub message: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -92,7 +92,7 @@ pub struct ErrorEvent {
 ///
 /// UsageSummary reports token consumption and cost for a single completion.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-#[non_exhaustive]
+
 pub struct UsageSummary {
     pub prompt_tokens: i64,
     pub completion_tokens: i64,

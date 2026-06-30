@@ -36,6 +36,7 @@ impl SearchIndex {
             CREATE VIRTUAL TABLE IF NOT EXISTS message_fts USING fts5(
                 content,
                 session_id UNINDEXED,
+                message_id UNINDEXED,
                 session_title UNINDEXED,
                 role UNINDEXED,
                 created_at UNINDEXED
@@ -56,14 +57,15 @@ impl SearchIndex {
         &self,
         content: &str,
         session_id: &str,
+        message_id: &str,
         session_title: &str,
         role: &str,
         created_at: &str,
     ) -> Result<(), HarnessError> {
         self.conn
             .execute(
-                "INSERT INTO message_fts (content, session_id, session_title, role, created_at) VALUES (?1, ?2, ?3, ?4, ?5)",
-                params![content, session_id, session_title, role, created_at],
+                "INSERT INTO message_fts (content, session_id, message_id, session_title, role, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                params![content, session_id, message_id, session_title, role, created_at],
             )
             .map_err(|e| HarnessError::Storage(e.to_string()))?;
         Ok(())
@@ -85,7 +87,7 @@ impl SearchIndex {
         let mut stmt = self
             .conn
             .prepare(
-                "SELECT f.content, f.session_id, f.session_title, f.role, f.created_at, f.rank
+                "SELECT f.content, f.session_id, f.message_id, f.session_title, f.role, f.created_at, f.rank
              FROM message_fts f
              WHERE f.message_fts MATCH ?1
                AND f.session_id NOT IN (SELECT session_id FROM deleted_sessions)
@@ -96,21 +98,22 @@ impl SearchIndex {
 
         let results = stmt
             .query_map(params![query, limit], |row| {
-                let role_str: String = row.get(3)?;
+                let role_str: String = row.get(4)?;
                 let role = match role_str.as_str() {
                     "user" => MessageRole::User,
                     "assistant" => MessageRole::Assistant,
                     "system" => MessageRole::System,
                     "tool" => MessageRole::Tool,
-                    _ => MessageRole::User,
+                    _ => MessageRole::Unspecified,
                 };
                 Ok(SearchResult {
                     message_preview: row.get(0)?,
                     session_id: row.get(1)?,
-                    session_title: row.get(2)?,
+                    message_id: row.get(2)?,
+                    session_title: row.get(3)?,
                     role,
-                    created_at: row.get::<_, DateTime<Utc>>(4)?,
-                    score: row.get(5)?,
+                    created_at: row.get::<_, DateTime<Utc>>(5)?,
+                    score: row.get(6)?,
                 })
             })
             .map_err(|e| HarnessError::Storage(e.to_string()))?
@@ -131,6 +134,7 @@ mod tests {
         idx.index_message(
             "How do I refactor the auth module?",
             "session-1",
+            "msg-1",
             "Auth Refactor",
             "user",
             "2025-01-01T00:00:00Z",
@@ -139,6 +143,7 @@ mod tests {
         idx.index_message(
             "Let me analyze the database schema.",
             "session-2",
+            "msg-2",
             "DB Analysis",
             "assistant",
             "2025-01-02T00:00:00Z",
@@ -156,6 +161,7 @@ mod tests {
         idx.index_message(
             "How do I refactor the auth module?",
             "session-1",
+            "msg-1",
             "Auth Refactor",
             "user",
             "2025-01-01T00:00:00Z",

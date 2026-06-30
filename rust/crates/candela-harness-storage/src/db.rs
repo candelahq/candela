@@ -53,18 +53,19 @@ impl Database {
             );
 
             CREATE TABLE IF NOT EXISTS messages (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                id TEXT PRIMARY KEY,
                 session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
                 role TEXT NOT NULL,
                 content TEXT NOT NULL,
                 model TEXT,
                 token_count INTEGER,
                 cost_usd REAL,
-                created_at TEXT NOT NULL
+                created_at TEXT NOT NULL,
+                sequence INTEGER NOT NULL DEFAULT 0
             );
 
             CREATE INDEX IF NOT EXISTS idx_messages_session
-                ON messages(session_id, created_at);
+                ON messages(session_id, sequence);
         ",
             )
             .map_err(|e| HarnessError::Storage(e.to_string()))?;
@@ -154,29 +155,28 @@ impl Database {
     /// Uses a transaction to ensure atomicity between the message insert and
     /// session counter update. Verifies the target session exists and is not
     /// soft-deleted.
-    pub fn insert_message(&mut self, msg: &Message) -> Result<i64, HarnessError> {
+    pub fn insert_message(&mut self, msg: &Message) -> Result<String, HarnessError> {
         let tx = self
             .conn
             .transaction()
             .map_err(|e| HarnessError::Storage(e.to_string()))?;
 
         tx.execute(
-            "INSERT INTO messages (session_id, role, content, model, token_count, cost_usd, created_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            "INSERT INTO messages (id, session_id, role, content, model, token_count, cost_usd, created_at, sequence)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
             params![
+                msg.id,
                 msg.session_id,
-                serde_json::to_string(&msg.role)
-                    .unwrap_or_default()
-                    .trim_matches('"'),
+                format!("{}", msg.role).to_lowercase(),
                 msg.content,
                 msg.model,
                 msg.token_count,
                 msg.cost_usd,
                 msg.created_at.to_rfc3339(),
+                msg.sequence,
             ],
         )
         .map_err(|e| HarnessError::Storage(e.to_string()))?;
-        let id = tx.last_insert_rowid();
 
         // Update session counters — only for non-deleted sessions.
         let rows_updated = tx
@@ -198,7 +198,7 @@ impl Database {
         tx.commit()
             .map_err(|e| HarnessError::Storage(e.to_string()))?;
 
-        Ok(id)
+        Ok(msg.id.clone())
     }
 
     /// Get messages for a session.
@@ -206,10 +206,10 @@ impl Database {
         let mut stmt = self
             .conn
             .prepare(
-                "SELECT id, session_id, role, content, model, token_count, cost_usd, created_at
+                "SELECT id, session_id, role, content, model, token_count, cost_usd, created_at, sequence
              FROM messages
              WHERE session_id = ?1
-             ORDER BY created_at ASC
+             ORDER BY sequence ASC
              LIMIT ?2",
             )
             .map_err(|e| HarnessError::Storage(e.to_string()))?;
@@ -222,7 +222,7 @@ impl Database {
                     "assistant" => MessageRole::Assistant,
                     "system" => MessageRole::System,
                     "tool" => MessageRole::Tool,
-                    _ => MessageRole::User,
+                    _ => MessageRole::Unspecified,
                 };
                 Ok(Message {
                     id: row.get(0)?,
@@ -233,6 +233,7 @@ impl Database {
                     token_count: row.get(5)?,
                     cost_usd: row.get(6)?,
                     created_at: row.get::<_, DateTime<Utc>>(7)?,
+                    sequence: row.get(8)?,
                 })
             })
             .map_err(|e| HarnessError::Storage(e.to_string()))?
@@ -246,12 +247,12 @@ impl Database {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use candela_core::harness::Session;
+    use candela_core::harness::{new_message, new_session};
 
     #[test]
     fn test_create_and_list_sessions() {
         let db = Database::open_in_memory().unwrap();
-        let session = Session::new("gemini-2.0-flash", "device-1");
+        let session = new_session("gemini-2.0-flash", "device-1");
         db.create_session(&session).unwrap();
 
         let sessions = db.list_sessions(50, 0).unwrap();
@@ -263,7 +264,7 @@ mod tests {
     #[test]
     fn test_soft_delete_session() {
         let db = Database::open_in_memory().unwrap();
-        let session = Session::new("test-model", "device-1");
+        let session = new_session("test-model", "device-1");
         db.create_session(&session).unwrap();
 
         db.delete_session(&session.id).unwrap();
@@ -275,19 +276,10 @@ mod tests {
     #[test]
     fn test_insert_and_get_messages() {
         let mut db = Database::open_in_memory().unwrap();
-        let session = Session::new("test-model", "device-1");
+        let session = new_session("test-model", "device-1");
         db.create_session(&session).unwrap();
 
-        let msg = Message {
-            id: 0,
-            session_id: session.id.clone(),
-            role: MessageRole::User,
-            content: "Hello!".to_string(),
-            model: None,
-            token_count: Some(5),
-            cost_usd: Some(0.001),
-            created_at: chrono::Utc::now(),
-        };
+        let msg = new_message(&session.id, MessageRole::User, "Hello!");
         db.insert_message(&msg).unwrap();
 
         let messages = db.get_messages(&session.id, 50).unwrap();

@@ -451,6 +451,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "candela-types"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "rusqlite",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "cc"
 version = "1.2.61"
 source = "registry+https://github.com/rust-lang/crates.io-index"

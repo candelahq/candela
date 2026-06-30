@@ -30,25 +30,38 @@ impl SearchIndex {
     }
 
     fn init_schema(&self) -> Result<(), HarnessError> {
-        self.conn
-            .execute_batch(
-                "
-            CREATE VIRTUAL TABLE IF NOT EXISTS message_fts USING fts5(
-                content,
-                session_id UNINDEXED,
-                message_id UNINDEXED,
-                session_title UNINDEXED,
-                role UNINDEXED,
-                created_at UNINDEXED
-            );
-
-            -- Track soft-deleted sessions so we can exclude them from search.
-            CREATE TABLE IF NOT EXISTS deleted_sessions (
-                session_id TEXT PRIMARY KEY
-            );
-        ",
-            )
+        let version: i32 = self
+            .conn
+            .pragma_query_value(None, "user_version", |row| row.get(0))
             .map_err(|e| HarnessError::Storage(e.to_string()))?;
+
+        if version < 1 {
+            // Drop and recreate to ensure message_id column exists.
+            self.conn
+                .execute_batch(
+                    "
+                DROP TABLE IF EXISTS message_fts;
+                DROP TABLE IF EXISTS deleted_sessions;
+
+                CREATE VIRTUAL TABLE message_fts USING fts5(
+                    content,
+                    session_id UNINDEXED,
+                    message_id UNINDEXED,
+                    session_title UNINDEXED,
+                    role UNINDEXED,
+                    created_at UNINDEXED
+                );
+
+                CREATE TABLE deleted_sessions (
+                    session_id TEXT PRIMARY KEY
+                );
+
+                PRAGMA user_version = 1;
+            ",
+                )
+                .map_err(|e| HarnessError::Storage(e.to_string()))?;
+        }
+
         Ok(())
     }
 
@@ -153,6 +166,7 @@ mod tests {
         let results = idx.search("refactor auth", 10).unwrap();
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].session_id, "session-1");
+        assert_eq!(results[0].message_id, "msg-1");
     }
 
     #[test]

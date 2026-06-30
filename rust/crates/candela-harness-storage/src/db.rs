@@ -58,39 +58,53 @@ impl Database {
     }
 
     fn init_schema(&self) -> Result<(), HarnessError> {
-        self.conn
-            .execute_batch(
-                "
-            CREATE TABLE IF NOT EXISTS sessions (
-                id TEXT PRIMARY KEY,
-                title TEXT NOT NULL DEFAULT 'New Chat',
-                model TEXT NOT NULL DEFAULT '',
-                message_count INTEGER NOT NULL DEFAULT 0,
-                total_tokens INTEGER NOT NULL DEFAULT 0,
-                total_cost_usd REAL NOT NULL DEFAULT 0.0,
-                device_id TEXT NOT NULL DEFAULT '',
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL,
-                deleted_at TEXT
-            );
-
-            CREATE TABLE IF NOT EXISTS messages (
-                id TEXT PRIMARY KEY,
-                session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
-                role TEXT NOT NULL,
-                content TEXT NOT NULL,
-                model TEXT,
-                token_count INTEGER,
-                cost_usd REAL,
-                created_at TEXT NOT NULL,
-                sequence INTEGER NOT NULL DEFAULT 0
-            );
-
-            CREATE INDEX IF NOT EXISTS idx_messages_session
-                ON messages(session_id, sequence);
-        ",
-            )
+        let version: i32 = self
+            .conn
+            .pragma_query_value(None, "user_version", |row| row.get(0))
             .map_err(|e| HarnessError::Storage(e.to_string()))?;
+
+        if version < 1 {
+            self.conn
+                .execute_batch(
+                    "
+                -- Drop legacy tables if they exist (pre-v1 schema).
+                DROP TABLE IF EXISTS messages;
+                DROP TABLE IF EXISTS sessions;
+
+                CREATE TABLE sessions (
+                    id TEXT PRIMARY KEY,
+                    title TEXT NOT NULL DEFAULT 'New Chat',
+                    model TEXT NOT NULL DEFAULT '',
+                    message_count INTEGER NOT NULL DEFAULT 0,
+                    total_tokens INTEGER NOT NULL DEFAULT 0,
+                    total_cost_usd REAL NOT NULL DEFAULT 0.0,
+                    device_id TEXT NOT NULL DEFAULT '',
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    deleted_at TEXT
+                );
+
+                CREATE TABLE messages (
+                    id TEXT PRIMARY KEY,
+                    session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+                    role TEXT NOT NULL,
+                    content TEXT NOT NULL,
+                    model TEXT,
+                    token_count INTEGER,
+                    cost_usd REAL,
+                    created_at TEXT NOT NULL,
+                    sequence INTEGER NOT NULL DEFAULT 0
+                );
+
+                CREATE INDEX idx_messages_session
+                    ON messages(session_id, sequence);
+
+                PRAGMA user_version = 1;
+            ",
+                )
+                .map_err(|e| HarnessError::Storage(e.to_string()))?;
+        }
+
         Ok(())
     }
 
@@ -183,6 +197,15 @@ impl Database {
             .transaction()
             .map_err(|e| HarnessError::Storage(e.to_string()))?;
 
+        // Auto-assign sequence: next value for this session.
+        let next_seq: i64 = tx
+            .query_row(
+                "SELECT COALESCE(MAX(sequence), 0) + 1 FROM messages WHERE session_id = ?1",
+                params![msg.session_id],
+                |row| row.get(0),
+            )
+            .map_err(|e| HarnessError::Storage(e.to_string()))?;
+
         tx.execute(
             "INSERT INTO messages (id, session_id, role, content, model, token_count, cost_usd, created_at, sequence)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
@@ -195,7 +218,7 @@ impl Database {
                 msg.token_count,
                 msg.cost_usd,
                 msg.created_at.to_rfc3339(),
-                msg.sequence,
+                next_seq,
             ],
         )
         .map_err(|e| HarnessError::Storage(e.to_string()))?;

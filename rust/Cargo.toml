@@ -52,7 +52,10 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["json", "env-filter"] }
 
 # HTTP client (OTLP export, upstream proxying)
-reqwest = { version = "0.12", default-features = false, features = ["gzip", "json", "rustls-tls"] }
+reqwest = { version = "0.12", default-features = false, features = ["gzip", "json", "rustls-tls", "stream"] }
+futures-core = "0.3"
+tokio-stream = "0.1"
+pin-project-lite = "0.2"
 
 # TLS (MITM transparent proxy)
 rustls = "0.23"
@@ -75,7 +78,7 @@ tokio-test = "0.4"
 
 # Harness deps
 rusqlite = { version = "0.35", features = ["bundled", "chrono"] }
-clap = { version = "4", features = ["derive"] }
+clap = { version = "4", features = ["derive", "env"] }
 dirs = "6"
 
 # Workspace crates

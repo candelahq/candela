@@ -64,7 +64,19 @@ impl ChatRuntime {
             agent: None,
         });
 
-        // 2. Store user message
+        // 2. Budget check — reject before incurring cost
+        let budget_limit = self.config.budget_limit_usd;
+        if budget_limit > 0.0 {
+            let session = self.db.lock().unwrap().get_session(session_id)?;
+            if session.total_cost_usd >= budget_limit {
+                return Err(HarnessError::BudgetExceeded {
+                    used: session.total_cost_usd,
+                    limit: budget_limit,
+                });
+            }
+        }
+
+        // 3. Store user message
         let user_msg = new_message(session_id, MessageRole::User, content);
         self.db.lock().unwrap().insert_message(&user_msg)?;
 

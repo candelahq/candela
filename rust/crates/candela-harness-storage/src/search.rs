@@ -135,6 +135,58 @@ impl SearchIndex {
 
         Ok(results)
     }
+
+    /// Update the session title in all FTS rows for a given session.
+    ///
+    /// FTS5 doesn't support UPDATE directly, so we use DELETE + re-INSERT
+    /// by reading existing rows, deleting them, and re-inserting with the new title.
+    pub fn update_session_title(
+        &self,
+        session_id: &str,
+        new_title: &str,
+    ) -> Result<(), HarnessError> {
+        // Read existing rows for this session
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT content, session_id, message_id, session_title, role, created_at, rowid
+                 FROM message_fts
+                 WHERE session_id = ?1",
+            )
+            .map_err(|e| HarnessError::Storage(e.to_string()))?;
+
+        let rows: Vec<(String, String, String, String, String, String, i64)> = stmt
+            .query_map(params![session_id], |row| {
+                Ok((
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                    row.get(5)?,
+                    row.get(6)?,
+                ))
+            })
+            .map_err(|e| HarnessError::Storage(e.to_string()))?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| HarnessError::Storage(e.to_string()))?;
+
+        // Delete old rows and re-insert with new title
+        for (content, sid, mid, _old_title, role, created_at, rowid) in &rows {
+            self.conn
+                .execute("DELETE FROM message_fts WHERE rowid = ?1", params![rowid])
+                .map_err(|e| HarnessError::Storage(e.to_string()))?;
+
+            self.conn
+                .execute(
+                    "INSERT INTO message_fts (content, session_id, message_id, session_title, role, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                    params![content, sid, mid, new_title, role, created_at],
+                )
+                .map_err(|e| HarnessError::Storage(e.to_string()))?;
+        }
+
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -234,5 +286,44 @@ mod tests {
             "expected negative score from FTS5 rank, got {}",
             results[0].score
         );
+    }
+
+    #[test]
+    fn test_update_session_title_propagates_to_search() {
+        let idx = SearchIndex::open_in_memory().unwrap();
+
+        // Index two messages in the same session with old title
+        idx.index_message(
+            "hello world",
+            "s1",
+            "m1",
+            "Old Title",
+            "user",
+            "2025-01-01T00:00:00Z",
+        )
+        .unwrap();
+        idx.index_message(
+            "goodbye world",
+            "s1",
+            "m2",
+            "Old Title",
+            "assistant",
+            "2025-01-01T00:01:00Z",
+        )
+        .unwrap();
+
+        // Verify old title
+        let results = idx.search("hello", 10).unwrap();
+        assert_eq!(results[0].session_title, "Old Title");
+
+        // Update session title
+        idx.update_session_title("s1", "New Title").unwrap();
+
+        // Verify both messages have new title
+        let results = idx.search("hello", 10).unwrap();
+        assert_eq!(results[0].session_title, "New Title");
+
+        let results = idx.search("goodbye", 10).unwrap();
+        assert_eq!(results[0].session_title, "New Title");
     }
 }

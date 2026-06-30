@@ -91,7 +91,7 @@ impl ModelClient {
 }
 
 /// Resolve an API key from environment variables.
-fn resolve_api_key() -> Option<String> {
+pub(crate) fn resolve_api_key() -> Option<String> {
     std::env::var("CANDELA_API_KEY")
         .or_else(|_| std::env::var("GEMINI_API_KEY"))
         .or_else(|_| std::env::var("OPENAI_API_KEY"))

@@ -699,6 +699,99 @@ func TestUserHandler_ListUsers(t *testing.T) {
 	}
 }
 
+// TestUserHandler_ListUsers_BrokenTotalBreaksPagination is a regression test
+// for the count fallback bug fixed in PR #456. It demonstrates that when the
+// store returns total=0 (simulating Firestore aggregation failure without the
+// fallback fix), the handler produces no nextPageToken and reports 0 total —
+// breaking pagination for the client.
+func TestUserHandler_ListUsers_BrokenTotalBreaksPagination(t *testing.T) {
+	store := &brokenCountStore{
+		mockUserStore: newMockUserStore(),
+		reportTotal:   0, // simulate broken aggregation
+	}
+	handler := NewUserHandler(store, 0)
+	ctx := authedCtx("admin@example.com")
+
+	// Create 5 users.
+	for i := range 5 {
+		if _, err := handler.CreateUser(ctx, connect.NewRequest(&v1.CreateUserRequest{
+			Email: fmt.Sprintf("user%d@broken.com", i),
+		})); err != nil {
+			t.Fatalf("CreateUser[%d]: %v", i, err)
+		}
+	}
+
+	// Request page of size 2 — with total=0 from store, handler can't
+	// compute nextPageToken (offset+limit < total is 2 < 0 = false).
+	resp, err := handler.ListUsers(ctx, connect.NewRequest(&v1.ListUsersRequest{
+		Pagination: &typespb.PaginationRequest{PageSize: 2},
+	}))
+	if err != nil {
+		t.Fatalf("ListUsers: %v", err)
+	}
+	if len(resp.Msg.Users) != 2 {
+		t.Errorf("got %d users, want 2", len(resp.Msg.Users))
+	}
+	// With broken total=0, pagination metadata is wrong:
+	if resp.Msg.Pagination.TotalCount != 0 {
+		t.Errorf("total = %d, want 0 (broken store)", resp.Msg.Pagination.TotalCount)
+	}
+	if resp.Msg.Pagination.NextPageToken != "" {
+		t.Errorf("next_page_token = %q, want empty (broken total suppresses pagination)", resp.Msg.Pagination.NextPageToken)
+	}
+}
+
+// TestUserHandler_ListUsers_CorrectTotalEnablesPagination verifies that when
+// the store returns the correct total, pagination works as expected.
+func TestUserHandler_ListUsers_CorrectTotalEnablesPagination(t *testing.T) {
+	store := &brokenCountStore{
+		mockUserStore: newMockUserStore(),
+		reportTotal:   -1, // -1 = use real total
+	}
+	handler := NewUserHandler(store, 0)
+	ctx := authedCtx("admin@example.com")
+
+	// Create 5 users.
+	for i := range 5 {
+		if _, err := handler.CreateUser(ctx, connect.NewRequest(&v1.CreateUserRequest{
+			Email: fmt.Sprintf("user%d@fixed.com", i),
+		})); err != nil {
+			t.Fatalf("CreateUser[%d]: %v", i, err)
+		}
+	}
+
+	resp, err := handler.ListUsers(ctx, connect.NewRequest(&v1.ListUsersRequest{
+		Pagination: &typespb.PaginationRequest{PageSize: 2},
+	}))
+	if err != nil {
+		t.Fatalf("ListUsers: %v", err)
+	}
+	if resp.Msg.Pagination.TotalCount != 5 {
+		t.Errorf("total = %d, want 5", resp.Msg.Pagination.TotalCount)
+	}
+	if resp.Msg.Pagination.NextPageToken == "" {
+		t.Error("expected next_page_token when more pages exist")
+	}
+}
+
+// brokenCountStore wraps mockUserStore but overrides the total returned by
+// ListUsers to simulate Firestore aggregation failures.
+type brokenCountStore struct {
+	*mockUserStore
+	reportTotal int // total to return; -1 means use real total
+}
+
+func (s *brokenCountStore) ListUsers(ctx context.Context, statusFilter string, limit, offset int) ([]*storage.UserRecord, int, error) {
+	users, realTotal, err := s.mockUserStore.ListUsers(ctx, statusFilter, limit, offset)
+	if err != nil {
+		return nil, 0, err
+	}
+	if s.reportTotal >= 0 {
+		return users, s.reportTotal, nil
+	}
+	return users, realTotal, nil
+}
+
 func TestUserHandler_ListUsers_LastActiveAtMapping(t *testing.T) {
 	store := newMockUserStore()
 	handler := NewUserHandler(store, 0)

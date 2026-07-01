@@ -87,14 +87,11 @@ async fn main() -> anyhow::Result<()> {
     let search = SearchIndex::open(&search_path)?;
     let search = Arc::new(std::sync::Mutex::new(search));
 
-    // Create notification channel for streaming events
+    // Create notification channel for streaming events (used by stdio mode)
     let (notify_tx, notify_rx) = mpsc::unbounded_channel::<JsonRpcNotification>();
 
     // Create chat runtime
-    let chat = Arc::new(ChatRuntime::new(config.clone(), db.clone(), search));
-
-    // Create RPC handler
-    let handler = RpcHandler::new(db, chat, notify_tx, config.model.clone());
+    let chat = Arc::new(ChatRuntime::new(config.clone(), db.clone(), search.clone()));
 
     info!(
         transport = ?config.transport,
@@ -105,10 +102,14 @@ async fn main() -> anyhow::Result<()> {
     );
 
     match config.transport {
-        TransportMode::Stdio => serve_stdio(handler, notify_rx).await?,
+        TransportMode::Stdio => {
+            let handler = RpcHandler::new(db, chat, notify_tx, config.model.clone());
+            serve_stdio(handler, notify_rx).await?;
+        }
         TransportMode::Http => {
-            // TODO: Axum HTTP server
-            anyhow::bail!("HTTP transport is not yet implemented");
+            candela_harness_connect::server::serve(config.http_port, chat, db, search)
+                .await
+                .map_err(|e| anyhow::anyhow!("ConnectRPC server error: {e}"))?;
         }
     }
 

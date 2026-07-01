@@ -1,0 +1,44 @@
+[package]
+name = "candela-harness-connect"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+# ConnectRPC
+connectrpc = { version = "0.7", features = ["axum"] }
+buffa = { version = "0.7", features = ["json"] }
+buffa-types = { version = "0.7", features = ["json"] }
+async-stream = "0.3"
+http-body = "1"
+
+# HTTP framework
+axum = { workspace = true }
+tower = { workspace = true }
+tower-http = { workspace = true }
+hyper = { workspace = true }
+
+# Async
+tokio = { workspace = true }
+tokio-stream = { workspace = true }
+futures-core = { workspace = true }
+
+# Serialization
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# Observability
+tracing = { workspace = true }
+
+# Time
+chrono = { workspace = true }
+
+# Workspace crates
+candela-core = { workspace = true }
+candela-harness-chat = { workspace = true }
+candela-harness-storage = { workspace = true }
+
+[build-dependencies]
+connectrpc-build = "0.7"
+anyhow = { workspace = true }

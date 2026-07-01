@@ -14,6 +14,7 @@ candela-harness-storage = { workspace = true }
 candela-harness-chat = { workspace = true }
 candela-harness-mcp = { workspace = true }
 candela-harness-rpc = { workspace = true }
+candela-harness-connect = { workspace = true }
 tokio = { workspace = true }
 clap = { workspace = true }
 tracing = { workspace = true }

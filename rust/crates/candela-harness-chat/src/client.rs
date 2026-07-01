@@ -338,8 +338,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_sse_stream_skips_empty_delta() {
-        use tokio_stream::iter;
-
         // Role-only chunk (no content field) should be skipped
         let sse_data = "data: {\"choices\":[{\"delta\":{\"role\":\"assistant\"}}]}\n\n\
                         data: {\"choices\":[{\"delta\":{\"content\":\"Hi\"}}]}\n\n\

@@ -11,6 +11,18 @@ use tracing::info;
 use crate::proto::candela::harness::v1::HarnessServiceExt;
 use crate::service::HarnessServiceImpl;
 
+/// Build the ConnectRPC router without starting a server.
+///
+/// Useful for testing or embedding in a custom Axum app.
+pub fn build_router(
+    chat: Arc<ChatRuntime>,
+    db: Arc<Mutex<Database>>,
+    search: Arc<Mutex<SearchIndex>>,
+) -> connectrpc::Router {
+    let service = Arc::new(HarnessServiceImpl { chat, db, search });
+    service.register(connectrpc::Router::new())
+}
+
 /// Start the ConnectRPC server.
 ///
 /// Serves Connect, gRPC, and gRPC-Web protocols on the given port.
@@ -20,10 +32,7 @@ pub async fn serve(
     db: Arc<Mutex<Database>>,
     search: Arc<Mutex<SearchIndex>>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let service = Arc::new(HarnessServiceImpl { chat, db, search });
-
-    // Register the service with a ConnectRPC router, then convert to Axum
-    let connect_router = service.register(connectrpc::Router::new());
+    let connect_router = build_router(chat, db, search);
 
     let app = axum::Router::new()
         .merge(connect_router.into_axum_router())

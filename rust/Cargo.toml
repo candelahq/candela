@@ -11,6 +11,7 @@ members = [
     "crates/candela-harness-chat",
     "crates/candela-harness-mcp",
     "crates/candela-harness-rpc",
+    "crates/candela-harness-connect",
     "bins/candela-proxy",
     "bins/candela-sidecar",
     "bins/candela-harness",
@@ -56,6 +57,7 @@ reqwest = { version = "0.12", default-features = false, features = ["gzip", "jso
 futures-core = "0.3"
 tokio-stream = "0.1"
 pin-project-lite = "0.2"
+async-stream = "0.3"
 
 # TLS (MITM transparent proxy)
 rustls = "0.23"
@@ -91,6 +93,7 @@ candela-harness-storage = { path = "crates/candela-harness-storage" }
 candela-harness-chat = { path = "crates/candela-harness-chat" }
 candela-harness-mcp = { path = "crates/candela-harness-mcp" }
 candela-harness-rpc = { path = "crates/candela-harness-rpc" }
+candela-harness-connect = { path = "crates/candela-harness-connect" }
 candela-types = { path = "crates/candela-types" }
 
 [profile.release]

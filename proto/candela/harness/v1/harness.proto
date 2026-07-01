@@ -1,0 +1,144 @@
+syntax = "proto3";
+package candela.harness.v1;
+
+import "google/protobuf/timestamp.proto";
+
+option java_package = "com.candelahq.harness.v1";
+option go_package = "github.com/candelahq/candela/gen/go/candela/harness/v1;harnessv1";
+
+// HarnessService is the IDE sidecar RPC service.
+// Supports Connect, gRPC, and gRPC-Web protocols simultaneously.
+service HarnessService {
+  // SendMessage streams chat completion events (server-streaming).
+  rpc SendMessage(SendMessageRequest) returns (stream ChatEvent);
+
+  // Session CRUD (unary).
+  rpc ListSessions(ListSessionsRequest) returns (ListSessionsResponse);
+  rpc CreateSession(CreateSessionRequest) returns (Session);
+  rpc GetSession(GetSessionRequest) returns (Session);
+  rpc DeleteSession(DeleteSessionRequest) returns (DeleteSessionResponse);
+  rpc EditSessionTitle(EditSessionTitleRequest) returns (Session);
+
+  // Search (unary).
+  rpc SearchMessages(SearchMessagesRequest) returns (SearchMessagesResponse);
+
+  // Health (unary).
+  rpc Health(HealthRequest) returns (HealthResponse);
+}
+
+// ── Messages ──
+
+message Session {
+  string id = 1;
+  string title = 2;
+  string model = 3;
+  int32 message_count = 4;
+  int64 total_tokens = 5;
+  optional double total_cost_usd = 6;
+  string device_id = 7;
+  google.protobuf.Timestamp created_at = 8;
+  google.protobuf.Timestamp updated_at = 9;
+  optional google.protobuf.Timestamp deleted_at = 10;
+}
+
+// ── Chat ──
+
+message SendMessageRequest {
+  string session_id = 1;
+  string content = 2;
+}
+
+message ChatEvent {
+  oneof event {
+    ChunkEvent chunk = 1;
+    DoneEvent done = 2;
+    ErrorEvent error = 3;
+    StatusEvent status = 4;
+    ToolCallEvent tool_call = 5;
+  }
+}
+
+message ChunkEvent {
+  string content = 1;
+}
+
+message DoneEvent {
+  string message_id = 1;
+}
+
+message ErrorEvent {
+  string message = 1;
+  int32 code = 2;
+}
+
+message StatusEvent {
+  string status = 1;
+}
+
+message ToolCallEvent {
+  string name = 1;
+  string arguments = 2;
+  string id = 3;
+}
+
+// ── Session CRUD ──
+
+message ListSessionsRequest {
+  int32 limit = 1;
+  int32 offset = 2;
+}
+
+message ListSessionsResponse {
+  repeated Session sessions = 1;
+  int32 total = 2;
+}
+
+message GetSessionRequest {
+  string session_id = 1;
+}
+
+message CreateSessionRequest {
+  string model = 1;
+  string device_id = 2;
+}
+
+message DeleteSessionRequest {
+  string session_id = 1;
+}
+
+message DeleteSessionResponse {}
+
+message EditSessionTitleRequest {
+  string session_id = 1;
+  string title = 2;
+}
+
+// ── Search ──
+
+message SearchMessagesRequest {
+  string query = 1;
+  int32 limit = 2;
+}
+
+message SearchResult {
+  string message_preview = 1;
+  string session_id = 2;
+  string message_id = 3;
+  string session_title = 4;
+  string role = 5;
+  google.protobuf.Timestamp created_at = 6;
+  double score = 7;
+}
+
+message SearchMessagesResponse {
+  repeated SearchResult results = 1;
+}
+
+// ── Health ──
+
+message HealthRequest {}
+
+message HealthResponse {
+  string status = 1;
+  string version = 2;
+}

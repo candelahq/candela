@@ -427,6 +427,7 @@ dependencies = [
  "futures-core",
  "http-body",
  "hyper",
+ "reqwest",
  "serde",
  "serde_json",
  "tokio",

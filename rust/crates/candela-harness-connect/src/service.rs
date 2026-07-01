@@ -63,7 +63,7 @@ impl HarnessService for HarnessServiceImpl {
                     err.code = 500;
                     let mut ce = ChatEvent::default();
                     ce.event = Some(__buffa::oneof::chat_event::Event::Error(Box::new(err)));
-                    let _ = tx_err.try_send(ce);
+                    let _ = tx_err.send(ce).await;
                 }
             });
 
@@ -165,8 +165,10 @@ impl HarnessService for HarnessServiceImpl {
                 .db
                 .lock()
                 .map_err(|e| ConnectError::internal(format!("lock failed: {e}")))?;
-            db.delete_session(&session_id)
-                .map_err(|e| ConnectError::internal(e.to_string()))?;
+            db.delete_session(&session_id).map_err(|e| match e {
+                HarnessError::SessionNotFound(msg) => ConnectError::not_found(msg),
+                other => ConnectError::internal(other.to_string()),
+            })?;
 
             Ok(Response::new(DeleteSessionResponse::default()))
         }
@@ -188,10 +190,14 @@ impl HarnessService for HarnessServiceImpl {
                 .lock()
                 .map_err(|e| ConnectError::internal(format!("lock failed: {e}")))?;
             db.update_session_title(&session_id, &title)
-                .map_err(|e| ConnectError::internal(e.to_string()))?;
-            let session = db
-                .get_session(&session_id)
-                .map_err(|e| ConnectError::internal(e.to_string()))?;
+                .map_err(|e| match e {
+                    HarnessError::SessionNotFound(msg) => ConnectError::not_found(msg),
+                    other => ConnectError::internal(other.to_string()),
+                })?;
+            let session = db.get_session(&session_id).map_err(|e| match e {
+                HarnessError::SessionNotFound(msg) => ConnectError::not_found(msg),
+                other => ConnectError::internal(other.to_string()),
+            })?;
 
             Ok(Response::new(domain_session_to_proto(&session)))
         }

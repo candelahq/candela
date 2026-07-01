@@ -7,7 +7,7 @@
 use std::sync::{Arc, Mutex};
 
 use buffa::MessageField;
-use candela_core::harness::{self, ChatEvent as DomainChatEvent, new_session};
+use candela_core::harness::{self, ChatEvent as DomainChatEvent, HarnessError, new_session};
 use candela_harness_chat::ChatRuntime;
 use candela_harness_storage::{Database, SearchIndex};
 use connectrpc::{
@@ -42,14 +42,14 @@ impl HarnessService for HarnessServiceImpl {
         let chat = self.chat.clone();
 
         async move {
-            let (tx, rx) = tokio::sync::mpsc::channel::<ChatEvent>(32);
+            let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<ChatEvent>();
 
             tokio::spawn(async move {
                 let tx_err = tx.clone();
                 let result = chat
                     .send_message(&session_id, &content, move |event| {
                         let proto_event = domain_chat_event_to_proto(&event);
-                        let _ = tx.blocking_send(proto_event);
+                        let _ = tx.send(proto_event);
                     })
                     .await;
 
@@ -60,12 +60,12 @@ impl HarnessService for HarnessServiceImpl {
                     err.code = 500;
                     let mut ce = ChatEvent::default();
                     ce.event = Some(__buffa::oneof::chat_event::Event::Error(Box::new(err)));
-                    let _ = tx_err.send(ce).await;
+                    let _ = tx_err.send(ce);
                 }
             });
 
             use tokio_stream::StreamExt;
-            let stream = tokio_stream::wrappers::ReceiverStream::new(rx).map(Ok);
+            let stream = tokio_stream::wrappers::UnboundedReceiverStream::new(rx).map(Ok);
             Ok(Response::new(Box::pin(stream) as ServiceStream<_>))
         }
     }
@@ -77,8 +77,8 @@ impl HarnessService for HarnessServiceImpl {
     ) -> impl std::future::Future<
         Output = ServiceResult<impl connectrpc::Encodable<ListSessionsResponse> + Send + use<'a>>,
     > + Send {
-        let limit = request.limit as i64;
-        let offset = request.offset as i64;
+        let limit = request.limit.max(0) as i64;
+        let offset = request.offset.max(0) as i64;
 
         async move {
             let db = self
@@ -91,6 +91,8 @@ impl HarnessService for HarnessServiceImpl {
 
             let proto_sessions: Vec<Session> =
                 sessions.iter().map(domain_session_to_proto).collect();
+            // TODO: Add db.count_sessions() for accurate total across all pages.
+            // For now, this returns the count of the current page only.
             let total = proto_sessions.len() as i32;
 
             let mut resp = ListSessionsResponse::default();
@@ -138,10 +140,10 @@ impl HarnessService for HarnessServiceImpl {
                 .db
                 .lock()
                 .map_err(|e| ConnectError::internal(format!("lock failed: {e}")))?;
-            let session = db
-                .get_session(&session_id)
-                .map_err(|e| ConnectError::not_found(e.to_string()))?;
-
+            let session = db.get_session(&session_id).map_err(|e| match e {
+                HarnessError::SessionNotFound(msg) => ConnectError::not_found(msg),
+                other => ConnectError::internal(other.to_string()),
+            })?;
             Ok(Response::new(domain_session_to_proto(&session)))
         }
     }
@@ -200,7 +202,7 @@ impl HarnessService for HarnessServiceImpl {
         Output = ServiceResult<impl connectrpc::Encodable<SearchMessagesResponse> + Send + use<'a>>,
     > + Send {
         let query = request.query.to_string();
-        let limit = request.limit as i64;
+        let limit = request.limit.max(0) as i64;
 
         async move {
             let search = self

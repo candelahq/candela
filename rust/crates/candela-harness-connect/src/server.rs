@@ -30,7 +30,7 @@ pub async fn serve(
         .layer(CorsLayer::permissive())
         .layer(TraceLayer::new_for_http());
 
-    let addr = format!("0.0.0.0:{port}");
+    let addr = format!("127.0.0.1:{port}");
     let listener = tokio::net::TcpListener::bind(&addr).await?;
     info!(addr = %addr, "harness ConnectRPC server started");
 

@@ -3,7 +3,7 @@
 //! Serves Connect, gRPC, and gRPC-Web protocols on a single port.
 
 pub mod proto {
-    include!(concat!(env!("OUT_DIR"), "/_connectrpc.rs"));
+    connectrpc::include_generated!();
 }
 
 pub mod server;

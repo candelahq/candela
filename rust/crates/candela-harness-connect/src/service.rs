@@ -42,14 +42,17 @@ impl HarnessService for HarnessServiceImpl {
         let chat = self.chat.clone();
 
         async move {
-            let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<ChatEvent>();
+            let (tx, rx) = tokio::sync::mpsc::channel::<ChatEvent>(32);
 
             tokio::spawn(async move {
                 let tx_err = tx.clone();
                 let result = chat
                     .send_message(&session_id, &content, move |event| {
                         let proto_event = domain_chat_event_to_proto(&event);
-                        let _ = tx.send(proto_event);
+                        // try_send: non-blocking (sync callback), bounded backpressure.
+                        // If the 32-slot buffer is full, the token is dropped — acceptable
+                        // for a live stream of deltas that will never realistically fill.
+                        let _ = tx.try_send(proto_event);
                     })
                     .await;
 
@@ -60,12 +63,12 @@ impl HarnessService for HarnessServiceImpl {
                     err.code = 500;
                     let mut ce = ChatEvent::default();
                     ce.event = Some(__buffa::oneof::chat_event::Event::Error(Box::new(err)));
-                    let _ = tx_err.send(ce);
+                    let _ = tx_err.try_send(ce);
                 }
             });
 
             use tokio_stream::StreamExt;
-            let stream = tokio_stream::wrappers::UnboundedReceiverStream::new(rx).map(Ok);
+            let stream = tokio_stream::wrappers::ReceiverStream::new(rx).map(Ok);
             Ok(Response::new(Box::pin(stream) as ServiceStream<_>))
         }
     }

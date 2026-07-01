@@ -67,6 +67,18 @@ pub struct HarnessConfig {
     pub transport: TransportMode,
     /// HTTP port (for daemon mode).
     pub http_port: u16,
+    /// Model for auto-generating session titles.
+    /// Some("truncate") (default) = first ~80 chars, word-boundary aware.
+    /// Some("keywords") = local keyword extraction, no API call.
+    /// Some("auto") = resolve cheapest model at runtime via models.list API.
+    /// Some("model-name") = use a specific model for LLM summarization.
+    /// None = disabled, no auto-titling.
+    #[serde(default = "default_auto_title_model")]
+    pub auto_title_model: Option<String>,
+}
+
+fn default_auto_title_model() -> Option<String> {
+    Some("truncate".to_string())
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -88,6 +100,7 @@ impl Default for HarnessConfig {
             enable_subagents: true,
             transport: TransportMode::Stdio,
             http_port: 8200,
+            auto_title_model: Some("truncate".to_string()),
         }
     }
 }
@@ -261,5 +274,46 @@ mod tests {
         assert_eq!(msg.sequence, 0);
         // cost_usd should be None.
         assert_eq!(msg.cost_usd, None);
+    }
+
+    #[test]
+    fn test_serde_missing_auto_title_model_defaults_to_truncate() {
+        // Configs from older versions won't have auto_title_model.
+        // The serde default should fill in Some("truncate"), not None.
+        let json = r#"{
+            "save_dir": ".candela/sessions",
+            "model": "gemini-2.0-flash",
+            "budget_limit_usd": 5.0,
+            "device_id": "",
+            "enable_subagents": true,
+            "transport": "stdio",
+            "http_port": 8200
+        }"#;
+        let config: HarnessConfig = serde_json::from_str(json).unwrap();
+        assert_eq!(
+            config.auto_title_model,
+            Some("truncate".to_string()),
+            "missing auto_title_model should default to Some(\"truncate\")"
+        );
+    }
+
+    #[test]
+    fn test_serde_explicit_none_auto_title_model() {
+        // Explicitly set to null = disabled.
+        let json = r#"{
+            "save_dir": ".candela/sessions",
+            "model": "gemini-2.0-flash",
+            "budget_limit_usd": 5.0,
+            "device_id": "",
+            "enable_subagents": true,
+            "transport": "stdio",
+            "http_port": 8200,
+            "auto_title_model": null
+        }"#;
+        let config: HarnessConfig = serde_json::from_str(json).unwrap();
+        assert_eq!(
+            config.auto_title_model, None,
+            "explicit null should disable auto-titling"
+        );
     }
 }

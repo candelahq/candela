@@ -199,6 +199,22 @@ impl Database {
             })
     }
 
+    /// Update a session's title.
+    pub fn update_session_title(&self, id: &str, title: &str) -> Result<(), HarnessError> {
+        let now = chrono::Utc::now().to_rfc3339();
+        let rows = self
+            .conn
+            .execute(
+                "UPDATE sessions SET title = ?1, updated_at = ?2 WHERE id = ?3 AND deleted_at IS NULL",
+                params![title, now, id],
+            )
+            .map_err(|e| HarnessError::Storage(e.to_string()))?;
+        if rows == 0 {
+            return Err(HarnessError::SessionNotFound(id.to_string()));
+        }
+        Ok(())
+    }
+
     /// Soft-delete a session.
     pub fn delete_session(&self, id: &str) -> Result<(), HarnessError> {
         let now = chrono::Utc::now().to_rfc3339();
@@ -497,5 +513,64 @@ mod tests {
         // Soft-deleted session should not be found
         let err = db.get_session(&session.id).unwrap_err();
         assert!(matches!(err, HarnessError::SessionNotFound(_)));
+    }
+
+    #[test]
+    fn test_update_session_title() {
+        let db = Database::open_in_memory().unwrap();
+        let session = new_session("test-model", "device-1");
+        db.create_session(&session).unwrap();
+
+        db.update_session_title(&session.id, "My Cool Chat")
+            .unwrap();
+
+        let updated = db.get_session(&session.id).unwrap();
+        assert_eq!(updated.title, "My Cool Chat");
+    }
+
+    #[test]
+    fn test_update_session_title_not_found() {
+        let db = Database::open_in_memory().unwrap();
+        let err = db.update_session_title("nonexistent", "title").unwrap_err();
+        assert!(matches!(err, HarnessError::SessionNotFound(_)));
+    }
+
+    #[test]
+    fn test_update_session_title_bumps_updated_at() {
+        let db = Database::open_in_memory().unwrap();
+        let session = new_session("test-model", "device-1");
+        db.create_session(&session).unwrap();
+
+        let before = db.get_session(&session.id).unwrap().updated_at;
+        // Small delay to ensure timestamp difference
+        std::thread::sleep(std::time::Duration::from_millis(10));
+
+        db.update_session_title(&session.id, "Updated Title")
+            .unwrap();
+
+        let after = db.get_session(&session.id).unwrap().updated_at;
+        assert!(
+            after > before,
+            "updated_at should advance: before={before}, after={after}"
+        );
+    }
+
+    #[test]
+    fn test_update_session_title_rejected_for_deleted_session() {
+        let db = Database::open_in_memory().unwrap();
+        let session = new_session("test-model", "device-1");
+        db.create_session(&session).unwrap();
+
+        // Soft-delete the session
+        db.delete_session(&session.id).unwrap();
+
+        // Updating title on a deleted session should fail
+        let err = db
+            .update_session_title(&session.id, "New Title")
+            .unwrap_err();
+        assert!(
+            matches!(err, HarnessError::SessionNotFound(_)),
+            "should reject title update on soft-deleted session"
+        );
     }
 }

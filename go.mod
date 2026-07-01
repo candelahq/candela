@@ -20,7 +20,7 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/prometheus/client_golang v1.23.2
 	github.com/prometheus/client_model v0.6.2
-	github.com/protocgen/proto2type v0.0.0-20260621191201-0ebb0b0376b2
+	github.com/protocgen/proto2type v0.3.0
 	github.com/stretchr/testify v1.11.1
 	go.opentelemetry.io/collector/component v1.54.0
 	go.opentelemetry.io/collector/consumer v1.54.0

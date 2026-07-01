@@ -12,7 +12,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file proto2type/options.proto.
  */
 export const file_proto2type_options: GenFile = /*@__PURE__*/
-  fileDesc("Chhwcm90bzJ0eXBlL29wdGlvbnMucHJvdG8SCnByb3RvMnR5cGUiHgoOTWVzc2FnZU9wdGlvbnMSDAoEc2tpcBgBIAEoCCKWAQoMRmllbGRPcHRpb25zEhMKC2RvY3VtZW50X2lkGAEgASgIEhgKEHNlcnZlcl90aW1lc3RhbXAYAiABKAgSDAoEbmFtZRgDIAEoCRIMCgRza2lwGAQgASgIEisKCW9taXRlbXB0eRgFIAEoDjIYLnByb3RvMnR5cGUuT3B0aW9uYWxCb29sEg4KBmlubGluZRgGIAEoCCpeCgxPcHRpb25hbEJvb2wSHQoZT1BUSU9OQUxfQk9PTF9VTlNQRUNJRklFRBAAEhYKEk9QVElPTkFMX0JPT0xfVFJVRRABEhcKE09QVElPTkFMX0JPT0xfRkFMU0UQAjpXCgdtZXNzYWdlEh8uZ29vZ2xlLnByb3RvYnVmLk1lc3NhZ2VPcHRpb25zGPS/BSABKAsyGi5wcm90bzJ0eXBlLk1lc3NhZ2VPcHRpb25zUgdtZXNzYWdlOk8KBWZpZWxkEh0uZ29vZ2xlLnByb3RvYnVmLkZpZWxkT3B0aW9ucxj0vwUgASgLMhgucHJvdG8ydHlwZS5GaWVsZE9wdGlvbnNSBWZpZWxkQpgBCg5jb20ucHJvdG8ydHlwZUIMT3B0aW9uc1Byb3RvUAFaMGdpdGh1Yi5jb20vcHJvdG9jZ2VuL3Byb3RvMnR5cGUvcHJvdG8vcHJvdG8ydHlwZaICA1BYWKoCClByb3RvMnR5cGXKAgpQcm90bzJ0eXBl4gIWUHJvdG8ydHlwZVxHUEJNZXRhZGF0YeoCClByb3RvMnR5cGViBnByb3RvMw", [file_google_protobuf_descriptor]);
+  fileDesc("Chhwcm90bzJ0eXBlL29wdGlvbnMucHJvdG8SCnByb3RvMnR5cGUiHgoOTWVzc2FnZU9wdGlvbnMSDAoEc2tpcBgBIAEoCCLIAQoMRmllbGRPcHRpb25zEhMKC2RvY3VtZW50X2lkGAEgASgIEhgKEHNlcnZlcl90aW1lc3RhbXAYAiABKAgSDAoEbmFtZRgDIAEoCRIMCgRza2lwGAQgASgIEisKCW9taXRlbXB0eRgFIAEoDjIYLnByb3RvMnR5cGUuT3B0aW9uYWxCb29sEg4KBmlubGluZRgGIAEoCBIwCg5lbnVtX2FzX3N0cmluZxgHIAEoDjIYLnByb3RvMnR5cGUuT3B0aW9uYWxCb29sKl4KDE9wdGlvbmFsQm9vbBIdChlPUFRJT05BTF9CT09MX1VOU1BFQ0lGSUVEEAASFgoST1BUSU9OQUxfQk9PTF9UUlVFEAESFwoTT1BUSU9OQUxfQk9PTF9GQUxTRRACOlYKB21lc3NhZ2USHy5nb29nbGUucHJvdG9idWYuTWVzc2FnZU9wdGlvbnMYmwogASgLMhoucHJvdG8ydHlwZS5NZXNzYWdlT3B0aW9uc1IHbWVzc2FnZTpOCgVmaWVsZBIdLmdvb2dsZS5wcm90b2J1Zi5GaWVsZE9wdGlvbnMYmwogASgLMhgucHJvdG8ydHlwZS5GaWVsZE9wdGlvbnNSBWZpZWxkQpgBCg5jb20ucHJvdG8ydHlwZUIMT3B0aW9uc1Byb3RvUAFaMGdpdGh1Yi5jb20vcHJvdG9jZ2VuL3Byb3RvMnR5cGUvcHJvdG8vcHJvdG8ydHlwZaICA1BYWKoCClByb3RvMnR5cGXKAgpQcm90bzJ0eXBl4gIWUHJvdG8ydHlwZVxHUEJNZXRhZGF0YeoCClByb3RvMnR5cGViBnByb3RvMw", [file_google_protobuf_descriptor]);
 
 /**
  * @generated from message proto2type.MessageOptions
@@ -80,6 +80,14 @@ export type FieldOptions = Message<"proto2type.FieldOptions"> & {
    * @generated from field: bool inline = 6;
    */
   inline: boolean;
+
+  /**
+   * Store this enum field as its string name instead of int32.
+   * Per-field override for the global enum_as_string plugin option.
+   *
+   * @generated from field: proto2type.OptionalBool enum_as_string = 7;
+   */
+  enumAsString: OptionalBool;
 };
 
 /**
@@ -116,13 +124,13 @@ export const OptionalBoolSchema: GenEnum<OptionalBool> = /*@__PURE__*/
   enumDesc(file_proto2type_options, 0);
 
 /**
- * @generated from extension: proto2type.MessageOptions message = 90100;
+ * @generated from extension: proto2type.MessageOptions message = 1307;
  */
 export const message: GenExtension<MessageOptions$1, MessageOptions> = /*@__PURE__*/
   extDesc(file_proto2type_options, 0);
 
 /**
- * @generated from extension: proto2type.FieldOptions field = 90100;
+ * @generated from extension: proto2type.FieldOptions field = 1307;
  */
 export const field: GenExtension<FieldOptions$1, FieldOptions> = /*@__PURE__*/
   extDesc(file_proto2type_options, 1);

@@ -437,9 +437,9 @@ func ApplyFieldMaskSpan(dst, src *Span, paths []string) {
 		case "duration":
 			dst.Duration = src.Duration
 		case "gen_ai":
-			dst.GenAi = src.GenAi
+			dst.GenAi = src.GenAi.Clone()
 		case "tool":
-			dst.Tool = src.Tool
+			dst.Tool = src.Tool.Clone()
 		case "attributes":
 			dst.Attributes = src.Attributes
 		case "project_id":

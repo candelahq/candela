@@ -50,7 +50,10 @@ async fn start_test_server() -> String {
 
 /// POST a Connect unary RPC and return the response body.
 async fn connect_post(base: &str, method: &str, body: &str) -> reqwest::Response {
-    reqwest::Client::new()
+    reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(5))
+        .build()
+        .expect("build client")
         .post(format!("{base}/candela.harness.v1.HarnessService/{method}"))
         .header("Content-Type", "application/json")
         .body(body.to_string())
@@ -182,7 +185,10 @@ async fn test_send_message_streams_error_without_proxy() {
 
     // SendMessage — no proxy URL configured, so the LLM call will fail.
     // We should get a stream that contains an error event.
-    let resp = reqwest::Client::new()
+    let resp = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(5))
+        .build()
+        .expect("build client")
         .post(format!(
             "{base}/candela.harness.v1.HarnessService/SendMessage"
         ))
@@ -199,6 +205,11 @@ async fn test_send_message_streams_error_without_proxy() {
         !body.is_empty(),
         "expected streaming response body, got empty"
     );
-    // The stream should contain an error since no LLM proxy is configured.
-    // This validates the full plumbing: request → spawn → callback → channel → stream → response.
+    // Verify the error event is present — the stream should contain an error
+    // since no LLM proxy is configured. This validates the full plumbing:
+    // request → spawn → callback → channel → stream → response.
+    assert!(
+        body.contains("error") || body.contains("Error"),
+        "expected error event in streaming response, got: {body}"
+    );
 }

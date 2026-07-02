@@ -1,6 +1,6 @@
 //! JSON-RPC request handler — dispatches method calls.
 
-use candela_core::harness::{ChatEvent, HarnessError, chat_event_to_json_value, new_session};
+use candela_core::harness::{HarnessError, chat_event_to_json_value, new_session};
 use candela_harness_chat::ChatRuntime;
 use candela_harness_storage::Database;
 use std::sync::Arc;
@@ -168,30 +168,30 @@ impl RpcHandler {
             }
         };
 
-        let stream_id = uuid::Uuid::new_v4().to_string();
         let chat = self.chat.clone();
         let tx = self.notify_tx.clone();
-        let sid = stream_id.clone();
+
+        // Setup is synchronous — budget check, store user msg, start model stream.
+        // Errors here are returned as JSON-RPC errors (not stream events).
+        let (stream_id, event_stream) = match chat.send_message(&session_id, &content).await {
+            Ok(result) => result,
+            Err(e) => {
+                return JsonRpcResponse::error(
+                    id,
+                    -32000, // server error
+                    e.to_string(),
+                );
+            }
+        };
 
         // Spawn the streaming task — response comes back immediately
         tokio::spawn(async move {
-            let notify_tx = tx.clone();
-            let on_event = move |event: ChatEvent| {
+            use tokio_stream::StreamExt;
+            tokio::pin!(event_stream);
+            while let Some(event) = event_stream.next().await {
                 let notif =
                     JsonRpcNotification::new("chat.event", chat_event_to_json_value(&event));
-                let _ = notify_tx.send(notif);
-            };
-
-            if let Err(e) = chat.send_message(&session_id, &content, on_event).await {
-                let error_notif = JsonRpcNotification::new(
-                    "chat.event",
-                    serde_json::json!({
-                        "type": "error",
-                        "stream_id": sid,
-                        "message": e.to_string(),
-                    }),
-                );
-                let _ = tx.send(error_notif);
+                let _ = tx.send(notif);
             }
         });
 

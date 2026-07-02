@@ -5,6 +5,8 @@ use candela_core::harness::{
     StatusEvent, UsageSummary, new_message,
 };
 use candela_harness_storage::{Database, SearchIndex};
+use futures_core::Stream;
+use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 use tokio::sync::RwLock;
 use tokio_stream::StreamExt;
@@ -66,16 +68,18 @@ impl ChatRuntime {
         Ok(())
     }
 
-    /// Send a message and stream the response.
+    /// Send a message and return a stream of chat events.
     ///
-    /// Returns the stream ID. Events will be sent via the `on_event` callback
-    /// as they arrive from the model.
+    /// Setup (budget check, store user message, load history) happens eagerly
+    /// and returns an error if it fails. The model stream is started lazily
+    /// inside the returned stream — connection failures appear as error events.
+    ///
+    /// Returns `(stream_id, event_stream)`.
     pub async fn send_message(
         &self,
         session_id: &str,
         content: &str,
-        on_event: impl Fn(ChatEvent) + Send + 'static,
-    ) -> Result<String, HarnessError> {
+    ) -> Result<(String, Pin<Box<dyn Stream<Item = ChatEvent> + Send>>), HarnessError> {
         let stream_id = uuid::Uuid::new_v4().to_string();
         info!(
             session_id,
@@ -84,16 +88,7 @@ impl ChatRuntime {
             "chat.send"
         );
 
-        // 1. Emit status
-        on_event(ChatEvent {
-            stream_id: stream_id.clone(),
-            event: Some(ChatEventEvent::Status(Box::new(StatusEvent {
-                text: "Thinking...".to_string(),
-                agent: None,
-            }))),
-        });
-
-        // 2. Budget check — reject before incurring cost
+        // 1. Budget check — reject before incurring cost
         let budget_limit = self.config.budget_limit_usd;
         if budget_limit > 0.0 {
             let session = self.db.lock().unwrap().get_session(session_id)?;
@@ -105,97 +100,155 @@ impl ChatRuntime {
             }
         }
 
-        // 3. Store user message
+        // 2. Store user message
         let user_msg = new_message(session_id, MessageRole::User, content);
         self.db.lock().unwrap().insert_message(&user_msg)?;
 
-        // 4. Load conversation history
+        // 3. Load conversation history
         let history = self.db.lock().unwrap().get_messages(session_id, 100)?;
 
-        // 5. Stream from model
-        let model = &self.config.model;
-        let mut full_response = String::new();
-        let mut usage = UsageSummary::default();
+        // 4. Bridge via channel — spawned task starts model stream + consumes it.
+        let (tx, rx) = tokio::sync::mpsc::channel::<ChatEvent>(64);
 
-        let stream = self.client.stream_chat(&history, model, &stream_id).await?;
-        tokio::pin!(stream);
+        let sid = stream_id.clone();
+        let model = self.config.model.clone();
+        let session_id_owned = session_id.to_string();
+        let content_owned = content.to_string();
+        let db = self.db.clone();
+        let search = self.search.clone();
+        let config = self.config.clone();
+        let client = self.client.clone();
+        let title_candidates = self.title_model_candidates.read().await.clone();
 
-        while let Some(event) = stream.next().await {
-            match event {
-                Ok(ChatEvent {
-                    event: Some(ChatEventEvent::Chunk(c)),
-                    ..
-                }) => {
-                    full_response.push_str(&c.delta);
-                    on_event(ChatEvent {
-                        stream_id: stream_id.clone(),
-                        event: Some(ChatEventEvent::Chunk(c)),
-                    });
-                }
-                Ok(ChatEvent {
-                    event: Some(ChatEventEvent::Done(d)),
-                    ..
-                }) => {
-                    if let Some(u) = d.usage {
-                        usage = *u;
-                    }
-                    usage.model = model.to_string();
-                }
-                Ok(other) => on_event(other),
+        tokio::spawn(async move {
+            // Emit initial status
+            let _ = tx
+                .send(ChatEvent {
+                    stream_id: sid.clone(),
+                    event: Some(ChatEventEvent::Status(Box::new(StatusEvent {
+                        text: "Thinking...".to_string(),
+                        agent: None,
+                    }))),
+                })
+                .await;
+
+            // Start model stream — connection failures become error events
+            let model_stream = match client.stream_chat(&history, &model, &sid).await {
+                Ok(s) => s,
                 Err(e) => {
-                    error!(error = %e, "stream error");
-                    on_event(ChatEvent {
-                        stream_id: stream_id.clone(),
-                        event: Some(ChatEventEvent::Error(Box::new(ErrorEvent {
-                            message: e.to_string(),
-                            code: None,
-                        }))),
-                    });
-                    return Err(e);
+                    error!(error = %e, "failed to start model stream");
+                    let _ = tx
+                        .send(ChatEvent {
+                            stream_id: sid.clone(),
+                            event: Some(ChatEventEvent::Error(Box::new(ErrorEvent {
+                                message: e.to_string(),
+                                code: None,
+                            }))),
+                        })
+                        .await;
+                    return;
+                }
+            };
+
+            // Stream from model
+            let mut full_response = String::new();
+            let mut usage = UsageSummary::default();
+
+            tokio::pin!(model_stream);
+            while let Some(event) = model_stream.next().await {
+                match event {
+                    Ok(ChatEvent {
+                        event: Some(ChatEventEvent::Chunk(c)),
+                        ..
+                    }) => {
+                        full_response.push_str(&c.delta);
+                        let _ = tx
+                            .send(ChatEvent {
+                                stream_id: sid.clone(),
+                                event: Some(ChatEventEvent::Chunk(c)),
+                            })
+                            .await;
+                    }
+                    Ok(ChatEvent {
+                        event: Some(ChatEventEvent::Done(d)),
+                        ..
+                    }) => {
+                        if let Some(u) = d.usage {
+                            usage = *u;
+                        }
+                        usage.model = model.clone();
+                    }
+                    Ok(other) => {
+                        let _ = tx.send(other).await;
+                    }
+                    Err(e) => {
+                        error!(error = %e, "stream error");
+                        let _ = tx
+                            .send(ChatEvent {
+                                stream_id: sid.clone(),
+                                event: Some(ChatEventEvent::Error(Box::new(ErrorEvent {
+                                    message: e.to_string(),
+                                    code: None,
+                                }))),
+                            })
+                            .await;
+                        return; // stop on error
+                    }
                 }
             }
-        }
 
-        // 6. Store assistant message
-        if !full_response.is_empty() {
-            let mut assistant_msg = new_message(session_id, MessageRole::Assistant, &full_response);
-            assistant_msg.model = Some(model.to_string());
-            assistant_msg.token_count = Some(usage.total_tokens as i32);
-            assistant_msg.cost_usd = if usage.total_cost_usd > 0.0 {
-                Some(usage.total_cost_usd)
-            } else {
-                None
-            };
-            self.db.lock().unwrap().insert_message(&assistant_msg)?;
+            // Store assistant message
+            if !full_response.is_empty() {
+                let mut assistant_msg =
+                    new_message(&session_id_owned, MessageRole::Assistant, &full_response);
+                assistant_msg.model = Some(model.clone());
+                assistant_msg.token_count = Some(usage.total_tokens as i32);
+                assistant_msg.cost_usd = if usage.total_cost_usd > 0.0 {
+                    Some(usage.total_cost_usd)
+                } else {
+                    None
+                };
+                if let Err(e) = db.lock().unwrap().insert_message(&assistant_msg) {
+                    warn!(error = %e, "failed to store assistant message");
+                }
 
-            // 7. Index in FTS for search
-            let _ = self.search.lock().unwrap().index_message(
-                &full_response,
-                session_id,
-                &assistant_msg.id,
-                "", // title populated asynchronously by auto-titling
-                "assistant",
-                &assistant_msg.created_at.to_rfc3339(),
-            );
-        }
+                // Index in FTS for search
+                let _ = search.lock().unwrap().index_message(
+                    &full_response,
+                    &session_id_owned,
+                    &assistant_msg.id,
+                    "",
+                    "assistant",
+                    &assistant_msg.created_at.to_rfc3339(),
+                );
+            }
 
-        // 8. Emit Done immediately — don't block UI on title generation
-        on_event(ChatEvent {
-            stream_id: stream_id.clone(),
-            event: Some(ChatEventEvent::Done(Box::new(DoneEvent {
-                usage: Some(Box::new(usage)),
-            }))),
+            // Emit Done event
+            let _ = tx
+                .send(ChatEvent {
+                    stream_id: sid.clone(),
+                    event: Some(ChatEventEvent::Done(Box::new(DoneEvent {
+                        usage: Some(Box::new(usage)),
+                    }))),
+                })
+                .await;
+
+            // Auto-title (non-blocking for stream consumer — runs after Done is sent)
+            if !full_response.is_empty() {
+                let rt = ChatRuntime {
+                    config,
+                    db,
+                    search,
+                    client,
+                    title_model_candidates: RwLock::new(title_candidates),
+                };
+                rt.auto_title_session(&session_id_owned, &content_owned, &full_response)
+                    .await;
+            }
         });
 
-        // 9. Auto-title in background (non-blocking)
-        if !full_response.is_empty() {
-            let user_content = content.to_string();
-            // auto_title_session borrows &self, so we call it directly but after Done
-            self.auto_title_session(session_id, &user_content, &full_response)
-                .await;
-        }
-
-        Ok(stream_id.clone())
+        let event_stream = tokio_stream::wrappers::ReceiverStream::new(rx);
+        Ok((stream_id, Box::pin(event_stream)))
     }
 
     /// Auto-title a session if it still has the default "New Chat" title.

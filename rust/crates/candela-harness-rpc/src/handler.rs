@@ -1,6 +1,6 @@
 //! JSON-RPC request handler — dispatches method calls.
 
-use candela_core::harness::{ChatEvent, HarnessError, chat_event_to_json_value, new_session};
+use candela_core::harness::{HarnessError, chat_event_to_json_value, new_session};
 use candela_harness_chat::ChatRuntime;
 use candela_harness_storage::Database;
 use std::sync::Arc;
@@ -168,30 +168,33 @@ impl RpcHandler {
             }
         };
 
-        let stream_id = uuid::Uuid::new_v4().to_string();
         let chat = self.chat.clone();
         let tx = self.notify_tx.clone();
-        let sid = stream_id.clone();
+
+        // Setup is synchronous — budget check, store user msg, start model stream.
+        // Errors here are returned as JSON-RPC errors (not stream events).
+        let (stream_id, event_stream) = match chat.clone().send_message(&session_id, &content).await
+        {
+            Ok(result) => result,
+            Err(e) => {
+                return JsonRpcResponse::error(
+                    id,
+                    -32000, // server error
+                    e.to_string(),
+                );
+            }
+        };
 
         // Spawn the streaming task — response comes back immediately
         tokio::spawn(async move {
-            let notify_tx = tx.clone();
-            let on_event = move |event: ChatEvent| {
+            use tokio_stream::StreamExt;
+            tokio::pin!(event_stream);
+            while let Some(event) = event_stream.next().await {
                 let notif =
                     JsonRpcNotification::new("chat.event", chat_event_to_json_value(&event));
-                let _ = notify_tx.send(notif);
-            };
-
-            if let Err(e) = chat.send_message(&session_id, &content, on_event).await {
-                let error_notif = JsonRpcNotification::new(
-                    "chat.event",
-                    serde_json::json!({
-                        "type": "error",
-                        "stream_id": sid,
-                        "message": e.to_string(),
-                    }),
-                );
-                let _ = tx.send(error_notif);
+                if tx.send(notif).is_err() {
+                    break; // client disconnected — stop polling the stream
+                }
             }
         });
 
@@ -403,5 +406,126 @@ mod tests {
         let result = resp.result.unwrap();
         assert_eq!(result["status"], "accepted");
         assert!(result["stream_id"].is_string());
+    }
+
+    #[tokio::test]
+    async fn test_chat_send_stream_id_consistent() {
+        let (handler, mut rx) = test_handler();
+
+        // Create session
+        let req = JsonRpcRequest {
+            jsonrpc: "2.0".to_string(),
+            id: Some(serde_json::json!(1)),
+            method: "session.create".to_string(),
+            params: serde_json::json!({}),
+        };
+        let resp = handler.handle(req).await.unwrap();
+        let session_id = resp.result.unwrap()["id"].as_str().unwrap().to_string();
+
+        // Send message
+        let req = JsonRpcRequest {
+            jsonrpc: "2.0".to_string(),
+            id: Some(serde_json::json!(2)),
+            method: "chat.send".to_string(),
+            params: serde_json::json!({
+                "session_id": session_id,
+                "content": "hello"
+            }),
+        };
+        let resp = handler.handle(req).await.unwrap();
+        let result = resp.result.unwrap();
+        let stream_id = result["stream_id"].as_str().unwrap().to_string();
+
+        // Collect all notifications — every event must have the same stream_id
+        let mut events = Vec::new();
+        events.push(
+            tokio::time::timeout(std::time::Duration::from_secs(2), rx.recv())
+                .await
+                .expect("timed out waiting for first event")
+                .expect("notification channel closed"),
+        );
+        while let Ok(notif) = rx.try_recv() {
+            events.push(notif);
+        }
+
+        assert!(!events.is_empty(), "should receive at least one event");
+        for notif in &events {
+            let params = &notif.params;
+            let event_stream_id = params["stream_id"].as_str().unwrap();
+            assert_eq!(
+                event_stream_id, stream_id,
+                "event stream_id must match the response stream_id"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn test_chat_send_error_event_on_model_failure() {
+        let (handler, mut rx) = test_handler();
+
+        // Create session
+        let req = JsonRpcRequest {
+            jsonrpc: "2.0".to_string(),
+            id: Some(serde_json::json!(1)),
+            method: "session.create".to_string(),
+            params: serde_json::json!({}),
+        };
+        let resp = handler.handle(req).await.unwrap();
+        let session_id = resp.result.unwrap()["id"].as_str().unwrap().to_string();
+
+        // Send message — model call will fail (no proxy configured)
+        let req = JsonRpcRequest {
+            jsonrpc: "2.0".to_string(),
+            id: Some(serde_json::json!(2)),
+            method: "chat.send".to_string(),
+            params: serde_json::json!({
+                "session_id": session_id,
+                "content": "hello"
+            }),
+        };
+        let resp = handler.handle(req).await.unwrap();
+        assert!(resp.error.is_none(), "should return accepted, not error");
+
+        // Collect events and verify error event is present
+        let mut events = Vec::new();
+        events.push(
+            tokio::time::timeout(std::time::Duration::from_secs(2), rx.recv())
+                .await
+                .expect("timed out waiting for first event")
+                .expect("notification channel closed"),
+        );
+        while let Ok(notif) = rx.try_recv() {
+            events.push(notif);
+        }
+
+        let has_error = events
+            .iter()
+            .any(|n| n.params.get("error").is_some() || n.params.to_string().contains("error"));
+        assert!(
+            has_error,
+            "stream should contain an error event when model call fails, got: {:?}",
+            events.iter().map(|n| &n.params).collect::<Vec<_>>()
+        );
+    }
+
+    #[tokio::test]
+    async fn test_chat_send_nonexistent_session() {
+        let (handler, _rx) = test_handler();
+
+        // Send to nonexistent session — should return JSON-RPC error
+        let req = JsonRpcRequest {
+            jsonrpc: "2.0".to_string(),
+            id: Some(serde_json::json!(1)),
+            method: "chat.send".to_string(),
+            params: serde_json::json!({
+                "session_id": "nonexistent-session",
+                "content": "hello"
+            }),
+        };
+        let resp = handler.handle(req).await.unwrap();
+        assert!(
+            resp.error.is_some(),
+            "should return error for nonexistent session"
+        );
     }
 }

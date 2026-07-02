@@ -13,6 +13,7 @@ use std::task::{Context, Poll};
 use tracing::{debug, warn};
 
 /// Client for streaming chat completions from an OpenAI-compatible API.
+#[derive(Clone)]
 pub struct ModelClient {
     http: Client,
     base_url: String,
@@ -37,7 +38,7 @@ impl ModelClient {
         messages: &[Message],
         model: &str,
         stream_id: &str,
-    ) -> Result<impl Stream<Item = Result<ChatEvent, HarnessError>>, HarnessError> {
+    ) -> Result<impl Stream<Item = Result<ChatEvent, HarnessError>> + use<>, HarnessError> {
         let url = format!("{}/v1/chat/completions", self.base_url);
 
         // Build OpenAI-compatible message array

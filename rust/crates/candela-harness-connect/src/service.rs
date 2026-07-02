@@ -14,7 +14,6 @@ use candela_harness_storage::{Database, SearchIndex};
 use connectrpc::{
     ConnectError, RequestContext, Response, ServiceRequest, ServiceResult, ServiceStream,
 };
-use tracing::error;
 
 use crate::proto::candela::types as proto_types;
 use crate::proto::candela::v1::*;
@@ -134,42 +133,17 @@ impl HarnessService for HarnessServiceImpl {
         let chat = self.chat.clone();
 
         async move {
-            // Buffer sized generously: the callback is sync (Fn, not async),
-            // so we cannot await inside it — try_send is required.  A large
-            // buffer makes channel-full drops practically impossible during
-            // normal streaming; if it does happen we log a warning so it's
-            // visible in traces rather than silently lost.
-            let (tx, rx) = tokio::sync::mpsc::channel::<SendMessageResponse>(256);
-
-            tokio::spawn(async move {
-                let tx_err = tx.clone();
-                let result = chat
-                    .send_message(&session_id, &content, move |event| {
-                        let proto_event = domain_chat_event_to_proto(&event);
-                        if let Err(e) = tx.try_send(proto_event) {
-                            tracing::warn!("stream event dropped (channel full or closed): {e}");
-                        }
-                    })
-                    .await;
-
-                if let Err(e) = result {
-                    error!(?e, "send_message failed");
-                    let mut err = proto_types::ErrorEvent::default();
-                    err.message = e.to_string().into();
-                    let mut ce = proto_types::ChatEvent::default();
-                    ce.event = Some(proto_types::__buffa::oneof::chat_event::Event::Error(
-                        Box::new(err),
-                    ));
-                    let mut resp = SendMessageResponse::default();
-                    resp.event = MessageField::some(ce);
-                    if let Err(e) = tx_err.send(resp).await {
-                        tracing::warn!("failed to send error event (receiver dropped): {e}");
-                    }
-                }
-            });
+            let (_stream_id, event_stream) = chat
+                .clone()
+                .send_message(&session_id, &content)
+                .await
+                .map_err(|e| match e {
+                    HarnessError::SessionNotFound(msg) => ConnectError::not_found(msg),
+                    other => ConnectError::internal(other.to_string()),
+                })?;
 
             use tokio_stream::StreamExt;
-            let stream = tokio_stream::wrappers::ReceiverStream::new(rx).map(Ok);
+            let stream = event_stream.map(|event| Ok(domain_chat_event_to_proto(&event)));
             Ok(Response::new(Box::pin(stream) as ServiceStream<_>))
         }
     }

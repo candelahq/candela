@@ -151,6 +151,8 @@ impl ChatRuntime {
             let mut usage = UsageSummary::default();
 
             tokio::pin!(model_stream);
+            let mut client_disconnected = false;
+            let mut stream_failed = false;
             while let Some(event) = model_stream.next().await {
                 match event {
                     Ok(ChatEvent {
@@ -158,12 +160,17 @@ impl ChatRuntime {
                         ..
                     }) => {
                         full_response.push_str(&c.delta);
-                        let _ = tx
-                            .send(ChatEvent {
-                                stream_id: sid.clone(),
-                                event: Some(ChatEventEvent::Chunk(c)),
-                            })
-                            .await;
+                        if !client_disconnected
+                            && tx
+                                .send(ChatEvent {
+                                    stream_id: sid.clone(),
+                                    event: Some(ChatEventEvent::Chunk(c)),
+                                })
+                                .await
+                                .is_err()
+                        {
+                            client_disconnected = true;
+                        }
                     }
                     Ok(ChatEvent {
                         event: Some(ChatEventEvent::Done(d)),
@@ -175,7 +182,9 @@ impl ChatRuntime {
                         usage.model = model.clone();
                     }
                     Ok(other) => {
-                        let _ = tx.send(other).await;
+                        if !client_disconnected && tx.send(other).await.is_err() {
+                            client_disconnected = true;
+                        }
                     }
                     Err(e) => {
                         error!(error = %e, "stream error");
@@ -188,7 +197,8 @@ impl ChatRuntime {
                                 }))),
                             })
                             .await;
-                        return; // stop on error
+                        stream_failed = true;
+                        break; // stop on error, but still persist what we have
                     }
                 }
             }
@@ -219,15 +229,17 @@ impl ChatRuntime {
                 );
             }
 
-            // Emit Done event
-            let _ = tx
-                .send(ChatEvent {
-                    stream_id: sid.clone(),
-                    event: Some(ChatEventEvent::Done(Box::new(DoneEvent {
-                        usage: Some(Box::new(usage)),
-                    }))),
-                })
-                .await;
+            // Emit Done event only if stream completed without errors
+            if !stream_failed {
+                let _ = tx
+                    .send(ChatEvent {
+                        stream_id: sid.clone(),
+                        event: Some(ChatEventEvent::Done(Box::new(DoneEvent {
+                            usage: Some(Box::new(usage)),
+                        }))),
+                    })
+                    .await;
+            }
 
             // Drop sender so the consumer's stream closes immediately after Done.
             // Auto-titling continues in this task but no longer blocks the stream.

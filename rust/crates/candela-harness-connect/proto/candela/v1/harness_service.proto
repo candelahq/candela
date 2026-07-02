@@ -47,13 +47,27 @@ message SendMessageResponse {
 // ── Session CRUD ──
 
 message ListSessionsRequest {
-  int32 limit = 1;
-  int32 offset = 2;
+  // Maximum number of sessions to return. Default: 50, max: 200.
+  // Deprecated: use page_size instead.
+  int32 limit = 1 [deprecated = true];
+  // Offset for pagination. Deprecated: use page_token instead.
+  int32 offset = 2 [deprecated = true];
+  // Maximum number of sessions to return (default 50, max 200).
+  int32 page_size = 3;
+  // Cursor token from a previous ListSessionsResponse.next_page_token.
+  // Reserved for future cursor-based pagination.
+  string page_token = 4;
 }
 
 message ListSessionsResponse {
   repeated candela.types.Session sessions = 1;
-  int32 total = 2;
+  // Deprecated: was page length, not total count. Use total_count instead.
+  int32 total = 2 [deprecated = true];
+  // Cursor token for the next page. Empty when there are no more results.
+  // Reserved for future cursor-based pagination.
+  string next_page_token = 3;
+  // Total number of sessions (not just this page).
+  int32 total_count = 4;
 }
 
 message GetSessionRequest {

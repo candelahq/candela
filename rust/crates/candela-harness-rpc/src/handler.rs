@@ -1,6 +1,6 @@
 //! JSON-RPC request handler — dispatches method calls.
 
-use candela_core::harness::{ChatEvent, HarnessError, new_session};
+use candela_core::harness::{ChatEvent, HarnessError, chat_event_to_json_value, new_session};
 use candela_harness_chat::ChatRuntime;
 use candela_harness_storage::Database;
 use std::sync::Arc;
@@ -177,10 +177,8 @@ impl RpcHandler {
         tokio::spawn(async move {
             let notify_tx = tx.clone();
             let on_event = move |event: ChatEvent| {
-                let notif = JsonRpcNotification::new(
-                    "chat.event",
-                    serde_json::to_value(&event).unwrap_or_default(),
-                );
+                let notif =
+                    JsonRpcNotification::new("chat.event", chat_event_to_json_value(&event));
                 let _ = notify_tx.send(notif);
             };
 

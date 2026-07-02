@@ -77,13 +77,19 @@ impl RpcHandler {
         id: Option<serde_json::Value>,
         params: serde_json::Value,
     ) -> JsonRpcResponse {
-        // page_size takes precedence over deprecated limit when present
+        // page_size takes precedence over deprecated limit when present and > 0
         let limit = params
             .get("page_size")
             .and_then(|v| v.as_i64())
-            .or_else(|| params.get("limit").and_then(|v| v.as_i64()))
+            .filter(|&v| v > 0)
+            .or_else(|| {
+                params
+                    .get("limit")
+                    .and_then(|v| v.as_i64())
+                    .filter(|&v| v > 0)
+            })
             .unwrap_or(50)
-            .clamp(0, 200);
+            .clamp(1, 200);
         let offset = params
             .get("offset")
             .and_then(|v| v.as_i64())

@@ -1,6 +1,6 @@
 //! JSON-RPC request handler — dispatches method calls.
 
-use candela_core::harness::{HarnessError, chat_event_to_json_value, new_session};
+use candela_core::harness::{ChatEventRpc, HarnessError, new_session};
 use candela_harness_chat::ChatRuntime;
 use candela_harness_storage::Database;
 use std::sync::Arc;
@@ -190,8 +190,18 @@ impl RpcHandler {
             use tokio_stream::StreamExt;
             tokio::pin!(event_stream);
             while let Some(event) = event_stream.next().await {
-                let notif =
-                    JsonRpcNotification::new("chat.event", chat_event_to_json_value(&event));
+                // Convert domain ChatEvent → flat ChatEventRpc for JSON-RPC wire format.
+                let rpc_event = ChatEventRpc::from(&event);
+                let params = match serde_json::to_value(&rpc_event) {
+                    Ok(v) => v,
+                    Err(err) => {
+                        // NaN/Infinite floats in UsageSummary can cause this.
+                        // Log and skip rather than sending null (which drops stream_id).
+                        tracing::error!(?err, "failed to serialize chat event");
+                        continue;
+                    }
+                };
+                let notif = JsonRpcNotification::new("chat.event", params);
                 if tx.send(notif).is_err() {
                     break; // client disconnected — stop polling the stream
                 }

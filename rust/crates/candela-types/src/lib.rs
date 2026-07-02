@@ -10,6 +10,7 @@
 //! Then copy the relevant files from gen/rust/.../ into this crate.
 
 pub mod chat;
+pub mod chat_jsonrpc;
 pub mod chat_sqlite;
 pub mod model_catalog;
 pub mod model_catalog_sqlite;

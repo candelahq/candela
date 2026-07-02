@@ -1,7 +1,8 @@
 //! Chat runtime — manages the conversation loop, model calls, and streaming.
 
 use candela_core::harness::{
-    ChatEvent, HarnessConfig, HarnessError, MessageRole, UsageSummary, new_message,
+    ChatEvent, ChatEventEvent, ChunkEvent, DoneEvent, ErrorEvent, HarnessConfig, HarnessError,
+    MessageRole, StatusEvent, UsageSummary, new_message,
 };
 use candela_harness_storage::{Database, SearchIndex};
 use std::sync::{Arc, Mutex};
@@ -84,10 +85,12 @@ impl ChatRuntime {
         );
 
         // 1. Emit status
-        on_event(ChatEvent::Status {
+        on_event(ChatEvent {
             stream_id: stream_id.clone(),
-            text: "Thinking...".to_string(),
-            agent: None,
+            event: Some(ChatEventEvent::Status(Box::new(StatusEvent {
+                text: "Thinking...".to_string(),
+                agent: None,
+            }))),
         });
 
         // 2. Budget check — reject before incurring cost
@@ -119,23 +122,36 @@ impl ChatRuntime {
 
         while let Some(event) = stream.next().await {
             match event {
-                Ok(ChatEvent::Chunk { delta, .. }) => {
-                    full_response.push_str(&delta);
-                    on_event(ChatEvent::Chunk {
+                Ok(ChatEvent {
+                    event: Some(ChatEventEvent::Chunk(ref c)),
+                    ..
+                }) => {
+                    full_response.push_str(&c.delta);
+                    on_event(ChatEvent {
                         stream_id: stream_id.clone(),
-                        delta,
+                        event: Some(ChatEventEvent::Chunk(Box::new(ChunkEvent {
+                            delta: c.delta.clone(),
+                        }))),
                     });
                 }
-                Ok(ChatEvent::Done { usage: u, .. }) => {
-                    usage = u;
+                Ok(ChatEvent {
+                    event: Some(ChatEventEvent::Done(ref d)),
+                    ..
+                }) => {
+                    if let Some(ref u) = d.usage {
+                        usage = *u.clone();
+                    }
                     usage.model = model.to_string();
                 }
                 Ok(other) => on_event(other),
                 Err(e) => {
                     error!(error = %e, "stream error");
-                    on_event(ChatEvent::Error {
+                    on_event(ChatEvent {
                         stream_id: stream_id.clone(),
-                        message: e.to_string(),
+                        event: Some(ChatEventEvent::Error(Box::new(ErrorEvent {
+                            message: e.to_string(),
+                            code: None,
+                        }))),
                     });
                     return Err(e);
                 }
@@ -166,9 +182,11 @@ impl ChatRuntime {
         }
 
         // 8. Emit Done immediately — don't block UI on title generation
-        on_event(ChatEvent::Done {
+        on_event(ChatEvent {
             stream_id: stream_id.clone(),
-            usage,
+            event: Some(ChatEventEvent::Done(Box::new(DoneEvent {
+                usage: Some(Box::new(usage)),
+            }))),
         });
 
         // 9. Auto-title in background (non-blocking)
@@ -431,9 +449,15 @@ impl ChatRuntime {
         let mut had_error = false;
         while let Some(event) = stream.next().await {
             match event {
-                Ok(ChatEvent::Chunk { delta, .. }) => title.push_str(&delta),
-                Ok(ChatEvent::Error { message, .. }) => {
-                    warn!(error = %message, "title stream error");
+                Ok(ChatEvent {
+                    event: Some(ChatEventEvent::Chunk(ref c)),
+                    ..
+                }) => title.push_str(&c.delta),
+                Ok(ChatEvent {
+                    event: Some(ChatEventEvent::Error(ref e)),
+                    ..
+                }) => {
+                    warn!(error = %e.message, "title stream error");
                     had_error = true;
                     break;
                 }

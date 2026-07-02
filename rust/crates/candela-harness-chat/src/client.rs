@@ -1,7 +1,9 @@
 //! LLM model client — streams chat completions via SSE.
 
 use candela_core::harness::Message;
-use candela_core::harness::{ChatEvent, HarnessError, UsageSummary};
+use candela_core::harness::{
+    ChatEvent, ChatEventEvent, ChunkEvent, DoneEvent, HarnessError, UsageSummary,
+};
 use futures_core::Stream;
 use pin_project_lite::pin_project;
 use reqwest::Client;
@@ -178,9 +180,9 @@ where
 
                 // SSE: data: [DONE]
                 if line == "data: [DONE]" {
-                    return Poll::Ready(Some(Ok(ChatEvent::Done {
+                    return Poll::Ready(Some(Ok(ChatEvent {
                         stream_id: this.stream_id.clone(),
-                        usage: UsageSummary::default(),
+                        event: Some(ChatEventEvent::Done(Box::new(DoneEvent { usage: None }))),
                     })));
                 }
 
@@ -193,23 +195,27 @@ where
                                 && let Some(content) = &choice.delta.content
                                 && !content.is_empty()
                             {
-                                return Poll::Ready(Some(Ok(ChatEvent::Chunk {
+                                return Poll::Ready(Some(Ok(ChatEvent {
                                     stream_id: this.stream_id.clone(),
-                                    delta: content.clone(),
+                                    event: Some(ChatEventEvent::Chunk(Box::new(ChunkEvent {
+                                        delta: content.clone(),
+                                    }))),
                                 })));
                             }
 
                             // Check for usage in final chunk
                             if let Some(usage) = chunk.usage {
-                                return Poll::Ready(Some(Ok(ChatEvent::Done {
+                                return Poll::Ready(Some(Ok(ChatEvent {
                                     stream_id: this.stream_id.clone(),
-                                    usage: UsageSummary {
-                                        prompt_tokens: usage.prompt_tokens.unwrap_or(0),
-                                        completion_tokens: usage.completion_tokens.unwrap_or(0),
-                                        total_tokens: usage.total_tokens.unwrap_or(0),
-                                        total_cost_usd: 0.0,
-                                        model: String::new(),
-                                    },
+                                    event: Some(ChatEventEvent::Done(Box::new(DoneEvent {
+                                        usage: Some(Box::new(UsageSummary {
+                                            prompt_tokens: usage.prompt_tokens.unwrap_or(0),
+                                            completion_tokens: usage.completion_tokens.unwrap_or(0),
+                                            total_tokens: usage.total_tokens.unwrap_or(0),
+                                            total_cost_usd: 0.0,
+                                            model: String::new(),
+                                        })),
+                                    }))),
                                 })));
                             }
 
@@ -244,9 +250,11 @@ where
                         let remaining = std::mem::take(this.buffer);
                         let remaining = remaining.trim();
                         if remaining == "data: [DONE]" {
-                            return Poll::Ready(Some(Ok(ChatEvent::Done {
+                            return Poll::Ready(Some(Ok(ChatEvent {
                                 stream_id: this.stream_id.clone(),
-                                usage: UsageSummary::default(),
+                                event: Some(ChatEventEvent::Done(Box::new(DoneEvent {
+                                    usage: None,
+                                }))),
                             })));
                         }
                     }
@@ -299,14 +307,26 @@ mod tests {
 
         assert_eq!(events.len(), 3); // Hello, " world", Done
         match &events[0] {
-            ChatEvent::Chunk { delta, .. } => assert_eq!(delta, "Hello"),
+            ChatEvent {
+                event: Some(ChatEventEvent::Chunk(c)),
+                ..
+            } => assert_eq!(c.delta, "Hello"),
             other => panic!("expected Chunk, got {other:?}"),
         }
         match &events[1] {
-            ChatEvent::Chunk { delta, .. } => assert_eq!(delta, " world"),
+            ChatEvent {
+                event: Some(ChatEventEvent::Chunk(c)),
+                ..
+            } => assert_eq!(c.delta, " world"),
             other => panic!("expected Chunk, got {other:?}"),
         }
-        assert!(matches!(&events[2], ChatEvent::Done { .. }));
+        assert!(matches!(
+            &events[2],
+            ChatEvent {
+                event: Some(ChatEventEvent::Done(_)),
+                ..
+            }
+        ));
     }
 
     #[tokio::test]
@@ -330,10 +350,19 @@ mod tests {
 
         assert_eq!(events.len(), 2);
         match &events[0] {
-            ChatEvent::Chunk { delta, .. } => assert_eq!(delta, "Hi"),
+            ChatEvent {
+                event: Some(ChatEventEvent::Chunk(c)),
+                ..
+            } => assert_eq!(c.delta, "Hi"),
             other => panic!("expected Chunk, got {other:?}"),
         }
-        assert!(matches!(&events[1], ChatEvent::Done { .. }));
+        assert!(matches!(
+            &events[1],
+            ChatEvent {
+                event: Some(ChatEventEvent::Done(_)),
+                ..
+            }
+        ));
     }
 
     #[tokio::test]
@@ -354,10 +383,19 @@ mod tests {
         // Role-only chunk should be skipped, leaving Chunk("Hi") + Done
         assert_eq!(events.len(), 2);
         match &events[0] {
-            ChatEvent::Chunk { delta, .. } => assert_eq!(delta, "Hi"),
+            ChatEvent {
+                event: Some(ChatEventEvent::Chunk(c)),
+                ..
+            } => assert_eq!(c.delta, "Hi"),
             other => panic!("expected Chunk, got {other:?}"),
         }
-        assert!(matches!(&events[1], ChatEvent::Done { .. }));
+        assert!(matches!(
+            &events[1],
+            ChatEvent {
+                event: Some(ChatEventEvent::Done(_)),
+                ..
+            }
+        ));
     }
 
     #[tokio::test]
@@ -378,7 +416,11 @@ mod tests {
 
         assert_eq!(events.len(), 3); // Chunk, Done(usage), Done([DONE])
         match &events[1] {
-            ChatEvent::Done { usage, .. } => {
+            ChatEvent {
+                event: Some(ChatEventEvent::Done(d)),
+                ..
+            } => {
+                let usage = d.usage.as_ref().expect("expected usage");
                 assert_eq!(usage.prompt_tokens, 10);
                 assert_eq!(usage.completion_tokens, 5);
                 assert_eq!(usage.total_tokens, 15);
@@ -407,10 +449,19 @@ mod tests {
         // Malformed line skipped, then Chunk + Done
         assert_eq!(events.len(), 2);
         match &events[0] {
-            ChatEvent::Chunk { delta, .. } => assert_eq!(delta, "ok"),
+            ChatEvent {
+                event: Some(ChatEventEvent::Chunk(c)),
+                ..
+            } => assert_eq!(c.delta, "ok"),
             other => panic!("expected Chunk, got {other:?}"),
         }
-        assert!(matches!(&events[1], ChatEvent::Done { .. }));
+        assert!(matches!(
+            &events[1],
+            ChatEvent {
+                event: Some(ChatEventEvent::Done(_)),
+                ..
+            }
+        ));
     }
 
     #[tokio::test]

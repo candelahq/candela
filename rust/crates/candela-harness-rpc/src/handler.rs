@@ -92,7 +92,10 @@ impl RpcHandler {
             .max(0);
 
         let db = self.db.lock().unwrap();
-        let total_count = db.count_sessions().unwrap_or(0);
+        let total_count = match db.count_sessions() {
+            Ok(c) => c,
+            Err(e) => return JsonRpcResponse::error(id, INTERNAL_ERROR, e.to_string()),
+        };
 
         match db.list_sessions(limit, offset) {
             Ok(sessions) => JsonRpcResponse::success(

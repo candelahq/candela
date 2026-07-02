@@ -54,7 +54,7 @@ async fn connect_post(base: &str, method: &str, body: &str) -> reqwest::Response
         .timeout(std::time::Duration::from_secs(5))
         .build()
         .expect("build client")
-        .post(format!("{base}/candela.harness.v1.HarnessService/{method}"))
+        .post(format!("{base}/candela.v1.HarnessService/{method}"))
         .header("Content-Type", "application/json")
         .body(body.to_string())
         .send()
@@ -78,7 +78,8 @@ async fn test_create_and_get_session() {
     // Create
     let resp = connect_post(&base, "CreateSession", r#"{"model":"test-model"}"#).await;
     assert_eq!(resp.status(), 200);
-    let session: serde_json::Value = resp.json().await.unwrap();
+    let body: serde_json::Value = resp.json().await.unwrap();
+    let session = &body["session"];
     let session_id = session["id"].as_str().expect("session id");
     assert!(!session_id.is_empty());
     assert_eq!(session["model"], "test-model");
@@ -92,7 +93,7 @@ async fn test_create_and_get_session() {
     .await;
     assert_eq!(resp.status(), 200);
     let got: serde_json::Value = resp.json().await.unwrap();
-    assert_eq!(got["id"], session_id);
+    assert_eq!(got["session"]["id"], session_id);
 }
 
 #[tokio::test]
@@ -118,8 +119,8 @@ async fn test_delete_session() {
 
     // Create
     let resp = connect_post(&base, "CreateSession", r#"{"model":"m"}"#).await;
-    let session: serde_json::Value = resp.json().await.unwrap();
-    let id = session["id"].as_str().unwrap();
+    let body: serde_json::Value = resp.json().await.unwrap();
+    let id = body["session"]["id"].as_str().unwrap();
 
     // Delete
     let resp = connect_post(
@@ -147,8 +148,8 @@ async fn test_edit_session_title() {
 
     // Create
     let resp = connect_post(&base, "CreateSession", r#"{"model":"m"}"#).await;
-    let session: serde_json::Value = resp.json().await.unwrap();
-    let id = session["id"].as_str().unwrap();
+    let body: serde_json::Value = resp.json().await.unwrap();
+    let id = body["session"]["id"].as_str().unwrap();
 
     // Edit title
     let resp = connect_post(
@@ -159,7 +160,7 @@ async fn test_edit_session_title() {
     .await;
     assert_eq!(resp.status(), 200);
     let updated: serde_json::Value = resp.json().await.unwrap();
-    assert_eq!(updated["title"], "Updated Title");
+    assert_eq!(updated["session"]["title"], "Updated Title");
 }
 
 #[tokio::test]
@@ -180,8 +181,8 @@ async fn test_send_message_streams_error_without_proxy() {
 
     // Create a session first
     let resp = connect_post(&base, "CreateSession", r#"{"model":"m"}"#).await;
-    let session: serde_json::Value = resp.json().await.unwrap();
-    let id = session["id"].as_str().unwrap();
+    let body: serde_json::Value = resp.json().await.unwrap();
+    let id = body["session"]["id"].as_str().unwrap();
 
     // SendMessage — no proxy URL configured, so the LLM call will fail.
     // We should get a stream that contains an error event.
@@ -189,9 +190,7 @@ async fn test_send_message_streams_error_without_proxy() {
         .timeout(std::time::Duration::from_secs(5))
         .build()
         .expect("build client")
-        .post(format!(
-            "{base}/candela.harness.v1.HarnessService/SendMessage"
-        ))
+        .post(format!("{base}/candela.v1.HarnessService/SendMessage"))
         .header("Content-Type", "application/connect+json")
         .body(format!(r#"{{"session_id":"{id}","content":"hello"}}"#))
         .send()

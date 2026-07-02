@@ -1,0 +1,59 @@
+syntax = "proto3";
+
+package candela.types;
+
+import "google/protobuf/struct.proto";
+
+option go_package = "github.com/candelahq/candela/gen/go/candela/types";
+
+// ChatEvent is a streaming event emitted during a chat completion.
+message ChatEvent {
+  string stream_id = 1;
+
+  oneof event {
+    ChunkEvent chunk = 2;
+    ToolCallEvent tool_call = 3;
+    StatusEvent status = 4;
+    DoneEvent done = 5;
+    ErrorEvent error = 6;
+  }
+}
+
+// ChunkEvent is a text delta from the model's streaming response.
+message ChunkEvent {
+  string delta = 1;
+}
+
+// ToolCallEvent is emitted when the model requests a tool invocation.
+message ToolCallEvent {
+  string call_id = 1;
+  string tool = 2;
+  google.protobuf.Struct args = 3;
+  bool requires_approval = 4;
+}
+
+// StatusEvent provides a progress update during generation.
+message StatusEvent {
+  string text = 1;
+  optional string agent = 2;
+}
+
+// DoneEvent signals successful completion of the stream.
+message DoneEvent {
+  UsageSummary usage = 1;
+}
+
+// ErrorEvent signals that the stream terminated with an error.
+message ErrorEvent {
+  string message = 1;
+  optional string code = 2;
+}
+
+// UsageSummary reports token consumption and cost for a single completion.
+message UsageSummary {
+  int64 prompt_tokens = 1;
+  int64 completion_tokens = 2;
+  int64 total_tokens = 3;
+  double total_cost_usd = 4;
+  string model = 5;
+}

@@ -1,0 +1,109 @@
+syntax = "proto3";
+
+package candela.v1;
+
+import "candela/types/chat.proto";
+import "candela/types/session.proto";
+
+option go_package = "github.com/candelahq/candela/gen/go/candela/v1";
+
+// HarnessService is the local IDE sidecar RPC service.
+// Supports Connect, gRPC, and gRPC-Web protocols simultaneously.
+//
+// The harness runs as a localhost process alongside the IDE, providing:
+// - Chat completion streaming via SendMessage
+// - Session CRUD for conversation management
+// - Full-text search across message history
+service HarnessService {
+  // SendMessage streams chat completion events (server-streaming).
+  rpc SendMessage(SendMessageRequest) returns (stream SendMessageResponse);
+
+  // Session CRUD (unary).
+  rpc ListSessions(ListSessionsRequest) returns (ListSessionsResponse);
+  rpc CreateSession(CreateSessionRequest) returns (CreateSessionResponse);
+  rpc GetSession(GetSessionRequest) returns (GetSessionResponse);
+  rpc DeleteSession(DeleteSessionRequest) returns (DeleteSessionResponse);
+  rpc EditSessionTitle(EditSessionTitleRequest) returns (EditSessionTitleResponse);
+
+  // Search (unary).
+  rpc SearchMessages(SearchMessagesRequest) returns (SearchMessagesResponse);
+
+  // Health (unary).
+  rpc Health(HealthRequest) returns (HealthResponse);
+}
+
+// ── Chat ──
+
+message SendMessageRequest {
+  string session_id = 1;
+  string content = 2;
+}
+
+// SendMessageResponse wraps a streaming ChatEvent.
+message SendMessageResponse {
+  candela.types.ChatEvent event = 1;
+}
+
+// ── Session CRUD ──
+
+message ListSessionsRequest {
+  int32 limit = 1;
+  int32 offset = 2;
+}
+
+message ListSessionsResponse {
+  repeated candela.types.Session sessions = 1;
+  int32 total = 2;
+}
+
+message GetSessionRequest {
+  string session_id = 1;
+}
+
+message GetSessionResponse {
+  candela.types.Session session = 1;
+}
+
+message CreateSessionRequest {
+  string model = 1;
+  string device_id = 2;
+}
+
+message CreateSessionResponse {
+  candela.types.Session session = 1;
+}
+
+message DeleteSessionRequest {
+  string session_id = 1;
+}
+
+message DeleteSessionResponse {}
+
+message EditSessionTitleRequest {
+  string session_id = 1;
+  string title = 2;
+}
+
+message EditSessionTitleResponse {
+  candela.types.Session session = 1;
+}
+
+// ── Search ──
+
+message SearchMessagesRequest {
+  string query = 1;
+  int32 limit = 2;
+}
+
+message SearchMessagesResponse {
+  repeated candela.types.SearchResult results = 1;
+}
+
+// ── Health ──
+
+message HealthRequest {}
+
+message HealthResponse {
+  string status = 1;
+  string version = 2;
+}

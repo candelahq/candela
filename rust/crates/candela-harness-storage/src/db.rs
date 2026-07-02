@@ -99,10 +99,26 @@ impl Database {
                 CREATE INDEX idx_messages_session
                     ON messages(session_id, sequence);
 
-                CREATE INDEX idx_sessions_updated_at
-                    ON sessions(updated_at DESC);
+                CREATE INDEX idx_sessions_deleted_updated_at
+                    ON sessions(deleted_at, updated_at DESC);
 
-                PRAGMA user_version = 1;
+                PRAGMA user_version = 2;
+            ",
+                )
+                .map_err(|e| HarnessError::Storage(e.to_string()))?;
+        }
+
+        // v1 → v2: add composite index for existing databases.
+        if (1..2).contains(&version) {
+            self.conn
+                .execute_batch(
+                    "
+                DROP INDEX IF EXISTS idx_sessions_updated_at;
+
+                CREATE INDEX IF NOT EXISTS idx_sessions_deleted_updated_at
+                    ON sessions(deleted_at, updated_at DESC);
+
+                PRAGMA user_version = 2;
             ",
                 )
                 .map_err(|e| HarnessError::Storage(e.to_string()))?;

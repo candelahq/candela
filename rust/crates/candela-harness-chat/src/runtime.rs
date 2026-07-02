@@ -151,6 +151,7 @@ impl ChatRuntime {
             let mut usage = UsageSummary::default();
 
             tokio::pin!(model_stream);
+            let mut client_disconnected = false;
             while let Some(event) = model_stream.next().await {
                 match event {
                     Ok(ChatEvent {
@@ -158,12 +159,17 @@ impl ChatRuntime {
                         ..
                     }) => {
                         full_response.push_str(&c.delta);
-                        let _ = tx
-                            .send(ChatEvent {
-                                stream_id: sid.clone(),
-                                event: Some(ChatEventEvent::Chunk(c)),
-                            })
-                            .await;
+                        if !client_disconnected
+                            && tx
+                                .send(ChatEvent {
+                                    stream_id: sid.clone(),
+                                    event: Some(ChatEventEvent::Chunk(c)),
+                                })
+                                .await
+                                .is_err()
+                        {
+                            client_disconnected = true;
+                        }
                     }
                     Ok(ChatEvent {
                         event: Some(ChatEventEvent::Done(d)),
@@ -175,7 +181,9 @@ impl ChatRuntime {
                         usage.model = model.clone();
                     }
                     Ok(other) => {
-                        let _ = tx.send(other).await;
+                        if !client_disconnected && tx.send(other).await.is_err() {
+                            client_disconnected = true;
+                        }
                     }
                     Err(e) => {
                         error!(error = %e, "stream error");
@@ -188,7 +196,7 @@ impl ChatRuntime {
                                 }))),
                             })
                             .await;
-                        return; // stop on error
+                        break; // stop on error, but still persist what we have
                     }
                 }
             }

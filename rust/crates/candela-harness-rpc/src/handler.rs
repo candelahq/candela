@@ -81,6 +81,7 @@ impl RpcHandler {
         let limit = params
             .get("page_size")
             .and_then(|v| v.as_i64())
+            .filter(|&v| v > 0)
             .or_else(|| params.get("limit").and_then(|v| v.as_i64()))
             .unwrap_or(50)
             .clamp(0, 200);
@@ -177,17 +178,14 @@ impl RpcHandler {
         let chat = self.chat.clone();
         let tx = self.notify_tx.clone();
 
-        // Setup is synchronous — budget check, store user msg, start model stream.
-        // Errors here are returned as JSON-RPC errors (not stream events).
+        // Eager setup (budget check, store user msg, load history) runs here.
+        // The model stream starts lazily in the spawned task.
+        // Setup errors are returned as JSON-RPC errors (not stream events).
         let (stream_id, event_stream) = match chat.clone().send_message(&session_id, &content).await
         {
             Ok(result) => result,
             Err(e) => {
-                return JsonRpcResponse::error(
-                    id,
-                    -32000, // server error
-                    e.to_string(),
-                );
+                return JsonRpcResponse::error(id, SERVER_ERROR, e.to_string());
             }
         };
 
@@ -509,16 +507,13 @@ mod tests {
         let result = resp.result.unwrap();
         let stream_id = result["stream_id"].as_str().unwrap().to_string();
 
-        // Collect all notifications — every event must have the same stream_id
+        // Collect all notifications with bounded recv
         let mut events = Vec::new();
-        events.push(
-            tokio::time::timeout(std::time::Duration::from_secs(2), rx.recv())
-                .await
-                .expect("timed out waiting for first event")
-                .expect("notification channel closed"),
-        );
-        while let Ok(notif) = rx.try_recv() {
-            events.push(notif);
+        loop {
+            match tokio::time::timeout(std::time::Duration::from_secs(2), rx.recv()).await {
+                Ok(Some(notif)) => events.push(notif),
+                _ => break,
+            }
         }
 
         assert!(!events.is_empty(), "should receive at least one event");
@@ -559,16 +554,13 @@ mod tests {
         let resp = handler.handle(req).await.unwrap();
         assert!(resp.error.is_none(), "should return accepted, not error");
 
-        // Collect events and verify error event is present
+        // Collect events with bounded recv — keeps polling until idle timeout
         let mut events = Vec::new();
-        events.push(
-            tokio::time::timeout(std::time::Duration::from_secs(2), rx.recv())
-                .await
-                .expect("timed out waiting for first event")
-                .expect("notification channel closed"),
-        );
-        while let Ok(notif) = rx.try_recv() {
-            events.push(notif);
+        loop {
+            match tokio::time::timeout(std::time::Duration::from_secs(2), rx.recv()).await {
+                Ok(Some(notif)) => events.push(notif),
+                _ => break, // timeout or channel closed
+            }
         }
 
         let has_error = events

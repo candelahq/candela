@@ -155,13 +155,15 @@ impl HarnessService for HarnessServiceImpl {
     ) -> impl std::future::Future<
         Output = ServiceResult<impl connectrpc::Encodable<ListSessionsResponse> + Send + use<'a>>,
     > + Send {
-        // page_size takes precedence over deprecated limit
-        let limit = (if request.page_size > 0 {
+        // page_size takes precedence over deprecated limit; default 50
+        let raw = if request.page_size > 0 {
             request.page_size
-        } else {
+        } else if request.limit > 0 {
             request.limit
-        })
-        .clamp(0, 200) as i64;
+        } else {
+            50
+        };
+        let limit = raw.clamp(0, 200) as i64;
         let offset = request.offset.max(0) as i64;
 
         async move {

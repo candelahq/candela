@@ -204,7 +204,7 @@ mod tests {
 
     #[test]
     fn test_chat_event_all_variants_json_rpc() {
-        // Verify chat_event_to_json_value produces the correct flat format
+        // Verify ChatEventRpc::from produces the correct flat format
         // for each variant.
         let cases: Vec<(ChatEvent, &str)> = vec![
             (

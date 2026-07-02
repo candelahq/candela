@@ -437,8 +437,13 @@ mod tests {
         let stream_id = result["stream_id"].as_str().unwrap().to_string();
 
         // Collect all notifications — every event must have the same stream_id
-        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
         let mut events = Vec::new();
+        events.push(
+            tokio::time::timeout(std::time::Duration::from_secs(2), rx.recv())
+                .await
+                .expect("timed out waiting for first event")
+                .expect("notification channel closed"),
+        );
         while let Ok(notif) = rx.try_recv() {
             events.push(notif);
         }
@@ -481,11 +486,14 @@ mod tests {
         let resp = handler.handle(req).await.unwrap();
         assert!(resp.error.is_none(), "should return accepted, not error");
 
-        // Wait for background streaming to complete
-        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-
         // Collect events and verify error event is present
         let mut events = Vec::new();
+        events.push(
+            tokio::time::timeout(std::time::Duration::from_secs(2), rx.recv())
+                .await
+                .expect("timed out waiting for first event")
+                .expect("notification channel closed"),
+        );
         while let Ok(notif) = rx.try_recv() {
             events.push(notif);
         }

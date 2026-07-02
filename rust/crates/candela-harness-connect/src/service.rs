@@ -137,7 +137,10 @@ impl HarnessService for HarnessServiceImpl {
                 .clone()
                 .send_message(&session_id, &content)
                 .await
-                .map_err(|e| ConnectError::internal(e.to_string()))?;
+                .map_err(|e| match e {
+                    HarnessError::SessionNotFound(msg) => ConnectError::not_found(msg),
+                    other => ConnectError::internal(other.to_string()),
+                })?;
 
             use tokio_stream::StreamExt;
             let stream = event_stream.map(|event| Ok(domain_chat_event_to_proto(&event)));

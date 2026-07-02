@@ -1,14 +1,20 @@
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let proto_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("proto");
-    let proto_file = proto_dir.join("candela/harness/v1/harness.proto");
+
+    let proto_files = [
+        proto_dir.join("candela/v1/harness_service.proto"),
+        proto_dir.join("candela/types/session.proto"),
+        proto_dir.join("candela/types/chat.proto"),
+    ];
 
     connectrpc_build::Config::new()
-        .files(std::slice::from_ref(&proto_file))
-        .includes(&[proto_dir])
+        .files(&proto_files)
+        .includes(&[&proto_dir])
         .include_file("_connectrpc.rs")
         .compile()?;
 
-    println!("cargo:rerun-if-changed={}", proto_file.display());
+    // Rerun if any proto file changes.
+    println!("cargo:rerun-if-changed={}", proto_dir.display());
 
     Ok(())
 }

@@ -8,7 +8,7 @@ use tower_http::cors::CorsLayer;
 use tower_http::trace::TraceLayer;
 use tracing::info;
 
-use crate::proto::candela::harness::v1::HarnessServiceExt;
+use crate::proto::candela::v1::HarnessServiceExt;
 use crate::service::HarnessServiceImpl;
 
 /// Build the ConnectRPC router without starting a server.

@@ -1,0 +1,54 @@
+syntax = "proto3";
+
+package candela.types;
+
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/candelahq/candela/gen/go/candela/types";
+
+// MessageRole identifies who authored a chat message.
+enum MessageRole {
+  MESSAGE_ROLE_UNSPECIFIED = 0;
+  MESSAGE_ROLE_USER = 1;
+  MESSAGE_ROLE_ASSISTANT = 2;
+  MESSAGE_ROLE_SYSTEM = 3;
+  MESSAGE_ROLE_TOOL = 4;
+}
+
+// Session represents a single conversation between a user and an AI model.
+message Session {
+  string id = 1;
+  string title = 2;
+  string model = 3;
+  int32 message_count = 4;
+  int64 total_tokens = 5;
+  double total_cost_usd = 6;
+  string device_id = 7;
+  google.protobuf.Timestamp created_at = 8;
+  google.protobuf.Timestamp updated_at = 9;
+  optional google.protobuf.Timestamp deleted_at = 10;
+}
+
+// Message is a single turn in a chat session.
+message Message {
+  string id = 1;
+  string session_id = 2;
+  MessageRole role = 3;
+  string content = 4;
+  optional string model = 5;
+  optional int32 token_count = 6;
+  optional double cost_usd = 7;
+  google.protobuf.Timestamp created_at = 8;
+  int64 sequence = 9;
+}
+
+// SearchResult is a ranked match from full-text search across sessions.
+message SearchResult {
+  string session_id = 1;
+  string message_id = 2;
+  string session_title = 3;
+  string message_preview = 4;
+  MessageRole role = 5;
+  double score = 6;
+  google.protobuf.Timestamp created_at = 7;
+}

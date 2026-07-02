@@ -14,7 +14,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .compile()?;
 
     // Rerun if any proto file changes.
-    println!("cargo:rerun-if-changed={}", proto_dir.display());
+    for file in &proto_files {
+        println!("cargo:rerun-if-changed={}", file.display());
+    }
 
     Ok(())
 }

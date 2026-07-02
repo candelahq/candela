@@ -86,17 +86,22 @@ fn domain_chat_event_to_proto(event: &CoreChatEvent) -> SendMessageResponse {
             proto_types::__buffa::oneof::chat_event::Event::Error(Box::new(e))
         }
         CoreChatEvent::Status {
-            text, stream_id, ..
+            text,
+            stream_id,
+            agent,
+            ..
         } => {
             ce.stream_id = stream_id.clone().into();
             let mut e = proto_types::StatusEvent::default();
             e.text = text.clone().into();
+            e.agent = agent.as_deref().map(Into::into);
             proto_types::__buffa::oneof::chat_event::Event::Status(Box::new(e))
         }
         CoreChatEvent::ToolCall {
             call_id,
             tool,
             args,
+            requires_approval,
             stream_id,
             ..
         } => {
@@ -105,6 +110,7 @@ fn domain_chat_event_to_proto(event: &CoreChatEvent) -> SendMessageResponse {
             e.call_id = call_id.clone().into();
             e.tool = tool.clone().into();
             e.args = MessageField::some(serde_json::from_value(args.clone()).unwrap_or_default());
+            e.requires_approval = *requires_approval;
             proto_types::__buffa::oneof::chat_event::Event::ToolCall(Box::new(e))
         }
     });
@@ -337,7 +343,7 @@ impl HarnessService for HarnessServiceImpl {
                     sr.session_id = r.session_id.clone().into();
                     sr.message_id = r.message_id.clone().into();
                     sr.session_title = r.session_title.clone().into();
-                    sr.role = buffa::EnumValue::Unknown(r.role as i32);
+                    sr.role = buffa::EnumValue::from(r.role as i32);
                     sr.score = r.score;
                     sr.created_at = MessageField::some(chrono_to_buffa_timestamp(&r.created_at));
                     sr

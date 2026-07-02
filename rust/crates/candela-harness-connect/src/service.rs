@@ -78,6 +78,7 @@ fn domain_chat_event_to_proto(event: &ChatEvent) -> SendMessageResponse {
         ChatEventEvent::Error(err) => {
             let mut e = proto_types::ErrorEvent::default();
             e.message = err.message.clone().into();
+            e.code = err.code.as_deref().map(Into::into);
             proto_types::__buffa::oneof::chat_event::Event::Error(Box::new(e))
         }
         ChatEventEvent::Status(s) => {

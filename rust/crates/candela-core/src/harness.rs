@@ -183,11 +183,17 @@ pub fn chat_event_to_json_value(event: &ChatEvent) -> serde_json::Value {
             }
             v
         }
-        Some(ChatEventEvent::Error(e)) => serde_json::json!({
-            "type": "error",
-            "stream_id": event.stream_id,
-            "message": e.message,
-        }),
+        Some(ChatEventEvent::Error(e)) => {
+            let mut v = serde_json::json!({
+                "type": "error",
+                "stream_id": event.stream_id,
+                "message": e.message,
+            });
+            if let Some(code) = &e.code {
+                v["code"] = serde_json::Value::String(code.clone());
+            }
+            v
+        }
         None => serde_json::json!({
             "type": "unknown",
             "stream_id": event.stream_id,

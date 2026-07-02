@@ -1,8 +1,8 @@
 //! Chat runtime — manages the conversation loop, model calls, and streaming.
 
 use candela_core::harness::{
-    ChatEvent, ChatEventEvent, ChunkEvent, DoneEvent, ErrorEvent, HarnessConfig, HarnessError,
-    MessageRole, StatusEvent, UsageSummary, new_message,
+    ChatEvent, ChatEventEvent, DoneEvent, ErrorEvent, HarnessConfig, HarnessError, MessageRole,
+    StatusEvent, UsageSummary, new_message,
 };
 use candela_harness_storage::{Database, SearchIndex};
 use std::sync::{Arc, Mutex};
@@ -123,23 +123,21 @@ impl ChatRuntime {
         while let Some(event) = stream.next().await {
             match event {
                 Ok(ChatEvent {
-                    event: Some(ChatEventEvent::Chunk(ref c)),
+                    event: Some(ChatEventEvent::Chunk(c)),
                     ..
                 }) => {
                     full_response.push_str(&c.delta);
                     on_event(ChatEvent {
                         stream_id: stream_id.clone(),
-                        event: Some(ChatEventEvent::Chunk(Box::new(ChunkEvent {
-                            delta: c.delta.clone(),
-                        }))),
+                        event: Some(ChatEventEvent::Chunk(c)),
                     });
                 }
                 Ok(ChatEvent {
-                    event: Some(ChatEventEvent::Done(ref d)),
+                    event: Some(ChatEventEvent::Done(d)),
                     ..
                 }) => {
-                    if let Some(ref u) = d.usage {
-                        usage = *u.clone();
+                    if let Some(u) = d.usage {
+                        usage = *u;
                     }
                     usage.model = model.to_string();
                 }

@@ -134,6 +134,7 @@ impl HarnessService for HarnessServiceImpl {
 
         async move {
             let (_stream_id, event_stream) = chat
+                .clone()
                 .send_message(&session_id, &content)
                 .await
                 .map_err(|e| ConnectError::internal(e.to_string()))?;

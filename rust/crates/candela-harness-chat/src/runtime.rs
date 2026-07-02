@@ -76,7 +76,7 @@ impl ChatRuntime {
     ///
     /// Returns `(stream_id, event_stream)`.
     pub async fn send_message(
-        &self,
+        self: Arc<Self>,
         session_id: &str,
         content: &str,
     ) -> Result<(String, Pin<Box<dyn Stream<Item = ChatEvent> + Send>>), HarnessError> {
@@ -110,15 +110,11 @@ impl ChatRuntime {
         // 4. Bridge via channel — spawned task starts model stream + consumes it.
         let (tx, rx) = tokio::sync::mpsc::channel::<ChatEvent>(64);
 
+        let this = self.clone();
         let sid = stream_id.clone();
-        let model = self.config.model.clone();
+        let model = this.config.model.clone();
         let session_id_owned = session_id.to_string();
         let content_owned = content.to_string();
-        let db = self.db.clone();
-        let search = self.search.clone();
-        let config = self.config.clone();
-        let client = self.client.clone();
-        let title_candidates = self.title_model_candidates.read().await.clone();
 
         tokio::spawn(async move {
             // Emit initial status
@@ -133,7 +129,7 @@ impl ChatRuntime {
                 .await;
 
             // Start model stream — connection failures become error events
-            let model_stream = match client.stream_chat(&history, &model, &sid).await {
+            let model_stream = match this.client.stream_chat(&history, &model, &sid).await {
                 Ok(s) => s,
                 Err(e) => {
                     error!(error = %e, "failed to start model stream");
@@ -208,12 +204,12 @@ impl ChatRuntime {
                 } else {
                     None
                 };
-                if let Err(e) = db.lock().unwrap().insert_message(&assistant_msg) {
+                if let Err(e) = this.db.lock().unwrap().insert_message(&assistant_msg) {
                     warn!(error = %e, "failed to store assistant message");
                 }
 
                 // Index in FTS for search
-                let _ = search.lock().unwrap().index_message(
+                let _ = this.search.lock().unwrap().index_message(
                     &full_response,
                     &session_id_owned,
                     &assistant_msg.id,
@@ -233,16 +229,13 @@ impl ChatRuntime {
                 })
                 .await;
 
-            // Auto-title (non-blocking for stream consumer — runs after Done is sent)
+            // Drop sender so the consumer's stream closes immediately after Done.
+            // Auto-titling continues in this task but no longer blocks the stream.
+            drop(tx);
+
+            // Auto-title on the real shared runtime — cache mutations persist
             if !full_response.is_empty() {
-                let rt = ChatRuntime {
-                    config,
-                    db,
-                    search,
-                    client,
-                    title_model_candidates: RwLock::new(title_candidates),
-                };
-                rt.auto_title_session(&session_id_owned, &content_owned, &full_response)
+                this.auto_title_session(&session_id_owned, &content_owned, &full_response)
                     .await;
             }
         });

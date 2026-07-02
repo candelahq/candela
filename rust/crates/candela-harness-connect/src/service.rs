@@ -155,7 +155,13 @@ impl HarnessService for HarnessServiceImpl {
     ) -> impl std::future::Future<
         Output = ServiceResult<impl connectrpc::Encodable<ListSessionsResponse> + Send + use<'a>>,
     > + Send {
-        let limit = request.limit.max(0) as i64;
+        // page_size takes precedence over deprecated limit
+        let limit = (if request.page_size > 0 {
+            request.page_size
+        } else {
+            request.limit
+        })
+        .clamp(0, 200) as i64;
         let offset = request.offset.max(0) as i64;
 
         async move {
@@ -163,6 +169,9 @@ impl HarnessService for HarnessServiceImpl {
                 .db
                 .lock()
                 .map_err(|e| ConnectError::internal(format!("lock failed: {e}")))?;
+            let total_count =
+                db.count_sessions()
+                    .map_err(|e| ConnectError::internal(e.to_string()))? as i32;
             let sessions = db
                 .list_sessions(limit, offset)
                 .map_err(|e| ConnectError::internal(e.to_string()))?;
@@ -173,7 +182,8 @@ impl HarnessService for HarnessServiceImpl {
 
             let mut resp = ListSessionsResponse::default();
             resp.sessions = proto_sessions;
-            resp.total = total;
+            resp.total = total; // deprecated — kept for backward compat
+            resp.total_count = total_count;
             Ok(Response::new(resp))
         }
     }

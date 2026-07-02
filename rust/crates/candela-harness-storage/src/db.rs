@@ -99,6 +99,9 @@ impl Database {
                 CREATE INDEX idx_messages_session
                     ON messages(session_id, sequence);
 
+                CREATE INDEX idx_sessions_updated_at
+                    ON sessions(updated_at DESC);
+
                 PRAGMA user_version = 1;
             ",
                 )
@@ -166,6 +169,17 @@ impl Database {
             .map_err(|e| HarnessError::Storage(e.to_string()))?;
 
         Ok(sessions)
+    }
+
+    /// Count all non-deleted sessions.
+    pub fn count_sessions(&self) -> Result<i64, HarnessError> {
+        self.conn
+            .query_row(
+                "SELECT COUNT(*) FROM sessions WHERE deleted_at IS NULL",
+                [],
+                |row| row.get(0),
+            )
+            .map_err(|e| HarnessError::Storage(e.to_string()))
     }
 
     /// Get a single session by ID.

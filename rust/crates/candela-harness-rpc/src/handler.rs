@@ -77,23 +77,29 @@ impl RpcHandler {
         id: Option<serde_json::Value>,
         params: serde_json::Value,
     ) -> JsonRpcResponse {
+        // page_size takes precedence over deprecated limit
         let limit = params
-            .get("limit")
+            .get("page_size")
             .and_then(|v| v.as_i64())
+            .or_else(|| params.get("limit").and_then(|v| v.as_i64()))
             .unwrap_or(50)
-            .max(0);
+            .clamp(0, 200);
         let offset = params
             .get("offset")
             .and_then(|v| v.as_i64())
             .unwrap_or(0)
             .max(0);
 
-        match self.db.lock().unwrap().list_sessions(limit, offset) {
+        let db = self.db.lock().unwrap();
+        let total_count = db.count_sessions().unwrap_or(0);
+
+        match db.list_sessions(limit, offset) {
             Ok(sessions) => JsonRpcResponse::success(
                 id,
                 serde_json::json!({
                     "sessions": sessions,
-                    "total": sessions.len(),
+                    "total": sessions.len(), // deprecated — kept for backward compat
+                    "total_count": total_count,
                 }),
             ),
             Err(e) => JsonRpcResponse::error(id, INTERNAL_ERROR, e.to_string()),
@@ -358,6 +364,63 @@ mod tests {
         let resp = handler.handle(req).await.unwrap();
         // Should not error — clamped to 0
         assert!(resp.error.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_session_list_total_count() {
+        let (handler, _rx) = test_handler();
+
+        // Create 3 sessions
+        for i in 1..=3 {
+            let req = JsonRpcRequest {
+                jsonrpc: "2.0".to_string(),
+                id: Some(serde_json::json!(i)),
+                method: "session.create".to_string(),
+                params: serde_json::json!({}),
+            };
+            handler.handle(req).await.unwrap();
+        }
+
+        // List with limit=2 — should return 2 sessions but total_count=3
+        let req = JsonRpcRequest {
+            jsonrpc: "2.0".to_string(),
+            id: Some(serde_json::json!(10)),
+            method: "session.list".to_string(),
+            params: serde_json::json!({ "limit": 2 }),
+        };
+        let resp = handler.handle(req).await.unwrap();
+        let result = resp.result.unwrap();
+        assert_eq!(result["sessions"].as_array().unwrap().len(), 2);
+        assert_eq!(result["total"], 2); // deprecated: page length
+        assert_eq!(result["total_count"], 3); // actual total
+    }
+
+    #[tokio::test]
+    async fn test_session_list_page_size_over_limit() {
+        let (handler, _rx) = test_handler();
+
+        // Create 3 sessions
+        for i in 1..=3 {
+            let req = JsonRpcRequest {
+                jsonrpc: "2.0".to_string(),
+                id: Some(serde_json::json!(i)),
+                method: "session.create".to_string(),
+                params: serde_json::json!({}),
+            };
+            handler.handle(req).await.unwrap();
+        }
+
+        // page_size should take precedence over limit
+        let req = JsonRpcRequest {
+            jsonrpc: "2.0".to_string(),
+            id: Some(serde_json::json!(10)),
+            method: "session.list".to_string(),
+            params: serde_json::json!({ "page_size": 1, "limit": 50 }),
+        };
+        let resp = handler.handle(req).await.unwrap();
+        let result = resp.result.unwrap();
+        assert_eq!(result["sessions"].as_array().unwrap().len(), 1);
+        assert_eq!(result["total_count"], 3);
     }
 
     #[tokio::test]

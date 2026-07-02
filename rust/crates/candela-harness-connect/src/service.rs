@@ -149,14 +149,21 @@ impl HarnessService for HarnessServiceImpl {
         let chat = self.chat.clone();
 
         async move {
-            let (tx, rx) = tokio::sync::mpsc::channel::<SendMessageResponse>(32);
+            // Buffer sized generously: the callback is sync (Fn, not async),
+            // so we cannot await inside it — try_send is required.  A large
+            // buffer makes channel-full drops practically impossible during
+            // normal streaming; if it does happen we log a warning so it's
+            // visible in traces rather than silently lost.
+            let (tx, rx) = tokio::sync::mpsc::channel::<SendMessageResponse>(256);
 
             tokio::spawn(async move {
                 let tx_err = tx.clone();
                 let result = chat
                     .send_message(&session_id, &content, move |event| {
                         let proto_event = domain_chat_event_to_proto(&event);
-                        let _ = tx.try_send(proto_event);
+                        if let Err(e) = tx.try_send(proto_event) {
+                            tracing::warn!("stream event dropped (channel full or closed): {e}");
+                        }
                     })
                     .await;
 
@@ -170,7 +177,9 @@ impl HarnessService for HarnessServiceImpl {
                     ));
                     let mut resp = SendMessageResponse::default();
                     resp.event = MessageField::some(ce);
-                    let _ = tx_err.send(resp).await;
+                    if let Err(e) = tx_err.send(resp).await {
+                        tracing::warn!("failed to send error event (receiver dropped): {e}");
+                    }
                 }
             });
 

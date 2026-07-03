@@ -199,6 +199,9 @@ impl RpcHandler {
                     format!("session not found: {sid}"),
                 );
             }
+            Err(e @ HarnessError::BudgetExceeded { .. }) => {
+                return JsonRpcResponse::error(id, SERVER_ERROR, e.to_string());
+            }
             Err(e) => {
                 return JsonRpcResponse::error(id, INTERNAL_ERROR, e.to_string());
             }

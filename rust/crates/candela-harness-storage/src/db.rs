@@ -167,18 +167,18 @@ impl Database {
 
         let sessions = stmt
             .query_map(params![limit, offset], |row| {
-                Ok(Session {
-                    id: row.get(0)?,
-                    title: row.get(1)?,
-                    model: row.get(2)?,
-                    message_count: row.get(3)?,
-                    total_tokens: row.get(4)?,
-                    total_cost_usd: row.get(5)?,
-                    device_id: row.get(6)?,
-                    created_at: row.get::<_, DateTime<Utc>>(7)?,
-                    updated_at: row.get::<_, DateTime<Utc>>(8)?,
-                    deleted_at: row.get::<_, Option<DateTime<Utc>>>(9)?,
-                })
+                let mut s = Session::default();
+                s.id = row.get(0)?;
+                s.title = row.get(1)?;
+                s.model = row.get(2)?;
+                s.message_count = row.get(3)?;
+                s.total_tokens = row.get(4)?;
+                s.total_cost_usd = row.get(5)?;
+                s.device_id = row.get(6)?;
+                s.created_at = row.get::<_, DateTime<Utc>>(7)?;
+                s.updated_at = row.get::<_, DateTime<Utc>>(8)?;
+                s.deleted_at = row.get::<_, Option<DateTime<Utc>>>(9)?;
+                Ok(s)
             })
             .map_err(|e| HarnessError::Storage(e.to_string()))?
             .collect::<Result<Vec<_>, _>>()
@@ -207,18 +207,18 @@ impl Database {
                  WHERE id = ?1 AND deleted_at IS NULL",
                 params![id],
                 |row| {
-                    Ok(Session {
-                        id: row.get(0)?,
-                        title: row.get(1)?,
-                        model: row.get(2)?,
-                        message_count: row.get(3)?,
-                        total_tokens: row.get(4)?,
-                        total_cost_usd: row.get(5)?,
-                        device_id: row.get(6)?,
-                        created_at: row.get::<_, DateTime<Utc>>(7)?,
-                        updated_at: row.get::<_, DateTime<Utc>>(8)?,
-                        deleted_at: row.get::<_, Option<DateTime<Utc>>>(9)?,
-                    })
+                    let mut s = Session::default();
+                    s.id = row.get(0)?;
+                    s.title = row.get(1)?;
+                    s.model = row.get(2)?;
+                    s.message_count = row.get(3)?;
+                    s.total_tokens = row.get(4)?;
+                    s.total_cost_usd = row.get(5)?;
+                    s.device_id = row.get(6)?;
+                    s.created_at = row.get::<_, DateTime<Utc>>(7)?;
+                    s.updated_at = row.get::<_, DateTime<Utc>>(8)?;
+                    s.deleted_at = row.get::<_, Option<DateTime<Utc>>>(9)?;
+                    Ok(s)
                 },
             )
             .map_err(|e| match e {
@@ -340,17 +340,17 @@ impl Database {
             .query_map(params![session_id, limit], |row| {
                 let role_str: String = row.get(2)?;
                 let role = role_from_str(&role_str);
-                Ok(Message {
-                    id: row.get(0)?,
-                    session_id: row.get(1)?,
-                    role,
-                    content: row.get(3)?,
-                    model: row.get(4)?,
-                    token_count: row.get(5)?,
-                    cost_usd: row.get(6)?,
-                    created_at: row.get::<_, DateTime<Utc>>(7)?,
-                    sequence: row.get(8)?,
-                })
+                let mut m = Message::default();
+                m.id = row.get(0)?;
+                m.session_id = row.get(1)?;
+                m.role = role;
+                m.content = row.get(3)?;
+                m.model = row.get(4)?;
+                m.token_count = row.get(5)?;
+                m.cost_usd = row.get(6)?;
+                m.created_at = row.get::<_, DateTime<Utc>>(7)?;
+                m.sequence = row.get(8)?;
+                Ok(m)
             })
             .map_err(|e| HarnessError::Storage(e.to_string()))?
             .collect::<Result<Vec<_>, _>>()

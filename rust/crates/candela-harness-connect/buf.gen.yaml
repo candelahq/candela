@@ -1,0 +1,19 @@
+version: v2
+inputs:
+  # Use the published BSR module which has proto2type annotations.
+  - module: buf.build/candelahq/protos
+    paths:
+      - candela/types/chat.proto
+      - candela/types/session.proto
+plugins:
+  # Buffa (ConnectRPC) converters — domain ↔ buffa proto types.
+  # domain_module points to candela_types::prelude which re-exports all types.
+  - local: protoc-gen-proto2type
+    out: src/converters
+    opt:
+      - lang=rust
+      - backend=buffa
+      - domain=false
+      - buffa_module=crate::proto::candela::types
+      - buffa_oneof_prefix=__buffa
+      - domain_module=candela_types::prelude

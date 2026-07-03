@@ -80,7 +80,7 @@ impl From<&ChatEvent> for ChatEventRpc {
             },
             Some(ChatEventEvent::Done(e)) => ChatEventRpc::Done {
                 stream_id: sid,
-                usage: e.usage.as_deref().cloned(),
+                usage: e.usage.clone(),
             },
             Some(ChatEventEvent::Error(e)) => ChatEventRpc::Error {
                 stream_id: sid,

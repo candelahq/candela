@@ -181,9 +181,11 @@ where
 
                 // SSE: data: [DONE]
                 if line == "data: [DONE]" {
-                    return Poll::Ready(Some(Ok(ChatEvent {
-                        stream_id: this.stream_id.clone(),
-                        event: Some(ChatEventEvent::Done(Box::new(DoneEvent { usage: None }))),
+                    return Poll::Ready(Some(Ok({
+                        let mut e = ChatEvent::default();
+                        e.stream_id = this.stream_id.clone();
+                        e.event = Some(ChatEventEvent::Done(DoneEvent::default()));
+                        e
                     })));
                 }
 
@@ -196,27 +198,36 @@ where
                                 && let Some(content) = &choice.delta.content
                                 && !content.is_empty()
                             {
-                                return Poll::Ready(Some(Ok(ChatEvent {
-                                    stream_id: this.stream_id.clone(),
-                                    event: Some(ChatEventEvent::Chunk(Box::new(ChunkEvent {
-                                        delta: content.clone(),
-                                    }))),
+                                return Poll::Ready(Some(Ok({
+                                    let mut e = ChatEvent::default();
+                                    e.stream_id = this.stream_id.clone();
+                                    e.event = Some(ChatEventEvent::Chunk({
+                                        let mut c = ChunkEvent::default();
+                                        c.delta = content.clone();
+                                        c
+                                    }));
+                                    e
                                 })));
                             }
 
                             // Check for usage in final chunk
                             if let Some(usage) = chunk.usage {
-                                return Poll::Ready(Some(Ok(ChatEvent {
-                                    stream_id: this.stream_id.clone(),
-                                    event: Some(ChatEventEvent::Done(Box::new(DoneEvent {
-                                        usage: Some(Box::new(UsageSummary {
-                                            prompt_tokens: usage.prompt_tokens.unwrap_or(0),
-                                            completion_tokens: usage.completion_tokens.unwrap_or(0),
-                                            total_tokens: usage.total_tokens.unwrap_or(0),
-                                            total_cost_usd: 0.0,
-                                            model: String::new(),
-                                        })),
-                                    }))),
+                                return Poll::Ready(Some(Ok({
+                                    let mut e = ChatEvent::default();
+                                    e.stream_id = this.stream_id.clone();
+                                    e.event = Some(ChatEventEvent::Done({
+                                        let mut d = DoneEvent::default();
+                                        d.usage = Some({
+                                            let mut u = UsageSummary::default();
+                                            u.prompt_tokens = usage.prompt_tokens.unwrap_or(0);
+                                            u.completion_tokens =
+                                                usage.completion_tokens.unwrap_or(0);
+                                            u.total_tokens = usage.total_tokens.unwrap_or(0);
+                                            u
+                                        });
+                                        d
+                                    }));
+                                    e
                                 })));
                             }
 
@@ -251,11 +262,11 @@ where
                         let remaining = std::mem::take(this.buffer);
                         let remaining = remaining.trim();
                         if remaining == "data: [DONE]" {
-                            return Poll::Ready(Some(Ok(ChatEvent {
-                                stream_id: this.stream_id.clone(),
-                                event: Some(ChatEventEvent::Done(Box::new(DoneEvent {
-                                    usage: None,
-                                }))),
+                            return Poll::Ready(Some(Ok({
+                                let mut e = ChatEvent::default();
+                                e.stream_id = this.stream_id.clone();
+                                e.event = Some(ChatEventEvent::Done(DoneEvent::default()));
+                                e
                             })));
                         }
                     }

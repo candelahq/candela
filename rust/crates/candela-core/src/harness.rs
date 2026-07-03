@@ -17,30 +17,25 @@ pub use candela_types::session::{Message, MessageRole, SearchResult, Session};
 pub fn new_session(model: &str, device_id: &str) -> Session {
     let now = chrono::Utc::now();
     let id = uuid::Uuid::new_v4().to_string();
-    Session {
-        id,
-        title: "New Chat".to_string(),
-        model: model.to_string(),
-        message_count: 0,
-        total_tokens: 0,
-        total_cost_usd: 0.0,
-        device_id: device_id.to_string(),
-        created_at: now,
-        updated_at: now,
-        deleted_at: None,
-    }
+    let mut session = Session::default();
+    session.id = id;
+    session.title = "New Chat".to_string();
+    session.model = model.to_string();
+    session.device_id = device_id.to_string();
+    session.created_at = now;
+    session.updated_at = now;
+    session
 }
 
 /// Create a new user message for a session.
 pub fn new_message(session_id: &str, role: MessageRole, content: &str) -> Message {
-    Message {
-        id: uuid::Uuid::new_v4().to_string(),
-        session_id: session_id.to_string(),
-        role,
-        content: content.to_string(),
-        created_at: chrono::Utc::now(),
-        ..Default::default()
-    }
+    let mut msg = Message::default();
+    msg.id = uuid::Uuid::new_v4().to_string();
+    msg.session_id = session_id.to_string();
+    msg.role = role;
+    msg.content = content.to_string();
+    msg.created_at = chrono::Utc::now();
+    msg
 }
 
 // ── Configuration ──
@@ -174,11 +169,15 @@ mod tests {
 
     #[test]
     fn chat_event_json_rpc_round_trip() {
-        let event = ChatEvent {
-            stream_id: "s1".into(),
-            event: Some(ChatEventEvent::Done(Box::new(DoneEvent {
-                usage: Some(Box::new(UsageSummary::default())),
-            }))),
+        let event = {
+            let mut e = ChatEvent::default();
+            e.stream_id = "s1".into();
+            e.event = Some(ChatEventEvent::Done({
+                let mut d = DoneEvent::default();
+                d.usage = Some(UsageSummary::default());
+                d
+            }));
+            e
         };
         // Verify the From impl + serde round-trip produces flat JSON-RPC format.
         let rpc = ChatEventRpc::from(&event);
@@ -208,52 +207,71 @@ mod tests {
         // for each variant.
         let cases: Vec<(ChatEvent, &str)> = vec![
             (
-                ChatEvent {
-                    stream_id: "s1".into(),
-                    event: Some(ChatEventEvent::Chunk(Box::new(ChunkEvent {
-                        delta: "Hello".into(),
-                    }))),
+                {
+                    let mut e = ChatEvent::default();
+                    e.stream_id = "s1".into();
+                    e.event = Some(ChatEventEvent::Chunk({
+                        let mut c = ChunkEvent::default();
+                        c.delta = "Hello".into();
+                        c
+                    }));
+                    e
                 },
                 "chunk",
             ),
             (
-                ChatEvent {
-                    stream_id: "s1".into(),
-                    event: Some(ChatEventEvent::ToolCall(Box::new(ToolCallEvent {
-                        call_id: "c1".into(),
-                        tool: "read_file".into(),
-                        args: serde_json::Map::new(),
-                        requires_approval: true,
-                    }))),
+                {
+                    let mut e = ChatEvent::default();
+                    e.stream_id = "s1".into();
+                    e.event = Some(ChatEventEvent::ToolCall({
+                        let mut t = ToolCallEvent::default();
+                        t.call_id = "c1".into();
+                        t.tool = "read_file".into();
+                        t.args = serde_json::Map::new();
+                        t.requires_approval = true;
+                        t
+                    }));
+                    e
                 },
                 "tool_call",
             ),
             (
-                ChatEvent {
-                    stream_id: "s1".into(),
-                    event: Some(ChatEventEvent::Status(Box::new(StatusEvent {
-                        text: "Analyzing...".into(),
-                        agent: Some("sub-1".into()),
-                    }))),
+                {
+                    let mut e = ChatEvent::default();
+                    e.stream_id = "s1".into();
+                    e.event = Some(ChatEventEvent::Status({
+                        let mut s = StatusEvent::default();
+                        s.text = "Analyzing...".into();
+                        s.agent = Some("sub-1".into());
+                        s
+                    }));
+                    e
                 },
                 "status",
             ),
             (
-                ChatEvent {
-                    stream_id: "s1".into(),
-                    event: Some(ChatEventEvent::Error(Box::new(ErrorEvent {
-                        message: "rate limit".into(),
-                        code: None,
-                    }))),
+                {
+                    let mut e = ChatEvent::default();
+                    e.stream_id = "s1".into();
+                    e.event = Some(ChatEventEvent::Error({
+                        let mut err = ErrorEvent::default();
+                        err.message = "rate limit".into();
+                        err
+                    }));
+                    e
                 },
                 "error",
             ),
             (
-                ChatEvent {
-                    stream_id: "s1".into(),
-                    event: Some(ChatEventEvent::Done(Box::new(DoneEvent {
-                        usage: Some(Box::new(UsageSummary::default())),
-                    }))),
+                {
+                    let mut e = ChatEvent::default();
+                    e.stream_id = "s1".into();
+                    e.event = Some(ChatEventEvent::Done({
+                        let mut d = DoneEvent::default();
+                        d.usage = Some(UsageSummary::default());
+                        d
+                    }));
+                    e
                 },
                 "done",
             ),
@@ -273,11 +291,15 @@ mod tests {
 
     #[test]
     fn test_chat_event_json_rpc_chunk_has_delta() {
-        let event = ChatEvent {
-            stream_id: "s1".into(),
-            event: Some(ChatEventEvent::Chunk(Box::new(ChunkEvent {
-                delta: "Hello world".into(),
-            }))),
+        let event = {
+            let mut e = ChatEvent::default();
+            e.stream_id = "s1".into();
+            e.event = Some(ChatEventEvent::Chunk({
+                let mut c = ChunkEvent::default();
+                c.delta = "Hello world".into();
+                c
+            }));
+            e
         };
         let rpc = ChatEventRpc::from(&event);
         let json = serde_json::to_value(&rpc).unwrap();
@@ -286,12 +308,16 @@ mod tests {
 
     #[test]
     fn test_chat_event_json_rpc_status_with_agent() {
-        let event = ChatEvent {
-            stream_id: "s1".into(),
-            event: Some(ChatEventEvent::Status(Box::new(StatusEvent {
-                text: "Working...".into(),
-                agent: Some("sub-agent".into()),
-            }))),
+        let event = {
+            let mut e = ChatEvent::default();
+            e.stream_id = "s1".into();
+            e.event = Some(ChatEventEvent::Status({
+                let mut s = StatusEvent::default();
+                s.text = "Working...".into();
+                s.agent = Some("sub-agent".into());
+                s
+            }));
+            e
         };
         let rpc = ChatEventRpc::from(&event);
         let json = serde_json::to_value(&rpc).unwrap();
@@ -300,12 +326,15 @@ mod tests {
 
     #[test]
     fn test_chat_event_json_rpc_status_without_agent() {
-        let event = ChatEvent {
-            stream_id: "s1".into(),
-            event: Some(ChatEventEvent::Status(Box::new(StatusEvent {
-                text: "Working...".into(),
-                agent: None,
-            }))),
+        let event = {
+            let mut e = ChatEvent::default();
+            e.stream_id = "s1".into();
+            e.event = Some(ChatEventEvent::Status({
+                let mut s = StatusEvent::default();
+                s.text = "Working...".into();
+                s
+            }));
+            e
         };
         let rpc = ChatEventRpc::from(&event);
         let json = serde_json::to_value(&rpc).unwrap();
@@ -375,14 +404,18 @@ mod tests {
         args.insert("recursive".into(), serde_json::json!(true));
         args.insert("depth".into(), serde_json::json!(3));
 
-        let event = ChatEvent {
-            stream_id: "s1".into(),
-            event: Some(ChatEventEvent::ToolCall(Box::new(ToolCallEvent {
-                call_id: "c1".into(),
-                tool: "read_file".into(),
-                args: args.clone(),
-                requires_approval: false,
-            }))),
+        let event = {
+            let mut e = ChatEvent::default();
+            e.stream_id = "s1".into();
+            e.event = Some(ChatEventEvent::ToolCall({
+                let mut t = ToolCallEvent::default();
+                t.call_id = "c1".into();
+                t.tool = "read_file".into();
+                t.args = args.clone();
+                t.requires_approval = false;
+                t
+            }));
+            e
         };
         let rpc = ChatEventRpc::from(&event);
         let json = serde_json::to_value(&rpc).unwrap();
@@ -395,9 +428,11 @@ mod tests {
     #[test]
     fn test_chat_event_rpc_none_event_becomes_error() {
         // A ChatEvent with event: None should map to Error with UNKNOWN code.
-        let event = ChatEvent {
-            stream_id: "s1".into(),
-            event: None,
+        let event = {
+            let mut e = ChatEvent::default();
+            e.stream_id = "s1".into();
+            e.event = None;
+            e
         };
         let rpc = ChatEventRpc::from(&event);
         let json = serde_json::to_value(&rpc).unwrap();
@@ -409,9 +444,11 @@ mod tests {
     #[test]
     fn test_chat_event_rpc_done_without_usage() {
         // Done with usage: None should omit usage field entirely.
-        let event = ChatEvent {
-            stream_id: "s1".into(),
-            event: Some(ChatEventEvent::Done(Box::new(DoneEvent { usage: None }))),
+        let event = {
+            let mut e = ChatEvent::default();
+            e.stream_id = "s1".into();
+            e.event = Some(ChatEventEvent::Done(DoneEvent::default()));
+            e
         };
         let rpc = ChatEventRpc::from(&event);
         let json = serde_json::to_value(&rpc).unwrap();

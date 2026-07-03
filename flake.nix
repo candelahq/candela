@@ -32,6 +32,22 @@
           };
           vendorHash = "sha256-nGAX1r6JgjZ0w9McpICd8nP+oWqu9PY6hSqTztm3s70=";
         };
+
+        # Proto-to-domain-type code generator (not in nixpkgs).
+        protoc-gen-proto2type = pkgs.buildGoModule rec {
+          pname = "protoc-gen-proto2type";
+          version = "0.4.2";
+          src = pkgs.fetchFromGitHub {
+            owner = "protocgen";
+            repo = "proto2type";
+            rev = "v${version}";
+            sha256 = "sha256-0Yq2XW73DyHyk1+hawqHLCfuIKkllS8rFnFHVeYwn/Y=";
+          };
+          vendorHash = "sha256-onh/RLIot3ig4bXZfmdc0SPEePtxfOR0RQNHxMMfF1Y=";
+          postInstall = ''
+            mv $out/bin/proto2type $out/bin/protoc-gen-proto2type
+          '';
+        };
       in
       {
         devShells.default = pkgs.mkShell {
@@ -48,6 +64,7 @@
             buf
             protobuf
             protoc-gen-bq-schema
+            protoc-gen-proto2type
 
             # Node.js (for web UI)
             nodejs_22

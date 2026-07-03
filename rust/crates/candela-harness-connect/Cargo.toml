@@ -36,6 +36,7 @@ chrono = { workspace = true }
 
 # Workspace crates
 candela-core = { workspace = true }
+candela-types = { workspace = true }
 candela-harness-chat = { workspace = true }
 candela-harness-storage = { workspace = true }
 

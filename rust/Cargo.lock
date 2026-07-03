@@ -421,6 +421,7 @@ dependencies = [
  "candela-core",
  "candela-harness-chat",
  "candela-harness-storage",
+ "candela-types",
  "chrono",
  "connectrpc",
  "connectrpc-build",

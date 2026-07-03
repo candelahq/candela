@@ -14,6 +14,7 @@ pub use candela_types::session::{Message, MessageRole, SearchResult, Session};
 // ── Session constructor ──
 
 /// Extension methods for creating new sessions.
+#[allow(clippy::field_reassign_with_default)]
 pub fn new_session(model: &str, device_id: &str) -> Session {
     let now = chrono::Utc::now();
     let id = uuid::Uuid::new_v4().to_string();
@@ -28,6 +29,7 @@ pub fn new_session(model: &str, device_id: &str) -> Session {
 }
 
 /// Create a new user message for a session.
+#[allow(clippy::field_reassign_with_default)]
 pub fn new_message(session_id: &str, role: MessageRole, content: &str) -> Message {
     let mut msg = Message::default();
     msg.id = uuid::Uuid::new_v4().to_string();

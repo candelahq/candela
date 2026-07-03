@@ -151,7 +151,28 @@ impl Database {
             .map_err(|e| HarnessError::Storage(e.to_string()))?;
         Ok(())
     }
+}
 
+/// Map a database row to a `Session`. Expects columns in the order:
+/// id, title, model, message_count, total_tokens, total_cost_usd,
+/// device_id, created_at, updated_at, deleted_at.
+#[allow(clippy::field_reassign_with_default)]
+fn session_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Session> {
+    let mut s = Session::default();
+    s.id = row.get(0)?;
+    s.title = row.get(1)?;
+    s.model = row.get(2)?;
+    s.message_count = row.get(3)?;
+    s.total_tokens = row.get(4)?;
+    s.total_cost_usd = row.get(5)?;
+    s.device_id = row.get(6)?;
+    s.created_at = row.get::<_, DateTime<Utc>>(7)?;
+    s.updated_at = row.get::<_, DateTime<Utc>>(8)?;
+    s.deleted_at = row.get::<_, Option<DateTime<Utc>>>(9)?;
+    Ok(s)
+}
+
+impl Database {
     /// List all non-deleted sessions, most recent first.
     pub fn list_sessions(&self, limit: i64, offset: i64) -> Result<Vec<Session>, HarnessError> {
         let mut stmt = self
@@ -166,20 +187,7 @@ impl Database {
             .map_err(|e| HarnessError::Storage(e.to_string()))?;
 
         let sessions = stmt
-            .query_map(params![limit, offset], |row| {
-                let mut s = Session::default();
-                s.id = row.get(0)?;
-                s.title = row.get(1)?;
-                s.model = row.get(2)?;
-                s.message_count = row.get(3)?;
-                s.total_tokens = row.get(4)?;
-                s.total_cost_usd = row.get(5)?;
-                s.device_id = row.get(6)?;
-                s.created_at = row.get::<_, DateTime<Utc>>(7)?;
-                s.updated_at = row.get::<_, DateTime<Utc>>(8)?;
-                s.deleted_at = row.get::<_, Option<DateTime<Utc>>>(9)?;
-                Ok(s)
-            })
+            .query_map(params![limit, offset], session_from_row)
             .map_err(|e| HarnessError::Storage(e.to_string()))?
             .collect::<Result<Vec<_>, _>>()
             .map_err(|e| HarnessError::Storage(e.to_string()))?;
@@ -206,20 +214,7 @@ impl Database {
                  FROM sessions
                  WHERE id = ?1 AND deleted_at IS NULL",
                 params![id],
-                |row| {
-                    let mut s = Session::default();
-                    s.id = row.get(0)?;
-                    s.title = row.get(1)?;
-                    s.model = row.get(2)?;
-                    s.message_count = row.get(3)?;
-                    s.total_tokens = row.get(4)?;
-                    s.total_cost_usd = row.get(5)?;
-                    s.device_id = row.get(6)?;
-                    s.created_at = row.get::<_, DateTime<Utc>>(7)?;
-                    s.updated_at = row.get::<_, DateTime<Utc>>(8)?;
-                    s.deleted_at = row.get::<_, Option<DateTime<Utc>>>(9)?;
-                    Ok(s)
-                },
+                session_from_row,
             )
             .map_err(|e| match e {
                 rusqlite::Error::QueryReturnedNoRows => {

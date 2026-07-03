@@ -40,7 +40,7 @@ message StatusEvent {
 
 // DoneEvent signals successful completion of the stream.
 message DoneEvent {
-  UsageSummary usage = 1;
+  optional UsageSummary usage = 1;
 }
 
 // ErrorEvent signals that the stream terminated with an error.

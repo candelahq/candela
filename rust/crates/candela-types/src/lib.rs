@@ -7,7 +7,11 @@
 //! buf generate --template buf.gen.rust.yaml
 //! ```
 //!
-//! Then copy the relevant files from gen/rust/.../ into this crate.
+//! Then vendor into this repo:
+//!
+//! ```bash
+//! ./scripts/vendor-types.sh
+//! ```
 
 pub mod chat;
 pub mod chat_jsonrpc;

@@ -28,6 +28,11 @@ fi
 
 TYPES_DIR="${REPO_DIR}/rust/crates/candela-types/src"
 
+if [ ! -d "${TYPES_DIR}" ]; then
+  echo "Error: destination directory not found: ${TYPES_DIR}" >&2
+  exit 1
+fi
+
 echo "Vendoring proto2type domain types from: ${GEN_DIR}"
 echo ""
 

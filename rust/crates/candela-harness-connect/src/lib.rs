@@ -6,5 +6,7 @@ pub mod proto {
     connectrpc::include_generated!();
 }
 
+mod converters;
+
 pub mod server;
 pub mod service;

@@ -8,7 +8,7 @@
 use std::sync::{Arc, Mutex};
 
 use buffa::MessageField;
-use candela_core::harness::{self, ChatEvent, ChatEventEvent, HarnessError, new_session};
+use candela_core::harness::{ChatEvent, HarnessError, new_session};
 use candela_harness_chat::ChatRuntime;
 use candela_harness_storage::{Database, SearchIndex};
 use connectrpc::{
@@ -26,92 +26,17 @@ pub struct HarnessServiceImpl {
 }
 
 // ── Domain ↔ Proto conversions ──
-// Adapter: candela_core domain types ↔ candela.types buffa wire types.
-// ChatEvent is now the unified type from candela_types::chat, re-exported
-// via candela_core. These converters will be replaced by proto2type-generated
-// buffa From impls once vendored.
+// Generated From/TryFrom impls live in crate::converters (proto2type buffa backend).
+// Only service-level wrappers (e.g. wrapping ChatEvent in SendMessageResponse)
+// remain hand-written here.
 
-#[allow(clippy::field_reassign_with_default, clippy::useless_conversion)]
-fn domain_session_to_proto(s: &harness::Session) -> proto_types::Session {
-    let mut session = proto_types::Session::default();
-    session.id = s.id.clone().into();
-    session.title = s.title.clone().into();
-    session.model = s.model.clone().into();
-    session.message_count = s.message_count;
-    session.total_tokens = s.total_tokens;
-    session.total_cost_usd = s.total_cost_usd;
-    session.device_id = s.device_id.clone().into();
-    session.created_at = MessageField::some(chrono_to_buffa_timestamp(&s.created_at));
-    session.updated_at = MessageField::some(chrono_to_buffa_timestamp(&s.updated_at));
-    session.deleted_at = match &s.deleted_at {
-        Some(dt) => MessageField::some(chrono_to_buffa_timestamp(dt)),
-        None => MessageField::none(),
-    };
-    session
-}
-
-#[allow(clippy::field_reassign_with_default, clippy::useless_conversion)]
+/// Wrap a domain ChatEvent into a SendMessageResponse for streaming.
+#[allow(clippy::field_reassign_with_default)]
 fn domain_chat_event_to_proto(event: &ChatEvent) -> SendMessageResponse {
-    let mut ce = proto_types::ChatEvent::default();
-    ce.stream_id = event.stream_id.clone().into();
-
-    ce.event = event.event.as_ref().map(|inner| match inner {
-        ChatEventEvent::Chunk(c) => {
-            let mut e = proto_types::ChunkEvent::default();
-            e.delta = c.delta.clone().into();
-            proto_types::__buffa::oneof::chat_event::Event::Chunk(Box::new(e))
-        }
-        ChatEventEvent::Done(d) => {
-            let mut e = proto_types::DoneEvent::default();
-            if let Some(usage) = &d.usage {
-                let mut u = proto_types::UsageSummary::default();
-                u.prompt_tokens = usage.prompt_tokens;
-                u.completion_tokens = usage.completion_tokens;
-                u.total_tokens = usage.total_tokens;
-                u.total_cost_usd = usage.total_cost_usd;
-                u.model = usage.model.clone().into();
-                e.usage = MessageField::some(u);
-            }
-            proto_types::__buffa::oneof::chat_event::Event::Done(Box::new(e))
-        }
-        ChatEventEvent::Error(err) => {
-            let mut e = proto_types::ErrorEvent::default();
-            e.message = err.message.clone().into();
-            e.code = err.code.as_deref().map(Into::into);
-            proto_types::__buffa::oneof::chat_event::Event::Error(Box::new(e))
-        }
-        ChatEventEvent::Status(s) => {
-            let mut e = proto_types::StatusEvent::default();
-            e.text = s.text.clone().into();
-            e.agent = s.agent.as_deref().map(Into::into);
-            proto_types::__buffa::oneof::chat_event::Event::Status(Box::new(e))
-        }
-        ChatEventEvent::ToolCall(tc) => {
-            let mut e = proto_types::ToolCallEvent::default();
-            e.call_id = tc.call_id.clone().into();
-            e.tool = tc.tool.clone().into();
-            e.args = MessageField::some(
-                serde_json::from_value(serde_json::Value::Object(tc.args.clone()))
-                    .unwrap_or_default(),
-            );
-            e.requires_approval = tc.requires_approval;
-            proto_types::__buffa::oneof::chat_event::Event::ToolCall(Box::new(e))
-        }
-    });
-
+    let ce: proto_types::ChatEvent = event.into();
     let mut resp = SendMessageResponse::default();
     resp.event = MessageField::some(ce);
     resp
-}
-
-#[allow(clippy::field_reassign_with_default)]
-fn chrono_to_buffa_timestamp(
-    dt: &chrono::DateTime<chrono::Utc>,
-) -> buffa_types::google::protobuf::Timestamp {
-    let mut ts = buffa_types::google::protobuf::Timestamp::default();
-    ts.seconds = dt.timestamp();
-    ts.nanos = dt.timestamp_subsec_nanos() as i32;
-    ts
 }
 
 #[allow(
@@ -178,8 +103,10 @@ impl HarnessService for HarnessServiceImpl {
                 .list_sessions(limit, offset)
                 .map_err(|e| ConnectError::internal(e.to_string()))?;
 
-            let proto_sessions: Vec<proto_types::Session> =
-                sessions.iter().map(domain_session_to_proto).collect();
+            let proto_sessions: Vec<proto_types::Session> = sessions
+                .iter()
+                .map(|s| proto_types::Session::from(s))
+                .collect();
             let total = proto_sessions.len() as i32;
 
             let mut resp = ListSessionsResponse::default();
@@ -211,7 +138,7 @@ impl HarnessService for HarnessServiceImpl {
                 .map_err(|e| ConnectError::internal(e.to_string()))?;
 
             let mut resp = CreateSessionResponse::default();
-            resp.session = MessageField::some(domain_session_to_proto(&session));
+            resp.session = MessageField::some(proto_types::Session::from(&session));
             Ok(Response::new(resp))
         }
     }
@@ -235,7 +162,7 @@ impl HarnessService for HarnessServiceImpl {
                 other => ConnectError::internal(other.to_string()),
             })?;
             let mut resp = GetSessionResponse::default();
-            resp.session = MessageField::some(domain_session_to_proto(&session));
+            resp.session = MessageField::some(proto_types::Session::from(&session));
             Ok(Response::new(resp))
         }
     }
@@ -291,7 +218,7 @@ impl HarnessService for HarnessServiceImpl {
             })?;
 
             let mut resp = EditSessionTitleResponse::default();
-            resp.session = MessageField::some(domain_session_to_proto(&session));
+            resp.session = MessageField::some(proto_types::Session::from(&session));
             Ok(Response::new(resp))
         }
     }
@@ -317,17 +244,7 @@ impl HarnessService for HarnessServiceImpl {
 
             let proto_results: Vec<proto_types::SearchResult> = results
                 .iter()
-                .map(|r| {
-                    let mut sr = proto_types::SearchResult::default();
-                    sr.message_preview = r.message_preview.clone().into();
-                    sr.session_id = r.session_id.clone().into();
-                    sr.message_id = r.message_id.clone().into();
-                    sr.session_title = r.session_title.clone().into();
-                    sr.role = buffa::EnumValue::from(r.role as i32);
-                    sr.score = r.score;
-                    sr.created_at = MessageField::some(chrono_to_buffa_timestamp(&r.created_at));
-                    sr
-                })
+                .map(proto_types::SearchResult::from)
                 .collect();
 
             let mut resp = SearchMessagesResponse::default();

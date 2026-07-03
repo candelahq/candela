@@ -16,3 +16,9 @@ pub mod model_catalog;
 pub mod model_catalog_sqlite;
 pub mod session;
 pub mod session_sqlite;
+
+/// Flat re-export of all domain types for use by generated converters.
+pub mod prelude {
+    pub use super::chat::*;
+    pub use super::session::*;
+}

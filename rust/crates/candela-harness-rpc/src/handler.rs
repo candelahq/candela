@@ -603,9 +603,13 @@ mod tests {
             }),
         };
         let resp = handler.handle(req).await.unwrap();
-        assert!(
-            resp.error.is_some(),
-            "should return error for nonexistent session"
+        let err = resp
+            .error
+            .expect("should return error for nonexistent session");
+        assert_eq!(
+            err.code, INVALID_PARAMS,
+            "nonexistent session should return INVALID_PARAMS, got {}",
+            err.code
         );
     }
 }

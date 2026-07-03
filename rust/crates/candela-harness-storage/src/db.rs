@@ -598,4 +598,199 @@ mod tests {
             "should reject title update on soft-deleted session"
         );
     }
+
+    #[test]
+    fn test_count_sessions() {
+        let db = Database::open_in_memory().unwrap();
+        assert_eq!(db.count_sessions().unwrap(), 0);
+
+        db.create_session(&new_session("m", "d")).unwrap();
+        assert_eq!(db.count_sessions().unwrap(), 1);
+
+        db.create_session(&new_session("m", "d")).unwrap();
+        db.create_session(&new_session("m", "d")).unwrap();
+        assert_eq!(db.count_sessions().unwrap(), 3);
+    }
+
+    #[test]
+    fn test_count_sessions_excludes_deleted() {
+        let db = Database::open_in_memory().unwrap();
+        let s1 = new_session("m", "d");
+        let s2 = new_session("m", "d");
+        db.create_session(&s1).unwrap();
+        db.create_session(&s2).unwrap();
+        assert_eq!(db.count_sessions().unwrap(), 2);
+
+        db.delete_session(&s1.id).unwrap();
+        assert_eq!(db.count_sessions().unwrap(), 1);
+    }
+
+    #[test]
+    fn test_list_sessions_pagination() {
+        let db = Database::open_in_memory().unwrap();
+        for _ in 0..5 {
+            let s = new_session("m", "d");
+            db.create_session(&s).unwrap();
+            // Small delay so updated_at ordering is deterministic.
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+
+        // Page 1: first 2
+        let page1 = db.list_sessions(2, 0).unwrap();
+        assert_eq!(page1.len(), 2);
+
+        // Page 2: next 2
+        let page2 = db.list_sessions(2, 2).unwrap();
+        assert_eq!(page2.len(), 2);
+
+        // Pages should not overlap.
+        assert_ne!(page1[0].id, page2[0].id);
+        assert_ne!(page1[1].id, page2[1].id);
+
+        // Page 3: last 1
+        let page3 = db.list_sessions(2, 4).unwrap();
+        assert_eq!(page3.len(), 1);
+
+        // Past the end: empty
+        let page4 = db.list_sessions(2, 10).unwrap();
+        assert!(page4.is_empty());
+    }
+
+    #[test]
+    fn test_list_sessions_ordered_by_updated_at() {
+        let db = Database::open_in_memory().unwrap();
+        let s1 = new_session("m", "d");
+        let s2 = new_session("m", "d");
+        let s3 = new_session("m", "d");
+        db.create_session(&s1).unwrap();
+        db.create_session(&s2).unwrap();
+        db.create_session(&s3).unwrap();
+
+        // Touch s1 last so it appears first in the listing.
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        db.update_session_title(&s1.id, "Updated").unwrap();
+
+        let sessions = db.list_sessions(10, 0).unwrap();
+        assert_eq!(
+            sessions[0].id, s1.id,
+            "most recently updated session should be first"
+        );
+    }
+
+    #[test]
+    fn test_create_session_duplicate_id() {
+        let db = Database::open_in_memory().unwrap();
+        let session = new_session("m", "d");
+        db.create_session(&session).unwrap();
+
+        // Inserting the same session again should fail (PRIMARY KEY constraint).
+        let err = db.create_session(&session).unwrap_err();
+        assert!(
+            matches!(err, HarnessError::Storage(ref s) if s.contains("UNIQUE")),
+            "expected UNIQUE constraint error, got: {err:?}"
+        );
+    }
+
+    #[test]
+    fn test_delete_session_not_found() {
+        let db = Database::open_in_memory().unwrap();
+        let err = db.delete_session("nonexistent").unwrap_err();
+        assert!(matches!(err, HarnessError::SessionNotFound(_)));
+    }
+
+    #[test]
+    fn test_delete_session_already_deleted() {
+        let db = Database::open_in_memory().unwrap();
+        let session = new_session("m", "d");
+        db.create_session(&session).unwrap();
+        db.delete_session(&session.id).unwrap();
+
+        // Second delete should fail — already soft-deleted.
+        let err = db.delete_session(&session.id).unwrap_err();
+        assert!(
+            matches!(err, HarnessError::SessionNotFound(_)),
+            "double-delete should return SessionNotFound"
+        );
+    }
+
+    #[test]
+    fn test_insert_message_updates_session_counters() {
+        let mut db = Database::open_in_memory().unwrap();
+        let session = new_session("m", "d");
+        db.create_session(&session).unwrap();
+
+        // Build a message with token_count and cost_usd set.
+        let mut msg1 = new_message(&session.id, MessageRole::User, "hello");
+        msg1.token_count = Some(100);
+        msg1.cost_usd = Some(0.001);
+        db.insert_message(&msg1).unwrap();
+
+        let s = db.get_session(&session.id).unwrap();
+        assert_eq!(s.message_count, 1);
+        assert_eq!(s.total_tokens, 100);
+        assert!((s.total_cost_usd - 0.001).abs() < 1e-9);
+
+        // Second message should accumulate.
+        let mut msg2 = new_message(&session.id, MessageRole::Assistant, "world");
+        msg2.token_count = Some(200);
+        msg2.cost_usd = Some(0.002);
+        db.insert_message(&msg2).unwrap();
+
+        let s = db.get_session(&session.id).unwrap();
+        assert_eq!(s.message_count, 2);
+        assert_eq!(s.total_tokens, 300);
+        assert!((s.total_cost_usd - 0.003).abs() < 1e-9);
+    }
+
+    #[test]
+    fn test_insert_message_on_deleted_session() {
+        let mut db = Database::open_in_memory().unwrap();
+        let session = new_session("m", "d");
+        db.create_session(&session).unwrap();
+        db.delete_session(&session.id).unwrap();
+
+        let msg = new_message(&session.id, MessageRole::User, "hello");
+        let err = db.insert_message(&msg).unwrap_err();
+        assert!(
+            matches!(err, HarnessError::SessionNotFound(_)),
+            "insert on deleted session should return SessionNotFound, got: {err:?}"
+        );
+    }
+
+    #[test]
+    fn test_get_messages_respects_limit() {
+        let mut db = Database::open_in_memory().unwrap();
+        let session = new_session("m", "d");
+        db.create_session(&session).unwrap();
+
+        for i in 0..5 {
+            let msg = new_message(&session.id, MessageRole::User, &format!("msg-{i}"));
+            db.insert_message(&msg).unwrap();
+        }
+
+        let messages = db.get_messages(&session.id, 3).unwrap();
+        assert_eq!(messages.len(), 3);
+        // Should return the first 3 by sequence order.
+        assert_eq!(messages[0].content, "msg-0");
+        assert_eq!(messages[1].content, "msg-1");
+        assert_eq!(messages[2].content, "msg-2");
+    }
+
+    #[test]
+    fn test_get_messages_empty_session() {
+        let db = Database::open_in_memory().unwrap();
+        let session = new_session("m", "d");
+        db.create_session(&session).unwrap();
+
+        let messages = db.get_messages(&session.id, 50).unwrap();
+        assert!(messages.is_empty());
+    }
+
+    #[test]
+    fn test_get_messages_nonexistent_session() {
+        let db = Database::open_in_memory().unwrap();
+        // Querying messages for a session that doesn't exist returns empty, not error.
+        let messages = db.get_messages("no-such-session", 50).unwrap();
+        assert!(messages.is_empty());
+    }
 }

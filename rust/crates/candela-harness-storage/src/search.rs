@@ -326,4 +326,140 @@ mod tests {
         let results = idx.search("goodbye", 10).unwrap();
         assert_eq!(results[0].session_title, "New Title");
     }
+
+    #[test]
+    fn test_search_no_results() {
+        let idx = SearchIndex::open_in_memory().unwrap();
+        idx.index_message(
+            "Rust is a systems programming language",
+            "s1",
+            "m1",
+            "Rust Chat",
+            "user",
+            "2025-01-01T00:00:00Z",
+        )
+        .unwrap();
+
+        let results = idx.search("javascript", 10).unwrap();
+        assert!(results.is_empty());
+    }
+
+    #[test]
+    fn test_mark_session_deleted_idempotent() {
+        let idx = SearchIndex::open_in_memory().unwrap();
+        idx.index_message(
+            "some content",
+            "s1",
+            "m1",
+            "Title",
+            "user",
+            "2025-01-01T00:00:00Z",
+        )
+        .unwrap();
+
+        // Mark deleted twice — INSERT OR IGNORE should not error.
+        idx.mark_session_deleted("s1").unwrap();
+        idx.mark_session_deleted("s1").unwrap();
+
+        let results = idx.search("content", 10).unwrap();
+        assert!(results.is_empty());
+    }
+
+    #[test]
+    fn test_update_session_title_no_messages() {
+        let idx = SearchIndex::open_in_memory().unwrap();
+        // Updating title for a session with no indexed messages should be a no-op.
+        idx.update_session_title("nonexistent-session", "New Title")
+            .unwrap();
+    }
+
+    #[test]
+    fn test_search_result_role_round_trip() {
+        let idx = SearchIndex::open_in_memory().unwrap();
+
+        let roles = [
+            ("user", MessageRole::User),
+            ("assistant", MessageRole::Assistant),
+            ("system", MessageRole::System),
+            ("tool", MessageRole::Tool),
+            ("unspecified", MessageRole::Unspecified),
+        ];
+
+        for (i, (role_str, _)) in roles.iter().enumerate() {
+            // Each message needs a unique searchable term.
+            let content = format!("unique_role_test_{i} conversation");
+            idx.index_message(
+                &content,
+                "s1",
+                &format!("m{i}"),
+                "Roles",
+                role_str,
+                "2025-01-01T00:00:00Z",
+            )
+            .unwrap();
+        }
+
+        for (i, (_, expected_role)) in roles.iter().enumerate() {
+            let query = format!("unique_role_test_{i}");
+            let results = idx.search(&query, 10).unwrap();
+            assert_eq!(results.len(), 1, "expected 1 result for {query}");
+            assert_eq!(
+                results[0].role, *expected_role,
+                "role mismatch for query {query}: got {:?}, expected {:?}",
+                results[0].role, expected_role
+            );
+        }
+    }
+
+    #[test]
+    fn test_search_result_created_at_fidelity() {
+        let idx = SearchIndex::open_in_memory().unwrap();
+        let ts = "2025-06-15T14:30:00Z";
+        idx.index_message("timestamp fidelity test", "s1", "m1", "Title", "user", ts)
+            .unwrap();
+
+        let results = idx.search("timestamp fidelity", 10).unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(
+            results[0].created_at.to_rfc3339(),
+            "2025-06-15T14:30:00+00:00",
+            "created_at should survive the index→search round-trip"
+        );
+    }
+
+    #[test]
+    fn test_search_multiple_results_ordering() {
+        let idx = SearchIndex::open_in_memory().unwrap();
+
+        // Index messages where "Rust" appears with varying frequency
+        // to create different FTS5 relevance scores.
+        idx.index_message(
+            "Rust Rust Rust is incredibly fast and safe",
+            "s1",
+            "m1",
+            "Heavy Rust",
+            "user",
+            "2025-01-01T00:00:00Z",
+        )
+        .unwrap();
+        idx.index_message(
+            "I heard Rust is good",
+            "s2",
+            "m2",
+            "Light Rust",
+            "user",
+            "2025-01-02T00:00:00Z",
+        )
+        .unwrap();
+
+        let results = idx.search("Rust", 10).unwrap();
+        assert_eq!(results.len(), 2, "both messages should match");
+        // FTS5 rank is negative; more relevant = more negative score.
+        assert!(
+            results[0].score <= results[1].score,
+            "results should be ordered by FTS5 rank (most relevant first): {:?} vs {:?}",
+            results[0].score,
+            results[1].score
+        );
+    }
 }

@@ -192,8 +192,15 @@ impl RpcHandler {
         let (stream_id, event_stream) = match chat.clone().send_message(&session_id, &content).await
         {
             Ok(result) => result,
+            Err(HarnessError::SessionNotFound(sid)) => {
+                return JsonRpcResponse::error(
+                    id,
+                    INVALID_PARAMS,
+                    format!("session not found: {sid}"),
+                );
+            }
             Err(e) => {
-                return JsonRpcResponse::error(id, SERVER_ERROR, e.to_string());
+                return JsonRpcResponse::error(id, INTERNAL_ERROR, e.to_string());
             }
         };
 

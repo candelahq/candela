@@ -12,6 +12,7 @@ use crate::proto::candela::types as __buffa_mod;
 pub enum ConversionError {
     InvalidTimestamp { seconds: i64, nanos: i32 },
     InvalidEnumValue(i32),
+    MissingRequiredField(&'static str),
 }
 
 impl std::fmt::Display for ConversionError {
@@ -21,6 +22,7 @@ impl std::fmt::Display for ConversionError {
                 write!(f, "invalid timestamp: {seconds}s {nanos}ns")
             }
             Self::InvalidEnumValue(v) => write!(f, "invalid enum value: {v}"),
+            Self::MissingRequiredField(field) => write!(f, "missing required field: {field}"),
         }
     }
 }
@@ -81,10 +83,16 @@ impl TryFrom<&__buffa_mod::Session> for Session {
         d.total_tokens = b.total_tokens;
         d.total_cost_usd = b.total_cost_usd;
         d.device_id = b.device_id.to_string();
-        d.created_at =
-            buffa_timestamp_to_chrono(b.created_at.as_option().unwrap_or(&Default::default()))?;
-        d.updated_at =
-            buffa_timestamp_to_chrono(b.updated_at.as_option().unwrap_or(&Default::default()))?;
+        d.created_at = buffa_timestamp_to_chrono(
+            b.created_at
+                .as_option()
+                .ok_or(ConversionError::MissingRequiredField("created_at"))?,
+        )?;
+        d.updated_at = buffa_timestamp_to_chrono(
+            b.updated_at
+                .as_option()
+                .ok_or(ConversionError::MissingRequiredField("updated_at"))?,
+        )?;
         d.deleted_at = match b.deleted_at.as_option() {
             Some(ts) => Some(buffa_timestamp_to_chrono(ts)?),
             None => None,
@@ -124,8 +132,11 @@ impl TryFrom<&__buffa_mod::Message> for Message {
         d.model = b.model.as_ref().map(|s| s.to_string());
         d.token_count = b.token_count;
         d.cost_usd = b.cost_usd;
-        d.created_at =
-            buffa_timestamp_to_chrono(b.created_at.as_option().unwrap_or(&Default::default()))?;
+        d.created_at = buffa_timestamp_to_chrono(
+            b.created_at
+                .as_option()
+                .ok_or(ConversionError::MissingRequiredField("created_at"))?,
+        )?;
         d.sequence = b.sequence;
         Ok(d)
     }
@@ -159,8 +170,11 @@ impl TryFrom<&__buffa_mod::SearchResult> for SearchResult {
         d.role = MessageRole::from_i32(b.role.to_i32())
             .ok_or(ConversionError::InvalidEnumValue(b.role.to_i32()))?;
         d.score = b.score;
-        d.created_at =
-            buffa_timestamp_to_chrono(b.created_at.as_option().unwrap_or(&Default::default()))?;
+        d.created_at = buffa_timestamp_to_chrono(
+            b.created_at
+                .as_option()
+                .ok_or(ConversionError::MissingRequiredField("created_at"))?,
+        )?;
         Ok(d)
     }
 }

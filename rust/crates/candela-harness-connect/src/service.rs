@@ -103,10 +103,8 @@ impl HarnessService for HarnessServiceImpl {
                 .list_sessions(limit, offset)
                 .map_err(|e| ConnectError::internal(e.to_string()))?;
 
-            let proto_sessions: Vec<proto_types::Session> = sessions
-                .iter()
-                .map(|s| proto_types::Session::from(s))
-                .collect();
+            let proto_sessions: Vec<proto_types::Session> =
+                sessions.iter().map(proto_types::Session::from).collect();
             let total = proto_sessions.len() as i32;
 
             let mut resp = ListSessionsResponse::default();

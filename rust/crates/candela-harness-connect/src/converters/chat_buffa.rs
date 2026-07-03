@@ -11,6 +11,7 @@ use crate::proto::candela::types as __buffa_mod;
 pub enum ConversionError {
     InvalidEnumValue(i32),
     InvalidStructValue,
+    MissingRequiredField(&'static str),
 }
 
 impl std::fmt::Display for ConversionError {
@@ -18,6 +19,7 @@ impl std::fmt::Display for ConversionError {
         match self {
             Self::InvalidEnumValue(v) => write!(f, "invalid enum value: {v}"),
             Self::InvalidStructValue => write!(f, "invalid struct value"),
+            Self::MissingRequiredField(field) => write!(f, "missing required field: {field}"),
         }
     }
 }

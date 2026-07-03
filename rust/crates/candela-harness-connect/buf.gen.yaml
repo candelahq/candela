@@ -1,7 +1,7 @@
 version: v2
 inputs:
   # Use the published BSR module which has proto2type annotations.
-  - module: buf.build/candelahq/protos
+  - module: buf.build/candelahq/protos:d0a126cd1f7541fc80cd0f61f33fcfc0
     paths:
       - candela/types/chat.proto
       - candela/types/session.proto

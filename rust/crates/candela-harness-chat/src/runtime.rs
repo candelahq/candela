@@ -119,12 +119,15 @@ impl ChatRuntime {
         tokio::spawn(async move {
             // Emit initial status
             let _ = tx
-                .send(ChatEvent {
-                    stream_id: sid.clone(),
-                    event: Some(ChatEventEvent::Status(Box::new(StatusEvent {
-                        text: "Thinking...".to_string(),
-                        agent: None,
-                    }))),
+                .send({
+                    let mut e = ChatEvent::default();
+                    e.stream_id = sid.clone();
+                    e.event = Some(ChatEventEvent::Status({
+                        let mut s = StatusEvent::default();
+                        s.text = "Thinking...".to_string();
+                        s
+                    }));
+                    e
                 })
                 .await;
 
@@ -134,12 +137,16 @@ impl ChatRuntime {
                 Err(e) => {
                     error!(error = %e, "failed to start model stream");
                     let _ = tx
-                        .send(ChatEvent {
-                            stream_id: sid.clone(),
-                            event: Some(ChatEventEvent::Error(Box::new(ErrorEvent {
-                                message: e.to_string(),
-                                code: None,
-                            }))),
+                        .send({
+                            let msg = e.to_string();
+                            let mut ev = ChatEvent::default();
+                            ev.stream_id = sid.clone();
+                            ev.event = Some(ChatEventEvent::Error({
+                                let mut err = ErrorEvent::default();
+                                err.message = msg;
+                                err
+                            }));
+                            ev
                         })
                         .await;
                     return;
@@ -162,9 +169,11 @@ impl ChatRuntime {
                         full_response.push_str(&c.delta);
                         if !client_disconnected
                             && tx
-                                .send(ChatEvent {
-                                    stream_id: sid.clone(),
-                                    event: Some(ChatEventEvent::Chunk(c)),
+                                .send({
+                                    let mut ev = ChatEvent::default();
+                                    ev.stream_id = sid.clone();
+                                    ev.event = Some(ChatEventEvent::Chunk(c));
+                                    ev
                                 })
                                 .await
                                 .is_err()
@@ -177,7 +186,7 @@ impl ChatRuntime {
                         ..
                     }) => {
                         if let Some(u) = d.usage {
-                            usage = *u;
+                            usage = u;
                         }
                         usage.model = model.clone();
                     }
@@ -189,12 +198,15 @@ impl ChatRuntime {
                     Err(e) => {
                         error!(error = %e, "stream error");
                         let _ = tx
-                            .send(ChatEvent {
-                                stream_id: sid.clone(),
-                                event: Some(ChatEventEvent::Error(Box::new(ErrorEvent {
-                                    message: e.to_string(),
-                                    code: None,
-                                }))),
+                            .send({
+                                let mut ev = ChatEvent::default();
+                                ev.stream_id = sid.clone();
+                                ev.event = Some(ChatEventEvent::Error({
+                                    let mut err = ErrorEvent::default();
+                                    err.message = e.to_string();
+                                    err
+                                }));
+                                ev
                             })
                             .await;
                         stream_failed = true;
@@ -232,11 +244,15 @@ impl ChatRuntime {
             // Emit Done event only if stream completed without errors
             if !stream_failed {
                 let _ = tx
-                    .send(ChatEvent {
-                        stream_id: sid.clone(),
-                        event: Some(ChatEventEvent::Done(Box::new(DoneEvent {
-                            usage: Some(Box::new(usage)),
-                        }))),
+                    .send({
+                        let mut ev = ChatEvent::default();
+                        ev.stream_id = sid.clone();
+                        ev.event = Some(ChatEventEvent::Done({
+                            let mut d = DoneEvent::default();
+                            d.usage = Some(usage);
+                            d
+                        }));
+                        ev
                     })
                     .await;
             }
@@ -485,10 +501,11 @@ impl ChatRuntime {
             "Generate a short title (max 6 words) for a chat that starts with this message. \
              Return ONLY the title, no quotes or punctuation:\n\n{truncated_input}"
         );
-        let messages = vec![Message {
-            role: MessageRole::User,
-            content: prompt,
-            ..Default::default()
+        let messages = vec![{
+            let mut m = Message::default();
+            m.role = MessageRole::User;
+            m.content = prompt;
+            m
         }];
 
         let stream_id = uuid::Uuid::new_v4().to_string();

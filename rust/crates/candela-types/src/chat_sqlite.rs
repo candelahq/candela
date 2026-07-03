@@ -279,7 +279,7 @@ impl DoneEventRow {
     pub fn to_domain(&self) -> Result<DoneEvent, ConversionError> {
         Ok(DoneEvent {
             usage: match &self.usage {
-                Some(s) => Some(Box::new(serde_json::from_str(s)?)),
+                Some(s) => Some(serde_json::from_str(s)?),
                 None => None,
             },
         })
@@ -289,7 +289,7 @@ impl DoneEventRow {
     pub fn into_domain(self) -> Result<DoneEvent, ConversionError> {
         Ok(DoneEvent {
             usage: match self.usage {
-                Some(s) => Some(Box::new(serde_json::from_str(&s)?)),
+                Some(s) => Some(serde_json::from_str(&s)?),
                 None => None,
             },
         })
@@ -299,7 +299,7 @@ impl DoneEventRow {
     pub fn from_domain(d: &DoneEvent) -> Result<Self, ConversionError> {
         Ok(Self {
             usage: match &d.usage {
-                Some(v) => Some(serde_json::to_string(v.as_ref())?),
+                Some(v) => Some(serde_json::to_string(v)?),
                 None => None,
             },
         })

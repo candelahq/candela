@@ -119,15 +119,15 @@ impl SearchIndex {
                     "tool" => MessageRole::Tool,
                     _ => MessageRole::Unspecified,
                 };
-                Ok(SearchResult {
-                    message_preview: row.get(0)?,
-                    session_id: row.get(1)?,
-                    message_id: row.get(2)?,
-                    session_title: row.get(3)?,
-                    role,
-                    created_at: row.get::<_, DateTime<Utc>>(5)?,
-                    score: row.get(6)?,
-                })
+                let mut sr = SearchResult::default();
+                sr.message_preview = row.get(0)?;
+                sr.session_id = row.get(1)?;
+                sr.message_id = row.get(2)?;
+                sr.session_title = row.get(3)?;
+                sr.role = role;
+                sr.created_at = row.get::<_, DateTime<Utc>>(5)?;
+                sr.score = row.get(6)?;
+                Ok(sr)
             })
             .map_err(|e| HarnessError::Storage(e.to_string()))?
             .collect::<Result<Vec<_>, _>>()

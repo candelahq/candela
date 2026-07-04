@@ -960,9 +960,16 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// ── Access gates: tag-based model access + tenant isolation ──
-	// Admins bypass. Catalog unavailable = fail-open. Solo mode (nil catalog) = skip.
+	// Admins bypass. Model not in catalog = skip (unmanaged model). Errors = fail closed.
 	if requestModel != "" && p.catalog != nil && !isAdmin {
-		if entry, err := p.catalog.Get(r.Context(), providerName, requestModel); err == nil && entry != nil {
+		entry, catErr := p.catalog.Get(r.Context(), providerName, requestModel)
+		if catErr != nil && !errors.Is(catErr, catalog.ErrNotFound) {
+			ProxyErrorResponse(w, http.StatusInternalServerError, "catalog lookup failed", "internal")
+			slog.Error("catalog lookup error in access gate",
+				"provider", providerName, "model", requestModel, "error", catErr)
+			return
+		}
+		if entry != nil {
 			var userTags []string
 			if userRecord != nil {
 				userTags = userRecord.AccessTags

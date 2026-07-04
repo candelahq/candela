@@ -2,6 +2,8 @@ package connecthandlers
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"testing"
 
 	connect "connectrpc.com/connect"
@@ -873,5 +875,129 @@ func TestCatalogHandler_ListNilUsersNoFilter(t *testing.T) {
 	// nil users = no auth context = all enabled models visible.
 	if len(resp.Msg.Models) != 4 {
 		t.Errorf("expected 4 models (no user filtering), got %d", len(resp.Msg.Models))
+	}
+}
+
+// ── Fail-closed tests ───────────────────────────────────────────────────────
+
+// errorUserStore is a mock that returns a transient error from GetUser.
+type errorUserStore struct {
+	storage.UserStore // embed to satisfy interface
+	users             map[string]*storage.UserRecord
+	getUserErr        error
+}
+
+func (m *errorUserStore) GetUserByEmail(_ context.Context, email string) (*storage.UserRecord, error) {
+	if u, ok := m.users[email]; ok {
+		return u, nil
+	}
+	return nil, storage.ErrNotFound
+}
+
+func (m *errorUserStore) GetUser(_ context.Context, id string) (*storage.UserRecord, error) {
+	if m.getUserErr != nil {
+		return nil, m.getUserErr
+	}
+	if u, ok := m.users[id]; ok {
+		return u, nil
+	}
+	return nil, storage.ErrNotFound
+}
+
+// TestCatalogHandler_ListGetUserError verifies that when GetUser returns a
+// transient error, the handler fails closed — only unrestricted models are
+// returned, NOT the full unfiltered catalog.
+func TestCatalogHandler_ListGetUserError(t *testing.T) {
+	store := catalog.NewConfigStore(testAccessEntries) // 4 entries, 3 gated + 1 open
+
+	errStore := &errorUserStore{
+		users: map[string]*storage.UserRecord{
+			"dev@example.com": {
+				ID:         "dev@example.com",
+				Email:      "dev@example.com",
+				Role:       storage.RoleDeveloper,
+				AccessTags: []string{"pro"},
+			},
+		},
+		getUserErr: fmt.Errorf("firestore: connection refused"), // transient error
+	}
+	handler := NewCatalogHandler(store, errStore)
+
+	resp, err := handler.ListModelCatalog(developerContext(),
+		connect.NewRequest(&v1.ListModelCatalogRequest{}))
+	if err != nil {
+		t.Fatalf("ListModelCatalog: %v", err)
+	}
+
+	// With the fail-closed fix, a transient GetUser error means the user is
+	// treated as having no tags — only open models should be returned.
+	if len(resp.Msg.Models) != 1 {
+		names := make([]string, len(resp.Msg.Models))
+		for i, m := range resp.Msg.Models {
+			names[i] = m.ModelId
+		}
+		t.Errorf("expected 1 model (fail-closed: only open-model), got %d: %v", len(resp.Msg.Models), names)
+	}
+	if len(resp.Msg.Models) > 0 && resp.Msg.Models[0].ModelId != "open-model" {
+		t.Errorf("expected open-model, got %s", resp.Msg.Models[0].ModelId)
+	}
+}
+
+// TestCatalogHandler_ListGetUserNotFound verifies that when the caller's
+// user record doesn't exist, they only see unrestricted models.
+func TestCatalogHandler_ListGetUserNotFound(t *testing.T) {
+	store := catalog.NewConfigStore(testAccessEntries)
+
+	// User store has an admin but NOT the developer — GetUser returns ErrNotFound.
+	adminOnly := newAdminUserStore()
+	handler := NewCatalogHandler(store, adminOnly)
+
+	resp, err := handler.ListModelCatalog(developerContext(),
+		connect.NewRequest(&v1.ListModelCatalogRequest{}))
+	if err != nil {
+		t.Fatalf("ListModelCatalog: %v", err)
+	}
+
+	// ErrNotFound = user has no tags → only open models.
+	if len(resp.Msg.Models) != 1 {
+		names := make([]string, len(resp.Msg.Models))
+		for i, m := range resp.Msg.Models {
+			names[i] = m.ModelId
+		}
+		t.Errorf("expected 1 model (user not found → no tags), got %d: %v", len(resp.Msg.Models), names)
+	}
+}
+
+// TestCatalogHandler_ListGetUserErrorVsOldBehavior documents the security
+// fix: previously a GetUser error would skip filtering entirely, returning
+// all models. This test ensures the old behavior is gone.
+func TestCatalogHandler_ListGetUserErrorVsOldBehavior(t *testing.T) {
+	store := catalog.NewConfigStore(testAccessEntries) // 4 entries total
+
+	errStore := &errorUserStore{
+		users: map[string]*storage.UserRecord{
+			"dev@example.com": {
+				ID:    "dev@example.com",
+				Email: "dev@example.com",
+				Role:  storage.RoleDeveloper,
+			},
+		},
+		getUserErr: errors.New("database unreachable"),
+	}
+	handler := NewCatalogHandler(store, errStore)
+
+	resp, err := handler.ListModelCatalog(developerContext(),
+		connect.NewRequest(&v1.ListModelCatalogRequest{}))
+	if err != nil {
+		t.Fatalf("ListModelCatalog: %v", err)
+	}
+
+	// Old (broken) behavior would return 4 models.
+	// New (fixed) behavior returns 1 (only open-model).
+	if len(resp.Msg.Models) == 4 {
+		t.Fatal("SECURITY: GetUser error caused unfiltered catalog — fail-open bug still present!")
+	}
+	if len(resp.Msg.Models) != 1 {
+		t.Errorf("expected 1 model, got %d", len(resp.Msg.Models))
 	}
 }

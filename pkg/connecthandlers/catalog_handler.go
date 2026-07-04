@@ -2,6 +2,7 @@ package connecthandlers
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 
@@ -47,10 +48,19 @@ func (h *CatalogHandler) ListModelCatalog(
 	}
 
 	// For non-admin callers, filter out models they don't have access to.
+	// Fail closed: if the caller record can't be resolved, treat them as
+	// having no access tags rather than skipping filtering entirely.
 	if callerScope != "" && h.users != nil {
-		if u, err := h.users.GetUser(ctx, callerScope); err == nil && u != nil {
-			entries = filterEntriesByAccess(entries, u.AccessTags)
+		var userTags []string
+		u, err := h.users.GetUser(ctx, callerScope)
+		switch {
+		case err == nil && u != nil:
+			userTags = u.AccessTags
+		case err != nil && !errors.Is(err, storage.ErrNotFound):
+			slog.Warn("failed to look up caller for access filtering, failing closed",
+				"user", callerScope, "error", err)
 		}
+		entries = filterEntriesByAccess(entries, userTags)
 	}
 
 	pbModels := make([]*types.ModelCatalogEntry, len(entries))
@@ -68,16 +78,6 @@ func (h *CatalogHandler) ListModelCatalog(
 // filterEntriesByAccess removes entries the user can't access based on
 // required_access tags. Models with empty required_access are always visible.
 func filterEntriesByAccess(entries []catalog.Entry, userTags []string) []catalog.Entry {
-	if len(userTags) == 0 {
-		// User has no tags — keep only models with no access requirements.
-		var filtered []catalog.Entry
-		for _, e := range entries {
-			if len(e.RequiredAccess) == 0 {
-				filtered = append(filtered, e)
-			}
-		}
-		return filtered
-	}
 	tagSet := make(map[string]bool, len(userTags))
 	for _, t := range userTags {
 		tagSet[t] = true

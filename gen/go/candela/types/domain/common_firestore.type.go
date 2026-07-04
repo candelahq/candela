@@ -30,12 +30,12 @@ func (p *PaginationRequestFirestore) ToProto() *types.PaginationRequest {
 }
 
 // FromProto populates from a protobuf message.
-func (p *PaginationRequestFirestore) FromProto(pb *types.PaginationRequest) {
-	if pb == nil {
+func (p *PaginationRequestFirestore) FromProto(msg *types.PaginationRequest) {
+	if msg == nil {
 		return
 	}
-	p.PageSize = pb.PageSize
-	p.PageToken = pb.PageToken
+	p.PageSize = msg.PageSize
+	p.PageToken = msg.PageToken
 }
 
 // ToDomain converts to the domain type.
@@ -78,12 +78,12 @@ func (p *PaginationResponseFirestore) ToProto() *types.PaginationResponse {
 }
 
 // FromProto populates from a protobuf message.
-func (p *PaginationResponseFirestore) FromProto(pb *types.PaginationResponse) {
-	if pb == nil {
+func (p *PaginationResponseFirestore) FromProto(msg *types.PaginationResponse) {
+	if msg == nil {
 		return
 	}
-	p.NextPageToken = pb.NextPageToken
-	p.TotalCount = pb.TotalCount
+	p.NextPageToken = msg.NextPageToken
+	p.TotalCount = msg.TotalCount
 }
 
 // ToDomain converts to the domain type.
@@ -129,15 +129,17 @@ func (t *TimeRangeFirestore) ToProto() *types.TimeRange {
 }
 
 // FromProto populates from a protobuf message.
-func (t *TimeRangeFirestore) FromProto(pb *types.TimeRange) {
-	if pb == nil {
+func (t *TimeRangeFirestore) FromProto(msg *types.TimeRange) {
+	if msg == nil {
 		return
 	}
-	if pb.Start != nil {
-		t.Start = pb.Start.AsTime()
+	t.Start = time.Time{}
+	if msg.Start != nil {
+		t.Start = msg.Start.AsTime()
 	}
-	if pb.End != nil {
-		t.End = pb.End.AsTime()
+	t.End = time.Time{}
+	if msg.End != nil {
+		t.End = msg.End.AsTime()
 	}
 }
 
@@ -165,9 +167,12 @@ func (t *TimeRangeFirestore) FromDomain(d *TimeRange) {
 // AttributeFirestore is the Firestore storage representation of candela.types.Attribute.
 type AttributeFirestore struct {
 	Key string `firestore:"key,omitempty"`
+	// oneof: value
+	StringValue *string  `firestore:"string_value,omitempty"`
+	IntValue    *int64   `firestore:"int_value,omitempty"`
+	DoubleValue *float64 `firestore:"double_value,omitempty"`
+	BoolValue   *bool    `firestore:"bool_value,omitempty"`
 }
-
-// WARNING: oneof fields in Attribute are not yet supported by proto2type.
 
 // ToProto converts to the protobuf message.
 func (a *AttributeFirestore) ToProto() *types.Attribute {
@@ -177,15 +182,41 @@ func (a *AttributeFirestore) ToProto() *types.Attribute {
 	out := &types.Attribute{
 		Key: a.Key,
 	}
+	if a.StringValue != nil {
+		out.Value = &types.Attribute_StringValue{StringValue: *a.StringValue}
+	}
+	if a.IntValue != nil {
+		out.Value = &types.Attribute_IntValue{IntValue: *a.IntValue}
+	}
+	if a.DoubleValue != nil {
+		out.Value = &types.Attribute_DoubleValue{DoubleValue: *a.DoubleValue}
+	}
+	if a.BoolValue != nil {
+		out.Value = &types.Attribute_BoolValue{BoolValue: *a.BoolValue}
+	}
 	return out
 }
 
 // FromProto populates from a protobuf message.
-func (a *AttributeFirestore) FromProto(pb *types.Attribute) {
-	if pb == nil {
+func (a *AttributeFirestore) FromProto(msg *types.Attribute) {
+	if msg == nil {
 		return
 	}
-	a.Key = pb.Key
+	a.Key = msg.Key
+	a.StringValue = nil
+	a.IntValue = nil
+	a.DoubleValue = nil
+	a.BoolValue = nil
+	switch v := msg.GetValue().(type) {
+	case *types.Attribute_StringValue:
+		a.StringValue = &v.StringValue
+	case *types.Attribute_IntValue:
+		a.IntValue = &v.IntValue
+	case *types.Attribute_DoubleValue:
+		a.DoubleValue = &v.DoubleValue
+	case *types.Attribute_BoolValue:
+		a.BoolValue = &v.BoolValue
+	}
 }
 
 // ToDomain converts to the domain type.
@@ -194,7 +225,11 @@ func (a *AttributeFirestore) ToDomain() *Attribute {
 		return nil
 	}
 	d := &Attribute{
-		Key: a.Key,
+		Key:         a.Key,
+		StringValue: a.StringValue,
+		IntValue:    a.IntValue,
+		DoubleValue: a.DoubleValue,
+		BoolValue:   a.BoolValue,
 	}
 	return d
 }
@@ -205,4 +240,8 @@ func (a *AttributeFirestore) FromDomain(d *Attribute) {
 		return
 	}
 	a.Key = d.Key
+	a.StringValue = d.StringValue
+	a.IntValue = d.IntValue
+	a.DoubleValue = d.DoubleValue
+	a.BoolValue = d.BoolValue
 }

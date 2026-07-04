@@ -109,45 +109,48 @@ func (b *BqSpanRow) ToProto() *types.BqSpanRow {
 }
 
 // FromProto populates from a protobuf message.
-func (b *BqSpanRow) FromProto(pb *types.BqSpanRow) {
-	if pb == nil {
+func (b *BqSpanRow) FromProto(msg *types.BqSpanRow) {
+	if msg == nil {
 		return
 	}
-	b.SpanID = pb.SpanId
-	b.TraceID = pb.TraceId
-	b.ParentSpanID = pb.ParentSpanId
-	b.Name = pb.Name
-	b.Kind = pb.Kind
-	b.Status = pb.Status
-	b.StatusMessage = pb.StatusMessage
-	if pb.StartTime != nil {
-		b.StartTime = pb.StartTime.AsTime()
+	b.SpanID = msg.SpanId
+	b.TraceID = msg.TraceId
+	b.ParentSpanID = msg.ParentSpanId
+	b.Name = msg.Name
+	b.Kind = msg.Kind
+	b.Status = msg.Status
+	b.StatusMessage = msg.StatusMessage
+	b.StartTime = time.Time{}
+	if msg.StartTime != nil {
+		b.StartTime = msg.StartTime.AsTime()
 	}
-	if pb.EndTime != nil {
-		b.EndTime = pb.EndTime.AsTime()
+	b.EndTime = time.Time{}
+	if msg.EndTime != nil {
+		b.EndTime = msg.EndTime.AsTime()
 	}
-	b.DurationNs = pb.DurationNs
-	b.ProjectID = pb.ProjectId
-	b.Environment = pb.Environment
-	b.ServiceName = pb.ServiceName
-	b.UserID = pb.UserId
-	b.SessionID = pb.SessionId
-	b.TenantID = pb.TenantId
-	b.JobID = pb.JobId
-	b.TraceGroup = pb.TraceGroup
-	b.GenAiModel = pb.GenAiModel
-	b.GenAiProvider = pb.GenAiProvider
-	b.GenAiInputTokens = pb.GenAiInputTokens
-	b.GenAiOutputTokens = pb.GenAiOutputTokens
-	b.GenAiTotalTokens = pb.GenAiTotalTokens
-	b.GenAiCostUsd = pb.GenAiCostUsd
-	b.GenAiTemperature = pb.GenAiTemperature
-	b.GenAiMaxTokens = pb.GenAiMaxTokens
-	b.GenAiInputContent = pb.GenAiInputContent
-	b.GenAiOutputContent = pb.GenAiOutputContent
-	if len(pb.Attributes) > 0 {
-		b.Attributes = make([]*BqAttribute, len(pb.Attributes))
-		for i, v := range pb.Attributes {
+	b.DurationNs = msg.DurationNs
+	b.ProjectID = msg.ProjectId
+	b.Environment = msg.Environment
+	b.ServiceName = msg.ServiceName
+	b.UserID = msg.UserId
+	b.SessionID = msg.SessionId
+	b.TenantID = msg.TenantId
+	b.JobID = msg.JobId
+	b.TraceGroup = msg.TraceGroup
+	b.GenAiModel = msg.GenAiModel
+	b.GenAiProvider = msg.GenAiProvider
+	b.GenAiInputTokens = msg.GenAiInputTokens
+	b.GenAiOutputTokens = msg.GenAiOutputTokens
+	b.GenAiTotalTokens = msg.GenAiTotalTokens
+	b.GenAiCostUsd = msg.GenAiCostUsd
+	b.GenAiTemperature = msg.GenAiTemperature
+	b.GenAiMaxTokens = msg.GenAiMaxTokens
+	b.GenAiInputContent = msg.GenAiInputContent
+	b.GenAiOutputContent = msg.GenAiOutputContent
+	b.Attributes = nil
+	if len(msg.Attributes) > 0 {
+		b.Attributes = make([]*BqAttribute, len(msg.Attributes))
+		for i, v := range msg.Attributes {
 			if v != nil {
 				elem := &BqAttribute{}
 				elem.FromProto(v)
@@ -155,9 +158,10 @@ func (b *BqSpanRow) FromProto(pb *types.BqSpanRow) {
 			}
 		}
 	}
-	if len(pb.Labels) > 0 {
-		b.Labels = make([]*BqAttribute, len(pb.Labels))
-		for i, v := range pb.Labels {
+	b.Labels = nil
+	if len(msg.Labels) > 0 {
+		b.Labels = make([]*BqAttribute, len(msg.Labels))
+		for i, v := range msg.Labels {
 			if v != nil {
 				elem := &BqAttribute{}
 				elem.FromProto(v)
@@ -430,12 +434,12 @@ func (b *BqAttribute) ToProto() *types.BqAttribute {
 }
 
 // FromProto populates from a protobuf message.
-func (b *BqAttribute) FromProto(pb *types.BqAttribute) {
-	if pb == nil {
+func (b *BqAttribute) FromProto(msg *types.BqAttribute) {
+	if msg == nil {
 		return
 	}
-	b.Key = pb.Key
-	b.Value = pb.Value
+	b.Key = msg.Key
+	b.Value = msg.Value
 }
 
 // ApplyFieldMaskBqAttribute copies fields from src to dst based on the given paths.

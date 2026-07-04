@@ -176,16 +176,23 @@ func (BudgetPeriod) EnumDescriptor() ([]byte, []int) {
 // User represents a developer or admin in the Candela platform.
 // Firestore path: users/{id}
 type User struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`       // UUID
-	Email         string                 `protobuf:"bytes,2,opt,name=email,proto3" json:"email,omitempty"` // From IAP JWT claims
-	DisplayName   string                 `protobuf:"bytes,3,opt,name=display_name,json=displayName,proto3" json:"display_name,omitempty"`
-	Role          UserRole               `protobuf:"varint,4,opt,name=role,proto3,enum=candela.types.UserRole" json:"role,omitempty"`
-	Status        UserStatus             `protobuf:"varint,5,opt,name=status,proto3,enum=candela.types.UserStatus" json:"status,omitempty"`
-	CreatedAt     *timestamppb.Timestamp `protobuf:"bytes,6,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
-	LastSeenAt    *timestamppb.Timestamp `protobuf:"bytes,7,opt,name=last_seen_at,json=lastSeenAt,proto3" json:"last_seen_at,omitempty"`       // Last web/dashboard login
-	RateLimit     int32                  `protobuf:"varint,8,opt,name=rate_limit,json=rateLimit,proto3" json:"rate_limit,omitempty"`           // Max requests/minute (0 = default)
-	LastActiveAt  *timestamppb.Timestamp `protobuf:"bytes,9,opt,name=last_active_at,json=lastActiveAt,proto3" json:"last_active_at,omitempty"` // Last proxy/API token usage
+	state        protoimpl.MessageState `protogen:"open.v1"`
+	Id           string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`       // UUID
+	Email        string                 `protobuf:"bytes,2,opt,name=email,proto3" json:"email,omitempty"` // From IAP JWT claims
+	DisplayName  string                 `protobuf:"bytes,3,opt,name=display_name,json=displayName,proto3" json:"display_name,omitempty"`
+	Role         UserRole               `protobuf:"varint,4,opt,name=role,proto3,enum=candela.types.UserRole" json:"role,omitempty"`
+	Status       UserStatus             `protobuf:"varint,5,opt,name=status,proto3,enum=candela.types.UserStatus" json:"status,omitempty"`
+	CreatedAt    *timestamppb.Timestamp `protobuf:"bytes,6,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
+	LastSeenAt   *timestamppb.Timestamp `protobuf:"bytes,7,opt,name=last_seen_at,json=lastSeenAt,proto3" json:"last_seen_at,omitempty"`       // Last web/dashboard login
+	RateLimit    int32                  `protobuf:"varint,8,opt,name=rate_limit,json=rateLimit,proto3" json:"rate_limit,omitempty"`           // Max requests/minute (0 = default)
+	LastActiveAt *timestamppb.Timestamp `protobuf:"bytes,9,opt,name=last_active_at,json=lastActiveAt,proto3" json:"last_active_at,omitempty"` // Last proxy/API token usage
+	// Access tags controlling which models this user can use.
+	// Freeform strings — admin-defined, no predefined set required.
+	// Examples: ["pro"], ["preview"], ["pro", "preview"]
+	// Empty = unrestricted (backward-compatible default).
+	// A user can access a model if they have ANY tag listed in the
+	// model's required_access field.
+	AccessTags    []string `protobuf:"bytes,10,rep,name=access_tags,json=accessTags,proto3" json:"access_tags,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -279,6 +286,13 @@ func (x *User) GetRateLimit() int32 {
 func (x *User) GetLastActiveAt() *timestamppb.Timestamp {
 	if x != nil {
 		return x.LastActiveAt
+	}
+	return nil
+}
+
+func (x *User) GetAccessTags() []string {
+	if x != nil {
+		return x.AccessTags
 	}
 	return nil
 }
@@ -667,7 +681,7 @@ var File_candela_types_user_proto protoreflect.FileDescriptor
 
 const file_candela_types_user_proto_rawDesc = "" +
 	"\n" +
-	"\x18candela/types/user.proto\x12\rcandela.types\x1a\x1fgoogle/protobuf/timestamp.proto\"\x89\x03\n" +
+	"\x18candela/types/user.proto\x12\rcandela.types\x1a\x1fgoogle/protobuf/timestamp.proto\"\xaa\x03\n" +
 	"\x04User\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x14\n" +
 	"\x05email\x18\x02 \x01(\tR\x05email\x12!\n" +
@@ -680,7 +694,10 @@ const file_candela_types_user_proto_rawDesc = "" +
 	"lastSeenAt\x12\x1d\n" +
 	"\n" +
 	"rate_limit\x18\b \x01(\x05R\trateLimit\x12@\n" +
-	"\x0elast_active_at\x18\t \x01(\v2\x1a.google.protobuf.TimestampR\flastActiveAt\"\xd7\x02\n" +
+	"\x0elast_active_at\x18\t \x01(\v2\x1a.google.protobuf.TimestampR\flastActiveAt\x12\x1f\n" +
+	"\vaccess_tags\x18\n" +
+	" \x03(\tR\n" +
+	"accessTags\"\xd7\x02\n" +
 	"\n" +
 	"UserBudget\x12\x17\n" +
 	"\auser_id\x18\x01 \x01(\tR\x06userId\x12\x1b\n" +

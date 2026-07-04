@@ -214,25 +214,25 @@ func (h *UserHandler) UpdateUser(
 		paths = []string{"display_name", "role"}
 	}
 
-	// Guard: role mutations require admin privileges to prevent escalation.
+	// Guard: role and access_tags mutations require admin privileges.
 	for _, p := range paths {
-		if p == "role" {
+		if p == "role" || p == "access_tags" {
 			caller := auth.FromContext(ctx)
 			if caller == nil {
 				return nil, connect.NewError(connect.CodeUnauthenticated,
-					fmt.Errorf("authentication required to modify roles"))
+					fmt.Errorf("authentication required to modify %s", p))
 			}
 			callerRecord, err := h.store.GetUserByEmail(ctx, caller.Email)
 			if err != nil {
 				if errors.Is(err, storage.ErrNotFound) {
 					return nil, connect.NewError(connect.CodePermissionDenied,
-						fmt.Errorf("only admins can modify user roles"))
+						fmt.Errorf("only admins can modify %s", p))
 				}
 				return nil, internalError("failed to look up caller", err)
 			}
 			if callerRecord.Role != storage.RoleAdmin {
 				return nil, connect.NewError(connect.CodePermissionDenied,
-					fmt.Errorf("only admins can modify user roles"))
+					fmt.Errorf("only admins can modify %s", p))
 			}
 			break
 		}
@@ -244,6 +244,8 @@ func (h *UserHandler) UpdateUser(
 			user.DisplayName = stringPtr(req.Msg.DisplayName)
 		case "role":
 			user.Role = roleToString(req.Msg.Role)
+		case "access_tags":
+			user.AccessTags = req.Msg.AccessTags
 		}
 	}
 
@@ -728,6 +730,7 @@ func userToProto(u *storage.UserRecord) *typespb.User {
 		Status:      stringToStatus(u.Status),
 		CreatedAt:   timestamppb.New(u.CreatedAt),
 		RateLimit:   int32(derefInt(u.RateLimit)),
+		AccessTags:  u.AccessTags,
 	}
 	if !u.LastSeenAt.IsZero() {
 		pb.LastSeenAt = timestamppb.New(u.LastSeenAt)

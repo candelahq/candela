@@ -778,6 +778,7 @@ func main() {
 				MaxRequestCost: cfg.Proxy.MaxRequestCost,
 				DailyLimits:    cfg.Proxy.DailyLimits,
 				Policy:         cfg.Proxy.Policy,
+				Catalog:        catalogStore,
 			}, proc, calc)
 			if err != nil {
 				slog.Error("invalid proxy configuration", "error", err)

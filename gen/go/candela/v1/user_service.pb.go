@@ -359,6 +359,7 @@ type UpdateUserRequest struct {
 	DisplayName   string                 `protobuf:"bytes,2,opt,name=display_name,json=displayName,proto3" json:"display_name,omitempty"`
 	Role          types.UserRole         `protobuf:"varint,3,opt,name=role,proto3,enum=candela.types.UserRole" json:"role,omitempty"`
 	UpdateMask    *fieldmaskpb.FieldMask `protobuf:"bytes,4,opt,name=update_mask,json=updateMask,proto3" json:"update_mask,omitempty"` // Which fields to update
+	AccessTags    []string               `protobuf:"bytes,5,rep,name=access_tags,json=accessTags,proto3" json:"access_tags,omitempty"` // Freeform access tags (admin-managed)
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -417,6 +418,13 @@ func (x *UpdateUserRequest) GetRole() types.UserRole {
 func (x *UpdateUserRequest) GetUpdateMask() *fieldmaskpb.FieldMask {
 	if x != nil {
 		return x.UpdateMask
+	}
+	return nil
+}
+
+func (x *UpdateUserRequest) GetAccessTags() []string {
+	if x != nil {
+		return x.AccessTags
 	}
 	return nil
 }
@@ -1693,13 +1701,15 @@ const file_candela_v1_user_service_proto_rawDesc = "" +
 	"\x0fGetUserResponse\x12'\n" +
 	"\x04user\x18\x01 \x01(\v2\x13.candela.types.UserR\x04user\x121\n" +
 	"\x06budget\x18\x02 \x01(\v2\x19.candela.types.UserBudgetR\x06budget\x12?\n" +
-	"\ractive_grants\x18\x03 \x03(\v2\x1a.candela.types.BudgetGrantR\factiveGrants\"\xb9\x01\n" +
+	"\ractive_grants\x18\x03 \x03(\v2\x1a.candela.types.BudgetGrantR\factiveGrants\"\xda\x01\n" +
 	"\x11UpdateUserRequest\x12\x17\n" +
 	"\x02id\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\x02id\x12!\n" +
 	"\fdisplay_name\x18\x02 \x01(\tR\vdisplayName\x12+\n" +
 	"\x04role\x18\x03 \x01(\x0e2\x17.candela.types.UserRoleR\x04role\x12;\n" +
 	"\vupdate_mask\x18\x04 \x01(\v2\x1a.google.protobuf.FieldMaskR\n" +
-	"updateMask\"=\n" +
+	"updateMask\x12\x1f\n" +
+	"\vaccess_tags\x18\x05 \x03(\tR\n" +
+	"accessTags\"=\n" +
 	"\x12UpdateUserResponse\x12'\n" +
 	"\x04user\x18\x01 \x01(\v2\x13.candela.types.UserR\x04user\"0\n" +
 	"\x15DeactivateUserRequest\x12\x17\n" +

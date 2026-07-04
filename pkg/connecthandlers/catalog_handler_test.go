@@ -62,6 +62,13 @@ func (m *mockUserStoreForCatalog) GetUserByEmail(_ context.Context, email string
 	return nil, storage.ErrNotFound
 }
 
+func (m *mockUserStoreForCatalog) GetUser(_ context.Context, id string) (*storage.UserRecord, error) {
+	if u, ok := m.users[id]; ok {
+		return u, nil
+	}
+	return nil, storage.ErrNotFound
+}
+
 func newAdminUserStore() *mockUserStoreForCatalog {
 	return &mockUserStoreForCatalog{
 		users: map[string]*storage.UserRecord{
@@ -681,5 +688,190 @@ func TestApplyFieldMask_ProviderModelIDAndRegion(t *testing.T) {
 	// Unmasked field should be preserved.
 	if dst.DisplayName != "Original" {
 		t.Errorf("display_name should be preserved, got %q", dst.DisplayName)
+	}
+}
+
+// ── Access tag filtering tests ──────────────────────────────────────────────
+
+// testAccessEntries includes models with various required_access tags.
+var testAccessEntries = []catalog.Entry{
+	{
+		ModelID:  "open-model",
+		Provider: "google",
+		Enabled:  true,
+		// No RequiredAccess — visible to everyone
+	},
+	{
+		ModelID:        "pro-model",
+		Provider:       "google",
+		Enabled:        true,
+		RequiredAccess: []string{"pro"},
+	},
+	{
+		ModelID:        "experimental-model",
+		Provider:       "anthropic",
+		Enabled:        true,
+		RequiredAccess: []string{"experimental"},
+	},
+	{
+		ModelID:        "enterprise-model",
+		Provider:       "openai",
+		Enabled:        true,
+		RequiredAccess: []string{"enterprise", "pro"},
+	},
+}
+
+func TestFilterEntriesByAccess(t *testing.T) {
+	tests := []struct {
+		name     string
+		userTags []string
+		wantIDs  []string
+	}{
+		{
+			name:     "no tags — only open models",
+			userTags: nil,
+			wantIDs:  []string{"open-model"},
+		},
+		{
+			name:     "empty tags — only open models",
+			userTags: []string{},
+			wantIDs:  []string{"open-model"},
+		},
+		{
+			name:     "pro tag — open + pro + enterprise (has pro)",
+			userTags: []string{"pro"},
+			wantIDs:  []string{"open-model", "pro-model", "enterprise-model"},
+		},
+		{
+			name:     "experimental tag — open + experimental",
+			userTags: []string{"experimental"},
+			wantIDs:  []string{"open-model", "experimental-model"},
+		},
+		{
+			name:     "enterprise tag — open + enterprise",
+			userTags: []string{"enterprise"},
+			wantIDs:  []string{"open-model", "enterprise-model"},
+		},
+		{
+			name:     "pro + experimental — open + pro + experimental + enterprise",
+			userTags: []string{"pro", "experimental"},
+			wantIDs:  []string{"open-model", "pro-model", "experimental-model", "enterprise-model"},
+		},
+		{
+			name:     "unrelated tag — only open",
+			userTags: []string{"beta"},
+			wantIDs:  []string{"open-model"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := filterEntriesByAccess(testAccessEntries, tt.userTags)
+			gotIDs := make([]string, len(got))
+			for i, e := range got {
+				gotIDs[i] = e.ModelID
+			}
+			if len(gotIDs) != len(tt.wantIDs) {
+				t.Fatalf("got %d entries %v, want %d %v", len(gotIDs), gotIDs, len(tt.wantIDs), tt.wantIDs)
+			}
+			for i, id := range tt.wantIDs {
+				if gotIDs[i] != id {
+					t.Errorf("entry[%d]: got %q, want %q", i, gotIDs[i], id)
+				}
+			}
+		})
+	}
+}
+
+// TestCatalogHandler_ListFiltersByAccessTags verifies that non-admin callers
+// only see models their access tags grant them.
+func TestCatalogHandler_ListFiltersByAccessTags(t *testing.T) {
+	store := catalog.NewConfigStore(testAccessEntries)
+
+	// Developer with "pro" tag should see open + pro + enterprise (enterprise has "pro" in its list).
+	devStore := &mockUserStoreForCatalog{
+		users: map[string]*storage.UserRecord{
+			"dev@example.com": {
+				ID:         "dev@example.com",
+				Email:      "dev@example.com",
+				Role:       storage.RoleDeveloper,
+				AccessTags: []string{"pro"},
+			},
+		},
+	}
+	handler := NewCatalogHandler(store, devStore)
+
+	resp, err := handler.ListModelCatalog(developerContext(),
+		connect.NewRequest(&v1.ListModelCatalogRequest{}))
+	if err != nil {
+		t.Fatalf("ListModelCatalog: %v", err)
+	}
+
+	if len(resp.Msg.Models) != 3 {
+		names := make([]string, len(resp.Msg.Models))
+		for i, m := range resp.Msg.Models {
+			names[i] = m.ModelId
+		}
+		t.Errorf("expected 3 models (open + pro + enterprise), got %d: %v", len(resp.Msg.Models), names)
+	}
+}
+
+// TestCatalogHandler_ListNoTagsDeveloper verifies that developers with
+// no access tags only see unrestricted models.
+func TestCatalogHandler_ListNoTagsDeveloper(t *testing.T) {
+	store := catalog.NewConfigStore(testAccessEntries)
+	handler := NewCatalogHandler(store, newDeveloperUserStore()) // no tags
+
+	resp, err := handler.ListModelCatalog(developerContext(),
+		connect.NewRequest(&v1.ListModelCatalogRequest{}))
+	if err != nil {
+		t.Fatalf("ListModelCatalog: %v", err)
+	}
+
+	if len(resp.Msg.Models) != 1 {
+		names := make([]string, len(resp.Msg.Models))
+		for i, m := range resp.Msg.Models {
+			names[i] = m.ModelId
+		}
+		t.Errorf("expected 1 model (open-model only), got %d: %v", len(resp.Msg.Models), names)
+	}
+	if len(resp.Msg.Models) > 0 && resp.Msg.Models[0].ModelId != "open-model" {
+		t.Errorf("expected open-model, got %s", resp.Msg.Models[0].ModelId)
+	}
+}
+
+// TestCatalogHandler_ListAdminBypassesAccessTags verifies admins see
+// all models regardless of required_access.
+func TestCatalogHandler_ListAdminBypassesAccessTags(t *testing.T) {
+	store := catalog.NewConfigStore(testAccessEntries)
+	handler := NewCatalogHandler(store, newAdminUserStore())
+
+	resp, err := handler.ListModelCatalog(adminContext(),
+		connect.NewRequest(&v1.ListModelCatalogRequest{}))
+	if err != nil {
+		t.Fatalf("ListModelCatalog: %v", err)
+	}
+
+	// Admin sees all 4 models — no filtering applied.
+	if len(resp.Msg.Models) != 4 {
+		t.Errorf("expected 4 models for admin, got %d", len(resp.Msg.Models))
+	}
+}
+
+// TestCatalogHandler_ListNilUsersNoFilter verifies that when users is nil
+// (local/dev mode), no access filtering is applied.
+func TestCatalogHandler_ListNilUsersNoFilter(t *testing.T) {
+	store := catalog.NewConfigStore(testAccessEntries)
+	handler := NewCatalogHandler(store, nil)
+
+	resp, err := handler.ListModelCatalog(context.Background(),
+		connect.NewRequest(&v1.ListModelCatalogRequest{}))
+	if err != nil {
+		t.Fatalf("ListModelCatalog: %v", err)
+	}
+
+	// nil users = no auth context = all enabled models visible.
+	if len(resp.Msg.Models) != 4 {
+		t.Errorf("expected 4 models (no user filtering), got %d", len(resp.Msg.Models))
 	}
 }

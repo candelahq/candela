@@ -4,6 +4,7 @@
 package domain
 
 import (
+	fmt "fmt"
 	types "github.com/candelahq/candela/gen/go/candela/types"
 	timestamppb "google.golang.org/protobuf/types/known/timestamppb"
 )
@@ -31,12 +32,12 @@ func (p *PaginationRequest) ToProto() *types.PaginationRequest {
 }
 
 // FromProto populates from a protobuf message.
-func (p *PaginationRequest) FromProto(pb *types.PaginationRequest) {
-	if pb == nil {
+func (p *PaginationRequest) FromProto(msg *types.PaginationRequest) {
+	if msg == nil {
 		return
 	}
-	p.PageSize = pb.PageSize
-	p.PageToken = pb.PageToken
+	p.PageSize = msg.PageSize
+	p.PageToken = msg.PageToken
 }
 
 // ApplyFieldMaskPaginationRequest copies fields from src to dst based on the given paths.
@@ -104,12 +105,12 @@ func (p *PaginationResponse) ToProto() *types.PaginationResponse {
 }
 
 // FromProto populates from a protobuf message.
-func (p *PaginationResponse) FromProto(pb *types.PaginationResponse) {
-	if pb == nil {
+func (p *PaginationResponse) FromProto(msg *types.PaginationResponse) {
+	if msg == nil {
 		return
 	}
-	p.NextPageToken = pb.NextPageToken
-	p.TotalCount = pb.TotalCount
+	p.NextPageToken = msg.NextPageToken
+	p.TotalCount = msg.TotalCount
 }
 
 // ApplyFieldMaskPaginationResponse copies fields from src to dst based on the given paths.
@@ -180,15 +181,17 @@ func (t *TimeRange) ToProto() *types.TimeRange {
 }
 
 // FromProto populates from a protobuf message.
-func (t *TimeRange) FromProto(pb *types.TimeRange) {
-	if pb == nil {
+func (t *TimeRange) FromProto(msg *types.TimeRange) {
+	if msg == nil {
 		return
 	}
-	if pb.Start != nil {
-		t.Start = pb.Start.AsTime()
+	t.Start = time.Time{}
+	if msg.Start != nil {
+		t.Start = msg.Start.AsTime()
 	}
-	if pb.End != nil {
-		t.End = pb.End.AsTime()
+	t.End = time.Time{}
+	if msg.End != nil {
+		t.End = msg.End.AsTime()
 	}
 }
 
@@ -241,9 +244,12 @@ func (t *TimeRange) Equal(other *TimeRange) bool {
 // Key-value attribute pair.
 type Attribute struct {
 	Key string `json:"key,omitempty"`
+	// oneof: value
+	StringValue *string  `json:"string_value,omitempty"`
+	IntValue    *int64   `json:"int_value,omitempty"`
+	DoubleValue *float64 `json:"double_value,omitempty"`
+	BoolValue   *bool    `json:"bool_value,omitempty"`
 }
-
-// WARNING: oneof fields in Attribute are not yet supported by proto2type.
 
 // ToProto converts to the protobuf message.
 func (a *Attribute) ToProto() *types.Attribute {
@@ -253,15 +259,41 @@ func (a *Attribute) ToProto() *types.Attribute {
 	out := &types.Attribute{
 		Key: a.Key,
 	}
+	if a.StringValue != nil {
+		out.Value = &types.Attribute_StringValue{StringValue: *a.StringValue}
+	}
+	if a.IntValue != nil {
+		out.Value = &types.Attribute_IntValue{IntValue: *a.IntValue}
+	}
+	if a.DoubleValue != nil {
+		out.Value = &types.Attribute_DoubleValue{DoubleValue: *a.DoubleValue}
+	}
+	if a.BoolValue != nil {
+		out.Value = &types.Attribute_BoolValue{BoolValue: *a.BoolValue}
+	}
 	return out
 }
 
 // FromProto populates from a protobuf message.
-func (a *Attribute) FromProto(pb *types.Attribute) {
-	if pb == nil {
+func (a *Attribute) FromProto(msg *types.Attribute) {
+	if msg == nil {
 		return
 	}
-	a.Key = pb.Key
+	a.Key = msg.Key
+	a.StringValue = nil
+	a.IntValue = nil
+	a.DoubleValue = nil
+	a.BoolValue = nil
+	switch v := msg.GetValue().(type) {
+	case *types.Attribute_StringValue:
+		a.StringValue = &v.StringValue
+	case *types.Attribute_IntValue:
+		a.IntValue = &v.IntValue
+	case *types.Attribute_DoubleValue:
+		a.DoubleValue = &v.DoubleValue
+	case *types.Attribute_BoolValue:
+		a.BoolValue = &v.BoolValue
+	}
 }
 
 // ApplyFieldMaskAttribute copies fields from src to dst based on the given paths.
@@ -273,6 +305,14 @@ func ApplyFieldMaskAttribute(dst, src *Attribute, paths []string) {
 		switch path {
 		case "key":
 			dst.Key = src.Key
+		case "string_value":
+			dst.StringValue = src.StringValue
+		case "int_value":
+			dst.IntValue = src.IntValue
+		case "double_value":
+			dst.DoubleValue = src.DoubleValue
+		case "bool_value":
+			dst.BoolValue = src.BoolValue
 		}
 	}
 }
@@ -284,6 +324,22 @@ func (a *Attribute) Clone() *Attribute {
 	}
 	c := &Attribute{
 		Key: a.Key,
+	}
+	if a.StringValue != nil {
+		v := *a.StringValue
+		c.StringValue = &v
+	}
+	if a.IntValue != nil {
+		v := *a.IntValue
+		c.IntValue = &v
+	}
+	if a.DoubleValue != nil {
+		v := *a.DoubleValue
+		c.DoubleValue = &v
+	}
+	if a.BoolValue != nil {
+		v := *a.BoolValue
+		c.BoolValue = &v
 	}
 	return c
 }
@@ -299,5 +355,77 @@ func (a *Attribute) Equal(other *Attribute) bool {
 	if a.Key != other.Key {
 		return false
 	}
+	if (a.StringValue == nil) != (other.StringValue == nil) {
+		return false
+	}
+	if a.StringValue != nil && *a.StringValue != *other.StringValue {
+		return false
+	}
+	if (a.IntValue == nil) != (other.IntValue == nil) {
+		return false
+	}
+	if a.IntValue != nil && *a.IntValue != *other.IntValue {
+		return false
+	}
+	if (a.DoubleValue == nil) != (other.DoubleValue == nil) {
+		return false
+	}
+	if a.DoubleValue != nil && *a.DoubleValue != *other.DoubleValue {
+		return false
+	}
+	if (a.BoolValue == nil) != (other.BoolValue == nil) {
+		return false
+	}
+	if a.BoolValue != nil && *a.BoolValue != *other.BoolValue {
+		return false
+	}
 	return true
+}
+
+// ActiveValue returns the proto field name of the set value
+// variant, or "" if none is set.
+func (a *Attribute) ActiveValue() string {
+	if a == nil {
+		return ""
+	}
+	if a.StringValue != nil {
+		return "string_value"
+	}
+	if a.IntValue != nil {
+		return "int_value"
+	}
+	if a.DoubleValue != nil {
+		return "double_value"
+	}
+	if a.BoolValue != nil {
+		return "bool_value"
+	}
+	return ""
+}
+
+// Validate checks domain invariants on Attribute.
+// It ensures at most one variant is set per oneof group.
+func (a *Attribute) Validate() error {
+	if a == nil {
+		return nil
+	}
+	{
+		_oneofCount := 0
+		if a.StringValue != nil {
+			_oneofCount++
+		}
+		if a.IntValue != nil {
+			_oneofCount++
+		}
+		if a.DoubleValue != nil {
+			_oneofCount++
+		}
+		if a.BoolValue != nil {
+			_oneofCount++
+		}
+		if _oneofCount > 1 {
+			return fmt.Errorf("oneof value: %d variants set, expected at most 1", _oneofCount)
+		}
+	}
+	return nil
 }

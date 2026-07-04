@@ -30,6 +30,7 @@ type ModelCatalogEntryFirestore struct {
 	UpdatedAt            time.Time `firestore:"updated_at,serverTimestamp"`
 	ProviderModelID      string    `firestore:"provider_model_id,omitempty"`
 	Region               string    `firestore:"region,omitempty"`
+	RequiredAccess       []string  `firestore:"required_access,omitempty"`
 }
 
 // ToProto converts to the protobuf message.
@@ -54,6 +55,7 @@ func (m *ModelCatalogEntryFirestore) ToProto() *types.ModelCatalogEntry {
 		DiscountPercent:      m.DiscountPercent,
 		ProviderModelId:      m.ProviderModelID,
 		Region:               m.Region,
+		RequiredAccess:       m.RequiredAccess,
 	}
 	if !m.UpdatedAt.IsZero() {
 		out.UpdatedAt = timestamppb.New(m.UpdatedAt)
@@ -62,29 +64,34 @@ func (m *ModelCatalogEntryFirestore) ToProto() *types.ModelCatalogEntry {
 }
 
 // FromProto populates from a protobuf message.
-func (m *ModelCatalogEntryFirestore) FromProto(pb *types.ModelCatalogEntry) {
-	if pb == nil {
+func (m *ModelCatalogEntryFirestore) FromProto(msg *types.ModelCatalogEntry) {
+	if msg == nil {
 		return
 	}
-	m.ModelID = pb.ModelId
-	m.Provider = pb.Provider
-	m.DisplayName = pb.DisplayName
-	m.InputPerMillion = pb.InputPerMillion
-	m.OutputPerMillion = pb.OutputPerMillion
-	m.Enabled = pb.Enabled
-	m.Category = pb.Category
-	m.ContextWindow = pb.ContextWindow
-	m.InputPerMillionHigh = pb.InputPerMillionHigh
-	m.OutputPerMillionHigh = pb.OutputPerMillionHigh
-	m.TierThresholdTokens = pb.TierThresholdTokens
-	m.Aliases = pb.Aliases
-	m.AllowedTenants = pb.AllowedTenants
-	m.DiscountPercent = pb.DiscountPercent
-	if pb.UpdatedAt != nil {
-		m.UpdatedAt = pb.UpdatedAt.AsTime()
+	m.ModelID = msg.ModelId
+	m.Provider = msg.Provider
+	m.DisplayName = msg.DisplayName
+	m.InputPerMillion = msg.InputPerMillion
+	m.OutputPerMillion = msg.OutputPerMillion
+	m.Enabled = msg.Enabled
+	m.Category = msg.Category
+	m.ContextWindow = msg.ContextWindow
+	m.InputPerMillionHigh = msg.InputPerMillionHigh
+	m.OutputPerMillionHigh = msg.OutputPerMillionHigh
+	m.TierThresholdTokens = msg.TierThresholdTokens
+	m.Aliases = nil
+	m.Aliases = msg.Aliases
+	m.AllowedTenants = nil
+	m.AllowedTenants = msg.AllowedTenants
+	m.DiscountPercent = msg.DiscountPercent
+	m.UpdatedAt = time.Time{}
+	if msg.UpdatedAt != nil {
+		m.UpdatedAt = msg.UpdatedAt.AsTime()
 	}
-	m.ProviderModelID = pb.ProviderModelId
-	m.Region = pb.Region
+	m.ProviderModelID = msg.ProviderModelId
+	m.Region = msg.Region
+	m.RequiredAccess = nil
+	m.RequiredAccess = msg.RequiredAccess
 }
 
 // ToDomain converts to the domain type.
@@ -110,6 +117,7 @@ func (m *ModelCatalogEntryFirestore) ToDomain() *ModelCatalogEntry {
 		UpdatedAt:            m.UpdatedAt,
 		ProviderModelID:      m.ProviderModelID,
 		Region:               m.Region,
+		RequiredAccess:       m.RequiredAccess,
 	}
 	return d
 }
@@ -136,4 +144,5 @@ func (m *ModelCatalogEntryFirestore) FromDomain(d *ModelCatalogEntry) {
 	m.UpdatedAt = d.UpdatedAt
 	m.ProviderModelID = d.ProviderModelID
 	m.Region = d.Region
+	m.RequiredAccess = d.RequiredAccess
 }

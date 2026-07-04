@@ -495,6 +495,7 @@ type UserRecord struct {
 	DisplayName  *string   `json:"display_name,omitempty"` // nil = unchanged in UpdateUser
 	Role         string    `json:"role,omitempty"`         // "developer" or "admin"
 	Status       string    `json:"status,omitempty"`       // "provisioned", "active", "inactive"
+	AccessTags   []string  `json:"access_tags,omitempty"`  // freeform tags gating model access
 	CreatedAt    time.Time `json:"created_at,omitempty"`
 	LastSeenAt   time.Time `json:"last_seen_at,omitempty"`
 	LastActiveAt time.Time `json:"last_active_at,omitempty"` // last proxy/API token usage

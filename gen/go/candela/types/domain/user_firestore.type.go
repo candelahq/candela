@@ -22,6 +22,7 @@ type UserFirestore struct {
 	LastSeenAt   time.Time `firestore:"last_seen_at,omitempty"`
 	RateLimit    int32     `firestore:"rate_limit,omitempty"`
 	LastActiveAt time.Time `firestore:"last_active_at,omitempty"`
+	AccessTags   []string  `firestore:"access_tags,omitempty"`
 }
 
 // ToProto converts to the protobuf message.
@@ -36,6 +37,7 @@ func (u *UserFirestore) ToProto() *types.User {
 		Role:        types.UserRole(u.Role),
 		Status:      types.UserStatus(u.Status),
 		RateLimit:   u.RateLimit,
+		AccessTags:  u.AccessTags,
 	}
 	if !u.CreatedAt.IsZero() {
 		out.CreatedAt = timestamppb.New(u.CreatedAt)
@@ -50,25 +52,30 @@ func (u *UserFirestore) ToProto() *types.User {
 }
 
 // FromProto populates from a protobuf message.
-func (u *UserFirestore) FromProto(pb *types.User) {
-	if pb == nil {
+func (u *UserFirestore) FromProto(msg *types.User) {
+	if msg == nil {
 		return
 	}
-	u.ID = pb.Id
-	u.Email = pb.Email
-	u.DisplayName = pb.DisplayName
-	u.Role = int32(pb.Role)
-	u.Status = int32(pb.Status)
-	if pb.CreatedAt != nil {
-		u.CreatedAt = pb.CreatedAt.AsTime()
+	u.ID = msg.Id
+	u.Email = msg.Email
+	u.DisplayName = msg.DisplayName
+	u.Role = int32(msg.Role)
+	u.Status = int32(msg.Status)
+	u.CreatedAt = time.Time{}
+	if msg.CreatedAt != nil {
+		u.CreatedAt = msg.CreatedAt.AsTime()
 	}
-	if pb.LastSeenAt != nil {
-		u.LastSeenAt = pb.LastSeenAt.AsTime()
+	u.LastSeenAt = time.Time{}
+	if msg.LastSeenAt != nil {
+		u.LastSeenAt = msg.LastSeenAt.AsTime()
 	}
-	u.RateLimit = pb.RateLimit
-	if pb.LastActiveAt != nil {
-		u.LastActiveAt = pb.LastActiveAt.AsTime()
+	u.RateLimit = msg.RateLimit
+	u.LastActiveAt = time.Time{}
+	if msg.LastActiveAt != nil {
+		u.LastActiveAt = msg.LastActiveAt.AsTime()
 	}
+	u.AccessTags = nil
+	u.AccessTags = msg.AccessTags
 }
 
 // ToDomain converts to the domain type.
@@ -86,6 +93,7 @@ func (u *UserFirestore) ToDomain() *User {
 		LastSeenAt:   u.LastSeenAt,
 		RateLimit:    u.RateLimit,
 		LastActiveAt: u.LastActiveAt,
+		AccessTags:   u.AccessTags,
 	}
 	return d
 }
@@ -104,6 +112,7 @@ func (u *UserFirestore) FromDomain(d *User) {
 	u.LastSeenAt = d.LastSeenAt
 	u.RateLimit = d.RateLimit
 	u.LastActiveAt = d.LastActiveAt
+	u.AccessTags = d.AccessTags
 }
 
 // UserBudgetFirestore is the Firestore storage representation of candela.types.UserBudget.
@@ -141,21 +150,23 @@ func (u *UserBudgetFirestore) ToProto() *types.UserBudget {
 }
 
 // FromProto populates from a protobuf message.
-func (u *UserBudgetFirestore) FromProto(pb *types.UserBudget) {
-	if pb == nil {
+func (u *UserBudgetFirestore) FromProto(msg *types.UserBudget) {
+	if msg == nil {
 		return
 	}
-	u.UserID = pb.UserId
-	u.LimitUsd = pb.LimitUsd
-	u.SpentUsd = pb.SpentUsd
-	u.TokensUsed = pb.TokensUsed
-	u.PeriodType = int32(pb.PeriodType)
-	u.PeriodKey = pb.PeriodKey
-	if pb.PeriodStart != nil {
-		u.PeriodStart = pb.PeriodStart.AsTime()
+	u.UserID = msg.UserId
+	u.LimitUsd = msg.LimitUsd
+	u.SpentUsd = msg.SpentUsd
+	u.TokensUsed = msg.TokensUsed
+	u.PeriodType = int32(msg.PeriodType)
+	u.PeriodKey = msg.PeriodKey
+	u.PeriodStart = time.Time{}
+	if msg.PeriodStart != nil {
+		u.PeriodStart = msg.PeriodStart.AsTime()
 	}
-	if pb.PeriodEnd != nil {
-		u.PeriodEnd = pb.PeriodEnd.AsTime()
+	u.PeriodEnd = time.Time{}
+	if msg.PeriodEnd != nil {
+		u.PeriodEnd = msg.PeriodEnd.AsTime()
 	}
 }
 
@@ -231,24 +242,27 @@ func (b *BudgetGrantFirestore) ToProto() *types.BudgetGrant {
 }
 
 // FromProto populates from a protobuf message.
-func (b *BudgetGrantFirestore) FromProto(pb *types.BudgetGrant) {
-	if pb == nil {
+func (b *BudgetGrantFirestore) FromProto(msg *types.BudgetGrant) {
+	if msg == nil {
 		return
 	}
-	b.ID = pb.Id
-	b.UserID = pb.UserId
-	b.AmountUsd = pb.AmountUsd
-	b.SpentUsd = pb.SpentUsd
-	b.Reason = pb.Reason
-	b.GrantedBy = pb.GrantedBy
-	if pb.StartsAt != nil {
-		b.StartsAt = pb.StartsAt.AsTime()
+	b.ID = msg.Id
+	b.UserID = msg.UserId
+	b.AmountUsd = msg.AmountUsd
+	b.SpentUsd = msg.SpentUsd
+	b.Reason = msg.Reason
+	b.GrantedBy = msg.GrantedBy
+	b.StartsAt = time.Time{}
+	if msg.StartsAt != nil {
+		b.StartsAt = msg.StartsAt.AsTime()
 	}
-	if pb.ExpiresAt != nil {
-		b.ExpiresAt = pb.ExpiresAt.AsTime()
+	b.ExpiresAt = time.Time{}
+	if msg.ExpiresAt != nil {
+		b.ExpiresAt = msg.ExpiresAt.AsTime()
 	}
-	if pb.CreatedAt != nil {
-		b.CreatedAt = pb.CreatedAt.AsTime()
+	b.CreatedAt = time.Time{}
+	if msg.CreatedAt != nil {
+		b.CreatedAt = msg.CreatedAt.AsTime()
 	}
 }
 
@@ -316,17 +330,18 @@ func (a *AuditEntryFirestore) ToProto() *types.AuditEntry {
 }
 
 // FromProto populates from a protobuf message.
-func (a *AuditEntryFirestore) FromProto(pb *types.AuditEntry) {
-	if pb == nil {
+func (a *AuditEntryFirestore) FromProto(msg *types.AuditEntry) {
+	if msg == nil {
 		return
 	}
-	a.ID = pb.Id
-	a.UserID = pb.UserId
-	a.ActorEmail = pb.ActorEmail
-	a.Action = pb.Action
-	a.Details = pb.Details
-	if pb.Timestamp != nil {
-		a.Timestamp = pb.Timestamp.AsTime()
+	a.ID = msg.Id
+	a.UserID = msg.UserId
+	a.ActorEmail = msg.ActorEmail
+	a.Action = msg.Action
+	a.Details = msg.Details
+	a.Timestamp = time.Time{}
+	if msg.Timestamp != nil {
+		a.Timestamp = msg.Timestamp.AsTime()
 	}
 }
 
@@ -386,16 +401,17 @@ func (r *RateWindowFirestore) ToProto() *types.RateWindow {
 }
 
 // FromProto populates from a protobuf message.
-func (r *RateWindowFirestore) FromProto(pb *types.RateWindow) {
-	if pb == nil {
+func (r *RateWindowFirestore) FromProto(msg *types.RateWindow) {
+	if msg == nil {
 		return
 	}
-	r.UserID = pb.UserId
-	r.RequestCount = pb.RequestCount
-	r.Limit = pb.Limit
-	r.WindowKey = pb.WindowKey
-	if pb.ExpireAt != nil {
-		r.ExpireAt = pb.ExpireAt.AsTime()
+	r.UserID = msg.UserId
+	r.RequestCount = msg.RequestCount
+	r.Limit = msg.Limit
+	r.WindowKey = msg.WindowKey
+	r.ExpireAt = time.Time{}
+	if msg.ExpireAt != nil {
+		r.ExpireAt = msg.ExpireAt.AsTime()
 	}
 }
 

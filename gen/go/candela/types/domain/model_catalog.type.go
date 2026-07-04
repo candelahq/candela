@@ -32,6 +32,7 @@ type ModelCatalogEntry struct {
 	UpdatedAt            time.Time `json:"updated_at,omitempty"`
 	ProviderModelID      string    `json:"provider_model_id,omitempty"`
 	Region               string    `json:"region,omitempty"`
+	RequiredAccess       []string  `json:"required_access,omitempty"`
 }
 
 // ToProto converts to the protobuf message.
@@ -56,6 +57,7 @@ func (m *ModelCatalogEntry) ToProto() *types.ModelCatalogEntry {
 		DiscountPercent:      m.DiscountPercent,
 		ProviderModelId:      m.ProviderModelID,
 		Region:               m.Region,
+		RequiredAccess:       m.RequiredAccess,
 	}
 	if !m.UpdatedAt.IsZero() {
 		out.UpdatedAt = timestamppb.New(m.UpdatedAt)
@@ -64,29 +66,34 @@ func (m *ModelCatalogEntry) ToProto() *types.ModelCatalogEntry {
 }
 
 // FromProto populates from a protobuf message.
-func (m *ModelCatalogEntry) FromProto(pb *types.ModelCatalogEntry) {
-	if pb == nil {
+func (m *ModelCatalogEntry) FromProto(msg *types.ModelCatalogEntry) {
+	if msg == nil {
 		return
 	}
-	m.ModelID = pb.ModelId
-	m.Provider = pb.Provider
-	m.DisplayName = pb.DisplayName
-	m.InputPerMillion = pb.InputPerMillion
-	m.OutputPerMillion = pb.OutputPerMillion
-	m.Enabled = pb.Enabled
-	m.Category = pb.Category
-	m.ContextWindow = pb.ContextWindow
-	m.InputPerMillionHigh = pb.InputPerMillionHigh
-	m.OutputPerMillionHigh = pb.OutputPerMillionHigh
-	m.TierThresholdTokens = pb.TierThresholdTokens
-	m.Aliases = pb.Aliases
-	m.AllowedTenants = pb.AllowedTenants
-	m.DiscountPercent = pb.DiscountPercent
-	if pb.UpdatedAt != nil {
-		m.UpdatedAt = pb.UpdatedAt.AsTime()
+	m.ModelID = msg.ModelId
+	m.Provider = msg.Provider
+	m.DisplayName = msg.DisplayName
+	m.InputPerMillion = msg.InputPerMillion
+	m.OutputPerMillion = msg.OutputPerMillion
+	m.Enabled = msg.Enabled
+	m.Category = msg.Category
+	m.ContextWindow = msg.ContextWindow
+	m.InputPerMillionHigh = msg.InputPerMillionHigh
+	m.OutputPerMillionHigh = msg.OutputPerMillionHigh
+	m.TierThresholdTokens = msg.TierThresholdTokens
+	m.Aliases = nil
+	m.Aliases = msg.Aliases
+	m.AllowedTenants = nil
+	m.AllowedTenants = msg.AllowedTenants
+	m.DiscountPercent = msg.DiscountPercent
+	m.UpdatedAt = time.Time{}
+	if msg.UpdatedAt != nil {
+		m.UpdatedAt = msg.UpdatedAt.AsTime()
 	}
-	m.ProviderModelID = pb.ProviderModelId
-	m.Region = pb.Region
+	m.ProviderModelID = msg.ProviderModelId
+	m.Region = msg.Region
+	m.RequiredAccess = nil
+	m.RequiredAccess = msg.RequiredAccess
 }
 
 // ApplyFieldMaskModelCatalogEntry copies fields from src to dst based on the given paths.
@@ -130,6 +137,8 @@ func ApplyFieldMaskModelCatalogEntry(dst, src *ModelCatalogEntry, paths []string
 			dst.ProviderModelID = src.ProviderModelID
 		case "region":
 			dst.Region = src.Region
+		case "required_access":
+			dst.RequiredAccess = src.RequiredAccess
 		}
 	}
 }
@@ -163,6 +172,10 @@ func (m *ModelCatalogEntry) Clone() *ModelCatalogEntry {
 	if m.AllowedTenants != nil {
 		c.AllowedTenants = make([]string, len(m.AllowedTenants))
 		copy(c.AllowedTenants, m.AllowedTenants)
+	}
+	if m.RequiredAccess != nil {
+		c.RequiredAccess = make([]string, len(m.RequiredAccess))
+		copy(c.RequiredAccess, m.RequiredAccess)
 	}
 	return c
 }
@@ -235,6 +248,14 @@ func (m *ModelCatalogEntry) Equal(other *ModelCatalogEntry) bool {
 	}
 	if m.Region != other.Region {
 		return false
+	}
+	if len(m.RequiredAccess) != len(other.RequiredAccess) {
+		return false
+	}
+	for i := range m.RequiredAccess {
+		if m.RequiredAccess[i] != other.RequiredAccess[i] {
+			return false
+		}
 	}
 	return true
 }

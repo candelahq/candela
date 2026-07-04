@@ -68,9 +68,15 @@ type ModelCatalogEntry struct {
 	ProviderModelId string `protobuf:"bytes,16,opt,name=provider_model_id,json=providerModelId,proto3" json:"provider_model_id,omitempty"`
 	// Cloud region for this specific model (e.g., "global", "us-east5").
 	// Falls back to the deployment-wide CANDELA_VERTEX_REGION setting if empty.
-	Region        string `protobuf:"bytes,17,opt,name=region,proto3" json:"region,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	Region string `protobuf:"bytes,17,opt,name=region,proto3" json:"region,omitempty"`
+	// Access tags required to use this model.
+	// Empty = open to all users (default).
+	// Non-empty = user must have at least one matching tag in their
+	// access_tags field. Examples: ["pro"], ["preview"]
+	// Admin-managed via UpdateModelCatalogEntry.
+	RequiredAccess []string `protobuf:"bytes,18,rep,name=required_access,json=requiredAccess,proto3" json:"required_access,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *ModelCatalogEntry) Reset() {
@@ -222,11 +228,18 @@ func (x *ModelCatalogEntry) GetRegion() string {
 	return ""
 }
 
+func (x *ModelCatalogEntry) GetRequiredAccess() []string {
+	if x != nil {
+		return x.RequiredAccess
+	}
+	return nil
+}
+
 var File_candela_types_model_catalog_proto protoreflect.FileDescriptor
 
 const file_candela_types_model_catalog_proto_rawDesc = "" +
 	"\n" +
-	"!candela/types/model_catalog.proto\x12\rcandela.types\x1a\x1bbuf/validate/validate.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x18proto2type/options.proto\"\xcd\x06\n" +
+	"!candela/types/model_catalog.proto\x12\rcandela.types\x1a\x1bbuf/validate/validate.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x18proto2type/options.proto\"\xf6\x06\n" +
 	"\x11ModelCatalogEntry\x12*\n" +
 	"\bmodel_id\x18\x01 \x01(\tB\x0f\xbaH\ar\x05\x10\x01\x18\x80\x01\xdaQ\x02(\x02R\amodelId\x12*\n" +
 	"\bprovider\x18\x02 \x01(\tB\x0e\xbaH\x06r\x04\x10\x01\x18@\xdaQ\x02(\x02R\bprovider\x12+\n" +
@@ -246,7 +259,8 @@ const file_candela_types_model_catalog_proto_rawDesc = "" +
 	"\n" +
 	"updated_at\x18\x0f \x01(\v2\x1a.google.protobuf.TimestampB\x05\xdaQ\x02\x10\x01R\tupdatedAt\x12*\n" +
 	"\x11provider_model_id\x18\x10 \x01(\tR\x0fproviderModelId\x12\x16\n" +
-	"\x06region\x18\x11 \x01(\tR\x06regionB\xae\x01\n" +
+	"\x06region\x18\x11 \x01(\tR\x06region\x12'\n" +
+	"\x0frequired_access\x18\x12 \x03(\tR\x0erequiredAccessB\xae\x01\n" +
 	"\x11com.candela.typesB\x11ModelCatalogProtoP\x01Z1github.com/candelahq/candela/gen/go/candela/types\xa2\x02\x03CTX\xaa\x02\rCandela.Types\xca\x02\rCandela\\Types\xe2\x02\x19Candela\\Types\\GPBMetadata\xea\x02\x0eCandela::Typesb\x06proto3"
 
 var (

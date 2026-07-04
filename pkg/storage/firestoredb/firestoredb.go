@@ -154,6 +154,7 @@ type firestoreUser struct {
 	DisplayName  string    `firestore:"display_name,omitempty"`
 	Role         string    `firestore:"role,omitempty"`
 	Status       string    `firestore:"status,omitempty"`
+	AccessTags   []string  `firestore:"access_tags,omitempty"`
 	CreatedAt    time.Time `firestore:"created_at,omitempty"`
 	LastSeenAt   time.Time `firestore:"last_seen_at,omitempty"`
 	LastActiveAt time.Time `firestore:"last_active_at,omitempty"`
@@ -166,6 +167,7 @@ func userToFirestore(u *storage.UserRecord) *firestoreUser {
 		Email:        u.Email,
 		Role:         u.Role,
 		Status:       u.Status,
+		AccessTags:   u.AccessTags,
 		CreatedAt:    u.CreatedAt,
 		LastSeenAt:   u.LastSeenAt,
 		LastActiveAt: u.LastActiveAt,
@@ -185,6 +187,7 @@ func firestoreToUser(fu *firestoreUser) *storage.UserRecord {
 		Email:        fu.Email,
 		Role:         fu.Role,
 		Status:       fu.Status,
+		AccessTags:   fu.AccessTags,
 		CreatedAt:    fu.CreatedAt,
 		LastSeenAt:   fu.LastSeenAt,
 		LastActiveAt: fu.LastActiveAt,

@@ -50,22 +50,23 @@ func (a *AnnotationFirestore) ToProto() *types.Annotation {
 }
 
 // FromProto populates from a protobuf message.
-func (a *AnnotationFirestore) FromProto(pb *types.Annotation) {
-	if pb == nil {
+func (a *AnnotationFirestore) FromProto(msg *types.Annotation) {
+	if msg == nil {
 		return
 	}
-	a.ID = pb.Id
-	a.TraceID = pb.TraceId
-	a.Type = int32(pb.Type)
-	a.Success = pb.Success
-	a.Score = pb.Score
-	a.Label = pb.Label
-	a.Reviewer = pb.Reviewer
-	a.MetricName = pb.MetricName
-	a.MetricValue = pb.MetricValue
-	a.Comment = pb.Comment
-	if pb.CreatedAt != nil {
-		a.CreatedAt = pb.CreatedAt.AsTime()
+	a.ID = msg.Id
+	a.TraceID = msg.TraceId
+	a.Type = int32(msg.Type)
+	a.Success = msg.Success
+	a.Score = msg.Score
+	a.Label = msg.Label
+	a.Reviewer = msg.Reviewer
+	a.MetricName = msg.MetricName
+	a.MetricValue = msg.MetricValue
+	a.Comment = msg.Comment
+	a.CreatedAt = time.Time{}
+	if msg.CreatedAt != nil {
+		a.CreatedAt = msg.CreatedAt.AsTime()
 	}
 }
 

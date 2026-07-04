@@ -41,18 +41,20 @@ func (p *Project) ToProto() *types.Project {
 }
 
 // FromProto populates from a protobuf message.
-func (p *Project) FromProto(pb *types.Project) {
-	if pb == nil {
+func (p *Project) FromProto(msg *types.Project) {
+	if msg == nil {
 		return
 	}
-	p.ID = pb.Id
-	p.Name = pb.Name
-	p.Description = pb.Description
-	if pb.CreatedAt != nil {
-		p.CreatedAt = pb.CreatedAt.AsTime()
+	p.ID = msg.Id
+	p.Name = msg.Name
+	p.Description = msg.Description
+	p.CreatedAt = time.Time{}
+	if msg.CreatedAt != nil {
+		p.CreatedAt = msg.CreatedAt.AsTime()
 	}
-	if pb.UpdatedAt != nil {
-		p.UpdatedAt = pb.UpdatedAt.AsTime()
+	p.UpdatedAt = time.Time{}
+	if msg.UpdatedAt != nil {
+		p.UpdatedAt = msg.UpdatedAt.AsTime()
 	}
 }
 
@@ -153,20 +155,22 @@ func (a *APIKey) ToProto() *types.APIKey {
 }
 
 // FromProto populates from a protobuf message.
-func (a *APIKey) FromProto(pb *types.APIKey) {
-	if pb == nil {
+func (a *APIKey) FromProto(msg *types.APIKey) {
+	if msg == nil {
 		return
 	}
-	a.ID = pb.Id
-	a.ProjectID = pb.ProjectId
-	a.Name = pb.Name
-	a.KeyPrefix = pb.KeyPrefix
-	a.Active = pb.Active
-	if pb.CreatedAt != nil {
-		a.CreatedAt = pb.CreatedAt.AsTime()
+	a.ID = msg.Id
+	a.ProjectID = msg.ProjectId
+	a.Name = msg.Name
+	a.KeyPrefix = msg.KeyPrefix
+	a.Active = msg.Active
+	a.CreatedAt = time.Time{}
+	if msg.CreatedAt != nil {
+		a.CreatedAt = msg.CreatedAt.AsTime()
 	}
-	if pb.ExpiresAt != nil {
-		a.ExpiresAt = pb.ExpiresAt.AsTime()
+	a.ExpiresAt = time.Time{}
+	if msg.ExpiresAt != nil {
+		a.ExpiresAt = msg.ExpiresAt.AsTime()
 	}
 }
 

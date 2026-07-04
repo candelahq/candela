@@ -33,6 +33,7 @@ import (
 
 	"github.com/candelahq/candela/pkg/attribution"
 	"github.com/candelahq/candela/pkg/auth"
+	"github.com/candelahq/candela/pkg/catalog"
 	"github.com/candelahq/candela/pkg/cloudauth"
 	"github.com/candelahq/candela/pkg/costcalc"
 	"github.com/candelahq/candela/pkg/notify"
@@ -251,8 +252,9 @@ type Proxy struct {
 	asyncSem  chan struct{} // bounds best-effort async goroutines (touch-active, budget notify)
 
 	// Optional dependencies for team-mode features.
-	users    storage.UserStore     // Budget deduction (nil = no budget tracking)
-	budgetCk *notify.BudgetChecker // Budget threshold notifications (nil = no alerts)
+	users    storage.UserStore         // Budget deduction (nil = no budget tracking)
+	budgetCk *notify.BudgetChecker     // Budget threshold notifications (nil = no alerts)
+	catalog  catalog.ModelCatalogStore // Access gate lookups (nil = gates skipped)
 
 	compatModels     []CompatModel // configured models for per-provider /models responses
 	modelListJSON    atomic.Value  // cached []byte JSON response for /v1/models
@@ -290,11 +292,12 @@ type Proxy struct {
 
 // Config holds proxy configuration.
 type Config struct {
-	Providers      []Provider         `yaml:"providers"`
-	ProjectID      string             `yaml:"project_id"`
-	MaxRequestCost float64            `yaml:"max_request_cost_usd"` // Per-request cost cap (0 = disabled)
-	DailyLimits    []SpendLimitConfig `yaml:"daily_limits"`         // Per-model daily spend limits
-	Policy         *PolicyConfig      `yaml:"policy"`               // Model allowlist policy (nil = all allowed)
+	Providers      []Provider                `yaml:"providers"`
+	ProjectID      string                    `yaml:"project_id"`
+	MaxRequestCost float64                   `yaml:"max_request_cost_usd"` // Per-request cost cap (0 = disabled)
+	DailyLimits    []SpendLimitConfig        `yaml:"daily_limits"`         // Per-model daily spend limits
+	Policy         *PolicyConfig             `yaml:"policy"`               // Model allowlist policy (nil = all allowed)
+	Catalog        catalog.ModelCatalogStore `yaml:"-"`                    // Injected; used for access gate lookups
 
 	// HTTP transport tuning for upstream LLM provider connections.
 	MaxIdleConns        int `yaml:"max_idle_conns"`          // default: 200
@@ -423,6 +426,9 @@ func New(cfg Config, submitter SpanSubmitter, calc *costcalc.Calculator) (*Proxy
 	}
 	p.policy = policy
 
+	// Wire catalog store for access gate lookups.
+	p.catalog = cfg.Catalog
+
 	return p, nil
 }
 
@@ -434,6 +440,11 @@ func (p *Proxy) SetUserStore(users storage.UserStore) {
 // SetBudgetChecker sets the optional BudgetChecker for threshold notifications.
 func (p *Proxy) SetBudgetChecker(ck *notify.BudgetChecker) {
 	p.budgetCk = ck
+}
+
+// SetCatalog sets the optional catalog store for access gate lookups.
+func (p *Proxy) SetCatalog(c catalog.ModelCatalogStore) {
+	p.catalog = c
 }
 
 // SetSpendOutbox sets the optional spend outbox for durable DeductSpend retries (CRIT-3).
@@ -844,11 +855,15 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Check if user is admin — admins bypass rate limits and budget gates.
+	// Check if user is admin — admins bypass rate limits, budget, and access gates.
 	var isAdmin bool
+	var userRecord *storage.UserRecord
 	if p.users != nil && effectiveUserID != "" && !isServiceAccount {
-		if u, err := p.users.GetUser(r.Context(), effectiveUserID); err == nil && u != nil && u.Role == storage.RoleAdmin {
-			isAdmin = true
+		if u, err := p.users.GetUser(r.Context(), effectiveUserID); err == nil && u != nil {
+			userRecord = u
+			if u.Role == storage.RoleAdmin {
+				isAdmin = true
+			}
 		}
 	}
 
@@ -942,6 +957,31 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 		slog.Warn("model blocked by policy",
 			"provider", providerName, "model", requestModel, "user", effectiveUserID)
 		return
+	}
+
+	// ── Access gates: tag-based model access + tenant isolation ──
+	// Admins bypass. Catalog unavailable = fail-open. Solo mode (nil catalog) = skip.
+	if requestModel != "" && p.catalog != nil && !isAdmin {
+		if entry, err := p.catalog.Get(r.Context(), providerName, requestModel); err == nil && entry != nil {
+			var userTags []string
+			if userRecord != nil {
+				userTags = userRecord.AccessTags
+			}
+			if err := checkAccessTags(userTags, entry.RequiredAccess); err != nil {
+				ProxyErrorResponse(w, http.StatusForbidden, err.Error(), "access_denied")
+				slog.Warn("blocked by access tag gate",
+					"user", effectiveUserID, "tags", userTags,
+					"model", requestModel, "required", entry.RequiredAccess)
+				return
+			}
+			if err := checkTenantAccess(attr.TenantID, entry.AllowedTenants); err != nil {
+				ProxyErrorResponse(w, http.StatusForbidden, err.Error(), "tenant_access_denied")
+				slog.Warn("blocked by tenant gate",
+					"user", effectiveUserID, "tenant", attr.TenantID,
+					"model", requestModel, "allowed", entry.AllowedTenants)
+				return
+			}
+		}
 	}
 
 	// ── Budget pre-flight with model-aware floor (#7) ──

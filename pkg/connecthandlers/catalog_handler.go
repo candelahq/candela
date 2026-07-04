@@ -26,6 +26,7 @@ func NewCatalogHandler(store catalog.ModelCatalogStore, users storage.UserStore)
 
 // ListModelCatalog returns all models in the catalog.
 // Non-admin callers always receive enabled-only models regardless of include_disabled.
+// Models with required_access tags are filtered to only show models the caller can access.
 func (h *CatalogHandler) ListModelCatalog(
 	ctx context.Context,
 	req *connect.Request[v1.ListModelCatalogRequest],
@@ -45,6 +46,13 @@ func (h *CatalogHandler) ListModelCatalog(
 		return nil, internalError("failed to list model catalog", err)
 	}
 
+	// For non-admin callers, filter out models they don't have access to.
+	if callerScope != "" && h.users != nil {
+		if u, err := h.users.GetUser(ctx, callerScope); err == nil && u != nil {
+			entries = filterEntriesByAccess(entries, u.AccessTags)
+		}
+	}
+
 	pbModels := make([]*types.ModelCatalogEntry, len(entries))
 	for i, e := range entries {
 		pbModels[i] = e.ToProto()
@@ -55,6 +63,39 @@ func (h *CatalogHandler) ListModelCatalog(
 		Source:        h.store.Source(),
 		AdminEditable: h.store.Writable() && callerScope == "",
 	}), nil
+}
+
+// filterEntriesByAccess removes entries the user can't access based on
+// required_access tags. Models with empty required_access are always visible.
+func filterEntriesByAccess(entries []catalog.Entry, userTags []string) []catalog.Entry {
+	if len(userTags) == 0 {
+		// User has no tags — keep only models with no access requirements.
+		var filtered []catalog.Entry
+		for _, e := range entries {
+			if len(e.RequiredAccess) == 0 {
+				filtered = append(filtered, e)
+			}
+		}
+		return filtered
+	}
+	tagSet := make(map[string]bool, len(userTags))
+	for _, t := range userTags {
+		tagSet[t] = true
+	}
+	var filtered []catalog.Entry
+	for _, e := range entries {
+		if len(e.RequiredAccess) == 0 {
+			filtered = append(filtered, e)
+			continue
+		}
+		for _, tag := range e.RequiredAccess {
+			if tagSet[tag] {
+				filtered = append(filtered, e)
+				break
+			}
+		}
+	}
+	return filtered
 }
 
 // UpdateModelCatalogEntry updates a single model entry.

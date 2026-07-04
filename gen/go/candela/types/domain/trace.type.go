@@ -54,23 +54,23 @@ func (g *GenAIAttributes) ToProto() *types.GenAIAttributes {
 }
 
 // FromProto populates from a protobuf message.
-func (g *GenAIAttributes) FromProto(pb *types.GenAIAttributes) {
-	if pb == nil {
+func (g *GenAIAttributes) FromProto(msg *types.GenAIAttributes) {
+	if msg == nil {
 		return
 	}
-	g.Model = pb.Model
-	g.Provider = pb.Provider
-	g.InputTokens = pb.InputTokens
-	g.OutputTokens = pb.OutputTokens
-	g.TotalTokens = pb.TotalTokens
-	g.CostUsd = pb.CostUsd
-	g.Temperature = pb.Temperature
-	g.MaxTokens = pb.MaxTokens
-	g.TopP = pb.TopP
-	g.InputContent = pb.InputContent
-	g.OutputContent = pb.OutputContent
-	g.InputContentRef = pb.InputContentRef
-	g.OutputContentRef = pb.OutputContentRef
+	g.Model = msg.Model
+	g.Provider = msg.Provider
+	g.InputTokens = msg.InputTokens
+	g.OutputTokens = msg.OutputTokens
+	g.TotalTokens = msg.TotalTokens
+	g.CostUsd = msg.CostUsd
+	g.Temperature = msg.Temperature
+	g.MaxTokens = msg.MaxTokens
+	g.TopP = msg.TopP
+	g.InputContent = msg.InputContent
+	g.OutputContent = msg.OutputContent
+	g.InputContentRef = msg.InputContentRef
+	g.OutputContentRef = msg.OutputContentRef
 }
 
 // ApplyFieldMaskGenAIAttributes copies fields from src to dst based on the given paths.
@@ -206,13 +206,13 @@ func (t *ToolAttributes) ToProto() *types.ToolAttributes {
 }
 
 // FromProto populates from a protobuf message.
-func (t *ToolAttributes) FromProto(pb *types.ToolAttributes) {
-	if pb == nil {
+func (t *ToolAttributes) FromProto(msg *types.ToolAttributes) {
+	if msg == nil {
 		return
 	}
-	t.ToolName = pb.ToolName
-	t.ToolInput = pb.ToolInput
-	t.ToolOutput = pb.ToolOutput
+	t.ToolName = msg.ToolName
+	t.ToolInput = msg.ToolInput
+	t.ToolOutput = msg.ToolOutput
 }
 
 // ApplyFieldMaskToolAttributes copies fields from src to dst based on the given paths.
@@ -350,37 +350,43 @@ func (s *Span) ToProto() *types.Span {
 }
 
 // FromProto populates from a protobuf message.
-func (s *Span) FromProto(pb *types.Span) {
-	if pb == nil {
+func (s *Span) FromProto(msg *types.Span) {
+	if msg == nil {
 		return
 	}
-	s.SpanID = pb.SpanId
-	s.TraceID = pb.TraceId
-	s.ParentSpanID = pb.ParentSpanId
-	s.Name = pb.Name
-	s.Kind = int32(pb.Kind)
-	s.Status = int32(pb.Status)
-	s.StatusMessage = pb.StatusMessage
-	if pb.StartTime != nil {
-		s.StartTime = pb.StartTime.AsTime()
+	s.SpanID = msg.SpanId
+	s.TraceID = msg.TraceId
+	s.ParentSpanID = msg.ParentSpanId
+	s.Name = msg.Name
+	s.Kind = int32(msg.Kind)
+	s.Status = int32(msg.Status)
+	s.StatusMessage = msg.StatusMessage
+	s.StartTime = time.Time{}
+	if msg.StartTime != nil {
+		s.StartTime = msg.StartTime.AsTime()
 	}
-	if pb.EndTime != nil {
-		s.EndTime = pb.EndTime.AsTime()
+	s.EndTime = time.Time{}
+	if msg.EndTime != nil {
+		s.EndTime = msg.EndTime.AsTime()
 	}
-	if pb.Duration != nil {
-		s.Duration = pb.Duration.AsDuration()
+	s.Duration = 0
+	if msg.Duration != nil {
+		s.Duration = msg.Duration.AsDuration()
 	}
-	if pb.GenAi != nil {
+	s.GenAi = nil
+	if msg.GenAi != nil {
 		s.GenAi = &GenAIAttributes{}
-		s.GenAi.FromProto(pb.GenAi)
+		s.GenAi.FromProto(msg.GenAi)
 	}
-	if pb.Tool != nil {
+	s.Tool = nil
+	if msg.Tool != nil {
 		s.Tool = &ToolAttributes{}
-		s.Tool.FromProto(pb.Tool)
+		s.Tool.FromProto(msg.Tool)
 	}
-	if len(pb.Attributes) > 0 {
-		s.Attributes = make([]*Attribute, len(pb.Attributes))
-		for i, v := range pb.Attributes {
+	s.Attributes = nil
+	if len(msg.Attributes) > 0 {
+		s.Attributes = make([]*Attribute, len(msg.Attributes))
+		for i, v := range msg.Attributes {
 			if v != nil {
 				elem := &Attribute{}
 				elem.FromProto(v)
@@ -388,18 +394,20 @@ func (s *Span) FromProto(pb *types.Span) {
 			}
 		}
 	}
-	s.ProjectID = pb.ProjectId
-	s.Environment = pb.Environment
-	s.ServiceName = pb.ServiceName
-	s.UserID = pb.UserId
-	s.SessionID = pb.SessionId
-	s.TenantID = pb.TenantId
-	s.JobID = pb.JobId
-	s.TraceGroup = pb.TraceGroup
-	s.Labels = pb.Labels
-	if len(pb.Events) > 0 {
-		s.Events = make([]*SpanEvent, len(pb.Events))
-		for i, v := range pb.Events {
+	s.ProjectID = msg.ProjectId
+	s.Environment = msg.Environment
+	s.ServiceName = msg.ServiceName
+	s.UserID = msg.UserId
+	s.SessionID = msg.SessionId
+	s.TenantID = msg.TenantId
+	s.JobID = msg.JobId
+	s.TraceGroup = msg.TraceGroup
+	s.Labels = nil
+	s.Labels = msg.Labels
+	s.Events = nil
+	if len(msg.Events) > 0 {
+		s.Events = make([]*SpanEvent, len(msg.Events))
+		for i, v := range msg.Events {
 			if v != nil {
 				elem := &SpanEvent{}
 				elem.FromProto(v)
@@ -665,17 +673,19 @@ func (s *SpanEvent) ToProto() *types.SpanEvent {
 }
 
 // FromProto populates from a protobuf message.
-func (s *SpanEvent) FromProto(pb *types.SpanEvent) {
-	if pb == nil {
+func (s *SpanEvent) FromProto(msg *types.SpanEvent) {
+	if msg == nil {
 		return
 	}
-	s.Name = pb.Name
-	if pb.Timestamp != nil {
-		s.Timestamp = pb.Timestamp.AsTime()
+	s.Name = msg.Name
+	s.Timestamp = time.Time{}
+	if msg.Timestamp != nil {
+		s.Timestamp = msg.Timestamp.AsTime()
 	}
-	if len(pb.Attributes) > 0 {
-		s.Attributes = make([]*Attribute, len(pb.Attributes))
-		for i, v := range pb.Attributes {
+	s.Attributes = nil
+	if len(msg.Attributes) > 0 {
+		s.Attributes = make([]*Attribute, len(msg.Attributes))
+		for i, v := range msg.Attributes {
 			if v != nil {
 				elem := &Attribute{}
 				elem.FromProto(v)
@@ -810,34 +820,38 @@ func (t *Trace) ToProto() *types.Trace {
 }
 
 // FromProto populates from a protobuf message.
-func (t *Trace) FromProto(pb *types.Trace) {
-	if pb == nil {
+func (t *Trace) FromProto(msg *types.Trace) {
+	if msg == nil {
 		return
 	}
-	t.TraceID = pb.TraceId
-	if pb.StartTime != nil {
-		t.StartTime = pb.StartTime.AsTime()
+	t.TraceID = msg.TraceId
+	t.StartTime = time.Time{}
+	if msg.StartTime != nil {
+		t.StartTime = msg.StartTime.AsTime()
 	}
-	if pb.EndTime != nil {
-		t.EndTime = pb.EndTime.AsTime()
+	t.EndTime = time.Time{}
+	if msg.EndTime != nil {
+		t.EndTime = msg.EndTime.AsTime()
 	}
-	if pb.Duration != nil {
-		t.Duration = pb.Duration.AsDuration()
+	t.Duration = 0
+	if msg.Duration != nil {
+		t.Duration = msg.Duration.AsDuration()
 	}
-	t.ProjectID = pb.ProjectId
-	t.Environment = pb.Environment
-	t.SpanCount = pb.SpanCount
-	t.TotalTokens = pb.TotalTokens
-	t.TotalCostUsd = pb.TotalCostUsd
-	t.RootSpanName = pb.RootSpanName
-	t.UserID = pb.UserId
-	t.SessionID = pb.SessionId
-	t.TenantID = pb.TenantId
-	t.JobID = pb.JobId
-	t.TraceGroup = pb.TraceGroup
-	if len(pb.Spans) > 0 {
-		t.Spans = make([]*Span, len(pb.Spans))
-		for i, v := range pb.Spans {
+	t.ProjectID = msg.ProjectId
+	t.Environment = msg.Environment
+	t.SpanCount = msg.SpanCount
+	t.TotalTokens = msg.TotalTokens
+	t.TotalCostUsd = msg.TotalCostUsd
+	t.RootSpanName = msg.RootSpanName
+	t.UserID = msg.UserId
+	t.SessionID = msg.SessionId
+	t.TenantID = msg.TenantId
+	t.JobID = msg.JobId
+	t.TraceGroup = msg.TraceGroup
+	t.Spans = nil
+	if len(msg.Spans) > 0 {
+		t.Spans = make([]*Span, len(msg.Spans))
+		for i, v := range msg.Spans {
 			if v != nil {
 				elem := &Span{}
 				elem.FromProto(v)
@@ -1045,32 +1059,34 @@ func (t *TraceSummary) ToProto() *types.TraceSummary {
 }
 
 // FromProto populates from a protobuf message.
-func (t *TraceSummary) FromProto(pb *types.TraceSummary) {
-	if pb == nil {
+func (t *TraceSummary) FromProto(msg *types.TraceSummary) {
+	if msg == nil {
 		return
 	}
-	t.TraceID = pb.TraceId
-	if pb.StartTime != nil {
-		t.StartTime = pb.StartTime.AsTime()
+	t.TraceID = msg.TraceId
+	t.StartTime = time.Time{}
+	if msg.StartTime != nil {
+		t.StartTime = msg.StartTime.AsTime()
 	}
-	if pb.Duration != nil {
-		t.Duration = pb.Duration.AsDuration()
+	t.Duration = 0
+	if msg.Duration != nil {
+		t.Duration = msg.Duration.AsDuration()
 	}
-	t.RootSpanName = pb.RootSpanName
-	t.ProjectID = pb.ProjectId
-	t.Environment = pb.Environment
-	t.SpanCount = pb.SpanCount
-	t.LlmCallCount = pb.LlmCallCount
-	t.TotalTokens = pb.TotalTokens
-	t.TotalCostUsd = pb.TotalCostUsd
-	t.Status = int32(pb.Status)
-	t.PrimaryModel = pb.PrimaryModel
-	t.PrimaryProvider = pb.PrimaryProvider
-	t.UserID = pb.UserId
-	t.SessionID = pb.SessionId
-	t.TenantID = pb.TenantId
-	t.JobID = pb.JobId
-	t.TraceGroup = pb.TraceGroup
+	t.RootSpanName = msg.RootSpanName
+	t.ProjectID = msg.ProjectId
+	t.Environment = msg.Environment
+	t.SpanCount = msg.SpanCount
+	t.LlmCallCount = msg.LlmCallCount
+	t.TotalTokens = msg.TotalTokens
+	t.TotalCostUsd = msg.TotalCostUsd
+	t.Status = int32(msg.Status)
+	t.PrimaryModel = msg.PrimaryModel
+	t.PrimaryProvider = msg.PrimaryProvider
+	t.UserID = msg.UserId
+	t.SessionID = msg.SessionId
+	t.TenantID = msg.TenantId
+	t.JobID = msg.JobId
+	t.TraceGroup = msg.TraceGroup
 }
 
 // ApplyFieldMaskTraceSummary copies fields from src to dst based on the given paths.

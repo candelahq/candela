@@ -1,0 +1,107 @@
+name: Hurl E2E
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: hurl-e2e-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  packages: read
+  pull-requests: read
+
+jobs:
+  # ── change detection ─────────────────────────────────────────────────────────
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      should_run: ${{ github.event_name == 'push' || steps.filter.outputs.e2e }}
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          persist-credentials: false
+      - uses: dorny/paths-filter@d1c1ffe0248fe513906c8e24db8ea791d46f8590 # v3
+        id: filter
+        with:
+          filters: |
+            e2e:
+              - 'test/functional/**'
+              - 'pkg/**'
+              - 'cmd/**'
+              - 'go.mod'
+              - 'go.sum'
+              - '.github/workflows/hurl.yml'
+              - 'flake.nix'
+              - 'flake.lock'
+              - 'Dockerfile.ci'
+
+  # ── hurl functional E2E tests ───────────────────────────────────────────────
+  hurl-e2e:
+    needs: changes
+    if: needs.changes.outputs.should_run == 'true'
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/candelahq/candela-dev:latest
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          persist-credentials: false
+
+      - name: Fix git ownership for Nix flake
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+      - name: Generate proto stubs
+        run: nix develop . --command buf generate
+
+      - name: Build candela-server
+        run: nix develop . --command go build -o candela-server ./cmd/candela-server
+
+      - name: Start mock upstream
+        run: |
+          nix develop . --command go run test/functional/mock/upstream.go --port 9999 &
+          for _i in $(seq 1 30); do
+            curl -s -o /dev/null http://localhost:9999/ 2>/dev/null && break
+            sleep 1
+          done
+          curl -s -o /dev/null http://localhost:9999/ || { echo "::error::Mock upstream failed to start"; exit 1; }
+
+      - name: Start candela-server
+        run: |
+          CANDELA_CONFIG=test/functional/test_config.yaml ./candela-server &
+          for _i in $(seq 1 30); do
+            curl -sf http://localhost:8080/healthz 2>/dev/null && break
+            sleep 1
+          done
+          curl -sf http://localhost:8080/healthz || { echo "::error::candela-server failed to start"; exit 1; }
+
+      - name: Run hurl functional tests
+        run: |
+          mkdir -p test-results
+
+          # Tests that work with minimal config (no Vertex AI, no catalog, no budgets).
+          # See test/functional/README.md for the full matrix of test requirements.
+          nix develop . --command hurl --test \
+            --variable CANDELA_URL=http://localhost:8080 \
+            --variable MOCK_UPSTREAM_URL=http://localhost:9999 \
+            --report-junit test-results/functional-server.xml \
+            test/functional/proxy/proxy_openai.hurl \
+            test/functional/proxy/proxy_anthropic_direct.hurl \
+            test/functional/proxy/proxy_cache_tokens.hurl \
+            test/functional/proxy/proxy_trace_context.hurl \
+            test/functional/proxy/proxy_tenant_gates.hurl
+
+      - name: Upload test results
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: hurl-test-results
+          path: test-results/
+          retention-days: 7

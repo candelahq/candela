@@ -1,7 +1,32 @@
+server:
+  port: 8080
+auth:
+  dev_mode: true
 storage:
   backend: sqlite
   sqlite:
     dsn: ":memory:"
-providers:
+proxy:
+  enabled: true
+# Disable all built-in providers (they point at real cloud endpoints).
+# We re-add only the ones needed for CI via custom_providers below.
+disabled_providers:
+  - openai
+  - google
+  - gemini-oai
+  - gemini-vertex
+  - anthropic
+  - anthropic-vertex
+  - anthropic-direct
+  - mistral
+  - deepseek
+  - deepseek-v3
+  - qwen
+  - zai
+# Re-add providers that don't need Vertex AI path rewriting,
+# pointing at the mock upstream.
+custom_providers:
   - name: openai
+    upstream_url: http://localhost:9999
+  - name: anthropic-direct
     upstream_url: http://localhost:9999

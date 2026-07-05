@@ -381,6 +381,48 @@ proxy:
 
 ---
 
+## 🏷️ Access Tag Gating (Per-User, Per-Model)
+
+While `policy.allowed_models` is a **config-level allowlist** that applies uniformly to all users (all-or-nothing), **access tag gating** provides **per-user, per-model** granular control.
+
+| Mechanism | Scope | Granularity | Configuration |
+|-----------|-------|-------------|---------------|
+| `policy.allowed_models` | Global (all users) | Per-provider model list | `config.yaml` |
+| `access_tags` / `required_access` | Per-user, per-model | Tag-based intersection | User record + Model catalog |
+| `allowed_tenants` | Per-tenant, per-model | Tenant membership | Model catalog |
+
+### How They Interact
+
+Both gates are evaluated **independently** and both must pass:
+
+1. **`allowed_models`** — Is this model allowed at the config level? (If omitted, all models pass.)
+2. **Access tag gate** — Does this user have the required tags for this model? (If `required_access` is empty, all users pass.)
+3. **Tenant gate** — Does this user's tenant match `allowed_tenants`? (If empty, all tenants pass.)
+
+A request is blocked if **any** gate denies it.
+
+### Example
+
+```yaml
+# config.yaml — global allowlist (all users)
+proxy:
+  policy:
+    allowed_models:
+      - provider: anthropic
+        models: ["claude-sonnet-4-*", "claude-opus-4-*"]
+```
+
+```
+# Model catalog — per-model gate
+claude-opus-4-20250514:
+  required_access: ["opus"]        # only users with "opus" tag
+  allowed_tenants: ["acme-corp"]   # only acme-corp tenant
+```
+
+For full details on tag semantics, admin bypass, and SA behavior, see [Access Tag Gating in security.md](security.md#access-tag-gating).
+
+---
+
 ## 🛠️ Advanced Proxy Config
 
 Configuration is done via `config.yaml`:

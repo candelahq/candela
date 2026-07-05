@@ -2,6 +2,29 @@
 
 All notable changes to Candela are documented here, organized by development phase. PRs are merged to `main`.
 
+## v0.10.0 — 2026-07-05
+
+### Feature — Tag-Based Model Access Control
+
+- **Per-user access tags**: `User.access_tags` field enables fine-grained, tag-based model access control. Admins assign tags (e.g., `["sonnet", "opus"]`) to users via `CreateUser` / `UpdateUser`
+- **Per-model required access**: `ModelCatalogEntry.required_access` gates individual models behind specific tags. Access is granted when the user holds **any** matching tag (set intersection)
+- **Tenant isolation**: `ModelCatalogEntry.allowed_tenants` restricts model access to specific tenants, enabling multi-tenant model segregation
+- **Service accounts treated as individuals**: SAs are subject to the same access tag and tenant gating as human users — no implicit bypass
+- **Fail-closed error handling**: Storage errors during access checks result in request denial rather than permissive fallthrough
+
+### Tooling
+
+- **Proto2type `Clone()` fixup script**: Automated script to patch generated protobuf types with proper `Clone()` methods
+
+### Tests
+
+- **14 hurl E2E access gate tests**: `proxy_access_gates.hurl` and `proxy_tenant_gates.hurl` covering tag intersection, empty tags, admin bypass, SA gating, tenant isolation, and error scenarios
+- **29 unit tests**: Comprehensive Go unit test coverage for access tag evaluation, tenant matching, and edge cases
+
+### Follow-Up
+
+- 7 GitHub issues filed for follow-up work (UI integration, audit log enrichment, bulk tag management, etc.)
+
 ## v0.9.6 — 2026-06-28
 
 ### Bug Fix — JetBrains "unexpected EOF" resolved

@@ -32,8 +32,8 @@ test/functional/
 │   ├── proxy_anthropic.hurl← PROXY-02: Anthropic/Vertex AI path + translation
 │   ├── proxy_streaming.hurl← PROXY-03: SSE streaming, [DONE] terminator
 │   ├── proxy_errors.hurl   ← PROXY-04/05: 413, unknown provider, 4xx shapes
-│   ├── proxy_access_gates.hurl ← ACCESS-01..07: tag-based model access control
-│   └── proxy_tenant_gates.hurl ← TENANT-01..07: tenant isolation gating
+│   ├── proxy_access_gates.hurl ← ACCESS-01..08: tag-based model access control
+│   └── proxy_tenant_gates.hurl ← TENANT-GATE-01..06: tenant isolation gating
 ├── billing/
 │   ├── budget_gate.hurl    ← BILLING-01/02: budget exhausted → 402
 │   ├── pricing_gate.hurl   ← BILLING-03/04: unknown model, local bypass

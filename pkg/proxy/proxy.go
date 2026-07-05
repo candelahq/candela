@@ -855,10 +855,13 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Check if user is admin — admins bypass rate limits, budget, and access gates.
+	// Look up user record — needed for admin check and access tag gating.
+	// Service accounts are included: they get access tags from their
+	// UserRecord just like regular users. SAs without a UserRecord
+	// will have nil tags and can only access unrestricted models.
 	var isAdmin bool
 	var userRecord *storage.UserRecord
-	if p.users != nil && effectiveUserID != "" && !isServiceAccount {
+	if p.users != nil && effectiveUserID != "" {
 		if u, err := p.users.GetUser(r.Context(), effectiveUserID); err == nil && u != nil {
 			userRecord = u
 			if u.Role == storage.RoleAdmin {

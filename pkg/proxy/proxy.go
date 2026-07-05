@@ -862,7 +862,13 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 	var isAdmin bool
 	var userRecord *storage.UserRecord
 	if p.users != nil && effectiveUserID != "" {
-		if u, err := p.users.GetUser(r.Context(), effectiveUserID); err == nil && u != nil {
+		u, err := p.users.GetUser(r.Context(), effectiveUserID)
+		if err != nil {
+			if !errors.Is(err, storage.ErrNotFound) {
+				slog.Error("failed to look up user record",
+					"user_id", effectiveUserID, "error", err)
+			}
+		} else if u != nil {
 			userRecord = u
 			if u.Role == storage.RoleAdmin {
 				isAdmin = true

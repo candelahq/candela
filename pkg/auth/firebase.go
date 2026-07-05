@@ -10,7 +10,6 @@ import (
 	"strings"
 	"time"
 
-	fbauth "firebase.google.com/go/v4/auth"
 	"google.golang.org/api/idtoken"
 )
 
@@ -52,7 +51,7 @@ var selfServicePaths = map[string]bool{
 	"/candela.v1.UserService/GetMyBudget":    true,
 }
 
-func FirebaseAuthMiddleware(next http.Handler, fbAuth *fbauth.Client, cloudRunAudience string, userAuth UserAuthorizer, devMode bool, allowedSAs []string) http.Handler {
+func FirebaseAuthMiddleware(next http.Handler, fbAuth TokenVerifier, cloudRunAudience string, userAuth UserAuthorizer, devMode bool, allowedSAs []string) http.Handler {
 	saAllowlist := NewServiceAccountAllowlist(allowedSAs)
 	if saAllowlist.Len() > 0 {
 		slog.Info("🔐 service account allowlist active", "count", saAllowlist.Len())

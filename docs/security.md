@@ -92,6 +92,46 @@ Request → Auth Middleware → Admin Interceptor → Handler
 
 ---
 
+## Access Tag Gating
+
+Beyond RBAC roles, Candela provides **tag-based model access control** for fine-grained, per-user, per-model authorization.
+
+### How It Works
+
+| Concept | Field | Description |
+|---------|-------|-------------|
+| **User access tags** | `User.access_tags` | String tags assigned to a user (e.g., `["sonnet", "opus", "internal"]`) |
+| **Model required access** | `ModelCatalogEntry.required_access` | Tags required to use a specific model |
+| **Tenant isolation** | `ModelCatalogEntry.allowed_tenants` | Restricts a model to specific tenants |
+
+### Tag Intersection (Any-Match)
+
+A user is granted access to a model when **any** of the user's `access_tags` matches **any** of the model's `required_access` tags (set intersection). If `required_access` is empty, the model is unrestricted.
+
+```
+User: access_tags = ["sonnet", "experimental"]
+Model: required_access = ["opus", "experimental"]
+Result: ✅ ALLOWED (intersection: "experimental")
+```
+
+### Tenant Isolation via `allowed_tenants`
+
+When `ModelCatalogEntry.allowed_tenants` is set, only users belonging to a listed tenant can access the model. This enables multi-tenant model segregation — e.g., restricting expensive models to specific business units.
+
+### Admin Bypass
+
+Users with `role = admin` bypass all access tag and tenant checks. Admins always have unrestricted model access.
+
+### Service Account Behavior
+
+Service accounts (SAs) are treated as **individual users** for access gating purposes. SAs must have the appropriate `access_tags` and belong to an allowed tenant — there is no implicit SA bypass.
+
+### Fail-Closed on Errors
+
+If the storage backend returns an error during access tag or tenant evaluation (e.g., database timeout), the request is **denied** rather than allowed. This prevents accidental access grants during transient failures.
+
+---
+
 ## Data Isolation — Per-User Trace Scoping
 
 Non-admin developers can only see their own traces and spans. This is enforced at two levels:

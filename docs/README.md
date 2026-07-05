@@ -29,4 +29,11 @@ There is intentional overlap in some areas (e.g., deployment). The Astro site is
 | `proxy.md` | Proxy architecture |
 | `security.md` | Security model |
 | `testing.md` | Testing guide |
+| `multitenancy.md` | Per-tenant LLM cost attribution |
+| `user-management.md` | User management & access control |
+| `candela.md` | Developer proxy & runtime manager |
+| `harness-architecture.md` | Harness architecture decisions |
+| `adk-integration.md` | Google ADK integration guide |
+| `otel-collector.md` | OTel Collector agent-native ingestion |
+| `audit-report-batch9.md` | Deep engineering audit — Batch 9 |
 | `adr/` | Architecture Decision Records |

@@ -111,6 +111,7 @@ firestore/
 │   ├── display_name: string
 │   ├── role: "admin" | "developer"
 │   ├── status: "provisioned" | "active" | "inactive"
+│   ├── access_tags: []string          # tag-based model access control (e.g., ["sonnet", "opus"])
 │   ├── last_seen_at: timestamp
 │   └── created_at: timestamp
 ├── budgets/{userId}

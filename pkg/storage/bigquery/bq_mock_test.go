@@ -64,7 +64,17 @@ func (m *mockBQClient) enqueueQuery(q *mockBQQuery) {
 // ── Mock Dataset / Table ─────────────────────────────────────────────
 
 type mockBQDataset struct {
-	tables map[string]*mockBQTable
+	tables       map[string]*mockBQTable
+	createCalled bool
+	createErr    error
+}
+
+func (d *mockBQDataset) Create(_ context.Context, _ *bigquery.DatasetMetadata) error {
+	d.createCalled = true
+	if d.createErr != nil {
+		return d.createErr
+	}
+	return nil
 }
 
 func (d *mockBQDataset) Table(id string) BQTable {
@@ -78,9 +88,23 @@ func (d *mockBQDataset) Table(id string) BQTable {
 
 type mockBQTable struct {
 	id             string
+	createCalled   bool
+	createErr      error
 	metadataCalled bool
 	metadataErr    error
+	metadataResult *bigquery.TableMetadata
+	updateCalled   bool
+	updateErr      error
+	updateSchema   bigquery.Schema // captures the schema passed to Update
 	inserter       *mockBQInserter
+}
+
+func (t *mockBQTable) Create(_ context.Context, _ *bigquery.TableMetadata) error {
+	t.createCalled = true
+	if t.createErr != nil {
+		return t.createErr
+	}
+	return nil
 }
 
 func (t *mockBQTable) Metadata(_ context.Context) (*bigquery.TableMetadata, error) {
@@ -88,7 +112,19 @@ func (t *mockBQTable) Metadata(_ context.Context) (*bigquery.TableMetadata, erro
 	if t.metadataErr != nil {
 		return nil, t.metadataErr
 	}
+	if t.metadataResult != nil {
+		return t.metadataResult, nil
+	}
 	return &bigquery.TableMetadata{}, nil
+}
+
+func (t *mockBQTable) Update(_ context.Context, md bigquery.TableMetadataToUpdate, _ string) (*bigquery.TableMetadata, error) {
+	t.updateCalled = true
+	t.updateSchema = md.Schema
+	if t.updateErr != nil {
+		return nil, t.updateErr
+	}
+	return &bigquery.TableMetadata{Schema: md.Schema}, nil
 }
 
 func (t *mockBQTable) Inserter() BQInserter {
@@ -96,6 +132,10 @@ func (t *mockBQTable) Inserter() BQInserter {
 		return t.inserter
 	}
 	return &mockBQInserter{}
+}
+
+func (t *mockBQTable) FullyQualifiedName() string {
+	return "test-project.test_dataset." + t.id
 }
 
 // ── Mock Inserter ────────────────────────────────────────────────────

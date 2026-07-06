@@ -6,10 +6,9 @@ import (
 	"cloud.google.com/go/bigquery"
 )
 
-// BQClient abstracts *bigquery.Client for the read and write paths.
-// This interface covers methods needed by read-path queries
-// (QueryTraces, SearchSpans, GetUsageSummary, etc.), Ping, and
-// IngestSpans (streaming insert + MERGE DML).
+// BQClient abstracts *bigquery.Client for all Store operations.
+// This interface covers read-path queries, IngestSpans (streaming insert +
+// MERGE DML), Ping, and schema management (ensureSchema, evolveSchema).
 //
 // Implementations:
 //   - bqClientWrapper (production, wraps *bigquery.Client)
@@ -20,16 +19,22 @@ type BQClient interface {
 	Query(string) BQQuery
 }
 
-// BQDataset abstracts *bigquery.Dataset (used by Ping).
+// BQDataset abstracts *bigquery.Dataset.
+// Used by Ping, IngestSpans, and ensureSchema.
 type BQDataset interface {
+	Create(ctx context.Context, md *bigquery.DatasetMetadata) error
 	Table(string) BQTable
 }
 
 // BQTable abstracts *bigquery.Table.
-// Ping reads table metadata; IngestSpans uses the inserter.
+// Used by Ping (Metadata), IngestSpans (Inserter), and schema management
+// (Create, Metadata, Update, FullyQualifiedName).
 type BQTable interface {
+	Create(ctx context.Context, md *bigquery.TableMetadata) error
 	Metadata(ctx context.Context) (*bigquery.TableMetadata, error)
+	Update(ctx context.Context, md bigquery.TableMetadataToUpdate, etag string) (*bigquery.TableMetadata, error)
 	Inserter() BQInserter
+	FullyQualifiedName() string
 }
 
 // BQInserter abstracts *bigquery.Inserter for streaming inserts.
@@ -76,16 +81,32 @@ func (w *bqClientWrapper) Query(q string) BQQuery      { return &bqQueryWrapper{
 
 type bqDatasetWrapper struct{ d *bigquery.Dataset }
 
+func (w *bqDatasetWrapper) Create(ctx context.Context, md *bigquery.DatasetMetadata) error {
+	return w.d.Create(ctx, md)
+}
+
 func (w *bqDatasetWrapper) Table(id string) BQTable { return &bqTableWrapper{w.d.Table(id)} }
 
 type bqTableWrapper struct{ t *bigquery.Table }
+
+func (w *bqTableWrapper) Create(ctx context.Context, md *bigquery.TableMetadata) error {
+	return w.t.Create(ctx, md)
+}
 
 func (w *bqTableWrapper) Metadata(ctx context.Context) (*bigquery.TableMetadata, error) {
 	return w.t.Metadata(ctx)
 }
 
+func (w *bqTableWrapper) Update(ctx context.Context, md bigquery.TableMetadataToUpdate, etag string) (*bigquery.TableMetadata, error) {
+	return w.t.Update(ctx, md, etag)
+}
+
 func (w *bqTableWrapper) Inserter() BQInserter {
 	return &bqInserterWrapper{w.t.Inserter()}
+}
+
+func (w *bqTableWrapper) FullyQualifiedName() string {
+	return w.t.FullyQualifiedName()
 }
 
 type bqInserterWrapper struct{ i *bigquery.Inserter }

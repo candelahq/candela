@@ -3,6 +3,7 @@ package bigquery
 import (
 	"context"
 	"fmt"
+	"strings"
 	"testing"
 
 	bq "cloud.google.com/go/bigquery"
@@ -175,6 +176,15 @@ func TestEvolveSchema_AddsNewColumns(t *testing.T) {
 			}
 		}
 	}
+
+	// Input schema must not be mutated (Required fields should stay true).
+	for _, field := range desiredSchema {
+		if field.Name == "name" || field.Name == "kind" {
+			if !field.Required {
+				t.Errorf("input schema field %q was mutated: Required should still be true", field.Name)
+			}
+		}
+	}
 }
 
 func TestEvolveSchema_NoChanges(t *testing.T) {
@@ -202,5 +212,71 @@ func TestEvolveSchema_NoChanges(t *testing.T) {
 
 	if table.updateCalled {
 		t.Error("table.Update should NOT be called when schema matches")
+	}
+}
+
+// ── Error Propagation Tests ──────────────────────────────────────────
+
+func TestEnsureSchema_DatasetCreateError(t *testing.T) {
+	client := newMockBQClient()
+	client.dataset.createErr = fmt.Errorf("permission denied")
+
+	s := schemaStore(client)
+	err := s.ensureSchema(context.Background())
+	if err == nil {
+		t.Fatal("expected error from ensureSchema")
+	}
+	if !strings.Contains(err.Error(), "permission denied") {
+		t.Errorf("error = %v, want to contain 'permission denied'", err)
+	}
+}
+
+func TestEnsureSchema_TableCreateError(t *testing.T) {
+	client := newMockBQClient()
+	// Dataset succeeds.
+	table := &mockBQTable{
+		id:        "spans",
+		createErr: fmt.Errorf("quota exceeded"),
+	}
+	client.dataset.tables["spans"] = table
+
+	s := schemaStore(client)
+	err := s.ensureSchema(context.Background())
+	if err == nil {
+		t.Fatal("expected error from ensureSchema")
+	}
+	if !strings.Contains(err.Error(), "quota exceeded") {
+		t.Errorf("error = %v, want to contain 'quota exceeded'", err)
+	}
+}
+
+func TestEvolveSchema_UpdateError(t *testing.T) {
+	client := newMockBQClient()
+
+	existingSchema := bq.Schema{
+		{Name: "span_id", Type: bq.StringFieldType},
+	}
+	desiredSchema := bq.Schema{
+		{Name: "span_id", Type: bq.StringFieldType},
+		{Name: "new_col", Type: bq.StringFieldType},
+	}
+
+	table := &mockBQTable{
+		id: "spans",
+		metadataResult: &bq.TableMetadata{
+			Schema: existingSchema,
+			ETag:   "etag-5",
+		},
+		updateErr: fmt.Errorf("concurrent modification"),
+	}
+	client.dataset.tables["spans"] = table
+
+	s := schemaStore(client)
+	err := s.evolveSchema(context.Background(), table, desiredSchema)
+	if err == nil {
+		t.Fatal("expected error from evolveSchema")
+	}
+	if !strings.Contains(err.Error(), "concurrent modification") {
+		t.Errorf("error = %v, want to contain 'concurrent modification'", err)
 	}
 }

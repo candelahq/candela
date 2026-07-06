@@ -321,8 +321,10 @@ func (s *Store) evolveSchema(ctx context.Context, table BQTable, desired bigquer
 	var missing bigquery.Schema
 	for _, field := range desired {
 		if !existing[field.Name] {
-			field.Required = false
-			missing = append(missing, field)
+			// Shallow copy to avoid mutating the caller's desired schema.
+			f := *field
+			f.Required = false
+			missing = append(missing, &f)
 		}
 	}
 

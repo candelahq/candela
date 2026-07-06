@@ -6,9 +6,10 @@ import (
 	"cloud.google.com/go/bigquery"
 )
 
-// BQClient abstracts *bigquery.Client for the read path.
-// This interface covers only the methods needed by read-path queries
-// (QueryTraces, SearchSpans, GetUsageSummary, etc.) and Ping.
+// BQClient abstracts *bigquery.Client for the read and write paths.
+// This interface covers methods needed by read-path queries
+// (QueryTraces, SearchSpans, GetUsageSummary, etc.), Ping, and
+// IngestSpans (streaming insert + MERGE DML).
 //
 // Implementations:
 //   - bqClientWrapper (production, wraps *bigquery.Client)
@@ -24,17 +25,31 @@ type BQDataset interface {
 	Table(string) BQTable
 }
 
-// BQTable abstracts *bigquery.Table (Ping reads table metadata).
+// BQTable abstracts *bigquery.Table.
+// Ping reads table metadata; IngestSpans uses the inserter.
 type BQTable interface {
 	Metadata(ctx context.Context) (*bigquery.TableMetadata, error)
+	Inserter() BQInserter
 }
 
-// BQQuery abstracts *bigquery.Query for parameterized read queries.
+// BQInserter abstracts *bigquery.Inserter for streaming inserts.
+type BQInserter interface {
+	Put(ctx context.Context, src interface{}) error
+}
+
+// BQQuery abstracts *bigquery.Query for parameterized queries.
 // SetParameters wraps the field assignment q.Parameters = [...] as a method
 // call so the interface stays clean.
+// Read is used by read-path queries; Run is used by write-path DML.
 type BQQuery interface {
 	SetParameters([]bigquery.QueryParameter)
 	Read(ctx context.Context) (BQRowIterator, error)
+	Run(ctx context.Context) (BQJob, error)
+}
+
+// BQJob abstracts *bigquery.Job (used by IngestSpans pessimistic MERGE path).
+type BQJob interface {
+	Wait(ctx context.Context) (*bigquery.JobStatus, error)
 }
 
 // BQRowIterator abstracts *bigquery.RowIterator for scanning query results.
@@ -48,7 +63,9 @@ type BQRowIterator interface {
 var _ BQClient = (*bqClientWrapper)(nil)
 var _ BQDataset = (*bqDatasetWrapper)(nil)
 var _ BQTable = (*bqTableWrapper)(nil)
+var _ BQInserter = (*bqInserterWrapper)(nil)
 var _ BQQuery = (*bqQueryWrapper)(nil)
+var _ BQJob = (*bqJobWrapper)(nil)
 var _ BQRowIterator = (*bqRowIteratorWrapper)(nil)
 
 type bqClientWrapper struct{ c *bigquery.Client }
@@ -67,6 +84,16 @@ func (w *bqTableWrapper) Metadata(ctx context.Context) (*bigquery.TableMetadata,
 	return w.t.Metadata(ctx)
 }
 
+func (w *bqTableWrapper) Inserter() BQInserter {
+	return &bqInserterWrapper{w.t.Inserter()}
+}
+
+type bqInserterWrapper struct{ i *bigquery.Inserter }
+
+func (w *bqInserterWrapper) Put(ctx context.Context, src interface{}) error {
+	return w.i.Put(ctx, src)
+}
+
 type bqQueryWrapper struct{ q *bigquery.Query }
 
 func (w *bqQueryWrapper) SetParameters(params []bigquery.QueryParameter) {
@@ -79,6 +106,20 @@ func (w *bqQueryWrapper) Read(ctx context.Context) (BQRowIterator, error) {
 		return nil, err
 	}
 	return &bqRowIteratorWrapper{it}, nil
+}
+
+func (w *bqQueryWrapper) Run(ctx context.Context) (BQJob, error) {
+	job, err := w.q.Run(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return &bqJobWrapper{job}, nil
+}
+
+type bqJobWrapper struct{ j *bigquery.Job }
+
+func (w *bqJobWrapper) Wait(ctx context.Context) (*bigquery.JobStatus, error) {
+	return w.j.Wait(ctx)
 }
 
 type bqRowIteratorWrapper struct{ it *bigquery.RowIterator }

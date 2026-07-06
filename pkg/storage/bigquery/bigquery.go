@@ -378,7 +378,7 @@ func (s *Store) IngestSpans(ctx context.Context, spans []storage.Span) error {
 
 	// 1. Process optimistic spans via streaming insert (fast path)
 	if len(optimisticSpans) > 0 {
-		inserter := s.rawClient.Dataset(s.config.Dataset).Table(s.config.Table).Inserter()
+		inserter := s.client.Dataset(s.config.Dataset).Table(s.config.Table).Inserter()
 		var rows []*bigquery.StructSaver
 		for _, span := range optimisticSpans {
 			row := spanToRow(span)
@@ -416,10 +416,10 @@ func (s *Store) IngestSpans(ctx context.Context, spans []storage.Span) error {
 				)
 		`, quoteTable(s.tableID))
 
-		q := s.rawClient.Query(query)
-		q.Parameters = []bigquery.QueryParameter{
+		q := s.client.Query(query)
+		q.SetParameters([]bigquery.QueryParameter{
 			{Name: "spans", Value: pessimisticRows},
-		}
+		})
 
 		job, err := q.Run(ctx)
 		if err != nil {

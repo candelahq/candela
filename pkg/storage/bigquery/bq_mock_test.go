@@ -80,6 +80,7 @@ type mockBQTable struct {
 	id             string
 	metadataCalled bool
 	metadataErr    error
+	inserter       *mockBQInserter
 }
 
 func (t *mockBQTable) Metadata(_ context.Context) (*bigquery.TableMetadata, error) {
@@ -90,6 +91,30 @@ func (t *mockBQTable) Metadata(_ context.Context) (*bigquery.TableMetadata, erro
 	return &bigquery.TableMetadata{}, nil
 }
 
+func (t *mockBQTable) Inserter() BQInserter {
+	if t.inserter != nil {
+		return t.inserter
+	}
+	return &mockBQInserter{}
+}
+
+// ── Mock Inserter ────────────────────────────────────────────────────
+
+type mockBQInserter struct {
+	putCalled bool
+	putSrc    interface{}
+	putErr    error
+}
+
+func (i *mockBQInserter) Put(_ context.Context, src interface{}) error {
+	i.putCalled = true
+	i.putSrc = src
+	if i.putErr != nil {
+		return i.putErr
+	}
+	return nil
+}
+
 // ── Mock Query ───────────────────────────────────────────────────────
 
 type mockBQQuery struct {
@@ -97,6 +122,8 @@ type mockBQQuery struct {
 	params  []bigquery.QueryParameter
 	iter    *mockBQRowIterator
 	readErr error
+	job     *mockBQJob
+	runErr  error
 }
 
 func (q *mockBQQuery) SetParameters(params []bigquery.QueryParameter) {
@@ -111,6 +138,33 @@ func (q *mockBQQuery) Read(_ context.Context) (BQRowIterator, error) {
 		return &mockBQRowIterator{}, nil
 	}
 	return q.iter, nil
+}
+
+func (q *mockBQQuery) Run(_ context.Context) (BQJob, error) {
+	if q.runErr != nil {
+		return nil, q.runErr
+	}
+	if q.job == nil {
+		return &mockBQJob{}, nil
+	}
+	return q.job, nil
+}
+
+// ── Mock Job ─────────────────────────────────────────────────────────
+
+type mockBQJob struct {
+	waitErr   error
+	statusErr error
+}
+
+func (j *mockBQJob) Wait(_ context.Context) (*bigquery.JobStatus, error) {
+	if j.waitErr != nil {
+		return nil, j.waitErr
+	}
+	if j.statusErr != nil {
+		return &bigquery.JobStatus{Errors: []*bigquery.Error{{Message: j.statusErr.Error()}}}, nil
+	}
+	return &bigquery.JobStatus{}, nil
 }
 
 // ── Mock Row Iterator ────────────────────────────────────────────────

@@ -30,10 +30,9 @@ type Config struct {
 
 // Store implements storage.TraceStore for BigQuery.
 type Store struct {
-	client    BQClient         // interface — used by read-path methods and IngestSpans (insert + MERGE)
-	rawClient *bigquery.Client // concrete — used by schema management (ensureSchema, evolveSchema)
-	config    Config
-	tableID   string // fully-qualified: project.dataset.table
+	client  BQClient // interface — all operations (read, write, schema) go through this
+	config  Config
+	tableID string // fully-qualified: project.dataset.table
 }
 
 var _ storage.SpanWriter = (*Store)(nil)
@@ -60,10 +59,9 @@ func New(ctx context.Context, cfg Config) (*Store, error) {
 	}
 
 	s := &Store{
-		client:    &bqClientWrapper{client},
-		rawClient: client,
-		config:    cfg,
-		tableID:   fmt.Sprintf("%s.%s.%s", cfg.ProjectID, cfg.Dataset, cfg.Table),
+		client:  &bqClientWrapper{client},
+		config:  cfg,
+		tableID: fmt.Sprintf("%s.%s.%s", cfg.ProjectID, cfg.Dataset, cfg.Table),
 	}
 
 	if err := s.ensureSchema(ctx); err != nil {
@@ -76,9 +74,6 @@ func New(ctx context.Context, cfg Config) (*Store, error) {
 
 // NewWithClient creates a Store with a pre-configured BQClient for testing.
 // It skips schema setup and does not require a real BigQuery connection.
-//
-// WARNING: rawClient is nil — write-path methods (IngestSpans, ensureSchema,
-// evolveSchema) will panic if called. This constructor is read-path only.
 func NewWithClient(client BQClient, cfg Config) *Store {
 	if cfg.Table == "" {
 		cfg.Table = "spans"
@@ -255,7 +250,7 @@ func rowToSpan(row spanRow) storage.Span {
 // ensureSchema creates the dataset and table if they don't exist,
 // and evolves the schema by adding any missing columns to existing tables.
 func (s *Store) ensureSchema(ctx context.Context) error {
-	dataset := s.rawClient.Dataset(s.config.Dataset)
+	dataset := s.client.Dataset(s.config.Dataset)
 
 	// Create dataset if not exists.
 	meta := &bigquery.DatasetMetadata{Location: s.config.Location}
@@ -308,7 +303,7 @@ func (s *Store) ensureSchema(ctx context.Context) error {
 // Limitation: this only detects missing top-level columns. Changes to nested
 // STRUCT fields (e.g. adding a field inside the "attributes" REPEATED STRUCT)
 // are not detected and must be handled manually or via a migration tool.
-func (s *Store) evolveSchema(ctx context.Context, table *bigquery.Table, desired bigquery.Schema) error {
+func (s *Store) evolveSchema(ctx context.Context, table BQTable, desired bigquery.Schema) error {
 	md, err := table.Metadata(ctx)
 	if err != nil {
 		return fmt.Errorf("reading table metadata: %w", err)

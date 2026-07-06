@@ -30,8 +30,8 @@ type Config struct {
 
 // Store implements storage.TraceStore for BigQuery.
 type Store struct {
-	client    BQClient         // interface — used by all read-path methods
-	rawClient *bigquery.Client // concrete — used by write-path (IngestSpans, ensureSchema, evolveSchema)
+	client    BQClient         // interface — used by read-path methods and IngestSpans (insert + MERGE)
+	rawClient *bigquery.Client // concrete — used by schema management (ensureSchema, evolveSchema)
 	config    Config
 	tableID   string // fully-qualified: project.dataset.table
 }

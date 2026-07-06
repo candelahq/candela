@@ -151,18 +151,17 @@ func (q *mockBQQuery) Run(_ context.Context) (BQJob, error) {
 }
 
 // ── Mock Job ─────────────────────────────────────────────────────────
+// NOTE: JobStatus.Err() reads a private field that cannot be set externally,
+// so we can only test the waitErr path (job.Wait returning an error).
+// The status.Err() branch in IngestSpans is not exercisable via mock.
 
 type mockBQJob struct {
-	waitErr   error
-	statusErr error
+	waitErr error
 }
 
 func (j *mockBQJob) Wait(_ context.Context) (*bigquery.JobStatus, error) {
 	if j.waitErr != nil {
 		return nil, j.waitErr
-	}
-	if j.statusErr != nil {
-		return &bigquery.JobStatus{Errors: []*bigquery.Error{{Message: j.statusErr.Error()}}}, nil
 	}
 	return &bigquery.JobStatus{}, nil
 }

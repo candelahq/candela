@@ -5,6 +5,7 @@ import (
 	"sync"
 
 	"cloud.google.com/go/bigquery"
+	"google.golang.org/api/iterator"
 )
 
 // ── Mock BQ Client ───────────────────────────────────────────────────
@@ -123,18 +124,8 @@ type mockBQRowIterator struct {
 
 func (it *mockBQRowIterator) Next(dst interface{}) error {
 	if it.nextFunc == nil {
-		return iteratorDone()
+		return iterator.Done
 	}
 	it.callIdx++
 	return it.nextFunc(dst)
 }
-
-// iteratorDone returns the google.golang.org/api/iterator.Done sentinel.
-// Avoids importing the package in the test helpers.
-func iteratorDone() error {
-	return iterDoneErr
-}
-
-// iterDoneErr is set by init() in the test file to avoid an import cycle.
-// See query_test.go for the initialization.
-var iterDoneErr error

@@ -76,6 +76,9 @@ func New(ctx context.Context, cfg Config) (*Store, error) {
 
 // NewWithClient creates a Store with a pre-configured BQClient for testing.
 // It skips schema setup and does not require a real BigQuery connection.
+//
+// WARNING: rawClient is nil — write-path methods (IngestSpans, ensureSchema,
+// evolveSchema) will panic if called. This constructor is read-path only.
 func NewWithClient(client BQClient, cfg Config) *Store {
 	if cfg.Table == "" {
 		cfg.Table = "spans"

@@ -45,6 +45,12 @@ type BQRowIterator interface {
 // ── Production wrappers ──────────────────────────────────────────────
 // These delegate directly to the real BigQuery SDK types.
 
+var _ BQClient = (*bqClientWrapper)(nil)
+var _ BQDataset = (*bqDatasetWrapper)(nil)
+var _ BQTable = (*bqTableWrapper)(nil)
+var _ BQQuery = (*bqQueryWrapper)(nil)
+var _ BQRowIterator = (*bqRowIteratorWrapper)(nil)
+
 type bqClientWrapper struct{ c *bigquery.Client }
 
 func (w *bqClientWrapper) Close() error                { return w.c.Close() }

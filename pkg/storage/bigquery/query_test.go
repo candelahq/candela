@@ -3,6 +3,7 @@ package bigquery
 import (
 	"context"
 	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -12,11 +13,6 @@ import (
 
 	"github.com/candelahq/candela/pkg/storage"
 )
-
-func init() {
-	// Wire up the iterator.Done sentinel for the mock helpers.
-	iterDoneErr = iterator.Done
-}
 
 // testStore creates a Store backed by the given mock client.
 func testStore(client *mockBQClient) *Store {
@@ -71,13 +67,14 @@ func TestQueryTraces_BuildsCorrectSQL(t *testing.T) {
 						return iterator.Done
 					}
 					called = true
-					type traceRow struct {
-						TraceID  string    `bigquery:"trace_id"`
-						Earliest time.Time `bigquery:"earliest"`
+					// Production scans into an anonymous struct; use reflect
+					// to set fields without depending on the exact type.
+					v := reflect.ValueOf(dst).Elem()
+					if f := v.FieldByName("TraceID"); f.IsValid() {
+						f.SetString("trace-001")
 					}
-					if r, ok := dst.(*traceRow); ok {
-						r.TraceID = "trace-001"
-						r.Earliest = time.Now()
+					if f := v.FieldByName("Earliest"); f.IsValid() {
+						f.Set(reflect.ValueOf(time.Now()))
 					}
 					return nil
 				}
@@ -120,6 +117,16 @@ func TestQueryTraces_BuildsCorrectSQL(t *testing.T) {
 	// Verify second query (batch span fetch).
 	assertContains(t, batchSpanQuery.sql, "trace_id IN UNNEST(@traceIDs)")
 	assertParam(t, batchSpanQuery.params, "traceIDs")
+
+	// Verify that trace-001 from the first query is passed to the second.
+	for _, p := range batchSpanQuery.params {
+		if p.Name == "traceIDs" {
+			if ids, ok := p.Value.([]string); !ok || len(ids) != 1 || ids[0] != "trace-001" {
+				t.Errorf("traceIDs parameter = %v, want [trace-001]", p.Value)
+			}
+			break
+		}
+	}
 }
 
 func TestQueryTraces_EmptyResult(t *testing.T) {

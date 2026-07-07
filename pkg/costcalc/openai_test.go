@@ -130,6 +130,10 @@ func TestExtractBaseModel(t *testing.T) {
 		{"exp mid-name no strip 2", "expert-model-v2", ""},
 		{"preview mid-name no strip", "model-previewer-v1", ""},
 		{"preview mid-name partial", "deepseek-previewable", ""},
+
+		// Mid-word tag + valid suffix — must strip at the valid suffix.
+		{"exp mid-word then suffix", "text-expander-flash-exp", "text-expander-flash"},
+		{"preview mid-word then suffix", "model-previewer-v1-preview-05-06", "model-previewer-v1"},
 	}
 
 	for _, tt := range tests {
@@ -167,6 +171,12 @@ func TestHasSuffixTag(t *testing.T) {
 		{"no tag", "gpt-4.1", "-exp", -1},
 		// Tag at very start (idx==0) should return -1.
 		{"tag at start", "-exp-model", "-exp", -1},
+
+		// Tag appears mid-word AND as a valid suffix — must match the suffix.
+		{"exp mid-word then valid suffix", "text-expander-flash-exp", "-exp", 19},
+		{"exp mid-word then valid sub-suffix", "text-expander-flash-exp-0827", "-exp", 19},
+		{"preview mid-word then valid suffix", "model-previewer-v1-preview", "-preview", 18},
+		{"preview mid-word then valid sub-suffix", "model-previewer-v1-preview-05-06", "-preview", 18},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

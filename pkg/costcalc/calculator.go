@@ -687,16 +687,24 @@ func isAllDigits(s string) bool {
 // false positives on model names that contain the tag mid-name (e.g. a
 // hypothetical "text-expander-3b" should NOT match "-exp").
 //
+// Scans right-to-left so that "text-expander-flash-exp" correctly matches the
+// trailing "-exp" rather than the mid-word "-exp" in "expander".
+//
 // Returns the index of the tag in m, or -1 if not found in a valid position.
 func hasSuffixTag(m, tag string) int {
-	idx := strings.Index(m, tag)
-	if idx <= 0 {
-		return -1
-	}
-	rest := m[idx+len(tag):]
-	// Valid positions: tag is at end of string, or followed by "-" (sub-suffix).
-	if rest == "" || rest[0] == '-' {
-		return idx
+	// Scan backwards through all occurrences.
+	for end := len(m); end > 0; {
+		idx := strings.LastIndex(m[:end], tag)
+		if idx <= 0 {
+			return -1
+		}
+		rest := m[idx+len(tag):]
+		// Valid positions: tag is at end of string, or followed by "-" (sub-suffix).
+		if rest == "" || rest[0] == '-' {
+			return idx
+		}
+		// This occurrence is mid-word; keep scanning left.
+		end = idx
 	}
 	return -1
 }

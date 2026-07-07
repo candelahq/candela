@@ -96,10 +96,54 @@ type LocalProvider struct {
 
 // VertexAIConfig holds GCP Vertex AI settings for direct cloud providers.
 type VertexAIConfig struct {
-	Project     string `yaml:"project"`      // GCP project ID (required)
-	Region      string `yaml:"region"`       // GCP region (default: us-central1)
-	CachingMode string `yaml:"caching_mode"` // off|auto|system-only (default: auto)
-	CacheTTL    string `yaml:"cache_ttl"`    // 5m|1h (default: 5m)
+	Project   string `yaml:"project"` // GCP project ID (required)
+	Region    string `yaml:"region"`  // GCP region (default: us-central1)
+	Anthropic struct {
+		CachingMode string `yaml:"caching_mode"` // off|auto|system-only (default: auto)
+		CacheTTL    string `yaml:"cache_ttl"`    // 5m|1h (default: 5m)
+	} `yaml:"anthropic"`
+
+	// Deprecated fields — kept for detection only. Values are NOT wired
+	// to any logic. When populated, configWarnings() returns migration hints.
+	//
+	// WARNING: These fields share YAML key names ("caching_mode", "cache_ttl")
+	// with fields inside the Anthropic sub-struct. This works because Anthropic
+	// is namespaced behind `yaml:"anthropic"`, so they resolve at different YAML
+	// nesting levels. Do NOT use yaml:",inline" on Anthropic — it would create
+	// ambiguous duplicate keys at the same level.
+	DeprecatedCachingMode   string `yaml:"caching_mode"`   // moved to anthropic.caching_mode
+	DeprecatedCacheTTL      string `yaml:"cache_ttl"`      // moved to anthropic.cache_ttl
+	DeprecatedPromptCaching *bool  `yaml:"prompt_caching"` // removed — use anthropic.caching_mode
+}
+
+// configWarnings checks for deprecated config fields and returns
+// human-readable migration warnings. Used for startup logging and
+// the /_local/api/config response (surfaced in Desktop).
+func configWarnings(cfg Config) []string {
+	var warnings []string
+	if cfg.VertexAI.DeprecatedCachingMode != "" {
+		warnings = append(warnings, "vertex_ai.caching_mode has moved to vertex_ai.anthropic.caching_mode — update your config")
+	}
+	if cfg.VertexAI.DeprecatedCacheTTL != "" {
+		warnings = append(warnings, "vertex_ai.cache_ttl has moved to vertex_ai.anthropic.cache_ttl — update your config")
+	}
+	if cfg.VertexAI.DeprecatedPromptCaching != nil {
+		warnings = append(warnings, "vertex_ai.prompt_caching has been removed — use vertex_ai.anthropic.caching_mode instead")
+	}
+	return warnings
+}
+
+// injectCacheHeaders sets Team Mode caching headers on the outbound request.
+// Only injects if the request doesn't already carry the header (allowing
+// per-request SDK overrides to take precedence). Called from the remoteProxy
+// Director closure.
+func injectCacheHeaders(req *http.Request, cfg VertexAIConfig) {
+	if cfg.Anthropic.CacheTTL != "" && req.Header.Get(proxy.CacheTTLHeader) == "" {
+		req.Header.Set(proxy.CacheTTLHeader, cfg.Anthropic.CacheTTL)
+	}
+	if cfg.Anthropic.CachingMode != "" && req.Header.Get(proxy.CachingHeader) == "" {
+		req.Header.Set(proxy.CachingHeader, cfg.Anthropic.CachingMode)
+	}
 }
 
 // AWSConfig holds AWS settings for Bedrock cloud providers.
@@ -649,6 +693,13 @@ func runForeground() {
 		cfg.Port = 8181
 	}
 
+	// Check for deprecated config fields and warn the user.
+	if warnings := configWarnings(*cfg); len(warnings) > 0 {
+		for _, w := range warnings {
+			slog.Warn("⚠️  DEPRECATED CONFIG: " + w)
+		}
+	}
+
 	// ── Validate & mode detection ──
 	ctx := context.Background()
 	soloMode := cfg.Remote == ""
@@ -805,6 +856,11 @@ func runForeground() {
 				req.Header.Del("Upgrade")
 				req.Header.Del("Connection")
 				req.Header.Del("HTTP2-Settings")
+
+				// Inject developer's Anthropic cache preferences for Team Mode.
+				// These headers are read by the server's proxy and stripped
+				// before forwarding to upstream LLM providers.
+				injectCacheHeaders(req, cfg.VertexAI)
 			},
 			ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
 				slog.Error("proxy error", "path", r.URL.Path, "error", err)
@@ -1060,6 +1116,7 @@ func runForeground() {
 	// Wire the cloud proxy into the config API for runtime caching control.
 	configAPI.cloudProxy = cloudProxy
 	configAPI.calc = cloudCalc
+	configAPI.configWarnings = configWarnings(*cfg)
 	// Create a calc for pricing-based model filtering.
 	// Uses the same defaults as the cloud proxy's embedded calc.
 	if len(cloudModels) > 0 {
@@ -1346,11 +1403,11 @@ func buildCloudProxy(cfg Config, submitter *processor.SpanProcessor) (*proxy.Pro
 			p.UpstreamURL = proxy.VertexAIUpstreamURL(region)
 			p.TokenSource = tokenSource
 			ft := &proxy.AnthropicFormatTranslator{}
-			if cfg.VertexAI.CachingMode != "" {
-				ft.SetCachingMode(proxy.ParseCachingMode(cfg.VertexAI.CachingMode))
+			if cfg.VertexAI.Anthropic.CachingMode != "" {
+				ft.SetCachingMode(proxy.ParseCachingMode(cfg.VertexAI.Anthropic.CachingMode))
 			}
-			if cfg.VertexAI.CacheTTL != "" {
-				ft.SetCacheTTL(proxy.ParseCacheTTL(cfg.VertexAI.CacheTTL))
+			if cfg.VertexAI.Anthropic.CacheTTL != "" {
+				ft.SetCacheTTL(proxy.ParseCacheTTL(cfg.VertexAI.Anthropic.CacheTTL))
 			}
 			p.FormatTranslator = ft
 			p.PathRewriter = &proxy.VertexAIPathRewriter{

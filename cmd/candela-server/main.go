@@ -90,11 +90,18 @@ type Config struct {
 		DailyLimits    []proxy.SpendLimitConfig `yaml:"daily_limits"`         // Per-model daily spend limits
 		Policy         *proxy.PolicyConfig      `yaml:"policy"`               // Model allowlist policy (#207)
 		VertexAI       struct {
-			ProjectID     string `yaml:"project_id"`     // GCP project for Vertex AI
-			Region        string `yaml:"region"`         // default region (e.g. "us-central1")
-			CachingMode   string `yaml:"caching_mode"`   // off|auto|system-only (default: auto)
-			PromptCaching bool   `yaml:"prompt_caching"` // enable prompt caching (maps to CachingMode: auto)
-			CacheTTL      string `yaml:"cache_ttl"`      // Vertex AI cache TTL ("5m" or "1h")
+			ProjectID string `yaml:"project_id"` // GCP project for Vertex AI
+			Region    string `yaml:"region"`     // default region (e.g. "us-central1")
+			Anthropic struct {
+				CachingMode string `yaml:"caching_mode"` // off|auto|system-only (default: auto)
+				CacheTTL    string `yaml:"cache_ttl"`    // 5m|1h (default: 5m)
+			} `yaml:"anthropic"`
+			// Deprecated fields — kept for detection only, not wired to logic.
+			// WARNING: Same YAML key names as Anthropic sub-struct fields.
+			// Safe because Anthropic is behind yaml:"anthropic". Do NOT inline it.
+			DeprecatedCachingMode   string `yaml:"caching_mode"`   // moved to anthropic.caching_mode
+			DeprecatedCacheTTL      string `yaml:"cache_ttl"`      // moved to anthropic.cache_ttl
+			DeprecatedPromptCaching *bool  `yaml:"prompt_caching"` // removed
 			// ProviderOverrides allows per-provider region and endpoint overrides.
 			// MaaS models (Mistral, DeepSeek, Qwen) have limited regional availability;
 			// this lets each provider target the correct region independently.
@@ -217,6 +224,18 @@ func main() {
 	if err != nil {
 		slog.Error("failed to load config", "error", err)
 		os.Exit(1)
+	}
+	// Check for deprecated config fields and warn the operator.
+	if v := cfg.Proxy.VertexAI; v.DeprecatedCachingMode != "" || v.DeprecatedCacheTTL != "" || v.DeprecatedPromptCaching != nil {
+		if v.DeprecatedCachingMode != "" {
+			slog.Warn("⚠️  DEPRECATED CONFIG: proxy.vertex_ai.caching_mode has moved to proxy.vertex_ai.anthropic.caching_mode — update your config")
+		}
+		if v.DeprecatedCacheTTL != "" {
+			slog.Warn("⚠️  DEPRECATED CONFIG: proxy.vertex_ai.cache_ttl has moved to proxy.vertex_ai.anthropic.cache_ttl — update your config")
+		}
+		if v.DeprecatedPromptCaching != nil {
+			slog.Warn("⚠️  DEPRECATED CONFIG: proxy.vertex_ai.prompt_caching has been removed — use proxy.vertex_ai.anthropic.caching_mode instead")
+		}
 	}
 
 	// Initialize storage backend.
@@ -567,15 +586,11 @@ func main() {
 					// anthropic-vertex is a native Messages API passthrough (for Claude Code).
 					if p.Name == "anthropic" {
 						ft := &proxy.AnthropicFormatTranslator{}
-						if cfg.Proxy.VertexAI.CachingMode != "" {
-							ft.SetCachingMode(proxy.ParseCachingMode(cfg.Proxy.VertexAI.CachingMode))
+						if cfg.Proxy.VertexAI.Anthropic.CachingMode != "" {
+							ft.SetCachingMode(proxy.ParseCachingMode(cfg.Proxy.VertexAI.Anthropic.CachingMode))
 						}
-						// prompt_caching: true is a shorthand for caching_mode: auto
-						if cfg.Proxy.VertexAI.CachingMode == "" && cfg.Proxy.VertexAI.PromptCaching {
-							ft.SetCachingMode(proxy.CachingAuto)
-						}
-						if cfg.Proxy.VertexAI.CacheTTL != "" {
-							ft.SetCacheTTL(proxy.ParseCacheTTL(cfg.Proxy.VertexAI.CacheTTL))
+						if cfg.Proxy.VertexAI.Anthropic.CacheTTL != "" {
+							ft.SetCacheTTL(proxy.ParseCacheTTL(cfg.Proxy.VertexAI.Anthropic.CacheTTL))
 						}
 						allProviders[i].FormatTranslator = ft
 					}
@@ -585,7 +600,7 @@ func main() {
 						"region", region,
 						"adc", tokenSource != nil,
 						"format_translation", p.Name == "anthropic",
-						"caching_mode", cfg.Proxy.VertexAI.CachingMode)
+						"caching_mode", cfg.Proxy.VertexAI.Anthropic.CachingMode)
 				}
 			}
 		}

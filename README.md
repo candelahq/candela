@@ -394,8 +394,9 @@ proxy:
   vertex_ai:
     project_id: "my-gcp-project"
     region: "us-east5"
-    caching_mode: "auto"      # off | auto | system-only
-    cache_ttl: 5m             # 5m (default) or 1h
+    anthropic:
+      caching_mode: "auto"    # off | auto | system-only
+      cache_ttl: 5m           # 5m (default) or 1h
   # policy:
   #   allowed_models:
   #     - provider: openai
@@ -533,9 +534,9 @@ providers:
 
 vertex_ai:
   project: my-gcp-project
-  prompt_caching: true    # Inject cache_control for Anthropic (~10x cost reduction)
-  cache_ttl: 5m           # 5m (default, 1.25x write cost) or 1h (2x write, ideal for long coding sessions)
-  caching_mode: auto      # off | auto | system-only
+  anthropic:
+    caching_mode: auto    # off | auto | system-only — injects cache_control (~10x cost reduction)
+    cache_ttl: 5m         # 5m (default, 1.25x write cost) or 1h (2x write, ideal for long coding sessions)
 ```
 
 - Local + cloud models merged into `/v1/models`

@@ -28,8 +28,9 @@ proxy:
   vertex_ai:
     project_id: "${CANDELA_VERTEX_PROJECT:-}"
     region: "${CANDELA_VERTEX_REGION:-us-east5}"
-    caching_mode: "${CANDELA_CACHING_MODE:-auto}"
-    cache_ttl: "${CANDELA_CACHE_TTL:-}"
+    anthropic:
+      caching_mode: "${CANDELA_CACHING_MODE:-auto}"
+      cache_ttl: "${CANDELA_CACHE_TTL:-}"
     provider_overrides:
       mistral:
         region: "${CANDELA_MISTRAL_REGION:-us-central1}"

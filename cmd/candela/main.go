@@ -102,6 +102,29 @@ type VertexAIConfig struct {
 		CachingMode string `yaml:"caching_mode"` // off|auto|system-only (default: auto)
 		CacheTTL    string `yaml:"cache_ttl"`    // 5m|1h (default: 5m)
 	} `yaml:"anthropic"`
+
+	// Deprecated fields — kept for detection only. Values are NOT wired
+	// to any logic. When populated, configWarnings() returns migration hints.
+	DeprecatedCachingMode   string `yaml:"caching_mode"`   // moved to anthropic.caching_mode
+	DeprecatedCacheTTL      string `yaml:"cache_ttl"`      // moved to anthropic.cache_ttl
+	DeprecatedPromptCaching *bool  `yaml:"prompt_caching"` // removed — use anthropic.caching_mode
+}
+
+// configWarnings checks for deprecated config fields and returns
+// human-readable migration warnings. Used for startup logging and
+// the /_local/api/config response (surfaced in Desktop).
+func configWarnings(cfg Config) []string {
+	var warnings []string
+	if cfg.VertexAI.DeprecatedCachingMode != "" {
+		warnings = append(warnings, "vertex_ai.caching_mode has moved to vertex_ai.anthropic.caching_mode — update your config")
+	}
+	if cfg.VertexAI.DeprecatedCacheTTL != "" {
+		warnings = append(warnings, "vertex_ai.cache_ttl has moved to vertex_ai.anthropic.cache_ttl — update your config")
+	}
+	if cfg.VertexAI.DeprecatedPromptCaching != nil {
+		warnings = append(warnings, "vertex_ai.prompt_caching has been removed — use vertex_ai.anthropic.caching_mode instead")
+	}
+	return warnings
 }
 
 // AWSConfig holds AWS settings for Bedrock cloud providers.
@@ -651,6 +674,13 @@ func runForeground() {
 		cfg.Port = 8181
 	}
 
+	// Check for deprecated config fields and warn the user.
+	if warnings := configWarnings(*cfg); len(warnings) > 0 {
+		for _, w := range warnings {
+			slog.Warn("⚠️  DEPRECATED CONFIG: " + w)
+		}
+	}
+
 	// ── Validate & mode detection ──
 	ctx := context.Background()
 	soloMode := cfg.Remote == ""
@@ -1074,6 +1104,7 @@ func runForeground() {
 	// Wire the cloud proxy into the config API for runtime caching control.
 	configAPI.cloudProxy = cloudProxy
 	configAPI.calc = cloudCalc
+	configAPI.configWarnings = configWarnings(*cfg)
 	// Create a calc for pricing-based model filtering.
 	// Uses the same defaults as the cloud proxy's embedded calc.
 	if len(cloudModels) > 0 {

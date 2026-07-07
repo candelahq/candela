@@ -96,10 +96,12 @@ type LocalProvider struct {
 
 // VertexAIConfig holds GCP Vertex AI settings for direct cloud providers.
 type VertexAIConfig struct {
-	Project     string `yaml:"project"`      // GCP project ID (required)
-	Region      string `yaml:"region"`       // GCP region (default: us-central1)
-	CachingMode string `yaml:"caching_mode"` // off|auto|system-only (default: auto)
-	CacheTTL    string `yaml:"cache_ttl"`    // 5m|1h (default: 5m)
+	Project   string `yaml:"project"` // GCP project ID (required)
+	Region    string `yaml:"region"`  // GCP region (default: us-central1)
+	Anthropic struct {
+		CachingMode string `yaml:"caching_mode"` // off|auto|system-only (default: auto)
+		CacheTTL    string `yaml:"cache_ttl"`    // 5m|1h (default: 5m)
+	} `yaml:"anthropic"`
 }
 
 // AWSConfig holds AWS settings for Bedrock cloud providers.
@@ -805,6 +807,18 @@ func runForeground() {
 				req.Header.Del("Upgrade")
 				req.Header.Del("Connection")
 				req.Header.Del("HTTP2-Settings")
+
+				// Inject developer's Anthropic cache preferences for Team Mode.
+				// These headers are read by the server's proxy and stripped
+				// before forwarding to upstream LLM providers.
+				// Only inject if the request doesn't already carry them
+				// (allowing per-request SDK overrides to take precedence).
+				if cfg.VertexAI.Anthropic.CacheTTL != "" && req.Header.Get("X-Candela-Cache-TTL") == "" {
+					req.Header.Set("X-Candela-Cache-TTL", cfg.VertexAI.Anthropic.CacheTTL)
+				}
+				if cfg.VertexAI.Anthropic.CachingMode != "" && req.Header.Get("X-Candela-Caching") == "" {
+					req.Header.Set("X-Candela-Caching", cfg.VertexAI.Anthropic.CachingMode)
+				}
 			},
 			ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
 				slog.Error("proxy error", "path", r.URL.Path, "error", err)
@@ -1346,11 +1360,11 @@ func buildCloudProxy(cfg Config, submitter *processor.SpanProcessor) (*proxy.Pro
 			p.UpstreamURL = proxy.VertexAIUpstreamURL(region)
 			p.TokenSource = tokenSource
 			ft := &proxy.AnthropicFormatTranslator{}
-			if cfg.VertexAI.CachingMode != "" {
-				ft.SetCachingMode(proxy.ParseCachingMode(cfg.VertexAI.CachingMode))
+			if cfg.VertexAI.Anthropic.CachingMode != "" {
+				ft.SetCachingMode(proxy.ParseCachingMode(cfg.VertexAI.Anthropic.CachingMode))
 			}
-			if cfg.VertexAI.CacheTTL != "" {
-				ft.SetCacheTTL(proxy.ParseCacheTTL(cfg.VertexAI.CacheTTL))
+			if cfg.VertexAI.Anthropic.CacheTTL != "" {
+				ft.SetCacheTTL(proxy.ParseCacheTTL(cfg.VertexAI.Anthropic.CacheTTL))
 			}
 			p.FormatTranslator = ft
 			p.PathRewriter = &proxy.VertexAIPathRewriter{

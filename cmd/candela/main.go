@@ -843,11 +843,11 @@ func runForeground() {
 				// before forwarding to upstream LLM providers.
 				// Only inject if the request doesn't already carry them
 				// (allowing per-request SDK overrides to take precedence).
-				if cfg.VertexAI.Anthropic.CacheTTL != "" && req.Header.Get("X-Candela-Cache-TTL") == "" {
-					req.Header.Set("X-Candela-Cache-TTL", cfg.VertexAI.Anthropic.CacheTTL)
+				if cfg.VertexAI.Anthropic.CacheTTL != "" && req.Header.Get(proxy.CacheTTLHeader) == "" {
+					req.Header.Set(proxy.CacheTTLHeader, cfg.VertexAI.Anthropic.CacheTTL)
 				}
-				if cfg.VertexAI.Anthropic.CachingMode != "" && req.Header.Get("X-Candela-Caching") == "" {
-					req.Header.Set("X-Candela-Caching", cfg.VertexAI.Anthropic.CachingMode)
+				if cfg.VertexAI.Anthropic.CachingMode != "" && req.Header.Get(proxy.CachingHeader) == "" {
+					req.Header.Set(proxy.CachingHeader, cfg.VertexAI.Anthropic.CachingMode)
 				}
 			},
 			ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {

@@ -234,7 +234,8 @@ func (a *localAPI) handleSetCaching(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, cachingConfigResponse{
-		Caching: a.buildCachingConfig(),
+		Caching:  a.buildCachingConfig(),
+		Warnings: a.configWarnings,
 	})
 }
 

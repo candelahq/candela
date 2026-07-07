@@ -586,6 +586,23 @@ func (c *Calculator) resolve(provider, model string) (ModelPricing, bool) {
 		if p, ok := c.fallback[base]; ok {
 			return p, true
 		}
+
+		// 5b. Normalize the extracted base (hyphen→dot) for Vertex AI
+		// dated IDs. Example chain:
+		//   "claude-haiku-4-5-20251001" → strip date → "claude-haiku-4-5"
+		//   → normalize → "claude-haiku-4.5" → matches pricing.yaml.
+		if normBase := normalizeModelID(base); normBase != base {
+			normKey := c.key(provider, normBase)
+			if p, ok := c.overrides[normKey]; ok {
+				return p, true
+			}
+			if p, ok := c.defaults[normKey]; ok {
+				return p, true
+			}
+			if p, ok := c.fallback[strings.ToLower(normBase)]; ok {
+				return p, true
+			}
+		}
 	}
 
 	return ModelPricing{}, false

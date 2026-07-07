@@ -124,6 +124,12 @@ func TestExtractBaseModel(t *testing.T) {
 		{"exact model no suffix 2", "claude-sonnet-4", ""},
 		{"exact model no suffix 3", "gemini-2.5-pro", ""},
 		{"empty string", "", ""},
+
+		// False-positive guards: -exp and -preview mid-name must NOT match.
+		{"exp mid-name no strip", "text-expander-3b", ""},
+		{"exp mid-name no strip 2", "expert-model-v2", ""},
+		{"preview mid-name no strip", "model-previewer-v1", ""},
+		{"preview mid-name partial", "deepseek-previewable", ""},
 	}
 
 	for _, tt := range tests {
@@ -131,6 +137,42 @@ func TestExtractBaseModel(t *testing.T) {
 			got := extractBaseModel(tt.input)
 			if got != tt.want {
 				t.Errorf("extractBaseModel(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+// ── hasSuffixTag ─────────────────────────────────────────────────────────────
+
+func TestHasSuffixTag(t *testing.T) {
+	tests := []struct {
+		name string
+		m    string
+		tag  string
+		want int
+	}{
+		// Valid suffix positions.
+		{"exp at end", "gemini-2.0-flash-exp", "-exp", 16},
+		{"exp before sub-suffix", "gemini-2.0-flash-exp-0827", "-exp", 16},
+		{"preview at end", "gemini-2.5-pro-preview", "-preview", 14},
+		{"preview before sub-suffix", "gemini-2.5-pro-preview-05-06", "-preview", 14},
+
+		// Invalid: tag appears mid-word (not at boundary).
+		{"exp mid-word expander", "text-expander-3b", "-exp", -1},
+		{"exp mid-word expert", "expert-model-v2", "-exp", -1},
+		{"preview mid-word previewer", "model-previewer-v1", "-preview", -1},
+		{"preview mid-word previewable", "deepseek-previewable", "-preview", -1},
+
+		// Tag not present at all.
+		{"no tag", "gpt-4.1", "-exp", -1},
+		// Tag at very start (idx==0) should return -1.
+		{"tag at start", "-exp-model", "-exp", -1},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := hasSuffixTag(tt.m, tt.tag)
+			if got != tt.want {
+				t.Errorf("hasSuffixTag(%q, %q) = %d, want %d", tt.m, tt.tag, got, tt.want)
 			}
 		})
 	}

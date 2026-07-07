@@ -746,3 +746,33 @@ func TestNormalizeModelID(t *testing.T) {
 		}
 	}
 }
+
+// TestDatedHyphenatedModelPricing verifies that Vertex AI model IDs with
+// both a date suffix and a hyphenated version (e.g. "claude-haiku-4-5-20251001")
+// correctly resolve pricing. This requires extractBaseModel (strip date) followed
+// by normalizeModelID (hyphen→dot) — the step 5b chain.
+func TestDatedHyphenatedModelPricing(t *testing.T) {
+	c := New()
+	models := []struct {
+		model      string
+		wantPriced bool
+	}{
+		{"claude-haiku-4-5-20251001", true},
+		{"claude-opus-4-7-20260301", true},
+		{"claude-sonnet-4-6-20250514", true},
+		{"claude-opus-4-8-20260601", true},
+	}
+	for _, tt := range models {
+		t.Run(tt.model, func(t *testing.T) {
+			if got := c.HasPricing("anthropic", tt.model); got != tt.wantPriced {
+				t.Errorf("HasPricing(anthropic, %q) = %v, want %v", tt.model, got, tt.wantPriced)
+			}
+			if tt.wantPriced {
+				cost := c.Calculate("anthropic", tt.model, 1_000_000, 0)
+				if cost == 0 {
+					t.Errorf("Calculate(anthropic, %q, 1M, 0) = $0.00 — pricing not applied", tt.model)
+				}
+			}
+		})
+	}
+}

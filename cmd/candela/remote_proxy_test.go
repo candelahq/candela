@@ -2,22 +2,11 @@ package main
 
 import (
 	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/candelahq/candela/pkg/proxy"
 )
-
-// injectCacheHeaders mirrors the logic from the remoteProxy Director.
-// Extracted here for testability — the Director closure in runForeground()
-// is not directly testable without a full server setup.
-func injectCacheHeaders(req *http.Request, cfg VertexAIConfig) {
-	if cfg.Anthropic.CacheTTL != "" && req.Header.Get(proxy.CacheTTLHeader) == "" {
-		req.Header.Set(proxy.CacheTTLHeader, cfg.Anthropic.CacheTTL)
-	}
-	if cfg.Anthropic.CachingMode != "" && req.Header.Get(proxy.CachingHeader) == "" {
-		req.Header.Set(proxy.CachingHeader, cfg.Anthropic.CachingMode)
-	}
-}
 
 func TestInjectCacheHeaders(t *testing.T) {
 	tests := []struct {
@@ -81,7 +70,7 @@ func TestInjectCacheHeaders(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			req, _ := http.NewRequest(http.MethodPost, "http://example.com/v1/messages", nil)
+			req := httptest.NewRequest(http.MethodPost, "http://example.com/v1/messages", nil)
 			for k, v := range tt.existingHeader {
 				req.Header.Set(k, v)
 			}

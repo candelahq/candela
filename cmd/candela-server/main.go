@@ -97,6 +97,8 @@ type Config struct {
 				CacheTTL    string `yaml:"cache_ttl"`    // 5m|1h (default: 5m)
 			} `yaml:"anthropic"`
 			// Deprecated fields — kept for detection only, not wired to logic.
+			// WARNING: Same YAML key names as Anthropic sub-struct fields.
+			// Safe because Anthropic is behind yaml:"anthropic". Do NOT inline it.
 			DeprecatedCachingMode   string `yaml:"caching_mode"`   // moved to anthropic.caching_mode
 			DeprecatedCacheTTL      string `yaml:"cache_ttl"`      // moved to anthropic.cache_ttl
 			DeprecatedPromptCaching *bool  `yaml:"prompt_caching"` // removed

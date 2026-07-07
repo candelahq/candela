@@ -105,6 +105,12 @@ type VertexAIConfig struct {
 
 	// Deprecated fields — kept for detection only. Values are NOT wired
 	// to any logic. When populated, configWarnings() returns migration hints.
+	//
+	// WARNING: These fields share YAML key names ("caching_mode", "cache_ttl")
+	// with fields inside the Anthropic sub-struct. This works because Anthropic
+	// is namespaced behind `yaml:"anthropic"`, so they resolve at different YAML
+	// nesting levels. Do NOT use yaml:",inline" on Anthropic — it would create
+	// ambiguous duplicate keys at the same level.
 	DeprecatedCachingMode   string `yaml:"caching_mode"`   // moved to anthropic.caching_mode
 	DeprecatedCacheTTL      string `yaml:"cache_ttl"`      // moved to anthropic.cache_ttl
 	DeprecatedPromptCaching *bool  `yaml:"prompt_caching"` // removed — use anthropic.caching_mode
@@ -125,6 +131,19 @@ func configWarnings(cfg Config) []string {
 		warnings = append(warnings, "vertex_ai.prompt_caching has been removed — use vertex_ai.anthropic.caching_mode instead")
 	}
 	return warnings
+}
+
+// injectCacheHeaders sets Team Mode caching headers on the outbound request.
+// Only injects if the request doesn't already carry the header (allowing
+// per-request SDK overrides to take precedence). Called from the remoteProxy
+// Director closure.
+func injectCacheHeaders(req *http.Request, cfg VertexAIConfig) {
+	if cfg.Anthropic.CacheTTL != "" && req.Header.Get(proxy.CacheTTLHeader) == "" {
+		req.Header.Set(proxy.CacheTTLHeader, cfg.Anthropic.CacheTTL)
+	}
+	if cfg.Anthropic.CachingMode != "" && req.Header.Get(proxy.CachingHeader) == "" {
+		req.Header.Set(proxy.CachingHeader, cfg.Anthropic.CachingMode)
+	}
 }
 
 // AWSConfig holds AWS settings for Bedrock cloud providers.
@@ -841,14 +860,7 @@ func runForeground() {
 				// Inject developer's Anthropic cache preferences for Team Mode.
 				// These headers are read by the server's proxy and stripped
 				// before forwarding to upstream LLM providers.
-				// Only inject if the request doesn't already carry them
-				// (allowing per-request SDK overrides to take precedence).
-				if cfg.VertexAI.Anthropic.CacheTTL != "" && req.Header.Get(proxy.CacheTTLHeader) == "" {
-					req.Header.Set(proxy.CacheTTLHeader, cfg.VertexAI.Anthropic.CacheTTL)
-				}
-				if cfg.VertexAI.Anthropic.CachingMode != "" && req.Header.Get(proxy.CachingHeader) == "" {
-					req.Header.Set(proxy.CachingHeader, cfg.VertexAI.Anthropic.CachingMode)
-				}
+				injectCacheHeaders(req, cfg.VertexAI)
 			},
 			ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
 				slog.Error("proxy error", "path", r.URL.Path, "error", err)

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"strings"
 	"testing"
 
 	"gopkg.in/yaml.v3"
@@ -95,7 +96,7 @@ vertex_ai:
 			for _, substr := range tt.wantModes {
 				found := false
 				for _, w := range warnings {
-					if contains(w, substr) {
+					if strings.Contains(w, substr) {
 						found = true
 						break
 					}
@@ -134,17 +135,4 @@ vertex_ai:
 	if len(warnings) != 0 {
 		t.Errorf("expected 0 warnings for new config, got %d: %v", len(warnings), warnings)
 	}
-}
-
-func contains(s, substr string) bool {
-	return len(s) >= len(substr) && (s == substr || len(s) > 0 && containsStr(s, substr))
-}
-
-func containsStr(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
-	}
-	return false
 }

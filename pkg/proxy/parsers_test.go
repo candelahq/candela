@@ -272,16 +272,21 @@ func TestGoogleParser_ParseStreamingResponse_SingleChunk(t *testing.T) {
 
 func TestGetParser_AllProviders(t *testing.T) {
 	providers := map[string]string{
-		"openai":           "*proxy.openaiParser",
-		"gemini-oai":       "*proxy.openaiParser",
-		"mistral":          "*proxy.openaiParser",
-		"deepseek":         "*proxy.openaiParser",
-		"qwen":             "*proxy.openaiParser",
-		"anthropic":        "*proxy.anthropicParser",
-		"anthropic-direct": "*proxy.anthropicParser",
-		"anthropic-vertex": "*proxy.anthropicParser",
-		"google":           "*proxy.googleParser",
-		"gemini-vertex":    "*proxy.googleParser",
+		"openai":            "*proxy.openaiParser",
+		"gemini-oai":        "*proxy.openaiParser",
+		"mistral":           "*proxy.openaiParser",
+		"deepseek":          "*proxy.openaiParser",
+		"deepseek-v3":       "*proxy.openaiParser",
+		"qwen":              "*proxy.openaiParser",
+		"zai":               "*proxy.openaiParser",
+		"meta":              "*proxy.openaiParser",
+		"xai":               "*proxy.openaiParser",
+		"anthropic":         "*proxy.anthropicParser",
+		"anthropic-direct":  "*proxy.anthropicParser",
+		"anthropic-vertex":  "*proxy.anthropicParser",
+		"anthropic-bedrock": "*proxy.anthropicParser",
+		"google":            "*proxy.googleParser",
+		"gemini-vertex":     "*proxy.googleParser",
 	}
 
 	for name, wantType := range providers {
@@ -819,7 +824,7 @@ func TestExtractCacheTokens_MaaSProviders(t *testing.T) {
 		}
 	}`)
 
-	for _, provider := range []string{"mistral", "deepseek", "qwen"} {
+	for _, provider := range []string{"mistral", "deepseek", "qwen", "zai", "meta", "xai"} {
 		ct := extractCacheTokens(provider, body)
 		if ct.CacheReadTokens != 3000 {
 			t.Errorf("%s: CacheReadTokens = %d, want 3000", provider, ct.CacheReadTokens)
@@ -837,7 +842,7 @@ data: {"choices":[],"usage":{"prompt_tokens":2000,"completion_tokens":100,"promp
 data: [DONE]
 `)
 
-	for _, provider := range []string{"mistral", "deepseek", "qwen"} {
+	for _, provider := range []string{"mistral", "deepseek", "qwen", "zai", "meta", "xai"} {
 		ct := extractStreamingCacheTokens(provider, stream)
 		if ct.CacheReadTokens != 1500 {
 			t.Errorf("%s: streaming CacheReadTokens = %d, want 1500", provider, ct.CacheReadTokens)
@@ -851,7 +856,7 @@ data: [DONE]
 func TestInjectStreamUsageOption_MaaSProviders(t *testing.T) {
 	body := []byte(`{"model":"some-model","messages":[{"role":"user","content":"hi"}],"stream":true}`)
 
-	for _, provider := range []string{"mistral", "deepseek", "qwen"} {
+	for _, provider := range []string{"mistral", "deepseek", "qwen", "zai", "meta", "xai"} {
 		result := injectStreamUsageOption(provider, body)
 
 		var parsed map[string]interface{}

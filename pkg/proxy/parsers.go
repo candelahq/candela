@@ -105,6 +105,8 @@ var parserRegistry = map[string]ProviderParser{
 	"deepseek-v3":       &openaiParser{}, // DeepSeek V3.x via Vertex AI OpenAI-compat (global).
 	"qwen":              &openaiParser{}, // Qwen via Vertex AI OpenAI-compat endpoint.
 	"zai":               &openaiParser{}, // Z.AI GLM via Vertex AI OpenAI-compat endpoint.
+	"meta":              &openaiParser{}, // Meta Llama 4 via Vertex AI OpenAI-compat endpoint.
+	"xai":               &openaiParser{}, // xAI Grok via Vertex AI OpenAI-compat endpoint.
 	"anthropic":         &anthropicParser{},
 	"anthropic-direct":  &anthropicParser{}, // Same wire format, just no Vertex AI translation.
 	"anthropic-vertex":  &anthropicParser{}, // Native Anthropic format routed via Vertex AI.
@@ -483,7 +485,7 @@ func extractModelFromResponse(provider string, body []byte) string {
 		if m, ok := resp["model"].(string); ok && m != "" {
 			return m
 		}
-	case "mistral", "deepseek", "deepseek-v3", "qwen", "zai":
+	case "mistral", "deepseek", "deepseek-v3", "qwen", "zai", "meta", "xai":
 		if m, ok := resp["model"].(string); ok && m != "" {
 			return stripPublisherPrefix(m)
 		}
@@ -520,7 +522,7 @@ func extractModelFromStreamingResponse(provider string, data []byte) string {
 
 	default:
 		// OpenAI/Anthropic SSE: scan for "model" in any data line.
-		isMaaS := provider == "mistral" || provider == "deepseek" || provider == "deepseek-v3" || provider == "qwen" || provider == "zai"
+		isMaaS := provider == "mistral" || provider == "deepseek" || provider == "deepseek-v3" || provider == "qwen" || provider == "zai" || provider == "meta" || provider == "xai"
 		for _, line := range strings.Split(string(data), "\n") {
 			line = strings.TrimSpace(line)
 			if !strings.HasPrefix(line, "data: ") {
@@ -571,7 +573,7 @@ func extractCacheTokens(provider string, body []byte) CacheTokens {
 			}
 		}
 
-	case "openai", "gemini-oai", "mistral", "deepseek", "deepseek-v3", "qwen", "zai":
+	case "openai", "gemini-oai", "mistral", "deepseek", "deepseek-v3", "qwen", "zai", "meta", "xai":
 		// OpenAI reports cached tokens inside usage.prompt_tokens_details.cached_tokens
 		if usage, ok := resp["usage"].(map[string]interface{}); ok {
 			if details, ok := usage["prompt_tokens_details"].(map[string]interface{}); ok {
@@ -599,7 +601,7 @@ func extractStreamingCacheTokens(provider string, data []byte) CacheTokens {
 	case "anthropic", "anthropic-direct", "anthropic-vertex", "anthropic-bedrock":
 		return extractAnthropicStreamingCache(data)
 
-	case "openai", "gemini-oai", "mistral", "deepseek", "deepseek-v3", "qwen", "zai":
+	case "openai", "gemini-oai", "mistral", "deepseek", "deepseek-v3", "qwen", "zai", "meta", "xai":
 		return extractOpenAIStreamingCache(data)
 
 	case "google", "gemini-vertex":
@@ -708,7 +710,7 @@ func extractGoogleStreamingCache(data []byte) CacheTokens {
 // This is a no-op if stream_options is already set or if the body is not valid JSON.
 func injectStreamUsageOption(provider string, body []byte) []byte {
 	switch provider {
-	case "openai", "gemini-oai", "mistral", "deepseek", "deepseek-v3", "qwen", "zai":
+	case "openai", "gemini-oai", "mistral", "deepseek", "deepseek-v3", "qwen", "zai", "meta", "xai":
 		// Only inject for OpenAI-compatible providers.
 	default:
 		return body

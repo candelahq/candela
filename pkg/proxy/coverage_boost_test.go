@@ -328,7 +328,7 @@ func TestMaaSProviders_InDefaultProviders(t *testing.T) {
 		names[p.Name] = true
 	}
 
-	want := []string{"deepseek", "deepseek-v3", "qwen", "zai"}
+	want := []string{"deepseek", "deepseek-v3", "qwen", "zai", "meta", "xai"}
 	for _, name := range want {
 		if !names[name] {
 			t.Errorf("MaaS provider %q not found in DefaultProviders()", name)
@@ -339,7 +339,7 @@ func TestMaaSProviders_InDefaultProviders(t *testing.T) {
 // TestMaaSProviders_ParserRegistry verifies all MaaS providers have
 // parsers registered and they return openaiParser (not fallback).
 func TestMaaSProviders_ParserRegistry(t *testing.T) {
-	maas := []string{"deepseek", "deepseek-v3", "qwen", "zai"}
+	maas := []string{"deepseek", "deepseek-v3", "qwen", "zai", "meta", "xai"}
 	for _, name := range maas {
 		p := getParser(name)
 		if _, ok := p.(*openaiParser); !ok {
@@ -367,6 +367,8 @@ func TestMaaSProviders_ModelPrefixRewrite(t *testing.T) {
 		{"deepseek-v3", "deepseek-v3.2-maas", "deepseek-ai/", "deepseek-ai/deepseek-v3.2-maas"},
 		{"qwen", "qwen3-235b-a22b-instruct-2507-maas", "qwen/", "qwen/qwen3-235b-a22b-instruct-2507-maas"},
 		{"zai", "glm-5-maas", "zai-org/", "zai-org/glm-5-maas"},
+		{"meta", "llama-4-maverick-17b-128e-instruct-maas", "meta/", "meta/llama-4-maverick-17b-128e-instruct-maas"},
+		{"xai", "grok-4.3", "xai/", "xai/grok-4.3"},
 	}
 
 	for _, tt := range tests {
@@ -422,6 +424,8 @@ func TestMaaSProviders_ExtractModel(t *testing.T) {
 		{"deepseek-v3", `{"model":"deepseek-ai/deepseek-v3.2-maas"}`, "deepseek-v3.2-maas"},
 		{"qwen", `{"model":"qwen/qwen3-235b-a22b-instruct-2507-maas"}`, "qwen3-235b-a22b-instruct-2507-maas"},
 		{"zai", `{"model":"zai-org/glm-5-maas"}`, "glm-5-maas"},
+		{"meta", `{"model":"meta/llama-4-maverick-17b-128e-instruct-maas"}`, "llama-4-maverick-17b-128e-instruct-maas"},
+		{"xai", `{"model":"xai/grok-4.3"}`, "grok-4.3"},
 	}
 
 	for _, tt := range tests {
@@ -437,7 +441,7 @@ func TestMaaSProviders_ExtractModel(t *testing.T) {
 // TestMaaSProviders_InjectStreamUsage verifies that injectStreamUsageOption
 // adds stream_options for all MaaS providers.
 func TestMaaSProviders_InjectStreamUsage(t *testing.T) {
-	maas := []string{"deepseek", "deepseek-v3", "qwen", "zai"}
+	maas := []string{"deepseek", "deepseek-v3", "qwen", "zai", "meta", "xai"}
 	body := []byte(`{"model":"test","stream":true}`)
 
 	for _, provider := range maas {

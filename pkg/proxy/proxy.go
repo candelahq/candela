@@ -348,6 +348,10 @@ func DefaultProviders() []Provider {
 		{Name: "qwen", UpstreamURL: "https://aiplatform.googleapis.com"},
 		// Z.AI GLM via Vertex AI OpenAI-compat endpoint (global). Model prefix: zai-org/
 		{Name: "zai", UpstreamURL: "https://aiplatform.googleapis.com"},
+		// Meta Llama 4 via Vertex AI OpenAI-compat endpoint (us-east5). Model prefix: meta/
+		{Name: "meta", UpstreamURL: "https://us-east5-aiplatform.googleapis.com"},
+		// xAI Grok via Vertex AI OpenAI-compat endpoint (global). Model prefix: xai/
+		{Name: "xai", UpstreamURL: "https://aiplatform.googleapis.com"},
 	}
 }
 
@@ -1328,6 +1332,14 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 				case "zai":
 					if !strings.HasPrefix(requestModel, "zai-org/") {
 						upstreamBody = rewriteModelField(upstreamBody, "zai-org/"+requestModel)
+					}
+				case "meta":
+					if !strings.HasPrefix(requestModel, "meta/") {
+						upstreamBody = rewriteModelField(upstreamBody, "meta/"+requestModel)
+					}
+				case "xai":
+					if !strings.HasPrefix(requestModel, "xai/") {
+						upstreamBody = rewriteModelField(upstreamBody, "xai/"+requestModel)
 					}
 				}
 			}

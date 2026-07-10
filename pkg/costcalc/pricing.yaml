@@ -101,6 +101,13 @@ models:
     input_per_million: 5.00
     output_per_million: 25.00
 
+  # Claude Sonnet 5 (June 2026) — launch pricing through Aug 31, 2026.
+  # Standard pricing ($3/$15) takes effect Sep 1, 2026.
+  - provider: anthropic
+    model: claude-sonnet-5
+    input_per_million: 2.00
+    output_per_million: 10.00
+
   # ── OpenAI ───────────────────────────────────────────────
   # GPT-4.1 family (current flagship, 1M context)
   - provider: openai

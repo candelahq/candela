@@ -162,7 +162,7 @@ export function useTodayBudget() {
             budget: budgetProto ? {
               limitUsd: limit,
               spentUsd: spent,
-              remainingUsd: budgetRes!.totalRemainingUsd,
+              remainingUsd: budgetRes?.budgetRemainingUsd ?? (limit - spent),
               percentUsed: limit > 0 ? (spent / limit) * 100 : 0,
               periodType: {
                 0: "unspecified",

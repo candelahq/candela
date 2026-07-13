@@ -30,6 +30,22 @@ async function mockDevUser(page: import("@playwright/test").Page) {
   });
 }
 
+/** Mock UserService.GetMyBudget — the hook now calls this in parallel with GetMyUsage. */
+async function mockBudget(
+  page: import("@playwright/test").Page,
+  budget: { limitUsd: number; spentUsd: number; periodType?: number } | null,
+  opts?: { totalRemainingUsd?: number; budgetRemainingUsd?: number },
+) {
+  const response: Record<string, unknown> = { activeGrants: [], periodResetsAt: "", periodKey: "" };
+  if (budget) {
+    response.budget = { ...budget, periodType: budget.periodType ?? 1 };
+    response.totalRemainingUsd = opts?.totalRemainingUsd ?? (budget.limitUsd - budget.spentUsd);
+    response.budgetRemainingUsd = opts?.budgetRemainingUsd ?? (budget.limitUsd - budget.spentUsd);
+    response.grantsRemainingUsd = 0;
+  }
+  await mockConnectRPC(page, "/candela.v1.UserService/GetMyBudget", response);
+}
+
 // ──────────────────────────────────────────
 // Today Budget View (/today)
 // ──────────────────────────────────────────
@@ -37,6 +53,7 @@ async function mockDevUser(page: import("@playwright/test").Page) {
 test.describe("Today Budget View", () => {
   test("renders page header with today's date", async ({ page }) => {
     await mockDevUser(page);
+    await mockBudget(page, { limitUsd: 50, spentUsd: 0 });
     await mockConnectRPC(page, "/candela.v1.DashboardService/GetMyUsage", {
       totalCalls: "0",
       totalInputTokens: "0",
@@ -44,18 +61,17 @@ test.describe("Today Budget View", () => {
       totalCostUsd: 0,
       avgLatencyMs: 0,
       models: [],
-      budget: { limitUsd: 50, spentUsd: 0, periodType: 1 },
-      totalRemainingUsd: 50,
     });
 
     await page.goto("/today");
-    await expect(page.locator("h1")).toHaveText("Today");
+    await expect(page.locator("h1")).toHaveText("Today UTC");
     // Date string should be visible (e.g. "Saturday, April 26, 2026")
     await expect(page.locator(".today-date")).toBeVisible();
   });
 
   test("shows budget ring gauge with spent/limit/remaining", async ({ page }) => {
     await mockDevUser(page);
+    await mockBudget(page, { limitUsd: 50, spentUsd: 12.5 });
     await mockConnectRPC(page, "/candela.v1.DashboardService/GetMyUsage", {
       totalCalls: "42",
       totalInputTokens: "10000",
@@ -66,8 +82,6 @@ test.describe("Today Budget View", () => {
         { model: "gpt-4o", provider: "openai", callCount: "30", inputTokens: "7000", outputTokens: "3000", costUsd: 1.0, avgLatencyMs: 300 },
         { model: "claude-3-sonnet", provider: "anthropic", callCount: "12", inputTokens: "3000", outputTokens: "2000", costUsd: 0.25, avgLatencyMs: 400 },
       ],
-      budget: { limitUsd: 50, spentUsd: 12.5, periodType: 1 },
-      totalRemainingUsd: 37.5,
     });
 
     await page.goto("/today");
@@ -83,6 +97,7 @@ test.describe("Today Budget View", () => {
 
   test("shows quick stats cards with today's data", async ({ page }) => {
     await mockDevUser(page);
+    await mockBudget(page, { limitUsd: 50, spentUsd: 5 });
     await mockConnectRPC(page, "/candela.v1.DashboardService/GetMyUsage", {
       totalCalls: "42",
       totalInputTokens: "10000",
@@ -90,8 +105,6 @@ test.describe("Today Budget View", () => {
       totalCostUsd: 1.25,
       avgLatencyMs: 340,
       models: [],
-      budget: { limitUsd: 50, spentUsd: 5, periodType: 1 },
-      totalRemainingUsd: 45,
     });
 
     await page.goto("/today");
@@ -114,6 +127,7 @@ test.describe("Today Budget View", () => {
 
   test("shows per-model token breakdown sorted by cost", async ({ page }) => {
     await mockDevUser(page);
+    await mockBudget(page, { limitUsd: 50, spentUsd: 5 });
     await mockConnectRPC(page, "/candela.v1.DashboardService/GetMyUsage", {
       totalCalls: "42",
       totalInputTokens: "10000",
@@ -124,8 +138,6 @@ test.describe("Today Budget View", () => {
         { model: "gpt-4o", provider: "openai", callCount: "30", inputTokens: "7000", outputTokens: "3000", costUsd: 1.0, avgLatencyMs: 300 },
         { model: "claude-3-sonnet", provider: "anthropic", callCount: "12", inputTokens: "3000", outputTokens: "2000", costUsd: 0.25, avgLatencyMs: 400 },
       ],
-      budget: { limitUsd: 50, spentUsd: 5, periodType: 1 },
-      totalRemainingUsd: 45,
     });
 
     await page.goto("/today");
@@ -143,6 +155,7 @@ test.describe("Today Budget View", () => {
 
   test("shows empty state when no activity today", async ({ page }) => {
     await mockDevUser(page);
+    await mockBudget(page, { limitUsd: 50, spentUsd: 0 });
     await mockConnectRPC(page, "/candela.v1.DashboardService/GetMyUsage", {
       totalCalls: "0",
       totalInputTokens: "0",
@@ -150,8 +163,6 @@ test.describe("Today Budget View", () => {
       totalCostUsd: 0,
       avgLatencyMs: 0,
       models: [],
-      budget: { limitUsd: 50, spentUsd: 0, periodType: 1 },
-      totalRemainingUsd: 50,
     });
 
     await page.goto("/today");
@@ -160,6 +171,7 @@ test.describe("Today Budget View", () => {
 
   test("shows no-budget message when budget is not configured", async ({ page }) => {
     await mockDevUser(page);
+    await mockBudget(page, null);
     await mockConnectRPC(page, "/candela.v1.DashboardService/GetMyUsage", {
       totalCalls: "10",
       totalInputTokens: "1000",
@@ -167,8 +179,6 @@ test.describe("Today Budget View", () => {
       totalCostUsd: 0.05,
       avgLatencyMs: 200,
       models: [],
-      // No budget field
-      totalRemainingUsd: 0,
     });
 
     await page.goto("/today");
@@ -177,6 +187,7 @@ test.describe("Today Budget View", () => {
 
   test("shows alert when budget is nearly exhausted (>=90%)", async ({ page }) => {
     await mockDevUser(page);
+    await mockBudget(page, { limitUsd: 50, spentUsd: 47.5 });
     await mockConnectRPC(page, "/candela.v1.DashboardService/GetMyUsage", {
       totalCalls: "200",
       totalInputTokens: "80000",
@@ -184,8 +195,6 @@ test.describe("Today Budget View", () => {
       totalCostUsd: 47.5,
       avgLatencyMs: 300,
       models: [],
-      budget: { limitUsd: 50, spentUsd: 47.5, periodType: 1 },
-      totalRemainingUsd: 2.5,
     });
 
     await page.goto("/today");
@@ -194,6 +203,7 @@ test.describe("Today Budget View", () => {
 
   test("shows exhausted alert when budget is at 100%", async ({ page }) => {
     await mockDevUser(page);
+    await mockBudget(page, { limitUsd: 50, spentUsd: 52 });
     await mockConnectRPC(page, "/candela.v1.DashboardService/GetMyUsage", {
       totalCalls: "300",
       totalInputTokens: "100000",
@@ -201,8 +211,6 @@ test.describe("Today Budget View", () => {
       totalCostUsd: 52.0,
       avgLatencyMs: 350,
       models: [],
-      budget: { limitUsd: 50, spentUsd: 52, periodType: 1 },
-      totalRemainingUsd: 0,
     });
 
     await page.goto("/today");
@@ -219,6 +227,7 @@ test.describe("Today Budget View", () => {
 
   test("refresh button triggers data reload", async ({ page }) => {
     await mockDevUser(page);
+    await mockBudget(page, { limitUsd: 50, spentUsd: 5 });
 
     let callCount = 0;
     await page.route(`${API_BASE}/candela.v1.DashboardService/GetMyUsage`, async (route) => {
@@ -233,8 +242,6 @@ test.describe("Today Budget View", () => {
           totalCostUsd: 0.5,
           avgLatencyMs: 200,
           models: [],
-          budget: { limitUsd: 50, spentUsd: 5, periodType: 1 },
-          totalRemainingUsd: 45,
         }),
       });
     });
@@ -269,7 +276,7 @@ test.describe("Today navigation", () => {
 
     await todayLink.click();
     await expect(page).toHaveURL("/today");
-    await expect(page.locator("h1")).toHaveText("Today");
+    await expect(page.locator("h1")).toHaveText("Today UTC");
   });
 
   test("Today nav item is highlighted when active", async ({ page }) => {

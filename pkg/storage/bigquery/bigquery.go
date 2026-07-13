@@ -526,7 +526,7 @@ func (s *Store) QueryTraces(ctx context.Context, tq storage.TraceQuery) (*storag
 		params = append(params, bigquery.QueryParameter{Name: "traceGroup", Value: tq.TraceGroup})
 	}
 	if tq.Status != 0 {
-		extraHaving = "\n\t\tHAVING MAX(CASE WHEN status = 2 THEN 2 ELSE 0 END) = @statusFilter"
+		extraHaving = "\n\t\tHAVING CASE WHEN MAX(CASE WHEN status = 2 THEN 1 ELSE 0 END) > 0 THEN 2 ELSE 1 END = @statusFilter"
 		params = append(params, bigquery.QueryParameter{Name: "statusFilter", Value: int(tq.Status)})
 	}
 

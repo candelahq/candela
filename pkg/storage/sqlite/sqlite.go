@@ -298,7 +298,7 @@ func (s *Store) QueryTraces(ctx context.Context, q storage.TraceQuery) (*storage
 	// Status is an aggregate (MAX), so it requires HAVING.
 	having := ""
 	if q.Status != 0 {
-		having = `HAVING MAX(CASE WHEN status = 2 THEN 2 ELSE 0 END) = ?`
+		having = `HAVING CASE WHEN MAX(CASE WHEN status = 2 THEN 1 ELSE 0 END) > 0 THEN 2 ELSE 1 END = ?`
 		args = append(args, int(q.Status))
 	}
 

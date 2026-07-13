@@ -194,17 +194,21 @@ export default function TodayPage() {
   });
 
   // Live UTC clock — ticks every 30s so users know what "today UTC" means.
-  const [utcNow, setUtcNow] = useState(() => new Date());
+  // Initialize as null to avoid SSR/client hydration mismatch.
+  const [utcNow, setUtcNow] = useState<Date | null>(null);
   useEffect(() => {
+    setUtcNow(new Date());
     const tick = setInterval(() => setUtcNow(new Date()), 30_000);
     return () => clearInterval(tick);
   }, []);
-  const utcTimeStr = utcNow.toLocaleTimeString(undefined, {
-    hour: "2-digit",
-    minute: "2-digit",
-    timeZone: "UTC",
-    hour12: false,
-  });
+  const utcTimeStr = utcNow
+    ? utcNow.toLocaleTimeString(undefined, {
+        hour: "2-digit",
+        minute: "2-digit",
+        timeZone: "UTC",
+        hour12: false,
+      })
+    : "--:--";
 
   const sortedModels = useMemo(
     () => [...(data?.models ?? [])].sort((a, b) => b.costUsd - a.costUsd),
@@ -217,7 +221,11 @@ export default function TodayPage() {
         <div>
           <h1>Today <span className="today-utc-badge">UTC</span></h1>
           <span className="today-date">{todayStr}</span>
-          <span className="today-utc-clock">{utcTimeStr} UTC · Resets at midnight</span>
+          <span className="today-utc-clock">
+            {utcTimeStr} UTC · {data?.periodResetsAt
+              ? `Resets ${new Date(data.periodResetsAt).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", hour12: true })}`
+              : "Resets at midnight UTC"}
+          </span>
         </div>
         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
           {data?.fetchedAt && (

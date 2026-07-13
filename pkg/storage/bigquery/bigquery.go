@@ -487,26 +487,63 @@ func (s *Store) QueryTraces(ctx context.Context, tq storage.TraceQuery) (*storag
 		tq.PageSize = 20
 	}
 
+	// Build optional WHERE conditions.
+	extraWhere := ""
+	extraHaving := ""
+	params := []bigquery.QueryParameter{
+		{Name: "projectID", Value: tq.ProjectID},
+		{Name: "startTime", Value: tq.StartTime},
+		{Name: "endTime", Value: tq.EndTime},
+		{Name: "userID", Value: tq.UserID},
+		{Name: "pageSize", Value: tq.PageSize},
+	}
+	if tq.Environment != "" {
+		extraWhere += "\n\t\t  AND environment = @environment"
+		params = append(params, bigquery.QueryParameter{Name: "environment", Value: tq.Environment})
+	}
+	if tq.TenantID != "" {
+		extraWhere += "\n\t\t  AND tenant_id = @tenantID"
+		params = append(params, bigquery.QueryParameter{Name: "tenantID", Value: tq.TenantID})
+	}
+	if tq.Model != "" {
+		extraWhere += "\n\t\t  AND gen_ai_model = @model"
+		params = append(params, bigquery.QueryParameter{Name: "model", Value: tq.Model})
+	}
+	if tq.Provider != "" {
+		extraWhere += "\n\t\t  AND gen_ai_provider = @provider"
+		params = append(params, bigquery.QueryParameter{Name: "provider", Value: tq.Provider})
+	}
+	if tq.Search != "" {
+		extraWhere += "\n\t\t  AND name LIKE CONCAT('%%', @escapedSearch, '%%')"
+		params = append(params, bigquery.QueryParameter{Name: "escapedSearch", Value: storage.EscapeLike(tq.Search)})
+	}
+	if tq.JobID != "" {
+		extraWhere += "\n\t\t  AND job_id = @jobID"
+		params = append(params, bigquery.QueryParameter{Name: "jobID", Value: tq.JobID})
+	}
+	if tq.TraceGroup != "" {
+		extraWhere += "\n\t\t  AND trace_group = @traceGroup"
+		params = append(params, bigquery.QueryParameter{Name: "traceGroup", Value: tq.TraceGroup})
+	}
+	if tq.Status != 0 {
+		extraHaving = "\n\t\tHAVING MAX(CASE WHEN status = 2 THEN 2 ELSE 0 END) = @statusFilter"
+		params = append(params, bigquery.QueryParameter{Name: "statusFilter", Value: int(tq.Status)})
+	}
+
 	query := fmt.Sprintf(`
 		SELECT trace_id, MIN(start_time) AS earliest
 		FROM %s
 		WHERE (@projectID = '' OR project_id = @projectID)
 		  AND start_time >= @startTime
 		  AND start_time <= @endTime
-		  AND (@userID = '' OR user_id = @userID)
-		GROUP BY trace_id
+		  AND (@userID = '' OR user_id = @userID)%s
+		GROUP BY trace_id%s
 		ORDER BY earliest DESC
 		LIMIT @pageSize
-	`, quoteTable(s.tableID))
+	`, quoteTable(s.tableID), extraWhere, extraHaving)
 
 	q := s.client.Query(query)
-	q.SetParameters([]bigquery.QueryParameter{
-		{Name: "projectID", Value: tq.ProjectID},
-		{Name: "startTime", Value: tq.StartTime},
-		{Name: "endTime", Value: tq.EndTime},
-		{Name: "userID", Value: tq.UserID},
-		{Name: "pageSize", Value: tq.PageSize},
-	})
+	q.SetParameters(params)
 
 	it, err := q.Read(ctx)
 	if err != nil {

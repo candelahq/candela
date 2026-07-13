@@ -193,6 +193,19 @@ export default function TodayPage() {
     timeZone: "UTC",
   });
 
+  // Live UTC clock — ticks every 30s so users know what "today UTC" means.
+  const [utcNow, setUtcNow] = useState(() => new Date());
+  useEffect(() => {
+    const tick = setInterval(() => setUtcNow(new Date()), 30_000);
+    return () => clearInterval(tick);
+  }, []);
+  const utcTimeStr = utcNow.toLocaleTimeString(undefined, {
+    hour: "2-digit",
+    minute: "2-digit",
+    timeZone: "UTC",
+    hour12: false,
+  });
+
   const sortedModels = useMemo(
     () => [...(data?.models ?? [])].sort((a, b) => b.costUsd - a.costUsd),
     [data?.models],
@@ -202,8 +215,9 @@ export default function TodayPage() {
     <>
       <header className="main-header">
         <div>
-          <h1>Today</h1>
+          <h1>Today <span className="today-utc-badge">UTC</span></h1>
           <span className="today-date">{todayStr}</span>
+          <span className="today-utc-clock">{utcTimeStr} UTC · Resets at midnight</span>
         </div>
         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
           {data?.fetchedAt && (
@@ -216,6 +230,7 @@ export default function TodayPage() {
           </button>
         </div>
       </header>
+
 
       <div className="main-body">
         {error && (
@@ -432,6 +447,25 @@ export default function TodayPage() {
           color: var(--text-muted);
           margin-left: 12px;
           font-weight: 400;
+        }
+        .today-utc-badge {
+          font-size: 11px;
+          font-weight: 600;
+          color: var(--accent);
+          background: rgba(240, 160, 48, 0.12);
+          padding: 2px 6px;
+          border-radius: 4px;
+          vertical-align: middle;
+          letter-spacing: 0.06em;
+          margin-left: 4px;
+        }
+        .today-utc-clock {
+          display: block;
+          font-size: 11px;
+          color: var(--text-muted);
+          margin-left: 12px;
+          margin-top: 2px;
+          font-variant-numeric: tabular-nums;
         }
         .today-updated {
           font-size: 11px;

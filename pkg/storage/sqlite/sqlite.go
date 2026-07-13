@@ -261,6 +261,49 @@ func (s *Store) QueryTraces(ctx context.Context, q storage.TraceQuery) (*storage
 		dir = "ASC"
 	}
 
+	// Build WHERE clause dynamically for optional span-level filters.
+	where := `(? = '' OR project_id = ?) AND start_time >= ? AND start_time <= ?
+			AND (? = '' OR user_id = ?)
+			AND (? = '' OR tenant_id = ?)
+			AND (? = '' OR environment = ?)`
+	args := []any{
+		q.ProjectID, q.ProjectID, // subquery 1: primary_model
+		q.ProjectID, q.ProjectID, // subquery 2: primary_provider
+		q.ProjectID, q.ProjectID, // WHERE clause
+		q.StartTime.Format(time.RFC3339Nano), q.EndTime.Format(time.RFC3339Nano),
+		q.UserID, q.UserID, q.TenantID, q.TenantID, q.Environment, q.Environment,
+	}
+
+	if q.Model != "" {
+		where += `
+			AND gen_ai_model = ?`
+		args = append(args, q.Model)
+	}
+	if q.Provider != "" {
+		where += `
+			AND gen_ai_provider = ?`
+		args = append(args, q.Provider)
+	}
+	if q.Search != "" {
+		where += `
+			AND name LIKE '%' || ? || '%' ESCAPE '\'`
+		args = append(args, storage.EscapeLike(q.Search))
+	}
+	if q.JobID != "" {
+		where += `
+			AND job_id = ?`
+		args = append(args, q.JobID)
+	}
+
+	// Status is an aggregate (MAX), so it requires HAVING.
+	having := ""
+	if q.Status != 0 {
+		having = `HAVING MAX(CASE WHEN status = 2 THEN 2 ELSE 0 END) = ?`
+		args = append(args, int(q.Status))
+	}
+
+	args = append(args, q.PageSize)
+
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT
 			trace_id,
@@ -291,18 +334,12 @@ func (s *Store) QueryTraces(ctx context.Context, q storage.TraceQuery) (*storage
 			), '') as primary_provider,
 			MAX(CASE WHEN status = 2 THEN 2 ELSE 0 END) as status
 		FROM spans
-		WHERE (? = '' OR project_id = ?) AND start_time >= ? AND start_time <= ?
-			AND (? = '' OR user_id = ?)
-			AND (? = '' OR tenant_id = ?)
-			AND (? = '' OR environment = ?)
+		WHERE `+where+`
 		GROUP BY trace_id
+		`+having+`
 		ORDER BY `+orderExpr+` `+dir+`
 		LIMIT ?
-	`, q.ProjectID, q.ProjectID, // subquery 1: primary_model
-		q.ProjectID, q.ProjectID, // subquery 2: primary_provider
-		q.ProjectID, q.ProjectID, // WHERE clause
-		q.StartTime.Format(time.RFC3339Nano), q.EndTime.Format(time.RFC3339Nano),
-		q.UserID, q.UserID, q.TenantID, q.TenantID, q.Environment, q.Environment, q.PageSize)
+	`, args...)
 	if err != nil {
 		return nil, fmt.Errorf("querying traces: %w", err)
 	}

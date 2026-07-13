@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useReducer } from "react";
-import { dashboardClient } from "@/lib/api";
+import { dashboardClient, userClient } from "@/lib/api";
 import { DEFAULT_PROJECT_ID } from "@/lib/constants";
 import { timestampDate, timestampFromDate } from "@bufbuild/protobuf/wkt";
 
@@ -43,6 +43,8 @@ export interface TodayBudgetData {
   grants: TodayGrant[];
   /** When this data was last fetched */
   fetchedAt: Date;
+  /** ISO 8601 timestamp when the budget period resets (midnight UTC). */
+  periodResetsAt: string | null;
 }
 
 type State = {
@@ -71,14 +73,20 @@ function reducer(state: State, action: Action): State {
   }
 }
 
-/** Returns the start of today in UTC (midnight). */
+/** Returns the start of today in UTC (midnight) to match budget reset boundary. */
 function startOfTodayUTC(): Date {
   const now = new Date();
   return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
 }
 
 /**
- * Fetches the current user's usage for TODAY only, scoped to the daily budget period.
+ * Fetches the current user's usage AND budget for TODAY, scoped to the daily
+ * budget period (midnight UTC → now).
+ *
+ * Calls two RPCs in parallel:
+ *   1. DashboardService.GetMyUsage  → token counts, cost, model breakdown (~800ms)
+ *   2. UserService.GetMyBudget      → budget limit/spent, grants (~80ms)
+ *
  * Auto-refreshes every 60 seconds to keep the view live.
  */
 export function useTodayBudget() {
@@ -96,21 +104,28 @@ export function useTodayBudget() {
     const start = startOfTodayUTC();
     const now = new Date();
 
-    dashboardClient.getMyUsage({
+    // Fire both RPCs in parallel — usage data from BigQuery, budget from Firestore.
+    const usagePromise = dashboardClient.getMyUsage({
       projectId: DEFAULT_PROJECT_ID,
       timeRange: {
         start: timestampFromDate(start),
         end: timestampFromDate(now),
       },
-    })
-      .then((res) => {
+    });
+
+    const budgetPromise = userClient.getMyBudget({}).catch(() => null);
+
+    Promise.all([usagePromise, budgetPromise])
+      .then(([usageRes, budgetRes]) => {
         if (cancelled) return;
 
-        const limit = res.budget?.limitUsd || 0;
-        const spent = res.budget?.spentUsd || 0;
+        // ── Budget from UserService.GetMyBudget (Firestore) ───────────────
+        const budgetProto = budgetRes?.budget;
+        const limit = budgetProto?.limitUsd ?? 0;
+        const spent = budgetProto?.spentUsd ?? 0;
 
-        // Map active grants from proto response.
-        const grants: TodayGrant[] = (res.activeGrants ?? []).map((g) => {
+        // Map active grants from the budget response.
+        const grants: TodayGrant[] = (budgetRes?.activeGrants ?? []).map((g) => {
           const amt = g.amountUsd;
           const sp = g.spentUsd;
           return {
@@ -128,12 +143,13 @@ export function useTodayBudget() {
         dispatch({
           type: "success",
           data: {
-            totalCalls: Number(res.totalCalls),
-            totalInputTokens: Number(res.totalInputTokens),
-            totalOutputTokens: Number(res.totalOutputTokens),
-            totalCostUsd: res.totalCostUsd,
-            avgLatencyMs: res.avgLatencyMs,
-            models: res.models.map((m) => ({
+            // ── Usage from DashboardService.GetMyUsage (BigQuery) ─────────
+            totalCalls: Number(usageRes.totalCalls),
+            totalInputTokens: Number(usageRes.totalInputTokens),
+            totalOutputTokens: Number(usageRes.totalOutputTokens),
+            totalCostUsd: usageRes.totalCostUsd,
+            avgLatencyMs: usageRes.avgLatencyMs,
+            models: usageRes.models.map((m) => ({
               model: m.model,
               provider: m.provider,
               callCount: Number(m.callCount),
@@ -142,18 +158,20 @@ export function useTodayBudget() {
               costUsd: m.costUsd,
               avgLatencyMs: m.avgLatencyMs,
             })),
-            budget: res.budget ? {
+            // ── Budget from UserService.GetMyBudget ──────────────────────
+            budget: budgetProto ? {
               limitUsd: limit,
               spentUsd: spent,
-              remainingUsd: res.totalRemainingUsd,
+              remainingUsd: budgetRes!.totalRemainingUsd,
               percentUsed: limit > 0 ? (spent / limit) * 100 : 0,
               periodType: {
                 0: "unspecified",
                 1: "daily",
-              }[res.budget.periodType] || "daily",
+              }[budgetProto.periodType] || "daily",
             } : null,
             grants,
             fetchedAt: new Date(),
+            periodResetsAt: budgetRes?.periodResetsAt ?? null,
           },
         });
       })

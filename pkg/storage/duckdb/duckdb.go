@@ -249,6 +249,43 @@ func (s *Store) QueryTraces(ctx context.Context, q storage.TraceQuery) (*storage
 		dir = "ASC"
 	}
 
+	// Build WHERE clause dynamically for optional span-level filters.
+	where := `project_id = ? AND start_time >= ? AND start_time <= ?
+			AND (? = '' OR user_id = ?)
+			AND (? = '' OR environment = ?)
+			AND (? = '' OR tenant_id = ?)`
+	args := []any{q.ProjectID, q.ProjectID, q.ProjectID, q.StartTime, q.EndTime, q.UserID, q.UserID, q.Environment, q.Environment, q.TenantID, q.TenantID}
+
+	if q.Model != "" {
+		where += `
+			AND gen_ai_model = ?`
+		args = append(args, q.Model)
+	}
+	if q.Provider != "" {
+		where += `
+			AND gen_ai_provider = ?`
+		args = append(args, q.Provider)
+	}
+	if q.Search != "" {
+		where += `
+			AND name LIKE '%' || ? || '%' ESCAPE '\'`
+		args = append(args, storage.EscapeLike(q.Search))
+	}
+	if q.JobID != "" {
+		where += `
+			AND job_id = ?`
+		args = append(args, q.JobID)
+	}
+
+	// Status is an aggregate (MAX), so it requires HAVING.
+	having := ""
+	if q.Status != 0 {
+		having = `HAVING MAX(CASE WHEN status = 2 THEN 2 ELSE 0 END) = ?`
+		args = append(args, int(q.Status))
+	}
+
+	args = append(args, q.PageSize)
+
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT
 			trace_id,
@@ -273,14 +310,12 @@ func (s *Store) QueryTraces(ctx context.Context, q storage.TraceQuery) (*storage
 				LIMIT 1) as primary_provider,
 			MAX(CASE WHEN status = 2 THEN 2 ELSE 0 END)::INTEGER as status
 		FROM spans
-		WHERE project_id = ? AND start_time >= ? AND start_time <= ?
-			AND (? = '' OR user_id = ?)
-			AND (? = '' OR environment = ?)
-			AND (? = '' OR tenant_id = ?)
+		WHERE `+where+`
 		GROUP BY trace_id
+		`+having+`
 		ORDER BY `+orderExpr+` `+dir+`
 		LIMIT ?
-	`, q.ProjectID, q.ProjectID, q.ProjectID, q.StartTime, q.EndTime, q.UserID, q.UserID, q.Environment, q.Environment, q.TenantID, q.TenantID, q.PageSize)
+	`, args...)
 	if err != nil {
 		return nil, fmt.Errorf("querying traces: %w", err)
 	}

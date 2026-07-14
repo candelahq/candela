@@ -114,7 +114,7 @@ is injected automatically into every LLM call made by an ADK agent:
 
 ```python
 from google.adk.agents import LlmAgent
-from candela.adk import CandleaContextPlugin, CandelaContext
+from candela.adk import CandelaContextPlugin, CandelaContext
 
 agent = LlmAgent(
     name="my-agent",
@@ -123,7 +123,7 @@ agent = LlmAgent(
 )
 
 ctx = CandelaContext(tenant_id="acme-corp", session_id="session-42")
-plugin = CandleaContextPlugin(ctx)
+plugin = CandelaContextPlugin(ctx)
 
 # The plugin injects Baggage headers on every underlying HTTP call.
 # No code changes needed in the agent itself.
@@ -259,7 +259,7 @@ The migration runs automatically on startup and is safe to run multiple times.
 | `tenant_id` in DuckDB / SQLite / BigQuery | ✅ Implemented |
 | `GetTenantLeaderboard` RPC | ✅ Implemented |
 | OTLP export of `candela.tenant_id` | ✅ Implemented |
-| ADK `CandleaContextPlugin` | ✅ Implemented |
+| ADK `CandelaContextPlugin` | ✅ Implemented |
 | `job_id` / `trial_id` second attribution dimension | 🔜 Planned |
 | Rust sidecar parity for tenant extraction | 🔜 Planned (after HTTP handler is wired) |
 | UI: Tenant leaderboard dashboard widget | 🔜 Planned (see GitHub issues) |

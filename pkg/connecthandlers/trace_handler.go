@@ -80,12 +80,14 @@ func (h *TraceHandler) ListTraces(
 		Environment: msg.Environment,
 		Model:       msg.Model,
 		Provider:    msg.Provider,
+		Status:      storage.SpanStatus(msg.Status),
 		Search:      msg.Search,
 		OrderBy:     msg.OrderBy,
 		Descending:  msg.Descending,
 		UserID:      scopeUserID(ctx, h.users),
 		JobID:       getAttribution(req).JobID,
 		TenantID:    getAttribution(req).TenantID,
+		TraceGroup:  msg.TraceGroup,
 	}
 
 	if msg.TimeRange != nil {

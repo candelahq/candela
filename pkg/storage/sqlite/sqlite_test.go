@@ -386,3 +386,291 @@ func TestGetTenantLeaderboard(t *testing.T) {
 		t.Errorf("tenant-a cost = %f, want 0.02", leaderboard[1].CostUSD)
 	}
 }
+
+func TestQueryFilter_Model_SQLite(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(time.Microsecond)
+
+	spans := []storage.Span{
+		{
+			SpanID: "s1", TraceID: "trace-gpt", Name: "llm.chat",
+			Kind: storage.SpanKindLLM, Status: storage.SpanStatusOK,
+			StartTime: now.Add(-2 * time.Second), EndTime: now.Add(-1 * time.Second),
+			Duration: time.Second, ProjectID: "proj-1",
+			GenAI: &storage.GenAIAttributes{
+				Model: "gpt-4o", Provider: "openai",
+				InputTokens: 100, OutputTokens: 50, TotalTokens: 150, CostUSD: 0.001,
+			},
+		},
+		{
+			SpanID: "s2", TraceID: "trace-gem", Name: "llm.chat",
+			Kind: storage.SpanKindLLM, Status: storage.SpanStatusOK,
+			StartTime: now.Add(-1 * time.Second), EndTime: now,
+			Duration: time.Second, ProjectID: "proj-1",
+			GenAI: &storage.GenAIAttributes{
+				Model: "gemini-2.0", Provider: "google",
+				InputTokens: 100, OutputTokens: 50, TotalTokens: 150, CostUSD: 0.001,
+			},
+		},
+	}
+
+	if err := s.IngestSpans(ctx, spans); err != nil {
+		t.Fatalf("ingest: %v", err)
+	}
+
+	result, err := s.QueryTraces(ctx, storage.TraceQuery{
+		ProjectID: "proj-1",
+		StartTime: now.Add(-10 * time.Second),
+		EndTime:   now.Add(10 * time.Second),
+		PageSize:  10,
+		Model:     "gpt-4o",
+	})
+	if err != nil {
+		t.Fatalf("query traces: %v", err)
+	}
+
+	if len(result.Traces) != 1 {
+		t.Fatalf("trace count = %d, want 1", len(result.Traces))
+	}
+	if result.Traces[0].TraceID != "trace-gpt" {
+		t.Errorf("trace_id = %q, want trace-gpt", result.Traces[0].TraceID)
+	}
+}
+
+func TestQueryFilter_Provider_SQLite(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(time.Microsecond)
+
+	spans := []storage.Span{
+		{
+			SpanID: "s1", TraceID: "trace-oai", Name: "llm.chat",
+			Kind: storage.SpanKindLLM, Status: storage.SpanStatusOK,
+			StartTime: now.Add(-2 * time.Second), EndTime: now.Add(-1 * time.Second),
+			Duration: time.Second, ProjectID: "proj-1",
+			GenAI: &storage.GenAIAttributes{
+				Model: "gpt-4o", Provider: "openai",
+				InputTokens: 100, OutputTokens: 50, TotalTokens: 150, CostUSD: 0.001,
+			},
+		},
+		{
+			SpanID: "s2", TraceID: "trace-goog", Name: "llm.chat",
+			Kind: storage.SpanKindLLM, Status: storage.SpanStatusOK,
+			StartTime: now.Add(-1 * time.Second), EndTime: now,
+			Duration: time.Second, ProjectID: "proj-1",
+			GenAI: &storage.GenAIAttributes{
+				Model: "gemini-2.0", Provider: "google",
+				InputTokens: 100, OutputTokens: 50, TotalTokens: 150, CostUSD: 0.001,
+			},
+		},
+	}
+
+	if err := s.IngestSpans(ctx, spans); err != nil {
+		t.Fatalf("ingest: %v", err)
+	}
+
+	result, err := s.QueryTraces(ctx, storage.TraceQuery{
+		ProjectID: "proj-1",
+		StartTime: now.Add(-10 * time.Second),
+		EndTime:   now.Add(10 * time.Second),
+		PageSize:  10,
+		Provider:  "openai",
+	})
+	if err != nil {
+		t.Fatalf("query traces: %v", err)
+	}
+
+	if len(result.Traces) != 1 {
+		t.Fatalf("trace count = %d, want 1", len(result.Traces))
+	}
+	if result.Traces[0].TraceID != "trace-oai" {
+		t.Errorf("trace_id = %q, want trace-oai", result.Traces[0].TraceID)
+	}
+}
+
+func TestQueryFilter_Search_SQLite(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(time.Microsecond)
+
+	spans := []storage.Span{
+		{
+			SpanID: "s1", TraceID: "trace-chat", Name: "llm.chat.completion",
+			Kind: storage.SpanKindLLM, Status: storage.SpanStatusOK,
+			StartTime: now.Add(-2 * time.Second), EndTime: now.Add(-1 * time.Second),
+			Duration: time.Second, ProjectID: "proj-1",
+			GenAI: &storage.GenAIAttributes{Model: "gpt-4o", Provider: "openai", CostUSD: 0.001},
+		},
+		{
+			SpanID: "s2", TraceID: "trace-search", Name: "tool.search",
+			Kind: storage.SpanKindTool, Status: storage.SpanStatusOK,
+			StartTime: now.Add(-1 * time.Second), EndTime: now,
+			Duration: time.Second, ProjectID: "proj-1",
+			GenAI: &storage.GenAIAttributes{Model: "gpt-4o", Provider: "openai", CostUSD: 0.001},
+		},
+	}
+
+	if err := s.IngestSpans(ctx, spans); err != nil {
+		t.Fatalf("ingest: %v", err)
+	}
+
+	result, err := s.QueryTraces(ctx, storage.TraceQuery{
+		ProjectID: "proj-1",
+		StartTime: now.Add(-10 * time.Second),
+		EndTime:   now.Add(10 * time.Second),
+		PageSize:  10,
+		Search:    "chat",
+	})
+	if err != nil {
+		t.Fatalf("query traces: %v", err)
+	}
+
+	if len(result.Traces) != 1 {
+		t.Fatalf("trace count = %d, want 1", len(result.Traces))
+	}
+	if result.Traces[0].TraceID != "trace-chat" {
+		t.Errorf("trace_id = %q, want trace-chat", result.Traces[0].TraceID)
+	}
+}
+
+func TestQueryFilter_StatusOK_SQLite(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(time.Microsecond)
+
+	// trace-ok: all spans OK
+	spans := []storage.Span{
+		{
+			SpanID: "s-ok", TraceID: "trace-ok", Name: "llm.chat",
+			Kind: storage.SpanKindLLM, Status: storage.SpanStatusOK,
+			StartTime: now.Add(-3 * time.Second), EndTime: now.Add(-2 * time.Second),
+			Duration: time.Second, ProjectID: "proj-1",
+		},
+		// trace-err: has an error span
+		{
+			SpanID: "s-err", TraceID: "trace-err", Name: "llm.chat",
+			Kind: storage.SpanKindLLM, Status: storage.SpanStatusError,
+			StartTime: now.Add(-1 * time.Second), EndTime: now,
+			Duration: time.Second, ProjectID: "proj-1",
+		},
+	}
+
+	if err := s.IngestSpans(ctx, spans); err != nil {
+		t.Fatalf("ingest: %v", err)
+	}
+
+	result, err := s.QueryTraces(ctx, storage.TraceQuery{
+		ProjectID: "proj-1",
+		StartTime: now.Add(-10 * time.Second),
+		EndTime:   now.Add(10 * time.Second),
+		PageSize:  10,
+		Status:    storage.SpanStatusOK,
+	})
+	if err != nil {
+		t.Fatalf("query traces: %v", err)
+	}
+
+	if len(result.Traces) != 1 {
+		t.Fatalf("trace count = %d, want 1 (only OK traces)", len(result.Traces))
+	}
+	if result.Traces[0].TraceID != "trace-ok" {
+		t.Errorf("trace_id = %q, want trace-ok", result.Traces[0].TraceID)
+	}
+}
+
+func TestQueryFilter_StatusError_SQLite(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(time.Microsecond)
+
+	spans := []storage.Span{
+		// trace-ok: all spans OK
+		{
+			SpanID: "s-ok", TraceID: "trace-ok", Name: "llm.chat",
+			Kind: storage.SpanKindLLM, Status: storage.SpanStatusOK,
+			StartTime: now.Add(-3 * time.Second), EndTime: now.Add(-2 * time.Second),
+			Duration: time.Second, ProjectID: "proj-1",
+		},
+		// trace-err: has an error span
+		{
+			SpanID: "s-err", TraceID: "trace-err", Name: "llm.chat",
+			Kind: storage.SpanKindLLM, Status: storage.SpanStatusError,
+			StartTime: now.Add(-1 * time.Second), EndTime: now,
+			Duration: time.Second, ProjectID: "proj-1",
+		},
+	}
+
+	if err := s.IngestSpans(ctx, spans); err != nil {
+		t.Fatalf("ingest: %v", err)
+	}
+
+	result, err := s.QueryTraces(ctx, storage.TraceQuery{
+		ProjectID: "proj-1",
+		StartTime: now.Add(-10 * time.Second),
+		EndTime:   now.Add(10 * time.Second),
+		PageSize:  10,
+		Status:    storage.SpanStatusError,
+	})
+	if err != nil {
+		t.Fatalf("query traces: %v", err)
+	}
+
+	if len(result.Traces) != 1 {
+		t.Fatalf("trace count = %d, want 1 (only error traces)", len(result.Traces))
+	}
+	if result.Traces[0].TraceID != "trace-err" {
+		t.Errorf("trace_id = %q, want trace-err", result.Traces[0].TraceID)
+	}
+}
+
+func TestQueryFilter_JobID_SQLite(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(time.Microsecond)
+
+	spans := []storage.Span{
+		{
+			SpanID: "s1", TraceID: "trace-job1", Name: "llm.chat",
+			Kind: storage.SpanKindLLM, Status: storage.SpanStatusOK,
+			StartTime: now.Add(-2 * time.Second), EndTime: now.Add(-1 * time.Second),
+			Duration: time.Second, ProjectID: "proj-1", JobID: "experiment-alpha",
+			GenAI: &storage.GenAIAttributes{
+				Model: "gpt-4o", Provider: "openai",
+				InputTokens: 100, OutputTokens: 50, TotalTokens: 150, CostUSD: 0.001,
+			},
+		},
+		{
+			SpanID: "s2", TraceID: "trace-job2", Name: "llm.chat",
+			Kind: storage.SpanKindLLM, Status: storage.SpanStatusOK,
+			StartTime: now.Add(-1 * time.Second), EndTime: now,
+			Duration: time.Second, ProjectID: "proj-1", JobID: "experiment-beta",
+			GenAI: &storage.GenAIAttributes{
+				Model: "gpt-4o", Provider: "openai",
+				InputTokens: 100, OutputTokens: 50, TotalTokens: 150, CostUSD: 0.001,
+			},
+		},
+	}
+
+	if err := s.IngestSpans(ctx, spans); err != nil {
+		t.Fatalf("ingest: %v", err)
+	}
+
+	result, err := s.QueryTraces(ctx, storage.TraceQuery{
+		ProjectID: "proj-1",
+		StartTime: now.Add(-10 * time.Second),
+		EndTime:   now.Add(10 * time.Second),
+		PageSize:  10,
+		JobID:     "experiment-alpha",
+	})
+	if err != nil {
+		t.Fatalf("query traces: %v", err)
+	}
+
+	if len(result.Traces) != 1 {
+		t.Fatalf("trace count = %d, want 1", len(result.Traces))
+	}
+	if result.Traces[0].TraceID != "trace-job1" {
+		t.Errorf("trace_id = %q, want trace-job1", result.Traces[0].TraceID)
+	}
+}

@@ -23,8 +23,6 @@ import (
 	"cloud.google.com/go/firestore"
 	firebase "firebase.google.com/go/v4"
 	fbauth "firebase.google.com/go/v4/auth"
-	"golang.org/x/net/http2"
-	"golang.org/x/net/http2/h2c"
 	"golang.org/x/oauth2/google"
 	"gopkg.in/yaml.v3"
 
@@ -586,11 +584,21 @@ func main() {
 					// anthropic-vertex is a native Messages API passthrough (for Claude Code).
 					if p.Name == "anthropic" {
 						ft := &proxy.AnthropicFormatTranslator{}
-						if cfg.Proxy.VertexAI.Anthropic.CachingMode != "" {
-							ft.SetCachingMode(proxy.ParseCachingMode(cfg.Proxy.VertexAI.Anthropic.CachingMode))
+						// Fall back to deprecated top-level fields if new sub-struct fields are empty.
+						cachingMode := cfg.Proxy.VertexAI.Anthropic.CachingMode
+						if cachingMode == "" && cfg.Proxy.VertexAI.DeprecatedCachingMode != "" {
+							cachingMode = cfg.Proxy.VertexAI.DeprecatedCachingMode
 						}
-						if cfg.Proxy.VertexAI.Anthropic.CacheTTL != "" {
-							ft.SetCacheTTL(proxy.ParseCacheTTL(cfg.Proxy.VertexAI.Anthropic.CacheTTL))
+						if cachingMode != "" {
+							ft.SetCachingMode(proxy.ParseCachingMode(cachingMode))
+						}
+
+						cacheTTL := cfg.Proxy.VertexAI.Anthropic.CacheTTL
+						if cacheTTL == "" && cfg.Proxy.VertexAI.DeprecatedCacheTTL != "" {
+							cacheTTL = cfg.Proxy.VertexAI.DeprecatedCacheTTL
+						}
+						if cacheTTL != "" {
+							ft.SetCacheTTL(proxy.ParseCacheTTL(cacheTTL))
 						}
 						allProviders[i].FormatTranslator = ft
 					}
@@ -1003,9 +1011,15 @@ func main() {
 		slog.Info("🔓 Running in dev mode — auth disabled")
 	}
 
+	// Enable both HTTP/1 and unencrypted HTTP/2 (replaces deprecated h2c package).
+	var protocols http.Protocols
+	protocols.SetHTTP1(true)
+	protocols.SetUnencryptedHTTP2(true)
+
 	srv := &http.Server{
 		Addr:              addr,
-		Handler:           h2c.NewHandler(authedMux, &http2.Server{}),
+		Handler:           authedMux,
+		Protocols:         &protocols,
 		ReadHeaderTimeout: 10 * time.Second,
 		WriteTimeout:      10 * time.Minute, // generous for streaming LLM responses
 		IdleTimeout:       120 * time.Second,

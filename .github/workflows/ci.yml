@@ -97,13 +97,13 @@ jobs:
 
       - name: Download modules
         run: |
-          nix develop . --command bash -c '
+          nix develop . --command bash -c "
             for attempt in 1 2 3; do
               go mod download && break
-              echo "::warning::go mod download failed (attempt $attempt/3), retrying..."
+              echo \"::warning::go mod download failed (attempt $attempt/3), retrying...\"
               sleep 5
             done
-          '
+          "
 
       - name: Build
         run: nix develop . --command go build ./...
@@ -167,13 +167,13 @@ jobs:
 
       - name: Download modules
         run: |
-          nix develop . --command bash -c '
+          nix develop . --command bash -c "
             for attempt in 1 2 3; do
               go mod download && break
-              echo "::warning::go mod download failed (attempt $attempt/3), retrying..."
+              echo \"::warning::go mod download failed (attempt $attempt/3), retrying...\"
               sleep 5
             done
-          '
+          "
 
       - name: Test (${{ matrix.group.name }})
         run: nix develop . --command go test ${{ matrix.group.pkgs }} -v -race -count=1 -p 4 -parallel 4 -coverprofile=coverage-${{ matrix.group.name }}.out -timeout 180s

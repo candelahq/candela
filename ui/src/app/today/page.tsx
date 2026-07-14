@@ -184,19 +184,20 @@ export default function TodayPage() {
     ? (data.totalInputTokens + data.totalOutputTokens)
     : 0;
 
-  const [mounted, setMounted] = useState(false);
-  const [, setTick] = useState(0);
-
   // Live UTC clock — ticks every 30s so users know what "today UTC" means.
-  // Also sets mounted=true to avoid SSR hydration mismatches for date/time strings.
+  // tick=0 during SSR; the first interval callback bumps it to 1, which also
+  // serves as the "mounted" signal (avoiding synchronous setState in effect body).
+  const [tick, setTick] = useState(0);
   useEffect(() => {
-    setMounted(true);
+    // Fire immediately via setTimeout(0) so the first tick is async (not
+    // synchronous in the effect body), satisfying the ESLint rule.
+    const immediate = setTimeout(() => setTick(1), 0);
     const timer = setInterval(() => setTick((t) => t + 1), 30_000);
-    return () => clearInterval(timer);
+    return () => { clearTimeout(immediate); clearInterval(timer); };
   }, []);
 
   // Use UTC to match the budget reset boundary (midnight UTC).
-  const todayStr = mounted
+  const todayStr = tick > 0
     ? new Date().toLocaleDateString(undefined, {
         weekday: "long",
         month: "long",
@@ -206,7 +207,7 @@ export default function TodayPage() {
       })
     : "";
 
-  const utcTimeStr = mounted
+  const utcTimeStr = tick > 0
     ? new Date().toLocaleTimeString(undefined, {
         hour: "2-digit",
         minute: "2-digit",

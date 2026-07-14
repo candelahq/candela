@@ -222,7 +222,7 @@ export default function TodayPage() {
           <span className="today-date">{todayStr}</span>
           <span className="today-utc-clock">
             {utcTimeStr} UTC · {data?.periodResetsAt
-              ? `Resets ${new Date(data.periodResetsAt).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", hour12: true })}`
+              ? `Resets ${new Date(data.periodResetsAt).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", hour12: true })} local time`
               : "Resets at midnight UTC"}
           </span>
         </div>

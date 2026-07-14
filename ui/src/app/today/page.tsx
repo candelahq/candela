@@ -194,15 +194,14 @@ export default function TodayPage() {
   });
 
   // Live UTC clock — ticks every 30s so users know what "today UTC" means.
-  // Initialize as null to avoid SSR/client hydration mismatch.
-  const [utcNow, setUtcNow] = useState<Date | null>(null);
+  // Use a counter to trigger re-renders (avoids ESLint setState-in-effect error).
+  const [, setTick] = useState(0);
   useEffect(() => {
-    setUtcNow(new Date());
-    const tick = setInterval(() => setUtcNow(new Date()), 30_000);
-    return () => clearInterval(tick);
+    const timer = setInterval(() => setTick((t) => t + 1), 30_000);
+    return () => clearInterval(timer);
   }, []);
-  const utcTimeStr = utcNow
-    ? utcNow.toLocaleTimeString(undefined, {
+  const utcTimeStr = typeof window !== "undefined"
+    ? new Date().toLocaleTimeString(undefined, {
         hour: "2-digit",
         minute: "2-digit",
         timeZone: "UTC",

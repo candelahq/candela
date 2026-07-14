@@ -23,8 +23,6 @@ import (
 	"cloud.google.com/go/firestore"
 	firebase "firebase.google.com/go/v4"
 	fbauth "firebase.google.com/go/v4/auth"
-	"golang.org/x/net/http2"
-	"golang.org/x/net/http2/h2c"
 	"golang.org/x/oauth2/google"
 	"gopkg.in/yaml.v3"
 
@@ -1003,9 +1001,15 @@ func main() {
 		slog.Info("🔓 Running in dev mode — auth disabled")
 	}
 
+	// Enable both HTTP/1 and unencrypted HTTP/2 (replaces deprecated h2c package).
+	var protocols http.Protocols
+	protocols.SetHTTP1(true)
+	protocols.SetUnencryptedHTTP2(true)
+
 	srv := &http.Server{
 		Addr:              addr,
-		Handler:           h2c.NewHandler(authedMux, &http2.Server{}),
+		Handler:           authedMux,
+		Protocols:         &protocols,
 		ReadHeaderTimeout: 10 * time.Second,
 		WriteTimeout:      10 * time.Minute, // generous for streaming LLM responses
 		IdleTimeout:       120 * time.Second,

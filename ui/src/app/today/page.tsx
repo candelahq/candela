@@ -184,23 +184,29 @@ export default function TodayPage() {
     ? (data.totalInputTokens + data.totalOutputTokens)
     : 0;
 
-  // Use UTC to match the budget reset boundary (midnight UTC).
-  const todayStr = new Date().toLocaleDateString(undefined, {
-    weekday: "long",
-    month: "long",
-    day: "numeric",
-    year: "numeric",
-    timeZone: "UTC",
-  });
+  const [mounted, setMounted] = useState(false);
+  const [, setTick] = useState(0);
 
   // Live UTC clock — ticks every 30s so users know what "today UTC" means.
-  // Use a counter to trigger re-renders (avoids ESLint setState-in-effect error).
-  const [, setTick] = useState(0);
+  // Also sets mounted=true to avoid SSR hydration mismatches for date/time strings.
   useEffect(() => {
+    setMounted(true);
     const timer = setInterval(() => setTick((t) => t + 1), 30_000);
     return () => clearInterval(timer);
   }, []);
-  const utcTimeStr = typeof window !== "undefined"
+
+  // Use UTC to match the budget reset boundary (midnight UTC).
+  const todayStr = mounted
+    ? new Date().toLocaleDateString(undefined, {
+        weekday: "long",
+        month: "long",
+        day: "numeric",
+        year: "numeric",
+        timeZone: "UTC",
+      })
+    : "";
+
+  const utcTimeStr = mounted
     ? new Date().toLocaleTimeString(undefined, {
         hour: "2-digit",
         minute: "2-digit",

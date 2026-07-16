@@ -22,7 +22,6 @@ import (
 
 	"cloud.google.com/go/firestore"
 	firebase "firebase.google.com/go/v4"
-	fbauth "firebase.google.com/go/v4/auth"
 	"golang.org/x/oauth2/google"
 	"gopkg.in/yaml.v3"
 
@@ -966,18 +965,19 @@ func main() {
 	}
 
 	// Initialize Firebase Admin SDK for token verification.
-	var fbAuthClient *fbauth.Client
+	var tokenVerifier auth.TokenVerifier
 	if !devMode {
 		fbApp, err := firebase.NewApp(context.Background(), nil)
 		if err != nil {
 			slog.Error("failed to initialize Firebase Admin SDK", "error", err)
 			os.Exit(1)
 		}
-		fbAuthClient, err = fbApp.Auth(context.Background())
+		fbAuthClient, err := fbApp.Auth(context.Background())
 		if err != nil {
 			slog.Error("failed to get Firebase Auth client", "error", err)
 			os.Exit(1)
 		}
+		tokenVerifier = auth.NewFirebaseTokenVerifier(fbAuthClient)
 		slog.Info("🔐 Firebase Auth initialized")
 	}
 
@@ -1001,7 +1001,7 @@ func main() {
 
 	authedMux := auth.FirebaseAuthMiddleware(
 		corsMiddleware(mux, cfg.CORS.AllowedOrigins),
-		fbAuthClient,
+		tokenVerifier,
 		cloudRunURL,
 		userAuth,
 		devMode,

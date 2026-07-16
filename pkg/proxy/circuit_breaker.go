@@ -130,6 +130,16 @@ func (cb *CircuitBreaker) State() CircuitState {
 	return cb.state
 }
 
+// IsOpen returns true if the circuit breaker is in the Open state and the
+// reset timeout has NOT elapsed. Unlike AllowRequest, this does not transition
+// the state — it's a pure read used for routing decisions (e.g., skipping
+// a provider with a tripped circuit in a fallback chain).
+func (cb *CircuitBreaker) IsOpen() bool {
+	cb.mu.Lock()
+	defer cb.mu.Unlock()
+	return cb.state == CircuitOpen && time.Since(cb.lastFailureTime) <= cb.resetTimeout
+}
+
 // String returns a human-readable state name.
 func (s CircuitState) String() string {
 	switch s {

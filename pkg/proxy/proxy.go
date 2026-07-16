@@ -251,6 +251,10 @@ type Proxy struct {
 	spanSem   chan struct{} // bounds concurrent async span-creation goroutines
 	asyncSem  chan struct{} // bounds best-effort async goroutines (touch-active, budget notify)
 
+	// Retry/fallback support.
+	retryConfig      RetryConfig
+	fallbackResolver *FallbackResolver
+
 	// Optional dependencies for team-mode features.
 	users    storage.UserStore         // Budget deduction (nil = no budget tracking)
 	budgetCk *notify.BudgetChecker     // Budget threshold notifications (nil = no alerts)
@@ -298,6 +302,10 @@ type Config struct {
 	DailyLimits    []SpendLimitConfig        `yaml:"daily_limits"`         // Per-model daily spend limits
 	Policy         *PolicyConfig             `yaml:"policy"`               // Model allowlist policy (nil = all allowed)
 	Catalog        catalog.ModelCatalogStore `yaml:"-"`                    // Injected; used for access gate lookups
+
+	// Retry/fallback configuration for upstream requests.
+	Retry    RetryConfig    `yaml:"retry"`
+	Fallback FallbackConfig `yaml:"fallback"`
 
 	// HTTP transport tuning for upstream LLM provider connections.
 	MaxIdleConns        int `yaml:"max_idle_conns"`          // default: 200
@@ -407,11 +415,23 @@ func New(cfg Config, submitter SpanSubmitter, calc *costcalc.Calculator) (*Proxy
 		projectID:    cfg.ProjectID,
 		config:       cfg,
 		breakers:     breakers,
+		retryConfig:  cfg.Retry,
 		spanSem:      make(chan struct{}, 200), // CRIT-16: cap concurrent span goroutines
 		asyncSem:     make(chan struct{}, 50),  // #333: cap best-effort async goroutines
 		saRL:         newSARateLimiter(0),      // default 120 RPM per SA
 		pendingSpend: newPendingSpendTracker(),
 		client:       newUpstreamHTTPClient(cfg),
+	}
+
+	// Initialize fallback resolver if configured.
+	// Build provider pointers from p.config.Providers (stored on struct) rather
+	// than &cfg.Providers[i] which would dangle after New() returns (cfg is by-value).
+	if cfg.Fallback.Enabled && len(cfg.Fallback.Chains) > 0 {
+		providerPtrs := make([]*Provider, 0, len(p.config.Providers))
+		for i := range p.config.Providers {
+			providerPtrs = append(providerPtrs, &p.config.Providers[i])
+		}
+		p.fallbackResolver = NewFallbackResolver(cfg.Fallback, providerPtrs)
 	}
 
 	// Initialize spend tracker if daily limits are configured.
@@ -1093,7 +1113,7 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 	// If the provider has a FormatTranslator, convert the request format
 	// (e.g. OpenAI Chat Completions → Anthropic Messages).
 	var translatedModel string
-	upstreamBody := reqBody
+	var upstreamBody []byte
 
 	// Always strip Candela-internal headers before forwarding — they must
 	// never leak to any upstream (Anthropic, Gemini, etc.).
@@ -1102,259 +1122,385 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 	ttlOverride := r.Header.Get(CacheTTLHeader)
 	r.Header.Del(CacheTTLHeader)
 
-	if provider.FormatTranslator != nil {
-		// Per-request caching override via X-Candela-Caching / X-Candela-Cache-TTL headers.
-		// Uses TranslateRequestWithModeAndTTL to avoid mutating shared translator
-		// state, which would race with concurrent requests.
-		if ft, ok := provider.FormatTranslator.(*AnthropicFormatTranslator); ok && (cachingOverride != "" || ttlOverride != "") {
-			mode := ft.GetCachingMode()
-			ttl := ft.GetCacheTTL()
-			if cachingOverride != "" {
-				mode = ParseCachingMode(cachingOverride)
-			}
-			if ttlOverride != "" {
-				ttl = ParseCacheTTL(ttlOverride)
-			}
-			upstreamBody, translatedModel, err = ft.TranslateRequestWithModeAndTTL(reqBody, mode, ttl)
-		} else {
-			upstreamBody, translatedModel, err = provider.FormatTranslator.TranslateRequest(reqBody)
-		}
-		if err != nil {
-			ProxyErrorResponse(w, http.StatusBadRequest, fmt.Sprintf("request translation error: %v", err), "invalid_request_error")
-			return
-		}
-
-		// For translated providers, also check streaming against the translated body.
-		isStreaming = isStreamingRequest(providerName, upstreamBody)
-
-		slog.Debug("translated request",
-			"provider", providerName,
-			"model", translatedModel,
-			"streaming", isStreaming)
-	}
-
-	// --- Vertex AI body enrichment for native Anthropic passthrough ---
-	// When there's no FormatTranslator (e.g. anthropic-vertex), the body is
-	// forwarded as-is. But Vertex AI rawPredict requires:
-	//   1. `anthropic_version` in the body (Claude Code sends it as a header)
-	//   2. `model` NOT in the body (Vertex AI identifies model from URL path)
-	// NOTE: Bedrock also has a PathRewriter but doesn't need anthropic_version
-	// or model stripping — Bedrock accepts the model in the URL and ignores
-	// extra body fields. Use RequestSigner to distinguish: Bedrock uses SigV4
-	// signing, Vertex uses Bearer tokens.
-	// NOTE: This block is scoped to Anthropic providers — Gemini providers with
-	// PathRewriter have different body requirements (model prefix, no stripping).
-	isAnthropicPassthrough := providerName == "anthropic-vertex"
-	if provider.FormatTranslator == nil && provider.PathRewriter != nil && provider.RequestSigner == nil && isAnthropicPassthrough {
-		var bodyMap map[string]interface{}
-		if json.Unmarshal(upstreamBody, &bodyMap) == nil && bodyMap != nil {
-			modified := false
-			// Inject anthropic_version — Vertex AI rawPredict requires
-			// a specific version, not the standard "2023-06-01" that
-			// Claude Code / @ai-sdk/anthropic sends. Always override.
-			wantVersion := provider.AnthropicVersion
-			if wantVersion == "" {
-				wantVersion = DefaultVertexAnthropicVersion
-			}
-			if v, _ := bodyMap["anthropic_version"].(string); v != wantVersion {
-				bodyMap["anthropic_version"] = wantVersion
-				modified = true
-			}
-			// Strip model — Vertex AI gets it from the URL path and
-			// rejects extra fields in the body.
-			if _, hasModel := bodyMap["model"]; hasModel {
-				delete(bodyMap, "model")
-				modified = true
-			}
-			if modified {
-				if enriched, err := json.Marshal(bodyMap); err == nil {
-					upstreamBody = enriched
+	// ── Retry/Fallback loop ──
+	// Build the provider attempt list: primary, then fallbacks (if configured).
+	// Each fallback candidate is checked against pricing and policy gates
+	// before inclusion — unchecked fallbacks could bypass authorization.
+	providerAttempts := []Provider{provider}
+	if p.fallbackResolver != nil {
+		if fps := p.fallbackResolver.FallbackProviders(requestModel, providerName); len(fps) > 0 {
+			for _, fp := range fps {
+				// Skip fallback providers whose circuit breaker is open.
+				if cb, ok := p.breakers[fp.Name]; ok && cb.IsOpen() {
+					slog.Info("skipping fallback provider: circuit breaker open",
+						"provider", fp.Name, "model", requestModel,
+						"request_id", requestID)
+					continue
 				}
-			}
-
-			// Debug: log upstream body when CANDELA_DEBUG=proxy is set.
-			if os.Getenv("CANDELA_DEBUG") == "proxy" {
-				// Log top-level keys and cache_control presence for debugging.
-				keys := make([]string, 0, len(bodyMap))
-				for k := range bodyMap {
-					keys = append(keys, k)
+				// Gate: pricing must be configured for the fallback provider.
+				if requestModel != "" && strings.ToLower(fp.Name) != "local" &&
+					!p.calc.HasPricing(pricingProvider(fp.Name), requestModel) {
+					slog.Info("skipping fallback provider: no pricing",
+						"provider", fp.Name, "model", requestModel,
+						"request_id", requestID)
+					continue
 				}
-				// Check system for cache_control.
-				var systemSnippet string
-				if sys, ok := bodyMap["system"]; ok {
-					if b, err := json.Marshal(sys); err == nil {
-						if len(b) > 500 {
-							systemSnippet = string(b[:500]) + "..."
-						} else {
-							systemSnippet = string(b)
-						}
-					}
+				// Gate: model must be allowed by policy for the fallback provider.
+				if requestModel != "" && !p.policy.IsAllowed(fp.Name, requestModel) {
+					slog.Info("skipping fallback provider: blocked by policy",
+						"provider", fp.Name, "model", requestModel,
+						"request_id", requestID)
+					continue
 				}
-				slog.Info("CANDELA_DEBUG: passthrough body",
-					"provider", providerName,
-					"keys", keys,
-					"anthropic_version", bodyMap["anthropic_version"],
-					"system_snippet", systemSnippet,
-					"body_len", len(upstreamBody))
+				providerAttempts = append(providerAttempts, *fp)
 			}
 		}
 	}
 
-	// --- Vertex AI Gemini model prefix injection ---
-	// Vertex AI's OpenAI-compat endpoint requires model names to include the
-	// publisher prefix (e.g. "google/gemini-2.5-flash"). Transparently inject
-	// the "google/" prefix so clients can send bare model names.
-	// Uses requestModel (extracted once above) to avoid redundant JSON parsing.
-	// Uses rewriteModelField (regex) to avoid expensive JSON round-trip.
-	// --- Vertex AI publisher prefix injection ---
-	// Vertex AI's OpenAI-compat endpoint requires model names to include the
-	// publisher prefix (e.g. "google/gemini-2.5-flash"). Transparently inject
-	// the prefix so clients can send bare model names.
-	if provider.PathRewriter != nil && requestModel != "" {
-		switch providerName {
-		case "gemini-oai":
-			if !strings.HasPrefix(requestModel, "google/") {
-				upstreamBody = rewriteModelField(upstreamBody, "google/"+requestModel)
-			}
-		case "deepseek", "deepseek-v3":
-			if !strings.HasPrefix(requestModel, "deepseek-ai/") {
-				upstreamBody = rewriteModelField(upstreamBody, "deepseek-ai/"+requestModel)
-			}
-		case "qwen":
-			if !strings.HasPrefix(requestModel, "qwen/") {
-				upstreamBody = rewriteModelField(upstreamBody, "qwen/"+requestModel)
-			}
-		case "zai":
-			if !strings.HasPrefix(requestModel, "zai-org/") {
-				upstreamBody = rewriteModelField(upstreamBody, "zai-org/"+requestModel)
-			}
+	var (
+		resp           *http.Response
+		upstreamPath2  string // may be rewritten per provider
+		activeProvider Provider
+		activeProvName string
+		cbAllow        bool
+		ttfb           time.Duration
+		extendedTTL    bool
+		proxySpanID    string
+		lastErr        error
+		attemptCount   int
+		// streamCancel for the winning response — deferred so the context
+		// lives through handleStreamingResponse/handleStandardResponse.
+		winningStreamCancel context.CancelFunc
+	)
+	defer func() {
+		if winningStreamCancel != nil {
+			winningStreamCancel()
 		}
-	}
-
-	// --- Path rewriting ---
-	// If the provider has a PathRewriter, rewrite the upstream URL path
-	// (e.g. Vertex AI project-scoped model endpoints).
-	// Uses translatedModel (from FormatTranslator) or requestModel
-	// (extracted once above from body or URL path).
-	modelForPath := translatedModel
-	if modelForPath == "" {
-		modelForPath = requestModel
-	}
-	// SECURITY: Reject model names with path traversal characters before
-	// they're interpolated into Vertex AI URL paths. Without this, a crafted
-	// model name like "../../other-project/locations/.../models/gemini-2.5-flash"
-	// could SSRF into arbitrary Vertex AI resources the SA has access to.
-	// See safeModelNameRe definition for the full threat model.
-	if modelForPath != "" && !isSafeModelName(modelForPath) {
-		slog.Warn("blocked request: invalid model name (possible path traversal)",
-			"model", modelForPath, "provider", providerName, "user_id", effectiveUserID)
-		ProxyErrorResponse(w, http.StatusBadRequest, "invalid model name", "invalid_request_error")
-		return
-	}
-	if provider.PathRewriter != nil && modelForPath != "" {
-		upstreamPath = provider.PathRewriter.RewritePath(modelForPath, isStreaming)
-	}
-
-	// --- Stream usage injection ---
-	// OpenAI/Gemini-OAI only include usage data in the final SSE chunk when
-	// stream_options.include_usage is set. Without this, streaming responses
-	// return 0 tokens. Inject it transparently so token counting always works.
-	if isStreaming && provider.FormatTranslator == nil {
-		upstreamBody = injectStreamUsageOption(providerName, upstreamBody)
-	}
-
-	// Build the upstream request.
-	upstreamURL := provider.UpstreamURL + upstreamPath
-	// SECURITY: Only forward client query params for passthrough providers
-	// (openai, anthropic-direct) where the client provides their own API key.
-	// For managed-auth providers (Vertex AI, Bedrock), strip the query string
-	// to prevent parameter injection (?key=..., ?alt=media, etc.).
-	if r.URL.RawQuery != "" && provider.TokenSource == nil && provider.RequestSigner == nil {
-		upstreamURL += "?" + r.URL.RawQuery
-	}
-
-	// SECURITY: Use a detached context for the upstream request so that a
-	// client disconnect doesn't cancel the upstream call. This ensures we
-	// always receive the final usage chunk (with token counts) from the
-	// upstream provider, preventing cost evasion by aborting mid-stream.
-	// The 5-minute client timeout on p.client still applies.
-	upstreamCtx, streamCancel := context.WithTimeout(context.WithoutCancel(r.Context()), maxStreamDuration)
-	defer streamCancel()
-	upstreamReq, err := http.NewRequestWithContext(upstreamCtx, r.Method, upstreamURL, bytes.NewReader(upstreamBody))
-	if err != nil {
-		ProxyErrorResponse(w, http.StatusInternalServerError, "failed to create upstream request", "server_error")
-		return
-	}
-
-	// Forward headers (auth, content-type, etc).
-	forwardHeaders(r, upstreamReq, providerName, provider.TokenSource != nil || provider.RequestSigner != nil || provider.APIKey != "")
-
-	// Pre-generate the span ID that buildSpan will use for this proxy span.
-	// We need it now so the outgoing traceparent to the upstream LLM
-	// references the sidecar's span as its parent.
-	proxySpanID := GenerateSpanID()
+	}()
 
 	// Ensure we always have a trace context — either from the caller's
-	// incoming traceparent or a freshly-generated root trace ID. This
-	// guarantees every upstream request gets a traceparent, enabling
-	// end-to-end trace correlation even when the caller has no OTel.
+	// incoming traceparent or a freshly-generated root trace ID.
 	if traceCtx == nil {
 		traceCtx = &traceContext{traceID: GenerateTraceID()}
 	}
 
-	// Inject an outgoing traceparent so the upstream LLM API (if it
-	// supports OTel) creates spans as children of the sidecar span.
-	upstreamReq.Header.Set("Traceparent",
-		fmt.Sprintf("00-%s-%s-01", traceCtx.traceID, proxySpanID))
+	for providerIdx, attemptProvider := range providerAttempts {
+		activeProvider = attemptProvider
+		activeProvName = attemptProvider.Name
 
-	// --- Auth injection ---
-	// RequestSigner (e.g., AWS SigV4) takes precedence over TokenSource (Bearer tokens).
-	if provider.RequestSigner != nil {
-		if signErr := provider.RequestSigner.SignRequest(r.Context(), upstreamReq, upstreamBody); signErr != nil {
-			slog.Error("failed to sign request", "provider", providerName, "error", signErr)
-			ProxyErrorResponse(w, http.StatusInternalServerError, "failed to sign upstream request", "server_error")
-			return
+		// Per-provider retry loop.
+		maxAttempts := 1
+		if p.retryConfig.Enabled {
+			maxAttempts = p.retryConfig.effectiveMaxAttempts()
 		}
-	} else if provider.TokenSource != nil {
-		token, tokenErr := provider.TokenSource.Token()
-		if tokenErr != nil {
-			slog.Error("failed to get auth token", "provider", providerName, "error", tokenErr)
-			ProxyErrorResponse(w, http.StatusInternalServerError, "failed to obtain cloud credentials", "server_error")
-			return
+
+		for attempt := 1; attempt <= maxAttempts; attempt++ {
+			attemptCount++
+
+			// Backoff before retries on the same provider (not before the
+			// first attempt, and not when switching to a fallback provider —
+			// fallback providers are independent upstreams and should be
+			// tried immediately).
+			if attempt > 1 {
+				backoff := p.retryConfig.BackoffDuration(attempt - 2)
+				// Honour Retry-After from the previous response if it's longer.
+				if resp != nil {
+					if ra := ParseRetryAfter(resp); ra > backoff {
+						backoff = ra
+					}
+					_ = resp.Body.Close()
+					resp = nil
+				}
+				if backoff > 0 {
+					slog.Info("retrying upstream request",
+						"provider", activeProvName, "attempt", attemptCount,
+						"backoff_ms", backoff.Milliseconds(),
+						"request_id", requestID, "model", requestModel)
+					// Context-aware backoff: abort if the client disconnects
+					// during the wait instead of consuming upstream quota.
+					select {
+					case <-time.After(backoff):
+					case <-r.Context().Done():
+						return
+					}
+				}
+			}
+
+			// --- Per-attempt translation ---
+			// Each provider may have a different FormatTranslator, so re-translate.
+			translatedModel = ""
+			upstreamBody = reqBody
+			upstreamPath2 = upstreamPath
+
+			if attemptProvider.FormatTranslator != nil {
+				if ft, ok := attemptProvider.FormatTranslator.(*AnthropicFormatTranslator); ok && (cachingOverride != "" || ttlOverride != "") {
+					mode := ft.GetCachingMode()
+					ttl := ft.GetCacheTTL()
+					if cachingOverride != "" {
+						mode = ParseCachingMode(cachingOverride)
+					}
+					if ttlOverride != "" {
+						ttl = ParseCacheTTL(ttlOverride)
+					}
+					upstreamBody, translatedModel, err = ft.TranslateRequestWithModeAndTTL(reqBody, mode, ttl)
+				} else {
+					upstreamBody, translatedModel, err = attemptProvider.FormatTranslator.TranslateRequest(reqBody)
+				}
+				if err != nil {
+					// Translation errors are not retryable — the body is malformed.
+					ProxyErrorResponse(w, http.StatusBadRequest, fmt.Sprintf("request translation error: %v", err), "invalid_request_error")
+					return
+				}
+				isStreaming = isStreamingRequest(activeProvName, upstreamBody)
+
+				slog.Debug("translated request",
+					"provider", activeProvName,
+					"model", translatedModel,
+					"streaming", isStreaming)
+			}
+
+			// --- Vertex AI body enrichment for native Anthropic passthrough ---
+			isAnthropicPassthrough := activeProvName == "anthropic-vertex"
+			if attemptProvider.FormatTranslator == nil && attemptProvider.PathRewriter != nil && attemptProvider.RequestSigner == nil && isAnthropicPassthrough {
+				var bodyMap map[string]interface{}
+				if json.Unmarshal(upstreamBody, &bodyMap) == nil && bodyMap != nil {
+					modified := false
+					wantVersion := attemptProvider.AnthropicVersion
+					if wantVersion == "" {
+						wantVersion = DefaultVertexAnthropicVersion
+					}
+					if v, _ := bodyMap["anthropic_version"].(string); v != wantVersion {
+						bodyMap["anthropic_version"] = wantVersion
+						modified = true
+					}
+					if _, hasModel := bodyMap["model"]; hasModel {
+						delete(bodyMap, "model")
+						modified = true
+					}
+					if modified {
+						if enriched, jsonErr := json.Marshal(bodyMap); jsonErr == nil {
+							upstreamBody = enriched
+						}
+					}
+
+					if os.Getenv("CANDELA_DEBUG") == "proxy" {
+						keys := make([]string, 0, len(bodyMap))
+						for k := range bodyMap {
+							keys = append(keys, k)
+						}
+						var systemSnippet string
+						if sys, ok := bodyMap["system"]; ok {
+							if b, jsonErr := json.Marshal(sys); jsonErr == nil {
+								if len(b) > 500 {
+									systemSnippet = string(b[:500]) + "..."
+								} else {
+									systemSnippet = string(b)
+								}
+							}
+						}
+						slog.Info("CANDELA_DEBUG: passthrough body",
+							"provider", activeProvName,
+							"keys", keys,
+							"anthropic_version", bodyMap["anthropic_version"],
+							"system_snippet", systemSnippet,
+							"body_len", len(upstreamBody))
+					}
+				}
+			}
+
+			// --- Publisher prefix injection ---
+			if attemptProvider.PathRewriter != nil && requestModel != "" {
+				switch activeProvName {
+				case "gemini-oai":
+					if !strings.HasPrefix(requestModel, "google/") {
+						upstreamBody = rewriteModelField(upstreamBody, "google/"+requestModel)
+					}
+				case "deepseek", "deepseek-v3":
+					if !strings.HasPrefix(requestModel, "deepseek-ai/") {
+						upstreamBody = rewriteModelField(upstreamBody, "deepseek-ai/"+requestModel)
+					}
+				case "qwen":
+					if !strings.HasPrefix(requestModel, "qwen/") {
+						upstreamBody = rewriteModelField(upstreamBody, "qwen/"+requestModel)
+					}
+				case "zai":
+					if !strings.HasPrefix(requestModel, "zai-org/") {
+						upstreamBody = rewriteModelField(upstreamBody, "zai-org/"+requestModel)
+					}
+				}
+			}
+
+			// --- Path rewriting ---
+			modelForPath := translatedModel
+			if modelForPath == "" {
+				modelForPath = requestModel
+			}
+			if modelForPath != "" && !isSafeModelName(modelForPath) {
+				slog.Warn("blocked request: invalid model name (possible path traversal)",
+					"model", modelForPath, "provider", activeProvName, "user_id", effectiveUserID)
+				ProxyErrorResponse(w, http.StatusBadRequest, "invalid model name", "invalid_request_error")
+				return
+			}
+			if attemptProvider.PathRewriter != nil && modelForPath != "" {
+				upstreamPath2 = attemptProvider.PathRewriter.RewritePath(modelForPath, isStreaming)
+			}
+
+			// --- Stream usage injection ---
+			if isStreaming && attemptProvider.FormatTranslator == nil {
+				upstreamBody = injectStreamUsageOption(activeProvName, upstreamBody)
+			}
+
+			// Build the upstream request.
+			upstreamURL := attemptProvider.UpstreamURL + upstreamPath2
+			if r.URL.RawQuery != "" && attemptProvider.TokenSource == nil && attemptProvider.RequestSigner == nil {
+				upstreamURL += "?" + r.URL.RawQuery
+			}
+
+			upstreamCtx, streamCancel := context.WithTimeout(context.WithoutCancel(r.Context()), maxStreamDuration)
+			upstreamReq, reqErr := http.NewRequestWithContext(upstreamCtx, r.Method, upstreamURL, bytes.NewReader(upstreamBody))
+			if reqErr != nil {
+				streamCancel()
+				ProxyErrorResponse(w, http.StatusInternalServerError, "failed to create upstream request", "server_error")
+				return
+			}
+
+			// Forward headers.
+			forwardHeaders(r, upstreamReq, activeProvName, attemptProvider.TokenSource != nil || attemptProvider.RequestSigner != nil || attemptProvider.APIKey != "")
+
+			// Pre-generate span ID for traceparent.
+			proxySpanID = GenerateSpanID()
+
+			// Inject traceparent.
+			upstreamReq.Header.Set("Traceparent",
+				fmt.Sprintf("00-%s-%s-01", traceCtx.traceID, proxySpanID))
+
+			// --- Auth injection ---
+			if attemptProvider.RequestSigner != nil {
+				if signErr := attemptProvider.RequestSigner.SignRequest(r.Context(), upstreamReq, upstreamBody); signErr != nil {
+					streamCancel()
+					slog.Error("failed to sign request", "provider", activeProvName, "error", signErr)
+					// Auth errors on fallback: try next provider.
+					if providerIdx < len(providerAttempts)-1 || attempt < maxAttempts {
+						continue
+					}
+					ProxyErrorResponse(w, http.StatusInternalServerError, "failed to sign upstream request", "server_error")
+					return
+				}
+			} else if attemptProvider.TokenSource != nil {
+				token, tokenErr := attemptProvider.TokenSource.Token()
+				if tokenErr != nil {
+					streamCancel()
+					slog.Error("failed to get auth token", "provider", activeProvName, "error", tokenErr)
+					if providerIdx < len(providerAttempts)-1 || attempt < maxAttempts {
+						continue
+					}
+					ProxyErrorResponse(w, http.StatusInternalServerError, "failed to obtain cloud credentials", "server_error")
+					return
+				}
+				upstreamReq.Header.Set("Authorization", "Bearer "+token.AccessToken)
+			} else if attemptProvider.APIKey != "" {
+				if attemptProvider.AuthHeader != "" {
+					upstreamReq.Header.Set(attemptProvider.AuthHeader, attemptProvider.APIKey)
+				} else {
+					upstreamReq.Header.Set("Authorization", "Bearer "+attemptProvider.APIKey)
+				}
+			}
+
+			// Propagate request ID to upstream.
+			upstreamReq.Header.Set("X-Request-ID", requestID)
+
+			// Execute the upstream request.
+			resp, lastErr = p.client.Do(upstreamReq)
+			if lastErr != nil {
+				streamCancel()
+				slog.Error("upstream request failed", "provider", activeProvName, "error", lastErr,
+					"attempt", attemptCount, "request_id", requestID)
+				p.recordCircuitBreaker(activeProvName, true)
+
+				if p.retryConfig.ShouldRetry(attempt, nil, lastErr, false) {
+					continue
+				}
+				// Exhausted retries for this provider — try fallback.
+				break
+			}
+			// Connection succeeded.
+			// Do NOT cancel streamCancel here — the response body needs the
+			// context alive for streaming. Transfer ownership to outer scope.
+			winningStreamCancel = streamCancel
+
+			ttfb = time.Since(startTime)
+
+			// Record circuit breaker state.
+			p.recordCircuitBreaker(activeProvName, resp.StatusCode >= 500)
+
+			// Check if this response should trigger retry or fallback.
+			// Fallback eligibility is decoupled from retryConfig.Enabled so
+			// that fallback chains fire even when same-provider retry is off.
+			isRetryableStatus := p.retryConfig.IsRetryableStatus(resp.StatusCode)
+			hasFallbacks := len(providerAttempts) > 1
+			isRetryableResp := (p.retryConfig.Enabled || hasFallbacks) && isRetryableStatus
+
+			// Non-retryable status (200, 400, 401, etc.) — accept it immediately.
+			if !isRetryableResp {
+				goto done
+			}
+
+			// Retryable status but still have attempts left — retry this provider.
+			if attempt < maxAttempts {
+				slog.Info("retryable upstream error",
+					"provider", activeProvName, "status", resp.StatusCode,
+					"attempt", attemptCount, "request_id", requestID)
+				streamCancel()
+				winningStreamCancel = nil
+				continue
+			}
+
+			// Retryable status but max attempts exhausted — break to try next fallback.
+			// Do NOT cancel the response context here: if this is the last provider,
+			// resp will be forwarded to the client and its context must stay alive.
+			// The outer fallback branch (lines below) handles cancellation for
+			// discarded intermediate responses only.
+			slog.Info("retryable upstream error (attempts exhausted)",
+				"provider", activeProvName, "status", resp.StatusCode,
+				"attempt", attemptCount, "request_id", requestID)
+			break
 		}
-		upstreamReq.Header.Set("Authorization", "Bearer "+token.AccessToken)
-	} else if provider.APIKey != "" {
-		// Static API key auth (custom providers configured via YAML).
-		if provider.AuthHeader != "" {
-			upstreamReq.Header.Set(provider.AuthHeader, provider.APIKey)
-		} else {
-			upstreamReq.Header.Set("Authorization", "Bearer "+provider.APIKey)
+		// Exhausted retries for this provider. If we got a response (even an error one),
+		// and it's the last provider, use it. Otherwise try next fallback.
+		if resp != nil && providerIdx < len(providerAttempts)-1 {
+			_ = resp.Body.Close()
+			resp = nil
+			if winningStreamCancel != nil {
+				winningStreamCancel()
+				winningStreamCancel = nil
+			}
 		}
 	}
 
-	// Propagate request ID to upstream.
-	upstreamReq.Header.Set("X-Request-ID", requestID)
-
-	// Execute the upstream request.
-	resp, err := p.client.Do(upstreamReq)
-	if err != nil {
-		// CRITICAL: Don't leak internal URLs/DNS/network info to the client.
-		slog.Error("upstream request failed", "provider", providerName, "error", err)
+done:
+	// All attempts exhausted — return the last error to the client.
+	if resp == nil {
 		ProxyErrorResponse(w, http.StatusBadGateway, "upstream provider unavailable", "upstream_error")
-		p.recordCircuitBreaker(providerName, true)
 		return
 	}
-	ttfb := time.Since(startTime)
 	defer func() { _ = resp.Body.Close() }()
 
-	// Record circuit breaker state based on upstream response.
-	p.recordCircuitBreaker(providerName, resp.StatusCode >= 500)
+	// Use the provider that actually succeeded (or was last attempted).
+	provider = activeProvider
+	providerName = activeProvName
+
+	// Log retry outcome if we retried.
+	if attemptCount > 1 {
+		slog.Info("retry outcome",
+			"final_provider", providerName, "final_status", resp.StatusCode,
+			"total_attempts", attemptCount, "request_id", requestID)
+	}
 
 	// Return request ID to the client.
 	w.Header().Set("X-Request-ID", requestID)
 
 	// Check circuit breaker — if open, skip observability but still forward.
-	cbAllow := p.breakers[providerName].AllowRequest()
+	cbAllow = p.breakers[providerName].AllowRequest()
 
 	// CRIT-17: Skip observability for utility endpoints (e.g. count_tokens,
 	// tokenize) that don't generate tokens. Parsing their response as a chat
@@ -1367,18 +1513,12 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// ── Resolve effective cache TTL for Anthropic cost normalization (#191) ──
-	// Determines whether cache creation tokens should be charged at 2.0× (1h)
-	// or the default 1.25× (5m). Three sources, in priority order:
-	//   1. Per-request header override (X-Candela-Cache-TTL)
-	//   2. Translator config (AnthropicFormatTranslator.GetCacheTTL)
-	//   3. Request body inspection (passthrough routes: cache_control.ttl)
-	extendedTTL := false
+	extendedTTL = false
 	if ttlOverride != "" {
 		extendedTTL = ParseCacheTTL(ttlOverride) == CacheTTL1h
 	} else if ft, ok := provider.FormatTranslator.(*AnthropicFormatTranslator); ok {
 		extendedTTL = ft.GetCacheTTL() == CacheTTL1h
 	} else if provider.FormatTranslator == nil && isAnthropicProvider(providerName) {
-		// Passthrough Anthropic routes — inspect request body.
 		extendedTTL = extractAnthropicCacheTTL(reqBody)
 	}
 

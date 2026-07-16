@@ -51,7 +51,27 @@ var selfServicePaths = map[string]bool{
 	"/candela.v1.UserService/GetMyBudget":    true,
 }
 
-func FirebaseAuthMiddleware(next http.Handler, fbAuth TokenVerifier, cloudRunAudience string, userAuth UserAuthorizer, devMode bool, allowedSAs []string) http.Handler {
+// MiddlewareOption configures optional behavior of FirebaseAuthMiddleware.
+type MiddlewareOption func(*middlewareConfig)
+
+type middlewareConfig struct {
+	accessTokenValidator AccessTokenValidator
+}
+
+// WithAccessTokenValidator overrides the default Google OAuth2 userinfo
+// validator used by Strategy 3. Use this in tests to inject a mock and
+// avoid live network calls to Google.
+func WithAccessTokenValidator(v AccessTokenValidator) MiddlewareOption {
+	return func(c *middlewareConfig) { c.accessTokenValidator = v }
+}
+
+func FirebaseAuthMiddleware(next http.Handler, fbAuth TokenVerifier, cloudRunAudience string, userAuth UserAuthorizer, devMode bool, allowedSAs []string, opts ...MiddlewareOption) http.Handler {
+	cfg := &middlewareConfig{
+		accessTokenValidator: DefaultAccessTokenValidator(),
+	}
+	for _, o := range opts {
+		o(cfg)
+	}
 	saAllowlist := NewServiceAccountAllowlist(allowedSAs)
 	if saAllowlist.Len() > 0 {
 		slog.Info("🔐 service account allowlist active", "count", saAllowlist.Len())
@@ -158,8 +178,8 @@ func FirebaseAuthMiddleware(next http.Handler, fbAuth TokenVerifier, cloudRunAud
 		}
 
 		// Strategy 3: Try Google OAuth2 access token (candela-local with user ADC).
-		// Validates via Google's userinfo endpoint.
-		user, err := validateAccessToken(r.Context(), token)
+		// Validates via the AccessTokenValidator (production: Google userinfo endpoint).
+		user, err := cfg.accessTokenValidator.ValidateAccessToken(r.Context(), token)
 		if err == nil {
 			// Service account check must also apply to OAuth2 tokens —
 			// otherwise SAs can bypass the allowlist by using an access

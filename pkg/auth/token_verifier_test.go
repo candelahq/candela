@@ -22,8 +22,19 @@ func (m *mockTokenVerifier) VerifyIDToken(ctx context.Context, idToken string) (
 	return m.verifyFunc(ctx, idToken)
 }
 
+// mockAccessTokenValidator is a configurable mock for AccessTokenValidator.
+type mockAccessTokenValidator struct {
+	validateFunc func(ctx context.Context, accessToken string) (*User, error)
+}
+
+func (m *mockAccessTokenValidator) ValidateAccessToken(ctx context.Context, accessToken string) (*User, error) {
+	return m.validateFunc(ctx, accessToken)
+}
+
 // newTestMiddleware builds a minimal auth middleware with the given TokenVerifier
 // and optional UserAuthorizer. Returns an httptest.Server ready for requests.
+// Uses a mock AccessTokenValidator that always rejects tokens, preventing live
+// network calls to Google's userinfo endpoint.
 func newTestMiddleware(t *testing.T, verifier TokenVerifier, userAuth UserAuthorizer, allowedSAs []string) *httptest.Server {
 	t.Helper()
 	inner := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -36,7 +47,14 @@ func newTestMiddleware(t *testing.T, verifier TokenVerifier, userAuth UserAuthor
 		w.WriteHeader(http.StatusOK)
 		_, _ = fmt.Fprintf(w, `{"email":"%s","id":"%s"}`, user.Email, user.ID)
 	})
-	handler := FirebaseAuthMiddleware(inner, verifier, "", userAuth, false, allowedSAs)
+	// Mock validator rejects all access tokens — prevents live Google calls.
+	mockValidator := &mockAccessTokenValidator{
+		validateFunc: func(_ context.Context, _ string) (*User, error) {
+			return nil, fmt.Errorf("mock: access token validation disabled in test")
+		},
+	}
+	handler := FirebaseAuthMiddleware(inner, verifier, "", userAuth, false, allowedSAs,
+		WithAccessTokenValidator(mockValidator))
 	return httptest.NewServer(handler)
 }
 
@@ -209,12 +227,20 @@ func TestTokenVerifier_SelfServicePath_BypassesRegistration(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = fmt.Fprintf(w, `{"email":"%s"}`, user.Email)
 	})
-	handler := FirebaseAuthMiddleware(inner, verifier, "", userAuth, false, nil)
+	handler := FirebaseAuthMiddleware(inner, verifier, "", userAuth, false, nil,
+		WithAccessTokenValidator(&mockAccessTokenValidator{
+			validateFunc: func(_ context.Context, _ string) (*User, error) {
+				return nil, fmt.Errorf("mock: access token validation disabled in test")
+			},
+		}))
 	srv := httptest.NewServer(handler)
 	defer srv.Close()
 
 	// GetCurrentUser is a self-service path — bypasses registration.
-	req, _ := http.NewRequest("POST", srv.URL+"/candela.v1.UserService/GetCurrentUser", nil)
+	req, err := http.NewRequest("POST", srv.URL+"/candela.v1.UserService/GetCurrentUser", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
 	req.Header.Set("Authorization", "Bearer valid-token")
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -250,22 +276,50 @@ func TestTokenVerifier_HealthCheckBypassesAuth(t *testing.T) {
 }
 
 func TestTokenVerifier_Cascade_FirebaseFails_FallsThrough(t *testing.T) {
-	// Firebase fails, but OAuth2 token validation is Strategy 3.
-	// Since we can't easily mock the OAuth2 path (it calls Google),
-	// we verify that when Firebase fails and no other strategies work,
-	// we get 401 (not a panic or 500).
+	// Firebase fails. Strategy 3 (OAuth2 access token) is mocked to return
+	// a known user, proving the cascade falls through correctly without
+	// making live network calls to Google.
 	verifier := &mockTokenVerifier{
 		verifyFunc: func(_ context.Context, _ string) (*fbauth.Token, error) {
 			return nil, fmt.Errorf("Firebase: invalid token")
 		},
 	}
+	mockOAuth := &mockAccessTokenValidator{
+		validateFunc: func(_ context.Context, token string) (*User, error) {
+			if token == "valid-oauth2-token" {
+				return &User{ID: "oauth-sub-123", Email: "oauth@example.com"}, nil
+			}
+			return nil, fmt.Errorf("mock: invalid access token")
+		},
+	}
 
-	srv := newTestMiddleware(t, verifier, nil, nil)
+	inner := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		user := FromContext(r.Context())
+		if user == nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = fmt.Fprintf(w, `{"email":"%s","id":"%s"}`, user.Email, user.ID)
+	})
+	handler := FirebaseAuthMiddleware(inner, verifier, "", nil, false, nil,
+		WithAccessTokenValidator(mockOAuth))
+	srv := httptest.NewServer(handler)
 	defer srv.Close()
 
-	status, _ := doRequest(t, srv.URL, "not-a-firebase-token")
-	if status != 401 {
-		t.Fatalf("status = %d, want 401 (all strategies fail)", status)
+	// Valid OAuth2 token should succeed via Strategy 3 fallthrough.
+	status, body := doRequest(t, srv.URL, "valid-oauth2-token")
+	if status != 200 {
+		t.Fatalf("status = %d, want 200 (Strategy 3 fallthrough); body = %s", status, body)
+	}
+	if !strings.Contains(body, `"email":"oauth@example.com"`) {
+		t.Errorf("body = %s, want email oauth@example.com", body)
+	}
+
+	// Invalid token should still get 401 (all strategies fail).
+	status2, _ := doRequest(t, srv.URL, "not-a-valid-token")
+	if status2 != 401 {
+		t.Fatalf("status = %d, want 401 (all strategies fail)", status2)
 	}
 }
 

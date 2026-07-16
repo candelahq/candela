@@ -22,11 +22,43 @@ type FirebaseTokenVerifier struct {
 }
 
 // NewFirebaseTokenVerifier wraps a Firebase Auth client as a TokenVerifier.
-func NewFirebaseTokenVerifier(client *fbauth.Client) *FirebaseTokenVerifier {
+// Returns nil (untyped) when client is nil to prevent the "typed nil" interface
+// gotcha — a non-nil interface wrapping a nil pointer would bypass != nil checks
+// and panic on VerifyIDToken.
+func NewFirebaseTokenVerifier(client *fbauth.Client) TokenVerifier {
+	if client == nil {
+		return nil
+	}
 	return &FirebaseTokenVerifier{client: client}
 }
 
 // VerifyIDToken delegates to the underlying Firebase Auth client.
 func (f *FirebaseTokenVerifier) VerifyIDToken(ctx context.Context, idToken string) (*fbauth.Token, error) {
 	return f.client.VerifyIDToken(ctx, idToken)
+}
+
+// AccessTokenValidator validates OAuth2 access tokens and returns user info.
+// This interface abstracts the validateAccessToken function for testability,
+// preventing tests from making live network calls to Google's userinfo endpoint.
+//
+// Implementations:
+//   - googleAccessTokenValidator (production, calls googleapis.com/oauth2/v3/userinfo)
+//   - mockAccessTokenValidator (tests)
+type AccessTokenValidator interface {
+	ValidateAccessToken(ctx context.Context, accessToken string) (*User, error)
+}
+
+// googleAccessTokenValidator is the production implementation that calls
+// Google's userinfo endpoint.
+type googleAccessTokenValidator struct{}
+
+// ValidateAccessToken delegates to the package-level validateAccessToken function.
+func (g *googleAccessTokenValidator) ValidateAccessToken(ctx context.Context, accessToken string) (*User, error) {
+	return validateAccessToken(ctx, accessToken)
+}
+
+// DefaultAccessTokenValidator returns the production validator that calls
+// Google's OAuth2 userinfo endpoint.
+func DefaultAccessTokenValidator() AccessTokenValidator {
+	return &googleAccessTokenValidator{}
 }

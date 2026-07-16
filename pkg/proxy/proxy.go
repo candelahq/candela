@@ -424,13 +424,12 @@ func New(cfg Config, submitter SpanSubmitter, calc *costcalc.Calculator) (*Proxy
 	}
 
 	// Initialize fallback resolver if configured.
-	// Build provider pointers from p.providers (owned map) rather than
-	// &cfg.Providers[i] which would dangle after New() returns (cfg is by-value).
+	// Build provider pointers from p.config.Providers (stored on struct) rather
+	// than &cfg.Providers[i] which would dangle after New() returns (cfg is by-value).
 	if cfg.Fallback.Enabled && len(cfg.Fallback.Chains) > 0 {
-		providerPtrs := make([]*Provider, 0, len(p.providers))
-		for name := range p.providers {
-			prov := p.providers[name]
-			providerPtrs = append(providerPtrs, &prov)
+		providerPtrs := make([]*Provider, 0, len(p.config.Providers))
+		for i := range p.config.Providers {
+			providerPtrs = append(providerPtrs, &p.config.Providers[i])
 		}
 		p.fallbackResolver = NewFallbackResolver(cfg.Fallback, providerPtrs)
 	}
@@ -1198,9 +1197,12 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 		for attempt := 1; attempt <= maxAttempts; attempt++ {
 			attemptCount++
 
-			// Backoff before retries (not before the first attempt).
-			if attempt > 1 || providerIdx > 0 {
-				backoff := p.retryConfig.BackoffDuration(attemptCount - 2)
+			// Backoff before retries on the same provider (not before the
+			// first attempt, and not when switching to a fallback provider —
+			// fallback providers are independent upstreams and should be
+			// tried immediately).
+			if attempt > 1 {
+				backoff := p.retryConfig.BackoffDuration(attempt - 2)
 				// Honour Retry-After from the previous response if it's longer.
 				if resp != nil {
 					if ra := ParseRetryAfter(resp); ra > backoff {

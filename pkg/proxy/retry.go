@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"errors"
 	"math"
 	"math/rand"
 	"net"
@@ -112,36 +113,18 @@ func IsPreConnectionError(err error) bool {
 
 	// Unwrap through any wrappers to find the root cause.
 	var netOpErr *net.OpError
-	if ok := errorAs(err, &netOpErr); ok {
+	if errors.As(err, &netOpErr) {
 		// "dial" errors are pre-connection: DNS failure, connection refused,
 		// port unreachable, network unreachable.
 		return netOpErr.Op == "dial"
 	}
 
 	var dnsErr *net.DNSError
-	if ok := errorAs(err, &dnsErr); ok {
+	if errors.As(err, &dnsErr) {
 		return true // DNS resolution failed — never connected.
 	}
 
 	// All other errors are ambiguous — assume bytes may have been sent.
-	return false
-}
-
-// errorAs is a thin wrapper around errors.As that avoids importing errors
-// in this file (it's already imported transitively via net). Using a
-// generic helper keeps the code readable.
-func errorAs[T any](err error, target *T) bool {
-	for err != nil {
-		if t, ok := err.(T); ok { //nolint:errorlint // intentional type assertion for generics
-			*target = t
-			return true
-		}
-		if u, ok := err.(interface{ Unwrap() error }); ok {
-			err = u.Unwrap()
-		} else {
-			return false
-		}
-	}
 	return false
 }
 

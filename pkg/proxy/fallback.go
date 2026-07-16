@@ -42,7 +42,7 @@ func NewFallbackResolver(cfg FallbackConfig, providers []*Provider) *FallbackRes
 	// Sort chains by prefix length descending for most-specific-first matching.
 	chains := make([]FallbackChain, len(cfg.Chains))
 	copy(chains, cfg.Chains)
-	sort.Slice(chains, func(i, j int) bool {
+	sort.SliceStable(chains, func(i, j int) bool {
 		return len(chains[i].ModelPrefix) > len(chains[j].ModelPrefix)
 	})
 

@@ -30,7 +30,7 @@ type Config struct {
 
 // Store implements storage.TraceStore for BigQuery.
 type Store struct {
-	client  *bigquery.Client
+	client  BQClient // interface — all operations (read, write, schema) go through this
 	config  Config
 	tableID string // fully-qualified: project.dataset.table
 }
@@ -59,7 +59,7 @@ func New(ctx context.Context, cfg Config) (*Store, error) {
 	}
 
 	s := &Store{
-		client:  client,
+		client:  &bqClientWrapper{client},
 		config:  cfg,
 		tableID: fmt.Sprintf("%s.%s.%s", cfg.ProjectID, cfg.Dataset, cfg.Table),
 	}
@@ -70,6 +70,19 @@ func New(ctx context.Context, cfg Config) (*Store, error) {
 	}
 
 	return s, nil
+}
+
+// NewWithClient creates a Store with a pre-configured BQClient for testing.
+// It skips schema setup and does not require a real BigQuery connection.
+func NewWithClient(client BQClient, cfg Config) *Store {
+	if cfg.Table == "" {
+		cfg.Table = "spans"
+	}
+	return &Store{
+		client:  client,
+		config:  cfg,
+		tableID: fmt.Sprintf("%s.%s.%s", cfg.ProjectID, cfg.Dataset, cfg.Table),
+	}
 }
 
 // AttributeKV represents a key-value pair for BigQuery STRUCT.
@@ -290,7 +303,7 @@ func (s *Store) ensureSchema(ctx context.Context) error {
 // Limitation: this only detects missing top-level columns. Changes to nested
 // STRUCT fields (e.g. adding a field inside the "attributes" REPEATED STRUCT)
 // are not detected and must be handled manually or via a migration tool.
-func (s *Store) evolveSchema(ctx context.Context, table *bigquery.Table, desired bigquery.Schema) error {
+func (s *Store) evolveSchema(ctx context.Context, table BQTable, desired bigquery.Schema) error {
 	md, err := table.Metadata(ctx)
 	if err != nil {
 		return fmt.Errorf("reading table metadata: %w", err)
@@ -308,8 +321,10 @@ func (s *Store) evolveSchema(ctx context.Context, table *bigquery.Table, desired
 	var missing bigquery.Schema
 	for _, field := range desired {
 		if !existing[field.Name] {
-			field.Required = false
-			missing = append(missing, field)
+			// Shallow copy to avoid mutating the caller's desired schema.
+			f := *field
+			f.Required = false
+			missing = append(missing, &f)
 		}
 	}
 
@@ -399,9 +414,9 @@ func (s *Store) IngestSpans(ctx context.Context, spans []storage.Span) error {
 		`, quoteTable(s.tableID))
 
 		q := s.client.Query(query)
-		q.Parameters = []bigquery.QueryParameter{
+		q.SetParameters([]bigquery.QueryParameter{
 			{Name: "spans", Value: pessimisticRows},
-		}
+		})
 
 		job, err := q.Run(ctx)
 		if err != nil {
@@ -450,10 +465,10 @@ func (s *Store) GetTrace(ctx context.Context, traceID string) (*storage.Trace, e
 	`, quoteTable(s.tableID))
 
 	q := s.client.Query(query)
-	q.Parameters = []bigquery.QueryParameter{
+	q.SetParameters([]bigquery.QueryParameter{
 		{Name: "traceID", Value: traceID},
 		{Name: "userID", Value: userID},
-	}
+	})
 
 	spans, err := s.querySpans(ctx, q)
 	if err != nil {
@@ -472,26 +487,63 @@ func (s *Store) QueryTraces(ctx context.Context, tq storage.TraceQuery) (*storag
 		tq.PageSize = 20
 	}
 
-	query := fmt.Sprintf(`
-		SELECT trace_id, MIN(start_time) AS earliest
-		FROM %s
-		WHERE (@projectID = '' OR project_id = @projectID)
-		  AND start_time >= @startTime
-		  AND start_time <= @endTime
-		  AND (@userID = '' OR user_id = @userID)
-		GROUP BY trace_id
-		ORDER BY earliest DESC
-		LIMIT @pageSize
-	`, quoteTable(s.tableID))
-
-	q := s.client.Query(query)
-	q.Parameters = []bigquery.QueryParameter{
+	// Build optional WHERE conditions.
+	extraWhere := ""
+	extraHaving := ""
+	params := []bigquery.QueryParameter{
 		{Name: "projectID", Value: tq.ProjectID},
 		{Name: "startTime", Value: tq.StartTime},
 		{Name: "endTime", Value: tq.EndTime},
 		{Name: "userID", Value: tq.UserID},
 		{Name: "pageSize", Value: tq.PageSize},
 	}
+	if tq.Environment != "" {
+		extraWhere += "\n\t\t  AND environment = @environment"
+		params = append(params, bigquery.QueryParameter{Name: "environment", Value: tq.Environment})
+	}
+	if tq.TenantID != "" {
+		extraWhere += "\n\t\t  AND tenant_id = @tenantID"
+		params = append(params, bigquery.QueryParameter{Name: "tenantID", Value: tq.TenantID})
+	}
+	if tq.Model != "" {
+		extraWhere += "\n\t\t  AND gen_ai_model = @model"
+		params = append(params, bigquery.QueryParameter{Name: "model", Value: tq.Model})
+	}
+	if tq.Provider != "" {
+		extraWhere += "\n\t\t  AND gen_ai_provider = @provider"
+		params = append(params, bigquery.QueryParameter{Name: "provider", Value: tq.Provider})
+	}
+	if tq.Search != "" {
+		extraWhere += "\n\t\t  AND name LIKE CONCAT('%%', @escapedSearch, '%%')"
+		params = append(params, bigquery.QueryParameter{Name: "escapedSearch", Value: storage.EscapeLike(tq.Search)})
+	}
+	if tq.JobID != "" {
+		extraWhere += "\n\t\t  AND job_id = @jobID"
+		params = append(params, bigquery.QueryParameter{Name: "jobID", Value: tq.JobID})
+	}
+	if tq.TraceGroup != "" {
+		extraWhere += "\n\t\t  AND trace_group = @traceGroup"
+		params = append(params, bigquery.QueryParameter{Name: "traceGroup", Value: tq.TraceGroup})
+	}
+	if tq.Status != 0 {
+		extraHaving = "\n\t\tHAVING CASE WHEN MAX(CASE WHEN status = 2 THEN 1 ELSE 0 END) > 0 THEN 2 ELSE 1 END = @statusFilter"
+		params = append(params, bigquery.QueryParameter{Name: "statusFilter", Value: int(tq.Status)})
+	}
+
+	query := fmt.Sprintf(`
+		SELECT trace_id, MIN(start_time) AS earliest
+		FROM %s
+		WHERE (@projectID = '' OR project_id = @projectID)
+		  AND start_time >= @startTime
+		  AND start_time <= @endTime
+		  AND (@userID = '' OR user_id = @userID)%s
+		GROUP BY trace_id%s
+		ORDER BY earliest DESC
+		LIMIT @pageSize
+	`, quoteTable(s.tableID), extraWhere, extraHaving)
+
+	q := s.client.Query(query)
+	q.SetParameters(params)
 
 	it, err := q.Read(ctx)
 	if err != nil {
@@ -539,9 +591,9 @@ func (s *Store) QueryTraces(ctx context.Context, tq storage.TraceQuery) (*storag
 	`, quoteTable(s.tableID))
 
 	bq := s.client.Query(batchQuery)
-	bq.Parameters = []bigquery.QueryParameter{
+	bq.SetParameters([]bigquery.QueryParameter{
 		{Name: "traceIDs", Value: traceIDs},
-	}
+	})
 
 	allSpans, err := s.querySpans(ctx, bq)
 	if err != nil {
@@ -623,7 +675,7 @@ func (s *Store) SearchSpans(ctx context.Context, sq storage.SpanQuery) (*storage
 	`, quoteTable(s.tableID))
 
 	q := s.client.Query(query)
-	q.Parameters = []bigquery.QueryParameter{
+	q.SetParameters([]bigquery.QueryParameter{
 		{Name: "projectID", Value: sq.ProjectID},
 		{Name: "startTime", Value: sq.StartTime},
 		{Name: "endTime", Value: sq.EndTime},
@@ -634,7 +686,7 @@ func (s *Store) SearchSpans(ctx context.Context, sq storage.SpanQuery) (*storage
 		{Name: "userID", Value: sq.UserID},
 		{Name: "tenantID", Value: sq.TenantID},
 		{Name: "pageSize", Value: sq.PageSize},
-	}
+	})
 
 	spans, err := s.querySpans(ctx, q)
 	if err != nil {
@@ -674,14 +726,14 @@ func (s *Store) GetUsageSummary(ctx context.Context, uq storage.UsageQuery) (*st
 	`, quoteTable(s.tableID))
 
 	q := s.client.Query(query)
-	q.Parameters = []bigquery.QueryParameter{
+	q.SetParameters([]bigquery.QueryParameter{
 		{Name: "projectID", Value: uq.ProjectID},
 		{Name: "startTime", Value: uq.StartTime},
 		{Name: "endTime", Value: uq.EndTime},
 		{Name: "llmKind", Value: int(storage.SpanKindLLM)},
 		{Name: "userID", Value: uq.UserID},
 		{Name: "tenantID", Value: uq.TenantID},
-	}
+	})
 
 	it, err := q.Read(ctx)
 	if err != nil {
@@ -750,13 +802,13 @@ func (s *Store) GetModelBreakdown(ctx context.Context, uq storage.UsageQuery) ([
 	`, quoteTable(s.tableID))
 
 	q := s.client.Query(query)
-	q.Parameters = []bigquery.QueryParameter{
+	q.SetParameters([]bigquery.QueryParameter{
 		{Name: "projectID", Value: uq.ProjectID},
 		{Name: "startTime", Value: uq.StartTime},
 		{Name: "endTime", Value: uq.EndTime},
 		{Name: "userID", Value: uq.UserID},
 		{Name: "tenantID", Value: uq.TenantID},
-	}
+	})
 
 	it, err := q.Read(ctx)
 	if err != nil {
@@ -849,14 +901,14 @@ func (s *Store) GetUsageWithModelBreakdown(ctx context.Context, uq storage.Usage
 	query := fmt.Sprintf(combinedUsageSQL, quoteTable(s.tableID))
 
 	q := s.client.Query(query)
-	q.Parameters = []bigquery.QueryParameter{
+	q.SetParameters([]bigquery.QueryParameter{
 		{Name: "projectID", Value: uq.ProjectID},
 		{Name: "startTime", Value: uq.StartTime},
 		{Name: "endTime", Value: uq.EndTime},
 		{Name: "llmKind", Value: int(storage.SpanKindLLM)},
 		{Name: "userID", Value: uq.UserID},
 		{Name: "tenantID", Value: uq.TenantID},
-	}
+	})
 
 	it, err := q.Read(ctx)
 	if err != nil {
@@ -968,13 +1020,13 @@ func (s *Store) GetUserLeaderboard(ctx context.Context, uq storage.UsageQuery, l
 	`, quoteTable(s.tableID))
 
 	q := s.client.Query(query)
-	q.Parameters = []bigquery.QueryParameter{
+	q.SetParameters([]bigquery.QueryParameter{
 		{Name: "projectID", Value: uq.ProjectID},
 		{Name: "startTime", Value: uq.StartTime},
 		{Name: "endTime", Value: uq.EndTime},
 		{Name: "llmKind", Value: int(storage.SpanKindLLM)},
 		{Name: "limit", Value: limit},
-	}
+	})
 
 	it, err := q.Read(ctx)
 	if err != nil {
@@ -1047,13 +1099,13 @@ func (s *Store) GetTenantLeaderboard(ctx context.Context, uq storage.UsageQuery,
 	`, quoteTable(s.tableID))
 
 	q := s.client.Query(query)
-	q.Parameters = []bigquery.QueryParameter{
+	q.SetParameters([]bigquery.QueryParameter{
 		{Name: "projectID", Value: uq.ProjectID},
 		{Name: "startTime", Value: uq.StartTime},
 		{Name: "endTime", Value: uq.EndTime},
 		{Name: "llmKind", Value: int(storage.SpanKindLLM)},
 		{Name: "limit", Value: limit},
-	}
+	})
 
 	it, err := q.Read(ctx)
 	if err != nil {
@@ -1119,7 +1171,7 @@ func (s *Store) GetJobLeaderboard(ctx context.Context, uq storage.UsageQuery, li
 	ORDER BY total_cost_usd DESC
 	LIMIT @limit`, quoteTable(s.tableID), quoteTable(s.tableID))
 	q := s.client.Query(query)
-	q.Parameters = []bigquery.QueryParameter{{Name: "projectID", Value: uq.ProjectID}, {Name: "startTime", Value: uq.StartTime}, {Name: "endTime", Value: uq.EndTime}, {Name: "llmKind", Value: int(storage.SpanKindLLM)}, {Name: "limit", Value: limit}}
+	q.SetParameters([]bigquery.QueryParameter{{Name: "projectID", Value: uq.ProjectID}, {Name: "startTime", Value: uq.StartTime}, {Name: "endTime", Value: uq.EndTime}, {Name: "llmKind", Value: int(storage.SpanKindLLM)}, {Name: "limit", Value: limit}})
 	it, err := q.Read(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("querying job leaderboard: %w", err)
@@ -1147,7 +1199,7 @@ func (s *Store) GetJobLeaderboard(ctx context.Context, uq storage.UsageQuery, li
 }
 
 // querySpans executes a query and scans results into storage.Span.
-func (s *Store) querySpans(ctx context.Context, q *bigquery.Query) ([]storage.Span, error) {
+func (s *Store) querySpans(ctx context.Context, q BQQuery) ([]storage.Span, error) {
 	it, err := q.Read(ctx)
 	if err != nil {
 		return nil, err

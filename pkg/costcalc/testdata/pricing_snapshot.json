@@ -54,6 +54,12 @@
     "output_per_million": 15
   },
   {
+    "model": "claude-sonnet-5",
+    "provider": "anthropic",
+    "input_per_million": 2,
+    "output_per_million": 10
+  },
+  {
     "model": "deepseek-r1-0528-maas",
     "provider": "deepseek",
     "input_per_million": 0.14,

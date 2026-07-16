@@ -184,14 +184,37 @@ export default function TodayPage() {
     ? (data.totalInputTokens + data.totalOutputTokens)
     : 0;
 
+  // Live UTC clock — ticks every 30s so users know what "today UTC" means.
+  // tick=0 during SSR; the first interval callback bumps it to 1, which also
+  // serves as the "mounted" signal (avoiding synchronous setState in effect body).
+  const [tick, setTick] = useState(0);
+  useEffect(() => {
+    // Fire immediately via setTimeout(0) so the first tick is async (not
+    // synchronous in the effect body), satisfying the ESLint rule.
+    const immediate = setTimeout(() => setTick(1), 0);
+    const timer = setInterval(() => setTick((t) => t + 1), 30_000);
+    return () => { clearTimeout(immediate); clearInterval(timer); };
+  }, []);
+
   // Use UTC to match the budget reset boundary (midnight UTC).
-  const todayStr = new Date().toLocaleDateString(undefined, {
-    weekday: "long",
-    month: "long",
-    day: "numeric",
-    year: "numeric",
-    timeZone: "UTC",
-  });
+  const todayStr = tick > 0
+    ? new Date().toLocaleDateString(undefined, {
+        weekday: "long",
+        month: "long",
+        day: "numeric",
+        year: "numeric",
+        timeZone: "UTC",
+      })
+    : "";
+
+  const utcTimeStr = tick > 0
+    ? new Date().toLocaleTimeString(undefined, {
+        hour: "2-digit",
+        minute: "2-digit",
+        timeZone: "UTC",
+        hour12: false,
+      })
+    : "--:--";
 
   const sortedModels = useMemo(
     () => [...(data?.models ?? [])].sort((a, b) => b.costUsd - a.costUsd),
@@ -202,8 +225,13 @@ export default function TodayPage() {
     <>
       <header className="main-header">
         <div>
-          <h1>Today</h1>
+          <h1>Today <span className="today-utc-badge">UTC</span></h1>
           <span className="today-date">{todayStr}</span>
+          <span className="today-utc-clock">
+            {utcTimeStr} UTC · {data?.periodResetsAt
+              ? `Resets ${new Date(data.periodResetsAt).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", hour12: true })} local time`
+              : "Resets at midnight UTC"}
+          </span>
         </div>
         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
           {data?.fetchedAt && (
@@ -216,6 +244,7 @@ export default function TodayPage() {
           </button>
         </div>
       </header>
+
 
       <div className="main-body">
         {error && (
@@ -432,6 +461,25 @@ export default function TodayPage() {
           color: var(--text-muted);
           margin-left: 12px;
           font-weight: 400;
+        }
+        .today-utc-badge {
+          font-size: 11px;
+          font-weight: 600;
+          color: var(--accent);
+          background: rgba(240, 160, 48, 0.12);
+          padding: 2px 6px;
+          border-radius: 4px;
+          vertical-align: middle;
+          letter-spacing: 0.06em;
+          margin-left: 4px;
+        }
+        .today-utc-clock {
+          display: block;
+          font-size: 11px;
+          color: var(--text-muted);
+          margin-left: 12px;
+          margin-top: 2px;
+          font-variant-numeric: tabular-nums;
         }
         .today-updated {
           font-size: 11px;

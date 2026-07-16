@@ -22,9 +22,6 @@ import (
 
 	"cloud.google.com/go/firestore"
 	firebase "firebase.google.com/go/v4"
-
-	"golang.org/x/net/http2"
-	"golang.org/x/net/http2/h2c"
 	"golang.org/x/oauth2/google"
 	"gopkg.in/yaml.v3"
 
@@ -90,11 +87,18 @@ type Config struct {
 		DailyLimits    []proxy.SpendLimitConfig `yaml:"daily_limits"`         // Per-model daily spend limits
 		Policy         *proxy.PolicyConfig      `yaml:"policy"`               // Model allowlist policy (#207)
 		VertexAI       struct {
-			ProjectID     string `yaml:"project_id"`     // GCP project for Vertex AI
-			Region        string `yaml:"region"`         // default region (e.g. "us-central1")
-			CachingMode   string `yaml:"caching_mode"`   // off|auto|system-only (default: auto)
-			PromptCaching bool   `yaml:"prompt_caching"` // enable prompt caching (maps to CachingMode: auto)
-			CacheTTL      string `yaml:"cache_ttl"`      // Vertex AI cache TTL ("5m" or "1h")
+			ProjectID string `yaml:"project_id"` // GCP project for Vertex AI
+			Region    string `yaml:"region"`     // default region (e.g. "us-central1")
+			Anthropic struct {
+				CachingMode string `yaml:"caching_mode"` // off|auto|system-only (default: auto)
+				CacheTTL    string `yaml:"cache_ttl"`    // 5m|1h (default: 5m)
+			} `yaml:"anthropic"`
+			// Deprecated fields — kept for detection only, not wired to logic.
+			// WARNING: Same YAML key names as Anthropic sub-struct fields.
+			// Safe because Anthropic is behind yaml:"anthropic". Do NOT inline it.
+			DeprecatedCachingMode   string `yaml:"caching_mode"`   // moved to anthropic.caching_mode
+			DeprecatedCacheTTL      string `yaml:"cache_ttl"`      // moved to anthropic.cache_ttl
+			DeprecatedPromptCaching *bool  `yaml:"prompt_caching"` // removed
 			// ProviderOverrides allows per-provider region and endpoint overrides.
 			// MaaS models (Mistral, DeepSeek, Qwen) have limited regional availability;
 			// this lets each provider target the correct region independently.
@@ -217,6 +221,18 @@ func main() {
 	if err != nil {
 		slog.Error("failed to load config", "error", err)
 		os.Exit(1)
+	}
+	// Check for deprecated config fields and warn the operator.
+	if v := cfg.Proxy.VertexAI; v.DeprecatedCachingMode != "" || v.DeprecatedCacheTTL != "" || v.DeprecatedPromptCaching != nil {
+		if v.DeprecatedCachingMode != "" {
+			slog.Warn("⚠️  DEPRECATED CONFIG: proxy.vertex_ai.caching_mode has moved to proxy.vertex_ai.anthropic.caching_mode — update your config")
+		}
+		if v.DeprecatedCacheTTL != "" {
+			slog.Warn("⚠️  DEPRECATED CONFIG: proxy.vertex_ai.cache_ttl has moved to proxy.vertex_ai.anthropic.cache_ttl — update your config")
+		}
+		if v.DeprecatedPromptCaching != nil {
+			slog.Warn("⚠️  DEPRECATED CONFIG: proxy.vertex_ai.prompt_caching has been removed — use proxy.vertex_ai.anthropic.caching_mode instead")
+		}
 	}
 
 	// Initialize storage backend.
@@ -567,15 +583,21 @@ func main() {
 					// anthropic-vertex is a native Messages API passthrough (for Claude Code).
 					if p.Name == "anthropic" {
 						ft := &proxy.AnthropicFormatTranslator{}
-						if cfg.Proxy.VertexAI.CachingMode != "" {
-							ft.SetCachingMode(proxy.ParseCachingMode(cfg.Proxy.VertexAI.CachingMode))
+						// Fall back to deprecated top-level fields if new sub-struct fields are empty.
+						cachingMode := cfg.Proxy.VertexAI.Anthropic.CachingMode
+						if cachingMode == "" && cfg.Proxy.VertexAI.DeprecatedCachingMode != "" {
+							cachingMode = cfg.Proxy.VertexAI.DeprecatedCachingMode
 						}
-						// prompt_caching: true is a shorthand for caching_mode: auto
-						if cfg.Proxy.VertexAI.CachingMode == "" && cfg.Proxy.VertexAI.PromptCaching {
-							ft.SetCachingMode(proxy.CachingAuto)
+						if cachingMode != "" {
+							ft.SetCachingMode(proxy.ParseCachingMode(cachingMode))
 						}
-						if cfg.Proxy.VertexAI.CacheTTL != "" {
-							ft.SetCacheTTL(proxy.ParseCacheTTL(cfg.Proxy.VertexAI.CacheTTL))
+
+						cacheTTL := cfg.Proxy.VertexAI.Anthropic.CacheTTL
+						if cacheTTL == "" && cfg.Proxy.VertexAI.DeprecatedCacheTTL != "" {
+							cacheTTL = cfg.Proxy.VertexAI.DeprecatedCacheTTL
+						}
+						if cacheTTL != "" {
+							ft.SetCacheTTL(proxy.ParseCacheTTL(cacheTTL))
 						}
 						allProviders[i].FormatTranslator = ft
 					}
@@ -585,7 +607,7 @@ func main() {
 						"region", region,
 						"adc", tokenSource != nil,
 						"format_translation", p.Name == "anthropic",
-						"caching_mode", cfg.Proxy.VertexAI.CachingMode)
+						"caching_mode", cfg.Proxy.VertexAI.Anthropic.CachingMode)
 				}
 			}
 		}
@@ -989,9 +1011,15 @@ func main() {
 		slog.Info("🔓 Running in dev mode — auth disabled")
 	}
 
+	// Enable both HTTP/1 and unencrypted HTTP/2 (replaces deprecated h2c package).
+	var protocols http.Protocols
+	protocols.SetHTTP1(true)
+	protocols.SetUnencryptedHTTP2(true)
+
 	srv := &http.Server{
 		Addr:              addr,
-		Handler:           h2c.NewHandler(authedMux, &http2.Server{}),
+		Handler:           authedMux,
+		Protocols:         &protocols,
 		ReadHeaderTimeout: 10 * time.Second,
 		WriteTimeout:      10 * time.Minute, // generous for streaming LLM responses
 		IdleTimeout:       120 * time.Second,

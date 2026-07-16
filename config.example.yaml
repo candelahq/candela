@@ -26,8 +26,9 @@ proxy:
   vertex_ai:
     project_id: "your-gcp-project-id"
     region: "us-east5"      # Vertex AI region (Claude available here)
-    prompt_caching: true    # Inject cache_control for Anthropic prompt caching (~10x cost reduction)
-    cache_ttl: 5m           # Cache entry lifetime: 5m (default, 1.25x write cost) or 1h (2x write cost, ideal for coding sessions)
+    anthropic:
+      caching_mode: auto    # off | auto | system-only — injects cache_control for Anthropic prompt caching (~10x cost reduction)
+      cache_ttl: 5m         # 5m (default, 1.25x write cost) or 1h (2x write cost, ideal for long coding sessions)
 
   # AWS Bedrock configuration (required for anthropic-bedrock provider).
   # Auth is automatic via standard AWS credential chain

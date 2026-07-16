@@ -170,3 +170,82 @@ func TestConfigAPI_SetCaching_EmptyBody(t *testing.T) {
 		t.Fatalf("status = %d, want 503", w.Code)
 	}
 }
+
+func TestConfigAPI_GetConfig_WarningsPresent(t *testing.T) {
+	warnings := []string{
+		"vertex_ai.caching_mode has moved to vertex_ai.anthropic.caching_mode — update your config",
+		"vertex_ai.cache_ttl has moved to vertex_ai.anthropic.cache_ttl — update your config",
+	}
+	api := &localAPI{cloudProxy: nil, configWarnings: warnings}
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /_local/api/config", api.handleGetConfig)
+
+	req := httptest.NewRequest(http.MethodGet, "/_local/api/config", nil)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", w.Code)
+	}
+
+	var resp cachingConfigResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode error: %v", err)
+	}
+	if len(resp.Warnings) != 2 {
+		t.Fatalf("got %d warnings, want 2", len(resp.Warnings))
+	}
+	if resp.Warnings[0] != warnings[0] {
+		t.Errorf("warnings[0] = %q, want %q", resp.Warnings[0], warnings[0])
+	}
+	if resp.Warnings[1] != warnings[1] {
+		t.Errorf("warnings[1] = %q, want %q", resp.Warnings[1], warnings[1])
+	}
+}
+
+func TestConfigAPI_GetConfig_NoWarnings_OmitsField(t *testing.T) {
+	api := &localAPI{cloudProxy: nil}
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /_local/api/config", api.handleGetConfig)
+
+	req := httptest.NewRequest(http.MethodGet, "/_local/api/config", nil)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	// When no warnings, the "warnings" key should be omitted (omitempty).
+	body := w.Body.String()
+	if strings.Contains(body, `"warnings"`) {
+		t.Error("response should not contain 'warnings' key when no warnings are set")
+	}
+}
+
+func TestConfigAPI_SetCaching_ResponseIncludesWarnings(t *testing.T) {
+	warnings := []string{"vertex_ai.prompt_caching has been removed — use vertex_ai.anthropic.caching_mode instead"}
+	ft := &proxy.AnthropicFormatTranslator{}
+	p := proxy.NewProxyForTest(map[string]proxy.Provider{
+		"anthropic": {Name: "anthropic", FormatTranslator: ft},
+	})
+	api := &localAPI{cloudProxy: p, configWarnings: warnings}
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /_local/api/config/caching", api.handleSetCaching)
+
+	req := httptest.NewRequest(http.MethodPost, "/_local/api/config/caching", strings.NewReader(`{"anthropic": "auto"}`))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", w.Code)
+	}
+
+	var resp cachingConfigResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode error: %v", err)
+	}
+	if len(resp.Warnings) != 1 {
+		t.Fatalf("got %d warnings, want 1", len(resp.Warnings))
+	}
+	if resp.Warnings[0] != warnings[0] {
+		t.Errorf("warnings[0] = %q, want %q", resp.Warnings[0], warnings[0])
+	}
+}

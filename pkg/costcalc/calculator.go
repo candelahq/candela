@@ -527,6 +527,23 @@ func (c *Calculator) GlobalDiscount() float64 {
 	return c.globalDiscount
 }
 
+// lookupCandidate performs the three-tier pricing lookup (overrides → defaults
+// → provider-agnostic fallback) for a single candidate model name. Extracted
+// to avoid repeating this pattern across every resolution step.
+func (c *Calculator) lookupCandidate(provider, candidate string) (ModelPricing, bool) {
+	key := c.key(provider, candidate)
+	if p, ok := c.overrides[key]; ok {
+		return p, true
+	}
+	if p, ok := c.defaults[key]; ok {
+		return p, true
+	}
+	if p, ok := c.fallback[strings.ToLower(candidate)]; ok {
+		return p, true
+	}
+	return ModelPricing{}, false
+}
+
 // resolve looks up pricing: config overrides first, then built-in defaults,
 // then precomputed provider-agnostic fallback, then model ID normalization
 // (hyphen→dot version suffix), then prefix-based fuzzy match.
@@ -538,20 +555,8 @@ func (c *Calculator) resolve(provider, model string) (ModelPricing, bool) {
 		provider = canonical
 	}
 
-	key := c.key(provider, model)
-
-	// 1. Config override (exact match)
-	if p, ok := c.overrides[key]; ok {
-		return p, true
-	}
-
-	// 2. Built-in default (exact match)
-	if p, ok := c.defaults[key]; ok {
-		return p, true
-	}
-
-	// 3. Precomputed provider-agnostic fallback (deterministic)
-	if p, ok := c.fallback[strings.ToLower(model)]; ok {
+	// 1-3. Exact match: config override → built-in default → fallback.
+	if p, ok := c.lookupCandidate(provider, model); ok {
 		return p, true
 	}
 
@@ -560,14 +565,7 @@ func (c *Calculator) resolve(provider, model string) (ModelPricing, bool) {
 	// to our canonical dotted entries (claude-opus-4.7) without duplicating
 	// every pricing entry.
 	if normalized := normalizeModelID(model); normalized != model {
-		normKey := c.key(provider, normalized)
-		if p, ok := c.overrides[normKey]; ok {
-			return p, true
-		}
-		if p, ok := c.defaults[normKey]; ok {
-			return p, true
-		}
-		if p, ok := c.fallback[strings.ToLower(normalized)]; ok {
+		if p, ok := c.lookupCandidate(provider, normalized); ok {
 			return p, true
 		}
 	}
@@ -576,15 +574,18 @@ func (c *Calculator) resolve(provider, model string) (ModelPricing, bool) {
 	// Handles: date suffixes (gpt-4.1-2025-04-14), preview tags
 	// (gemini-2.5-pro-preview-05-06), and OpenAI fine-tunes (ft:gpt-4.1:org:name:id).
 	if base := extractBaseModel(model); base != "" && base != strings.ToLower(model) {
-		baseKey := c.key(provider, base)
-		if p, ok := c.overrides[baseKey]; ok {
+		if p, ok := c.lookupCandidate(provider, base); ok {
 			return p, true
 		}
-		if p, ok := c.defaults[baseKey]; ok {
-			return p, true
-		}
-		if p, ok := c.fallback[base]; ok {
-			return p, true
+
+		// 5b. Normalize the extracted base (hyphen→dot) for Vertex AI
+		// dated IDs. Example chain:
+		//   "claude-haiku-4-5-20251001" → strip date → "claude-haiku-4-5"
+		//   → normalize → "claude-haiku-4.5" → matches pricing.yaml.
+		if normBase := normalizeModelID(base); normBase != base {
+			if p, ok := c.lookupCandidate(provider, normBase); ok {
+				return p, true
+			}
 		}
 	}
 
@@ -631,13 +632,16 @@ func extractBaseModel(model string) string {
 		}
 	}
 
-	// Strip -preview* suffix (e.g. "-preview-05-06", "-preview")
-	if idx := strings.Index(m, "-preview"); idx > 0 {
+	// Strip -preview* suffix (e.g. "-preview-05-06", "-preview").
+	// Use hasSuffixTag to avoid false positives on model names that
+	// contain "-preview" mid-name (e.g. a hypothetical "preview-model").
+	if idx := hasSuffixTag(m, "-preview"); idx > 0 {
 		return m[:idx]
 	}
 
-	// Strip -exp* suffix (e.g. "-exp-0827")
-	if idx := strings.Index(m, "-exp"); idx > 0 {
+	// Strip -exp* suffix (e.g. "-exp-0827", "-exp").
+	// Same word-boundary guard as -preview above.
+	if idx := hasSuffixTag(m, "-exp"); idx > 0 {
 		return m[:idx]
 	}
 
@@ -675,6 +679,34 @@ func isAllDigits(s string) bool {
 		}
 	}
 	return true
+}
+
+// hasSuffixTag finds a tag like "-preview" or "-exp" in model name m and returns
+// the index of the tag, but only if the tag appears as a word-boundary suffix
+// (i.e. it's at the end of the string or followed by a hyphen). This prevents
+// false positives on model names that contain the tag mid-name (e.g. a
+// hypothetical "text-expander-3b" should NOT match "-exp").
+//
+// Scans right-to-left so that "text-expander-flash-exp" correctly matches the
+// trailing "-exp" rather than the mid-word "-exp" in "expander".
+//
+// Returns the index of the tag in m, or -1 if not found in a valid position.
+func hasSuffixTag(m, tag string) int {
+	// Scan backwards through all occurrences.
+	for end := len(m); end > 0; {
+		idx := strings.LastIndex(m[:end], tag)
+		if idx <= 0 {
+			return -1
+		}
+		rest := m[idx+len(tag):]
+		// Valid positions: tag is at end of string, or followed by "-" (sub-suffix).
+		if rest == "" || rest[0] == '-' {
+			return idx
+		}
+		// This occurrence is mid-word; keep scanning left.
+		end = idx
+	}
+	return -1
 }
 
 // normalizeModelID converts trailing hyphen-digit version suffixes to dot-digit.

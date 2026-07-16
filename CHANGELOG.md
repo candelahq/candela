@@ -2,6 +2,32 @@
 
 All notable changes to Candela are documented here, organized by development phase. PRs are merged to `main`.
 
+## v0.10.1 — 2026-07-07
+
+### Breaking Change — Anthropic Caching Config Restructured
+
+- **`vertex_ai.anthropic` block**: `caching_mode`, `cache_ttl`, and `prompt_caching` moved from flat `vertex_ai.*` fields into `vertex_ai.anthropic.*`. The `prompt_caching` bool shorthand is removed.
+
+  **Before:**
+  ```yaml
+  vertex_ai:
+    caching_mode: auto
+    cache_ttl: 5m
+    prompt_caching: true
+  ```
+
+  **After:**
+  ```yaml
+  vertex_ai:
+    anthropic:
+      caching_mode: auto    # auto | system-only | off
+      cache_ttl: 1h         # 5m | 1h
+  ```
+
+  > ⚠️ Old flat fields are silently ignored. If you had `caching_mode: off`, caching will revert to the default (`auto`). Update your config to preserve your setting.
+
+- **Team Mode per-developer caching**: Local `vertex_ai.anthropic.caching_mode` and `vertex_ai.anthropic.cache_ttl` are now piped through to the remote server via `X-Candela-Caching` / `X-Candela-Cache-TTL` headers. Developers can now control their own Anthropic caching preferences in Team Mode without affecting other users.
+
 ## v0.10.0 — 2026-07-05
 
 ### Feature — Tag-Based Model Access Control

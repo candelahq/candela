@@ -24,9 +24,10 @@ import (
 //	GET  /_local/api/config          — current runtime configuration
 //	POST /_local/api/config/caching  — set caching mode at runtime (provider-agnostic)
 type localAPI struct {
-	mgr        *runtime.Manager
-	cloudProxy *proxy.Proxy
-	calc       *costcalc.Calculator // optional: for Gemini cache discount overrides
+	mgr            *runtime.Manager
+	cloudProxy     *proxy.Proxy
+	calc           *costcalc.Calculator // optional: for Gemini cache discount overrides
+	configWarnings []string             // deprecated config field warnings (surfaced in Desktop)
 }
 
 // registerLocalAPI mounts the /_local/* routes on the mux.
@@ -123,7 +124,8 @@ func (a *localAPI) handleBackends(w http.ResponseWriter, _ *http.Request) {
 // cachingConfigResponse is the canonical config response for GET and POST.
 // Having a shared type ensures the response shape is identical.
 type cachingConfigResponse struct {
-	Caching cachingProviders `json:"caching"`
+	Caching  cachingProviders `json:"caching"`
+	Warnings []string         `json:"warnings,omitempty"` // deprecated config field warnings
 }
 
 type cachingProviders struct {
@@ -171,7 +173,8 @@ func (a *localAPI) buildCachingConfig() cachingProviders {
 // GET /_local/api/config — returns current runtime configuration state.
 func (a *localAPI) handleGetConfig(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, cachingConfigResponse{
-		Caching: a.buildCachingConfig(),
+		Caching:  a.buildCachingConfig(),
+		Warnings: a.configWarnings,
 	})
 }
 
@@ -231,7 +234,8 @@ func (a *localAPI) handleSetCaching(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, cachingConfigResponse{
-		Caching: a.buildCachingConfig(),
+		Caching:  a.buildCachingConfig(),
+		Warnings: a.configWarnings,
 	})
 }
 

@@ -3,6 +3,7 @@ package proxy
 import (
 	"math"
 	"math/rand"
+	"net"
 	"net/http"
 	"strconv"
 	"strings"
@@ -82,7 +83,10 @@ func (c *RetryConfig) ShouldRetry(attempt int, resp *http.Response, connErr erro
 
 	// Connection-level error (timeout, DNS, reset).
 	if connErr != nil {
-		return c.RetryOnTimeout
+		// SAFETY: only retry errors provably before transmission to avoid
+		// replaying ambiguous POST requests that may have been partially
+		// processed upstream (double-charge risk).
+		return c.RetryOnTimeout && IsPreConnectionError(connErr)
 	}
 
 	// No response to inspect — don't retry blindly.
@@ -91,6 +95,54 @@ func (c *RetryConfig) ShouldRetry(attempt int, resp *http.Response, connErr erro
 	}
 
 	return c.IsRetryableStatus(resp.StatusCode)
+}
+
+// IsPreConnectionError returns true if the error provably occurred before
+// any request bytes were sent to the upstream server. Only these errors
+// are safe to retry for non-idempotent POST requests because the upstream
+// never received the request.
+//
+// Errors that occur after transmission (timeouts, connection resets during
+// response reads, EOF) are NOT safe — the upstream may have already started
+// processing and billing for the request.
+func IsPreConnectionError(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	// Unwrap through any wrappers to find the root cause.
+	var netOpErr *net.OpError
+	if ok := errorAs(err, &netOpErr); ok {
+		// "dial" errors are pre-connection: DNS failure, connection refused,
+		// port unreachable, network unreachable.
+		return netOpErr.Op == "dial"
+	}
+
+	var dnsErr *net.DNSError
+	if ok := errorAs(err, &dnsErr); ok {
+		return true // DNS resolution failed — never connected.
+	}
+
+	// All other errors are ambiguous — assume bytes may have been sent.
+	return false
+}
+
+// errorAs is a thin wrapper around errors.As that avoids importing errors
+// in this file (it's already imported transitively via net). Using a
+// generic helper keeps the code readable.
+func errorAs[T any](err error, target *T) bool {
+	for err != nil {
+		if t, ok := err.(T); ok { //nolint:errorlint // intentional type assertion for generics
+			*target = t
+			return true
+		}
+		if u, ok := err.(interface{ Unwrap() error }); ok {
+			err = u.Unwrap()
+		} else {
+			return false
+		}
+	}
+	return false
 }
 
 // BackoffDuration returns the backoff duration for the given attempt using

@@ -150,3 +150,37 @@ func TestFallbackEmptyProviders(t *testing.T) {
 		t.Errorf("empty providers should return nil, got %v", got)
 	}
 }
+
+// TestFallbackPrefixLengthSorting verifies that more-specific prefixes match
+// before less-specific ones when chains overlap (e.g. "claude-sonnet-4" vs "claude-").
+func TestFallbackPrefixLengthSorting(t *testing.T) {
+	r := NewFallbackResolver(FallbackConfig{
+		Enabled: true,
+		Chains: []FallbackChain{
+			// Less-specific chain listed first in config.
+			{ModelPrefix: "claude-", Providers: []string{"anthropic", "generic-fallback"}},
+			// More-specific chain listed second.
+			{ModelPrefix: "claude-sonnet-4", Providers: []string{"anthropic", "anthropic-vertex"}},
+		},
+	}, makeFallbackProviders("anthropic", "anthropic-vertex", "generic-fallback"))
+
+	// "claude-sonnet-4-1234" should match the more-specific "claude-sonnet-4" chain.
+	got := r.FallbackProviders("claude-sonnet-4-1234", "anthropic")
+	if len(got) != 1 || got[0].Name != "anthropic-vertex" {
+		names := make([]string, len(got))
+		for i, p := range got {
+			names[i] = p.Name
+		}
+		t.Errorf("expected [anthropic-vertex] from specific chain, got %v", names)
+	}
+
+	// "claude-haiku" should match the less-specific "claude-" chain.
+	got2 := r.FallbackProviders("claude-haiku", "anthropic")
+	if len(got2) != 1 || got2[0].Name != "generic-fallback" {
+		names := make([]string, len(got2))
+		for i, p := range got2 {
+			names[i] = p.Name
+		}
+		t.Errorf("expected [generic-fallback] from generic chain, got %v", names)
+	}
+}

@@ -3,6 +3,8 @@ package proxy
 import (
 	"errors"
 	"fmt"
+	"io"
+	"net"
 	"net/http"
 	"testing"
 	"time"
@@ -94,7 +96,7 @@ func TestShouldRetry(t *testing.T) {
 	}
 	disabled := RetryConfig{Enabled: false, MaxAttempts: 3}
 
-	connErr := errors.New("dial tcp: connection refused")
+	connErr := &net.OpError{Op: "dial", Net: "tcp", Err: errors.New("connection refused")}
 
 	makeResp := func(code int) *http.Response {
 		return &http.Response{StatusCode: code}
@@ -217,5 +219,103 @@ func TestParseRetryAfter(t *testing.T) {
 func TestParseRetryAfter_NilResponse(t *testing.T) {
 	if got := ParseRetryAfter(nil); got != 0 {
 		t.Errorf("ParseRetryAfter(nil) = %v, want 0", got)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// IsPreConnectionError
+// ---------------------------------------------------------------------------
+
+func TestIsPreConnectionError_Nil(t *testing.T) {
+	if IsPreConnectionError(nil) {
+		t.Error("nil error should not be pre-connection")
+	}
+}
+
+func TestIsPreConnectionError_DialError(t *testing.T) {
+	err := &net.OpError{
+		Op:  "dial",
+		Net: "tcp",
+		Err: errors.New("connection refused"),
+	}
+	if !IsPreConnectionError(err) {
+		t.Error("dial OpError should be pre-connection")
+	}
+}
+
+func TestIsPreConnectionError_ReadError(t *testing.T) {
+	err := &net.OpError{
+		Op:  "read",
+		Net: "tcp",
+		Err: errors.New("connection reset by peer"),
+	}
+	if IsPreConnectionError(err) {
+		t.Error("read OpError should NOT be pre-connection")
+	}
+}
+
+func TestIsPreConnectionError_DNSError(t *testing.T) {
+	err := &net.DNSError{
+		Err:  "no such host",
+		Name: "api.example.com",
+	}
+	if !IsPreConnectionError(err) {
+		t.Error("DNS error should be pre-connection")
+	}
+}
+
+func TestIsPreConnectionError_WrappedDialError(t *testing.T) {
+	inner := &net.OpError{Op: "dial", Net: "tcp", Err: errors.New("refused")}
+	wrapped := fmt.Errorf("upstream: %w", inner)
+	if !IsPreConnectionError(wrapped) {
+		t.Error("wrapped dial error should be pre-connection")
+	}
+}
+
+func TestIsPreConnectionError_EOF(t *testing.T) {
+	if IsPreConnectionError(io.EOF) {
+		t.Error("io.EOF should NOT be pre-connection (connection was established)")
+	}
+}
+
+func TestIsPreConnectionError_GenericError(t *testing.T) {
+	if IsPreConnectionError(errors.New("something went wrong")) {
+		t.Error("generic error should NOT be pre-connection")
+	}
+}
+
+// Verify ShouldRetry uses IsPreConnectionError for connection errors.
+func TestShouldRetry_ConnError_DialIsSafe(t *testing.T) {
+	cfg := RetryConfig{
+		Enabled:        true,
+		MaxAttempts:    3,
+		RetryOnTimeout: true,
+	}
+	dialErr := &net.OpError{Op: "dial", Net: "tcp", Err: errors.New("refused")}
+	if !cfg.ShouldRetry(1, nil, dialErr, false) {
+		t.Error("should retry on dial error")
+	}
+}
+
+func TestShouldRetry_ConnError_ReadIsUnsafe(t *testing.T) {
+	cfg := RetryConfig{
+		Enabled:        true,
+		MaxAttempts:    3,
+		RetryOnTimeout: true,
+	}
+	readErr := &net.OpError{Op: "read", Net: "tcp", Err: errors.New("reset")}
+	if cfg.ShouldRetry(1, nil, readErr, false) {
+		t.Error("should NOT retry on read error (ambiguous post-transmission)")
+	}
+}
+
+func TestShouldRetry_ConnError_TimeoutIsUnsafe(t *testing.T) {
+	cfg := RetryConfig{
+		Enabled:        true,
+		MaxAttempts:    3,
+		RetryOnTimeout: true,
+	}
+	if cfg.ShouldRetry(1, nil, io.EOF, false) {
+		t.Error("should NOT retry on EOF (ambiguous)")
 	}
 }

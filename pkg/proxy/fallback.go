@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"sort"
 	"strings"
 )
 
@@ -30,13 +31,23 @@ type FallbackResolver struct {
 
 // NewFallbackResolver creates a resolver from the given config and available
 // providers. The provider slice is indexed by name for O(1) lookups.
+// Chains are sorted by prefix length descending so more-specific prefixes
+// (e.g. "claude-sonnet-4") match before less-specific ones (e.g. "claude-").
 func NewFallbackResolver(cfg FallbackConfig, providers []*Provider) *FallbackResolver {
 	pm := make(map[string]*Provider, len(providers))
 	for _, p := range providers {
 		pm[strings.ToLower(p.Name)] = p
 	}
+
+	// Sort chains by prefix length descending for most-specific-first matching.
+	chains := make([]FallbackChain, len(cfg.Chains))
+	copy(chains, cfg.Chains)
+	sort.Slice(chains, func(i, j int) bool {
+		return len(chains[i].ModelPrefix) > len(chains[j].ModelPrefix)
+	})
+
 	return &FallbackResolver{
-		chains:    cfg.Chains,
+		chains:    chains,
 		providers: pm,
 		enabled:   cfg.Enabled,
 	}

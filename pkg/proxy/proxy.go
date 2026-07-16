@@ -424,10 +424,13 @@ func New(cfg Config, submitter SpanSubmitter, calc *costcalc.Calculator) (*Proxy
 	}
 
 	// Initialize fallback resolver if configured.
+	// Build provider pointers from p.providers (owned map) rather than
+	// &cfg.Providers[i] which would dangle after New() returns (cfg is by-value).
 	if cfg.Fallback.Enabled && len(cfg.Fallback.Chains) > 0 {
-		providerPtrs := make([]*Provider, 0, len(cfg.Providers))
-		for i := range cfg.Providers {
-			providerPtrs = append(providerPtrs, &cfg.Providers[i])
+		providerPtrs := make([]*Provider, 0, len(p.providers))
+		for name := range p.providers {
+			prov := p.providers[name]
+			providerPtrs = append(providerPtrs, &prov)
 		}
 		p.fallbackResolver = NewFallbackResolver(cfg.Fallback, providerPtrs)
 	}
@@ -1122,6 +1125,8 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 
 	// ── Retry/Fallback loop ──
 	// Build the provider attempt list: primary, then fallbacks (if configured).
+	// Each fallback candidate is checked against pricing and policy gates
+	// before inclusion — unchecked fallbacks could bypass authorization.
 	providerAttempts := []Provider{provider}
 	if p.fallbackResolver != nil {
 		if fps := p.fallbackResolver.FallbackProviders(requestModel, providerName); len(fps) > 0 {
@@ -1129,6 +1134,21 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 				// Skip fallback providers whose circuit breaker is open.
 				if cb, ok := p.breakers[fp.Name]; ok && cb.IsOpen() {
 					slog.Info("skipping fallback provider: circuit breaker open",
+						"provider", fp.Name, "model", requestModel,
+						"request_id", requestID)
+					continue
+				}
+				// Gate: pricing must be configured for the fallback provider.
+				if requestModel != "" && strings.ToLower(fp.Name) != "local" &&
+					!p.calc.HasPricing(pricingProvider(fp.Name), requestModel) {
+					slog.Info("skipping fallback provider: no pricing",
+						"provider", fp.Name, "model", requestModel,
+						"request_id", requestID)
+					continue
+				}
+				// Gate: model must be allowed by policy for the fallback provider.
+				if requestModel != "" && !p.policy.IsAllowed(fp.Name, requestModel) {
+					slog.Info("skipping fallback provider: blocked by policy",
 						"provider", fp.Name, "model", requestModel,
 						"request_id", requestID)
 					continue
@@ -1194,7 +1214,13 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 						"provider", activeProvName, "attempt", attemptCount,
 						"backoff_ms", backoff.Milliseconds(),
 						"request_id", requestID, "model", requestModel)
-					time.Sleep(backoff)
+					// Context-aware backoff: abort if the client disconnects
+					// during the wait instead of consuming upstream quota.
+					select {
+					case <-time.After(backoff):
+					case <-r.Context().Done():
+						return
+					}
 				}
 			}
 
@@ -1405,8 +1431,12 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 			// Record circuit breaker state.
 			p.recordCircuitBreaker(activeProvName, resp.StatusCode >= 500)
 
-			// Check if this response is retryable at all.
-			isRetryableResp := p.retryConfig.Enabled && p.retryConfig.IsRetryableStatus(resp.StatusCode)
+			// Check if this response should trigger retry or fallback.
+			// Fallback eligibility is decoupled from retryConfig.Enabled so
+			// that fallback chains fire even when same-provider retry is off.
+			isRetryableStatus := p.retryConfig.IsRetryableStatus(resp.StatusCode)
+			hasFallbacks := len(providerAttempts) > 1
+			isRetryableResp := (p.retryConfig.Enabled || hasFallbacks) && isRetryableStatus
 
 			// Non-retryable status (200, 400, 401, etc.) — accept it immediately.
 			if !isRetryableResp {
@@ -1424,11 +1454,13 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 			}
 
 			// Retryable status but max attempts exhausted — break to try next fallback.
+			// Do NOT cancel the response context here: if this is the last provider,
+			// resp will be forwarded to the client and its context must stay alive.
+			// The outer fallback branch (lines below) handles cancellation for
+			// discarded intermediate responses only.
 			slog.Info("retryable upstream error (attempts exhausted)",
 				"provider", activeProvName, "status", resp.StatusCode,
 				"attempt", attemptCount, "request_id", requestID)
-			streamCancel()
-			winningStreamCancel = nil
 			break
 		}
 		// Exhausted retries for this provider. If we got a response (even an error one),

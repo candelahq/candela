@@ -28,7 +28,7 @@ jobs:
       - name: Run GoReleaser
         run: |
           nix develop . --command bash -c "
-            go install github.com/goreleaser/goreleaser/v2@latest
+            go install github.com/goreleaser/goreleaser/v2@v2.17.0
             \$(go env GOPATH)/bin/goreleaser release --clean
           "
         env:

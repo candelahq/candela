@@ -177,12 +177,13 @@ export function useTrace(traceId: string) {
   const [collapsedIds, setCollapsedIds] = useState<Set<string>>(new Set());
 
   useEffect(() => {
-    let cancelled = false;
+    const controller = new AbortController();
+    const signal = controller.signal;
 
     traceClient
-      .getTrace({ traceId })
+      .getTrace({ traceId }, { signal })
       .then((res) => {
-        if (cancelled) return;
+        if (signal.aborted) return;
         if (!res.trace) {
           dispatch({ type: "not_found" });
           return;
@@ -211,10 +212,10 @@ export function useTrace(traceId: string) {
         });
       })
       .catch((err) => {
-        if (!cancelled) dispatch({ type: "error", message: err.message });
+        if (!signal.aborted) dispatch({ type: "error", message: err.message });
       });
 
-    return () => { cancelled = true; };
+    return () => controller.abort();
   }, [traceId]);
 
   // Filter flatSpans to hide children of collapsed nodes

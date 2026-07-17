@@ -65,7 +65,8 @@ export function useLeaderboard() {
   });
 
   useEffect(() => {
-    let cancelled = false;
+    const controller = new AbortController();
+    const signal = controller.signal;
     dispatch({ type: "fetch" });
 
     const now = new Date();
@@ -78,9 +79,9 @@ export function useLeaderboard() {
         end: timestampFromDate(now),
       },
       limit: 20,
-    })
+    }, { signal })
       .then((res) => {
-        if (cancelled) return;
+        if (signal.aborted) return;
         dispatch({
           type: "success",
           rankings: res.users.map((u) => ({
@@ -96,10 +97,10 @@ export function useLeaderboard() {
         });
       })
       .catch((err) => {
-        if (!cancelled) dispatch({ type: "error", message: err.message });
+        if (!signal.aborted) dispatch({ type: "error", message: err.message });
       });
 
-    return () => { cancelled = true; };
+    return () => controller.abort();
   }, [state.fetchCount, state.timeRange]);
 
   const refresh = useCallback(() => dispatch({ type: "refresh" }), []);

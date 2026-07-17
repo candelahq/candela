@@ -99,7 +99,13 @@ export function useTraces() {
   // Track the previous scope mode so we can detect changes
   const prevModeRef = useRef(mode);
 
+  const fetchRef = useRef<AbortController | null>(null);
+
   const fetchTraces = useCallback((f: TraceFilters) => {
+    fetchRef.current?.abort();
+    const controller = new AbortController();
+    fetchRef.current = controller;
+
     dispatch({ type: "fetch", filters: f });
 
     // Build headers — the backend interprets the auth token + this hint
@@ -120,14 +126,21 @@ export function useTraces() {
         descending: f.descending,
       }, {
         headers,
+        signal: controller.signal,
       })
       .then((res) => {
-        dispatch({
-          type: "success",
-          traces: (res.traces || []).map(mapTrace),
-        });
+        if (!controller.signal.aborted) {
+          dispatch({
+            type: "success",
+            traces: (res.traces || []).map(mapTrace),
+          });
+        }
       })
-      .catch((err) => dispatch({ type: "error", message: err.message }));
+      .catch((err) => {
+        if (!controller.signal.aborted) {
+          dispatch({ type: "error", message: err.message });
+        }
+      });
   }, [isPersonalScope]);
 
   const updateFilters = useCallback(
@@ -171,6 +184,7 @@ export function useTraces() {
       prevModeRef.current = mode;
       fetchTraces(state.filters);
     }
+    return () => fetchRef.current?.abort();
   }, [mode, fetchTraces, state.filters]);
 
   return {

@@ -75,7 +75,8 @@ export function useTenantLeaderboard() {
   });
 
   useEffect(() => {
-    let cancelled = false;
+    const controller = new AbortController();
+    const signal = controller.signal;
     dispatch({ type: "fetch" });
 
     (async () => {
@@ -95,7 +96,7 @@ export function useTenantLeaderboard() {
 
         const res = await fetch(
           `${API_BASE_URL}/_local/api/leaderboard?limit=50&startTime=${encodeURIComponent(start)}&endTime=${encodeURIComponent(end)}`,
-          { headers },
+          { headers, signal },
         );
 
         if (!res.ok) {
@@ -103,7 +104,7 @@ export function useTenantLeaderboard() {
         }
 
         const data = await res.json();
-        if (cancelled) return;
+        if (signal.aborted) return;
 
         const tenants: TenantUsageRow[] = (data.tenants ?? []).map(
           (t: Record<string, unknown>) => ({
@@ -118,7 +119,7 @@ export function useTenantLeaderboard() {
 
         dispatch({ type: "success", tenants });
       } catch (err) {
-        if (!cancelled) {
+        if (!signal.aborted) {
           dispatch({
             type: "error",
             message: err instanceof Error ? err.message : "Failed to load tenant leaderboard",
@@ -127,9 +128,7 @@ export function useTenantLeaderboard() {
       }
     })();
 
-    return () => {
-      cancelled = true;
-    };
+    return () => controller.abort();
   }, [state.fetchCount, state.timeRange]);
 
   // Client-side sorting

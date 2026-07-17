@@ -87,7 +87,8 @@ export function useCosts() {
   });
 
   useEffect(() => {
-    let cancelled = false;
+    const controller = new AbortController();
+    const signal = controller.signal;
     dispatch({ type: "fetch" });
 
     const now = new Date();
@@ -101,15 +102,15 @@ export function useCosts() {
     const summaryPromise = dashboardClient.getUsageSummary({
       projectId: DEFAULT_PROJECT_ID, // FIXME: Hardcoded - see constants.ts for evolution plan
       timeRange
-    });
+    }, { signal });
     const modelsPromise = dashboardClient.getModelBreakdown({
       projectId: DEFAULT_PROJECT_ID, // FIXME: Hardcoded - see constants.ts for evolution plan
       timeRange
-    });
+    }, { signal });
 
     Promise.all([summaryPromise, modelsPromise])
       .then(([summaryRes, modelsRes]) => {
-        if (cancelled) return;
+        if (signal.aborted) return;
         dispatch({
           type: "success",
           summary: {
@@ -138,10 +139,10 @@ export function useCosts() {
         });
       })
       .catch((err) => {
-        if (!cancelled) dispatch({ type: "error", message: err.message });
+        if (!signal.aborted) dispatch({ type: "error", message: err.message });
       });
 
-    return () => { cancelled = true; };
+    return () => controller.abort();
   }, [state.fetchCount, state.timeRange]);
 
   const refresh = useCallback(() => dispatch({ type: "refresh" }), []);

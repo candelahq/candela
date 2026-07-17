@@ -11,6 +11,10 @@ permissions:
   packages: read        # pull ghcr.io/candelahq/candela-dev
   pull-requests: read   # dorny/paths-filter needs PR file list
 
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: true
+
 # All jobs run inside the pre-baked CI container:
 #   Ubuntu 24.04 + Determinate Nix + dev shell pre-warmed in Nix store.
 # Steps use `nix develop . --command <cmd>` — identical to local dev.
@@ -22,6 +26,7 @@ jobs:
   # Push to main always runs everything.
   changes:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     outputs:
       go: ${{ github.event_name == 'push' || steps.filter.outputs.go }}
       rust: ${{ github.event_name == 'push' || steps.filter.outputs.rust }}
@@ -65,6 +70,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.go == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     container:
       image: ghcr.io/candelahq/candela-dev:latest
       credentials:
@@ -127,6 +133,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.go == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     container:
       image: ghcr.io/candelahq/candela-dev:latest
       credentials:
@@ -206,6 +213,7 @@ jobs:
     needs: [changes, go-test]
     if: always() && needs.changes.outputs.go == 'true' && needs.go-test.result == 'success'
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     container:
       image: ghcr.io/candelahq/candela-dev:latest
       credentials:
@@ -246,6 +254,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.go == 'true'
     runs-on: windows-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
         with:
@@ -286,6 +295,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.ui == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     container:
       image: ghcr.io/candelahq/candela-dev:latest
       credentials:
@@ -330,6 +340,7 @@ jobs:
     needs: [changes, ui-build-and-lint]
     if: always() && needs.changes.outputs.ui == 'true' && needs.ui-build-and-lint.result == 'success'
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     container:
       image: ghcr.io/candelahq/candela-dev:latest
       credentials:
@@ -373,6 +384,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.rust == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     container:
       image: ghcr.io/candelahq/candela-dev:latest
       credentials:
@@ -405,6 +417,7 @@ jobs:
   # ── Transparent proxy E2E (Linux + iptables) ────────────────────────────────
   transparent-proxy-e2e:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     # Only run when proxy/transparent/e2e files change.
     if: >-
       github.event_name == 'push' ||

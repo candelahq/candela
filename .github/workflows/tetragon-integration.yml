@@ -24,6 +24,10 @@ on:
       - 'pkg/tetragonaudit/**'
       - 'test/e2e/tetragon/**'
 
+concurrency:
+  group: tetragon-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: true
+
 jobs:
   tetragon-e2e:
     name: Tetragon E2E
@@ -34,6 +38,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          persist-credentials: false
 
       - name: Set up Docker Compose
         run: docker compose version

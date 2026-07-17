@@ -12,6 +12,7 @@ permissions:
 jobs:
   goreleaser:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     container:
       image: ghcr.io/candelahq/candela-dev:latest
       credentials:
@@ -20,6 +21,7 @@ jobs:
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
         with:
+          persist-credentials: false
           fetch-depth: 0   # GoReleaser needs full history for changelog
 
       - name: Fix git ownership for Nix flake
@@ -42,6 +44,7 @@ jobs:
   patch-formula:
     needs: goreleaser
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
         with:

@@ -33,8 +33,11 @@ jobs:
             artifact: candela-proxy-darwin-arm64
 
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          persist-credentials: false
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
@@ -69,9 +72,12 @@ jobs:
   # ── Build and push multi-arch container image ──
   build-container:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     needs: build-binaries
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          persist-credentials: false
 
       - name: Extract version from tag
         id: version
@@ -103,9 +109,12 @@ jobs:
   # ── Create GitHub release with binaries and checksums ──
   release:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     needs: [build-binaries, build-container]
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          persist-credentials: false
 
       - name: Extract version from tag
         id: version

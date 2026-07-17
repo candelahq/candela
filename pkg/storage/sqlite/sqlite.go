@@ -106,6 +106,8 @@ func (s *Store) migrate() error {
 		`CREATE INDEX IF NOT EXISTS idx_spans_kind ON spans(kind)`,
 		// Migration: add user_id column to existing tables.
 		`ALTER TABLE spans ADD COLUMN user_id TEXT DEFAULT ''`,
+		// Migration: add user_id index (matches DuckDB idx_spans_user).
+		`CREATE INDEX IF NOT EXISTS idx_spans_user ON spans(user_id)`,
 		// Migration: add session_id column to existing tables.
 		`ALTER TABLE spans ADD COLUMN session_id TEXT DEFAULT ''`,
 		// Migration: add tenant_id for multitenant cost attribution.
@@ -524,7 +526,7 @@ func (s *Store) GetUserLeaderboard(ctx context.Context, q storage.UsageQuery, li
 		WHERE (? = '' OR project_id = ?) AND start_time >= ? AND start_time <= ?
 			AND user_id != ''
 		GROUP BY user_id
-		ORDER BY SUM(gen_ai_cost_usd) DESC
+		ORDER BY SUM(gen_ai_cost_usd) DESC, user_id ASC
 		LIMIT ?
 	`, int(storage.SpanKindLLM), q.ProjectID, q.ProjectID, q.StartTime.Format(time.RFC3339Nano), q.EndTime.Format(time.RFC3339Nano),
 		q.ProjectID, q.ProjectID, q.StartTime.Format(time.RFC3339Nano), q.EndTime.Format(time.RFC3339Nano), limit)

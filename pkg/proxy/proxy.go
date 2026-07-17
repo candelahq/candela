@@ -1636,7 +1636,7 @@ func (p *Proxy) handleStandardResponse(
 		}
 		inputTokens = p.calc.NormalizeCachedInputWithTTL(provider.Name, model, inputTokens, ct.CacheReadTokens, ct.CacheCreationTokens, extendedTTL)
 		deductCtx, deductCancel := context.WithTimeout(context.WithoutCancel(r.Context()), 15*time.Second)
-		p.deductBudget(deductCtx, provider, model, effectiveUserID, inputTokens, outputTokens)
+		p.deductBudget(deductCtx, provider, model, effectiveUserID, inputTokens, outputTokens, time.Since(startTime))
 		deductCancel()
 		// Clear the pending-spend reservation now that DeductSpend has
 		// recorded the actual cost in Firestore. The deferred Release in
@@ -1803,7 +1803,7 @@ func (p *Proxy) handleStreamingResponse(
 		}
 		inputTokens = p.calc.NormalizeCachedInputWithTTL(provider.Name, model, inputTokens, ct.CacheReadTokens, ct.CacheCreationTokens, extendedTTL)
 		deductCtx, deductCancel := context.WithTimeout(context.WithoutCancel(r.Context()), 15*time.Second)
-		p.deductBudget(deductCtx, provider, model, effectiveUserID, inputTokens, outputTokens)
+		p.deductBudget(deductCtx, provider, model, effectiveUserID, inputTokens, outputTokens, time.Since(startTime))
 		deductCancel()
 		if budgetReserved != nil && *budgetReserved > 0 {
 			p.pendingSpend.Release(effectiveUserID, *budgetReserved)
@@ -1878,7 +1878,7 @@ type spanParams struct {
 // written. This MUST run in the request handler goroutine (not async) so that
 // the next request's CheckBudget reads the updated spend from Firestore.
 // Extracted from buildSpan to decouple billing timing from span creation.
-func (p *Proxy) deductBudget(ctx context.Context, provider Provider, model, userID string, inputTokens, outputTokens int64) {
+func (p *Proxy) deductBudget(ctx context.Context, provider Provider, model, userID string, inputTokens, outputTokens int64, duration time.Duration) {
 	if p.users == nil || userID == "" {
 		return
 	}
@@ -1886,6 +1886,9 @@ func (p *Proxy) deductBudget(ctx context.Context, provider Provider, model, user
 		// HIGH-2: Log SA spend instead of silently skipping.
 		totalTokens := inputTokens + outputTokens
 		cost := p.calc.Calculate(pricingProvider(provider.Name), model, inputTokens, outputTokens)
+		if cost == 0 {
+			cost = p.calc.CalculateTimeBased(pricingProvider(provider.Name), model, duration)
+		}
 		if cost > 0 || totalTokens > 0 {
 			p.saSpendMicroUSD.Add(int64(math.Round(cost * 1_000_000)))
 			slog.Info("sa_spend: service account usage",
@@ -1903,6 +1906,10 @@ func (p *Proxy) deductBudget(ctx context.Context, provider Provider, model, user
 
 	totalTokens := inputTokens + outputTokens
 	cost := p.calc.Calculate(pricingProvider(provider.Name), model, inputTokens, outputTokens)
+	// Time-based cost fallback for self-hosted models.
+	if cost == 0 {
+		cost = p.calc.CalculateTimeBased(pricingProvider(provider.Name), model, duration)
+	}
 
 	// #278: Record per-model daily spend in the in-memory tracker.
 	// This must happen even if DeductSpend fails, since the upstream
@@ -2017,6 +2024,14 @@ func (p *Proxy) buildSpan(ctx context.Context, params spanParams) {
 	totalTokens := params.inputTokens + params.outputTokens
 	pprov := pricingProvider(params.provider.Name)
 	cost := p.calc.Calculate(pprov, params.model, params.inputTokens, params.outputTokens)
+
+	// Time-based cost fallback for self-hosted models (e.g. Cloud Run GPU).
+	// When per-token cost is $0 but the model has per_second_usd pricing,
+	// compute cost from request duration instead.
+	if cost == 0 {
+		duration := params.endTime.Sub(params.startTime)
+		cost = p.calc.CalculateTimeBased(pprov, params.model, duration)
+	}
 
 	// Snapshot point-in-time pricing so historical spans retain the rates
 	// that were active at request time (enables cost auditing, #321).

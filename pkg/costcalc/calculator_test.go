@@ -4,6 +4,7 @@ import (
 	"math"
 	"sync"
 	"testing"
+	"time"
 )
 
 func TestNewEmpty(t *testing.T) {
@@ -775,4 +776,106 @@ func TestDatedHyphenatedModelPricing(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestCalculateTimeBased(t *testing.T) {
+	calc := NewEmpty()
+	// Cloud Run L4 GPU all-in rate.
+	calc.SetPricing(ModelPricing{
+		Model:        "deepseek-coder-v2-lite",
+		Provider:     "selfhosted",
+		PerSecondUSD: 0.000466,
+	})
+
+	t.Run("basic time-based cost", func(t *testing.T) {
+		// 2 minutes = 120 seconds × $0.000466/sec = $0.05592
+		cost := calc.CalculateTimeBased("selfhosted", "deepseek-coder-v2-lite", 2*time.Minute)
+		want := 120.0 * 0.000466
+		if math.Abs(cost-want) > 0.0001 {
+			t.Errorf("CalculateTimeBased(2m) = %f, want %f", cost, want)
+		}
+	})
+
+	t.Run("zero duration returns zero cost", func(t *testing.T) {
+		cost := calc.CalculateTimeBased("selfhosted", "deepseek-coder-v2-lite", 0)
+		if cost != 0 {
+			t.Errorf("CalculateTimeBased(0) = %f, want 0", cost)
+		}
+	})
+
+	t.Run("negative duration clamped to zero", func(t *testing.T) {
+		cost := calc.CalculateTimeBased("selfhosted", "deepseek-coder-v2-lite", -5*time.Second)
+		if cost != 0 {
+			t.Errorf("CalculateTimeBased(-5s) = %f, want 0", cost)
+		}
+	})
+
+	t.Run("unknown model returns zero", func(t *testing.T) {
+		cost := calc.CalculateTimeBased("selfhosted", "unknown-model", 5*time.Minute)
+		if cost != 0 {
+			t.Errorf("CalculateTimeBased(unknown) = %f, want 0", cost)
+		}
+	})
+
+	t.Run("model-level discount applied", func(t *testing.T) {
+		calc2 := NewEmpty()
+		calc2.SetPricing(ModelPricing{
+			Model:           "discounted-model",
+			Provider:        "selfhosted",
+			PerSecondUSD:    0.001,
+			DiscountPercent: 0.25, // 25% discount
+		})
+		cost := calc2.CalculateTimeBased("selfhosted", "discounted-model", time.Minute)
+		want := 60.0 * 0.001 * 0.75 // 60s × $0.001 × (1 - 0.25)
+		if math.Abs(cost-want) > 0.0001 {
+			t.Errorf("CalculateTimeBased(discount) = %f, want %f", cost, want)
+		}
+	})
+
+	t.Run("global discount applied", func(t *testing.T) {
+		calc3 := NewEmpty()
+		calc3.SetPricing(ModelPricing{
+			Model:        "global-disc-model",
+			Provider:     "selfhosted",
+			PerSecondUSD: 0.001,
+		})
+		calc3.SetGlobalDiscount(0.10) // 10% global discount
+		cost := calc3.CalculateTimeBased("selfhosted", "global-disc-model", time.Minute)
+		want := 60.0 * 0.001 * 0.90
+		if math.Abs(cost-want) > 0.0001 {
+			t.Errorf("CalculateTimeBased(global disc) = %f, want %f", cost, want)
+		}
+	})
+}
+
+func TestHasPricing_TimeBasedModel(t *testing.T) {
+	calc := NewEmpty()
+	calc.SetPricing(ModelPricing{
+		Model:        "deepseek-coder-v2-lite",
+		Provider:     "selfhosted",
+		PerSecondUSD: 0.000466,
+	})
+
+	t.Run("time-based model has pricing", func(t *testing.T) {
+		if !calc.HasPricing("selfhosted", "deepseek-coder-v2-lite") {
+			t.Error("HasPricing() returned false for time-based model, want true")
+		}
+	})
+
+	t.Run("unknown model has no pricing", func(t *testing.T) {
+		if calc.HasPricing("selfhosted", "unknown") {
+			t.Error("HasPricing() returned true for unknown model, want false")
+		}
+	})
+
+	t.Run("token-based still works", func(t *testing.T) {
+		calc.SetPricing(ModelPricing{
+			Model:           "gpt-4o",
+			Provider:        "openai",
+			InputPerMillion: 5.0,
+		})
+		if !calc.HasPricing("openai", "gpt-4o") {
+			t.Error("HasPricing() returned false for token-based model, want true")
+		}
+	})
 }

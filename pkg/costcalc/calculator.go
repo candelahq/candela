@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/candelahq/candela/pkg/catalog"
 	"gopkg.in/yaml.v3"
@@ -32,6 +33,11 @@ type ModelPricing struct {
 	InputPerMillionHigh  float64 `yaml:"input_per_million_high,omitempty" json:"input_per_million_high,omitempty"`
 	OutputPerMillionHigh float64 `yaml:"output_per_million_high,omitempty" json:"output_per_million_high,omitempty"`
 	TierThresholdTokens  int64   `yaml:"tier_threshold_tokens,omitempty" json:"tier_threshold_tokens,omitempty"`
+
+	// Time-based pricing for self-hosted models (e.g. Cloud Run GPU).
+	// When set, cost = request_duration_seconds × PerSecondUSD.
+	// Used instead of per-token pricing for infrastructure-cost models.
+	PerSecondUSD float64 `yaml:"per_second_usd,omitempty" json:"per_second_usd,omitempty"`
 }
 
 // PricingConfig holds pricing configuration loaded from config.yaml.
@@ -218,6 +224,29 @@ func (c *Calculator) Calculate(provider, model string, inputTokens, outputTokens
 	}
 
 	return baseCost
+}
+
+// CalculateTimeBased returns cost based on request duration for self-hosted models.
+// Used when PerSecondUSD is set (e.g. Cloud Run GPU at ~$0.000466/sec for L4).
+func (c *Calculator) CalculateTimeBased(provider, model string, duration time.Duration) float64 {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	p, ok := c.resolve(provider, model)
+	if !ok || p.PerSecondUSD == 0 {
+		return 0
+	}
+	// Clamp negative durations to zero (clock drift protection).
+	if duration < 0 {
+		duration = 0
+	}
+	cost := duration.Seconds() * p.PerSecondUSD
+	if p.DiscountPercent > 0 {
+		cost *= (1 - p.DiscountPercent)
+	}
+	if c.globalDiscount > 0 {
+		cost *= (1 - c.globalDiscount)
+	}
+	return cost
 }
 
 // LoadFromConfig applies pricing overrides from configuration.

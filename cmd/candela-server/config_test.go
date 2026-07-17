@@ -702,6 +702,34 @@ custom_providers:
 	}
 }
 
+func TestCustomProviderConfig_ModelsField(t *testing.T) {
+	yamlData := `
+custom_providers:
+  - name: selfhosted
+    upstream_url: https://vllm.example.com
+    models:
+      - deepseek-coder-v2-lite
+      - qwen3-32b
+`
+	var cfg Config
+	if err := yaml.Unmarshal([]byte(yamlData), &cfg); err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.CustomProviders) != 1 {
+		t.Fatalf("expected 1 custom provider, got %d", len(cfg.CustomProviders))
+	}
+	cp := cfg.CustomProviders[0]
+	if len(cp.Models) != 2 {
+		t.Fatalf("expected 2 models, got %d", len(cp.Models))
+	}
+	if cp.Models[0] != "deepseek-coder-v2-lite" {
+		t.Errorf("Models[0] = %q, want %q", cp.Models[0], "deepseek-coder-v2-lite")
+	}
+	if cp.Models[1] != "qwen3-32b" {
+		t.Errorf("Models[1] = %q, want %q", cp.Models[1], "qwen3-32b")
+	}
+}
+
 // ── CANDELA_VERTEX_REGION env var tests ──────────────────────────────────────
 
 func TestLoadConfig_VertexRegionEnvOverridesConfig(t *testing.T) {

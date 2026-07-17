@@ -49,11 +49,12 @@ import (
 // ProviderConfig defines a custom LLM provider added via YAML config.
 // This allows adding new providers without code changes.
 type ProviderConfig struct {
-	Name        string `yaml:"name"`
-	UpstreamURL string `yaml:"upstream_url"`
-	AuthHeader  string `yaml:"auth_header"`  // e.g., "Authorization", "x-api-key"
-	AuthEnvVar  string `yaml:"auth_env_var"` // env var for API key
-	Enabled     *bool  `yaml:"enabled"`      // nil = default (enabled)
+	Name        string   `yaml:"name"`
+	UpstreamURL string   `yaml:"upstream_url"`
+	AuthHeader  string   `yaml:"auth_header"`  // e.g., "Authorization", "x-api-key"
+	AuthEnvVar  string   `yaml:"auth_env_var"` // env var for API key
+	Enabled     *bool    `yaml:"enabled"`      // nil = default (enabled)
+	Models      []string `yaml:"models"`       // Model IDs routed to this provider via /v1/ compat routes
 }
 
 // Config holds the server configuration.
@@ -899,6 +900,23 @@ func main() {
 						Provider: compatProvider,
 					})
 				}
+
+				// Append custom provider models so they survive catalog refreshes.
+				for _, cp := range cfg.CustomProviders {
+					if cp.Enabled != nil && !*cp.Enabled {
+						continue
+					}
+					if !activeSet[cp.Name] {
+						continue
+					}
+					for _, modelID := range cp.Models {
+						models = append(models, proxy.CompatModel{
+							ID:       modelID,
+							Provider: cp.Name,
+						})
+					}
+				}
+
 				return models
 			}
 

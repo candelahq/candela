@@ -98,7 +98,8 @@ export function useTodayBudget() {
   });
 
   useEffect(() => {
-    let cancelled = false;
+    const controller = new AbortController();
+    const signal = controller.signal;
     dispatch({ type: "fetch" });
 
     const start = startOfTodayUTC();
@@ -111,13 +112,13 @@ export function useTodayBudget() {
         start: timestampFromDate(start),
         end: timestampFromDate(now),
       },
-    });
+    }, { signal });
 
-    const budgetPromise = userClient.getMyBudget({}).catch(() => null);
+    const budgetPromise = userClient.getMyBudget({}, { signal }).catch(() => null);
 
     Promise.all([usagePromise, budgetPromise])
       .then(([usageRes, budgetRes]) => {
-        if (cancelled) return;
+        if (signal.aborted) return;
 
         // ── Budget from UserService.GetMyBudget (Firestore) ───────────────
         const budgetProto = budgetRes?.budget;
@@ -176,10 +177,10 @@ export function useTodayBudget() {
         });
       })
       .catch((err) => {
-        if (!cancelled) dispatch({ type: "error", message: err.message });
+        if (!signal.aborted) dispatch({ type: "error", message: err.message });
       });
 
-    return () => { cancelled = true; };
+    return () => controller.abort();
   }, [state.fetchCount]);
 
   // Auto-refresh every 60 seconds.

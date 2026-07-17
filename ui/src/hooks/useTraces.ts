@@ -99,7 +99,13 @@ export function useTraces() {
   // Track the previous scope mode so we can detect changes
   const prevModeRef = useRef(mode);
 
+  const fetchRef = useRef<AbortController | null>(null);
+
   const fetchTraces = useCallback((f: TraceFilters) => {
+    fetchRef.current?.abort();
+    const controller = new AbortController();
+    fetchRef.current = controller;
+
     dispatch({ type: "fetch", filters: f });
 
     // Build headers — the backend interprets the auth token + this hint
@@ -120,14 +126,21 @@ export function useTraces() {
         descending: f.descending,
       }, {
         headers,
+        signal: controller.signal,
       })
       .then((res) => {
-        dispatch({
-          type: "success",
-          traces: (res.traces || []).map(mapTrace),
-        });
+        if (!controller.signal.aborted) {
+          dispatch({
+            type: "success",
+            traces: (res.traces || []).map(mapTrace),
+          });
+        }
       })
-      .catch((err) => dispatch({ type: "error", message: err.message }));
+      .catch((err) => {
+        if (!controller.signal.aborted) {
+          dispatch({ type: "error", message: err.message });
+        }
+      });
   }, [isPersonalScope]);
 
   const updateFilters = useCallback(
@@ -172,6 +185,14 @@ export function useTraces() {
       fetchTraces(state.filters);
     }
   }, [mode, fetchTraces, state.filters]);
+
+  // Abort in-flight request on unmount only. Cleanup must NOT be in the
+  // mode/filters effect — fetchTraces already updates fetchRef.current
+  // before React runs the previous effect's cleanup, so that cleanup
+  // would abort the *new* request instead of the old one.
+  useEffect(() => {
+    return () => fetchRef.current?.abort();
+  }, []);
 
   return {
     traces: state.traces,

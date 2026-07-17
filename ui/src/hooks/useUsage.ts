@@ -75,7 +75,8 @@ export function useUsage() {
   });
 
   useEffect(() => {
-    let cancelled = false;
+    const controller = new AbortController();
+    const signal = controller.signal;
     dispatch({ type: "fetch" });
 
     const now = new Date();
@@ -87,9 +88,9 @@ export function useUsage() {
         start: timestampFromDate(start),
         end: timestampFromDate(now),
       },
-    })
+    }, { signal })
       .then((res) => {
-        if (cancelled) return;
+        if (signal.aborted) return;
 
         const limit = res.budget?.limitUsd || 0;
         const spent = res.budget?.spentUsd || 0;
@@ -122,10 +123,10 @@ export function useUsage() {
         });
       })
       .catch((err) => {
-        if (!cancelled) dispatch({ type: "error", message: err.message });
+        if (!signal.aborted) dispatch({ type: "error", message: err.message });
       });
 
-    return () => { cancelled = true; };
+    return () => controller.abort();
   }, [state.fetchCount, state.timeRange]);
 
   const refresh = useCallback(() => dispatch({ type: "refresh" }), []);

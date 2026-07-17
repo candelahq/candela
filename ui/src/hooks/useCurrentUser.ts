@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useReducer} from "react";
+import { useCallback, useEffect, useReducer, useRef } from "react";
 import { userClient } from "@/lib/api";
 import type { User, UserBudget, BudgetGrant } from "@/gen/candela/types/user_pb";
 import { UserRole } from "@/gen/candela/types/user_pb";
@@ -55,12 +55,17 @@ const initialState: CurrentUser = {
  */
 export function useCurrentUser(): CurrentUser {
   const [state, dispatch] = useReducer(reducer, initialState);
+  const fetchRef = useRef<AbortController | null>(null);
 
   const fetchUser = useCallback(async () => {
+    fetchRef.current?.abort();
+    const controller = new AbortController();
+    fetchRef.current = controller;
+
     dispatch({ type: "loading" });
     try {
-      const resp = await userClient.getCurrentUser({});
-      if (resp.user) {
+      const resp = await userClient.getCurrentUser({}, { signal: controller.signal });
+      if (!controller.signal.aborted && resp.user) {
         dispatch({
           type: "success",
           user: resp.user,
@@ -70,13 +75,16 @@ export function useCurrentUser(): CurrentUser {
         });
       }
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : "Failed to load user";
-      dispatch({ type: "error", message });
+      if (!controller.signal.aborted) {
+        const message = err instanceof Error ? err.message : "Failed to load user";
+        dispatch({ type: "error", message });
+      }
     }
   }, []);
 
   useEffect(() => {
     fetchUser();
+    return () => fetchRef.current?.abort();
   }, [fetchUser]);
 
   return state;

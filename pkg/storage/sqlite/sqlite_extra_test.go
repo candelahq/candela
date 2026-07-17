@@ -156,16 +156,16 @@ func TestGetUserLeaderboard_SQLite(t *testing.T) {
 	if len(leaders) != 2 {
 		t.Fatalf("got %d leaders, want 2", len(leaders))
 	}
-	// Bob: $0.10 total → first
-	if leaders[0].UserID != "bob@example.com" {
-		t.Errorf("top user = %q, want bob@example.com", leaders[0].UserID)
+	// Both users have $0.10 total. Stable sort: cost DESC, user_id ASC.
+	// alice@example.com sorts before bob@example.com alphabetically.
+	if leaders[0].UserID != "alice@example.com" {
+		t.Errorf("top user = %q, want alice@example.com", leaders[0].UserID)
 	}
-	// Alice: 2 calls, $0.10 total → second
-	if leaders[1].UserID != "alice@example.com" {
-		t.Errorf("second user = %q, want alice@example.com", leaders[1].UserID)
+	if leaders[0].CallCount != 2 {
+		t.Errorf("alice call count = %d, want 2", leaders[0].CallCount)
 	}
-	if leaders[1].CallCount != 2 {
-		t.Errorf("alice call count = %d, want 2", leaders[1].CallCount)
+	if leaders[1].UserID != "bob@example.com" {
+		t.Errorf("second user = %q, want bob@example.com", leaders[1].UserID)
 	}
 }
 

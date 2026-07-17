@@ -142,6 +142,9 @@ type Config struct {
 	Budget struct {
 		Timezone string `yaml:"timezone"` // IANA timezone for budget period reset (default: UTC)
 	} `yaml:"budget"`
+	Notifications struct {
+		SlackWebhookURL string `yaml:"slack_webhook_url"` // Slack incoming webhook URL
+	} `yaml:"notifications"`
 }
 
 // CatalogConfig holds model catalog configuration.
@@ -811,7 +814,12 @@ func main() {
 			// Wire team-mode features if Firestore is available.
 			if userStore != nil {
 				llmProxy.SetUserStore(userStore)
-				llmProxy.SetBudgetChecker(notify.NewBudgetChecker(&notify.LogNotifier{}))
+				channels := []storage.Notifier{&notify.LogNotifier{}}
+				if cfg.Notifications.SlackWebhookURL != "" {
+					channels = append(channels, notify.NewSlackNotifier(cfg.Notifications.SlackWebhookURL))
+					slog.Info("🔔 Slack budget alerts enabled")
+				}
+				llmProxy.SetBudgetChecker(notify.NewBudgetChecker(channels...))
 
 				// CRIT-3: Wire durable spend outbox for DeductSpend retries.
 				// Prefer $HOME/.candela/ for local dev; fall back to /etc/candela/

@@ -186,3 +186,7 @@ sinks:
 # Default: UTC (backward compatible).
 # budget:
 #   timezone: "America/New_York"
+
+# Budget alert notifications.
+# notifications:
+#   slack_webhook_url: "https://hooks.slack.com/services/T.../B.../xxx"  # Slack incoming webhook

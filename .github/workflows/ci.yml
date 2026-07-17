@@ -98,12 +98,19 @@ jobs:
       - name: Download modules
         run: |
           nix develop . --command bash -c "
+            success=false
             for attempt in 1 2 3; do
-              go mod download && break
+              if go mod download; then
+                success=true
+                break
+              fi
               echo \"::warning::go mod download failed (attempt \$attempt/3), retrying...\"
               sleep 5
             done
-            go mod download || { echo \"::error::go mod download failed after 3 retries\"; exit 1; }
+            if [ \"\$success\" != true ]; then
+              echo \"::error::go mod download failed after 3 retries\"
+              exit 1
+            fi
           "
 
       - name: Build
@@ -169,12 +176,19 @@ jobs:
       - name: Download modules
         run: |
           nix develop . --command bash -c "
+            success=false
             for attempt in 1 2 3; do
-              go mod download && break
+              if go mod download; then
+                success=true
+                break
+              fi
               echo \"::warning::go mod download failed (attempt \$attempt/3), retrying...\"
               sleep 5
             done
-            go mod download || { echo \"::error::go mod download failed after 3 retries\"; exit 1; }
+            if [ \"\$success\" != true ]; then
+              echo \"::error::go mod download failed after 3 retries\"
+              exit 1
+            fi
           "
 
       - name: Test (${{ matrix.group.name }})

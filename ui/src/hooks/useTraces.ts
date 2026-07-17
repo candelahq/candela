@@ -184,8 +184,15 @@ export function useTraces() {
       prevModeRef.current = mode;
       fetchTraces(state.filters);
     }
-    return () => fetchRef.current?.abort();
   }, [mode, fetchTraces, state.filters]);
+
+  // Abort in-flight request on unmount only. Cleanup must NOT be in the
+  // mode/filters effect — fetchTraces already updates fetchRef.current
+  // before React runs the previous effect's cleanup, so that cleanup
+  // would abort the *new* request instead of the old one.
+  useEffect(() => {
+    return () => fetchRef.current?.abort();
+  }, []);
 
   return {
     traces: state.traces,

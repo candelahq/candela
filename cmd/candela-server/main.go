@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -1196,6 +1197,26 @@ func loadConfig() (*Config, error) {
 	}
 	if cfg.Proxy.VertexAI.Region == "" {
 		cfg.Proxy.VertexAI.Region = "us-central1"
+	}
+
+	// Auth: allowed service accounts — env var override (comma-separated).
+	// This lets Terraform / Cloud Run inject SAs without a config.yaml mount.
+	if env := os.Getenv("CANDELA_ALLOWED_SERVICE_ACCOUNTS"); env != "" {
+		var sas []string
+		for _, s := range strings.Split(env, ",") {
+			trimmed := strings.TrimSpace(s)
+			if trimmed != "" {
+				sas = append(sas, trimmed)
+			}
+		}
+		cfg.Auth.AllowedServiceAccounts = append(cfg.Auth.AllowedServiceAccounts, sas...)
+	}
+
+	// Auth: dev mode — env var override.
+	if env := os.Getenv("CANDELA_DEV_MODE"); env != "" {
+		if val, err := strconv.ParseBool(env); err == nil {
+			cfg.Auth.DevMode = val
+		}
 	}
 
 	return &cfg, nil

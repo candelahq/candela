@@ -5,6 +5,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"math"
 	"net/http"
 	"time"
 
@@ -45,7 +47,7 @@ func thresholdEmoji(threshold float64) string {
 // NotifyBudgetThreshold posts a budget alert message to Slack.
 func (n *SlackNotifier) NotifyBudgetThreshold(ctx context.Context, alert storage.BudgetAlert) error {
 	emoji := thresholdEmoji(alert.Threshold)
-	pct := int(alert.Threshold * 100)
+	pct := int(math.Round(alert.Threshold * 100))
 
 	text := fmt.Sprintf(
 		"%s *Budget Alert — %d%% threshold reached*\n"+
@@ -72,11 +74,13 @@ func (n *SlackNotifier) NotifyBudgetThreshold(ctx context.Context, alert storage
 		return fmt.Errorf("slack: send request: %w", err)
 	}
 	defer func() {
+		_, _ = io.Copy(io.Discard, resp.Body)
 		_ = resp.Body.Close()
 	}()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("slack: webhook returned HTTP %d", resp.StatusCode)
+		bodyBytes, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+		return fmt.Errorf("slack: webhook returned HTTP %d: %s", resp.StatusCode, string(bytes.TrimSpace(bodyBytes)))
 	}
 
 	return nil

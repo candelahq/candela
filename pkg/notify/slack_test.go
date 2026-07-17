@@ -129,8 +129,11 @@ func TestSlackNotifier_NonOKResponse(t *testing.T) {
 
 func TestSlackNotifier_ContextCancellation(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Slow handler — should be cancelled before responding.
-		time.Sleep(5 * time.Second)
+		// Block until client cancels — avoids goroutine leak from hard sleep.
+		select {
+		case <-r.Context().Done():
+		case <-time.After(5 * time.Second):
+		}
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer srv.Close()
@@ -147,7 +150,10 @@ func TestSlackNotifier_ContextCancellation(t *testing.T) {
 
 func TestSlackNotifier_Timeout(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		time.Sleep(500 * time.Millisecond)
+		select {
+		case <-r.Context().Done():
+		case <-time.After(500 * time.Millisecond):
+		}
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer srv.Close()

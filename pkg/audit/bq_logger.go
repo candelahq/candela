@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"time"
 
 	"cloud.google.com/go/bigquery"
 	"google.golang.org/api/googleapi"
@@ -60,16 +61,19 @@ func NewBQLogger(ctx context.Context, cfg BQConfig) (*BQLogger, error) {
 }
 
 // writeLoop drains the events channel and writes rows to BigQuery.
-// It uses context.Background() so inserts are not cancelled by request contexts.
+// Each insert gets a 30-second timeout to prevent hung BigQuery from
+// blocking the loop and causing the channel buffer to fill up.
 func (l *BQLogger) writeLoop() {
 	defer close(l.done)
 	for row := range l.events {
-		if err := l.inserter.Put(context.Background(), row); err != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		if err := l.inserter.Put(ctx, row); err != nil {
 			slog.Warn("audit: failed to write to BigQuery",
 				"error", err,
 				"procedure", row.Procedure,
 				"actor", row.ActorEmail)
 		}
+		cancel()
 	}
 }
 

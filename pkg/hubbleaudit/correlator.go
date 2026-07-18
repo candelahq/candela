@@ -201,10 +201,20 @@ func tupleKey(f Flow) string {
 }
 
 // removeIndex removes val from a slice of ints (preserving order).
+// When the slice shrinks well below its capacity, it is compacted to
+// reclaim memory from long-lived index entries.
 func removeIndex(s []int, val int) []int {
 	for i, v := range s {
 		if v == val {
-			return append(s[:i], s[i+1:]...)
+			s = append(s[:i], s[i+1:]...)
+			// Compact: if length is much smaller than capacity, copy to
+			// a right-sized slice to release the excess backing array.
+			if cap(s) > 64 && len(s) < cap(s)/4 {
+				compacted := make([]int, len(s))
+				copy(compacted, s)
+				return compacted
+			}
+			return s
 		}
 	}
 	return s

@@ -104,7 +104,10 @@ func TestAPIKeyCRUD(t *testing.T) {
 	}
 
 	// Create API key.
-	fullKey := GenerateAPIKey()
+	fullKey, err := GenerateAPIKey()
+	if err != nil {
+		t.Fatalf("GenerateAPIKey: %v", err)
+	}
 	key, err := store.CreateAPIKey(ctx, storage.APIKey{
 		ProjectID: p.ID,
 		Name:      "dev-key",
@@ -160,7 +163,7 @@ func TestCascadeDelete(t *testing.T) {
 	ctx := context.Background()
 
 	p, _ := store.CreateProject(ctx, storage.Project{Name: "Cascade Test"})
-	fullKey := GenerateAPIKey()
+	fullKey, _ := GenerateAPIKey()
 	_, _ = store.CreateAPIKey(ctx, storage.APIKey{ProjectID: p.ID, Name: "k1"}, fullKey)
 
 	// Delete project — should cascade to keys.
@@ -178,7 +181,10 @@ func TestCascadeDelete(t *testing.T) {
 }
 
 func TestGenerateAPIKey(t *testing.T) {
-	key := GenerateAPIKey()
+	key, err := GenerateAPIKey()
+	if err != nil {
+		t.Fatalf("GenerateAPIKey: %v", err)
+	}
 	if len(key) != 37 { // "cdla_" (5) + 32 hex chars
 		t.Errorf("expected 37 char key, got %d: %q", len(key), key)
 	}

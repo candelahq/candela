@@ -98,14 +98,14 @@ func (h *TraceHandler) ListTraces(
 			q.EndTime = msg.TimeRange.End.AsTime()
 		}
 	}
+	if q.EndTime.IsZero() {
+		q.EndTime = time.Now()
+	}
 	if q.StartTime.IsZero() {
 		// Default to 30 days so the list view doesn't silently exclude spans
 		// that fall outside a narrow window — GetTrace has no time filter and
 		// would otherwise show different totals for the same trace.
-		q.StartTime = time.Now().AddDate(0, 0, -30)
-	}
-	if q.EndTime.IsZero() {
-		q.EndTime = time.Now()
+		q.StartTime = q.EndTime.AddDate(0, 0, -30)
 	}
 
 	if msg.Pagination != nil {
@@ -161,6 +161,13 @@ func (h *TraceHandler) SearchSpans(
 		if msg.TimeRange.End != nil {
 			q.EndTime = msg.TimeRange.End.AsTime()
 		}
+	}
+	// Default to last 7 days to prevent unbounded BigQuery scans.
+	if q.EndTime.IsZero() {
+		q.EndTime = time.Now()
+	}
+	if q.StartTime.IsZero() {
+		q.StartTime = q.EndTime.Add(-7 * 24 * time.Hour)
 	}
 
 	if msg.Pagination != nil {

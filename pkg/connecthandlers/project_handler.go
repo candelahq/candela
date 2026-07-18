@@ -114,7 +114,10 @@ func (h *ProjectHandler) CreateAPIKey(
 			fmt.Errorf("admin access required"))
 	}
 
-	fullKey := projectdb.GenerateAPIKey()
+	fullKey, err := projectdb.GenerateAPIKey()
+	if err != nil {
+		return nil, internalError("failed to generate API key", err)
+	}
 
 	key, err := h.store.CreateAPIKey(ctx, storage.APIKey{
 		ProjectID: req.Msg.ProjectId,

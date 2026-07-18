@@ -326,11 +326,11 @@ func parseLeaderboardParams(msg leaderboardRequest) (storage.UsageQuery, int) {
 			q.EndTime = msg.GetTimeRange().End.AsTime()
 		}
 	}
-	if q.StartTime.IsZero() {
-		q.StartTime = time.Now().Add(-30 * 24 * time.Hour)
-	}
 	if q.EndTime.IsZero() {
 		q.EndTime = time.Now()
+	}
+	if q.StartTime.IsZero() {
+		q.StartTime = q.EndTime.Add(-30 * 24 * time.Hour)
 	}
 	limit := int(msg.GetLimit())
 	if limit <= 0 {

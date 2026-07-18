@@ -162,6 +162,13 @@ func (h *TraceHandler) SearchSpans(
 			q.EndTime = msg.TimeRange.End.AsTime()
 		}
 	}
+	// Default to last 7 days to prevent unbounded BigQuery scans.
+	if q.StartTime.IsZero() {
+		q.StartTime = time.Now().Add(-7 * 24 * time.Hour)
+	}
+	if q.EndTime.IsZero() {
+		q.EndTime = time.Now()
+	}
 
 	if msg.Pagination != nil {
 		q.PageSize = int(msg.Pagination.PageSize)

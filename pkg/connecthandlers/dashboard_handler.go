@@ -280,6 +280,9 @@ func (h *DashboardHandler) GetTeamLeaderboard(
 	if limit <= 0 {
 		limit = 20
 	}
+	if limit > 100 {
+		limit = 100
+	}
 
 	users, err := h.store.GetUserLeaderboard(ctx, q, limit)
 	if err != nil {

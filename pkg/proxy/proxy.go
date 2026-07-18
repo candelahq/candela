@@ -1020,12 +1020,11 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// ── Budget pre-flight with model-aware floor (#7) ──
+	// ── Budget pre-flight with conservative reservation ──
 	// Only applies in team mode (UserStore configured).
 	var budgetReserved float64 // track reservation for Release in deductBudget
 	if p.users != nil && effectiveUserID != "" && !isServiceAccount && !isAdmin {
-		// #7: Budget check with a per-call floor so even a $0.001-remaining
-		// user can't fire a $50 request. Floor = minimum meaningful API cost.
+		// Budget check floor: minimum cost to allow a request through.
 		const budgetCheckFloor = 0.001 // $0.001 — lower than any cloud model's minimum call
 		check, err := p.users.CheckBudget(r.Context(), effectiveUserID, budgetCheckFloor)
 		if err != nil {
@@ -1059,10 +1058,11 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// Reserve a conservative estimate so concurrent requests see lower balance.
-		// We use the floor ($0.001) because we don't know actual cost yet.
-		// This is a lower bound — the real cost will be higher, but even a
-		// small reservation prevents unlimited concurrent overdraft.
-		budgetReserved = budgetCheckFloor
+		// $0.05 is a realistic floor for most LLM API calls (a small GPT-4o
+		// request costs ~$0.01–0.10, Claude ~$0.03–0.50). This prevents the
+		// previous $0.001 reservation from allowing 1000x overdraft.
+		const reservationFloor = 0.05
+		budgetReserved = reservationFloor
 		p.pendingSpend.Reserve(effectiveUserID, budgetReserved)
 		// Release the reservation if we return before the response handlers
 		// (handleStreamingResponse / handleStandardResponse) take ownership.
@@ -1288,21 +1288,17 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 						for k := range bodyMap {
 							keys = append(keys, k)
 						}
-						var systemSnippet string
+						var systemLen int
 						if sys, ok := bodyMap["system"]; ok {
 							if b, jsonErr := json.Marshal(sys); jsonErr == nil {
-								if len(b) > 500 {
-									systemSnippet = string(b[:500]) + "..."
-								} else {
-									systemSnippet = string(b)
-								}
+								systemLen = len(b)
 							}
 						}
 						slog.Info("CANDELA_DEBUG: passthrough body",
 							"provider", activeProvName,
 							"keys", keys,
-							"anthropic_version", bodyMap["anthropic_version"],
-							"system_snippet", systemSnippet,
+							"has_system", systemLen > 0,
+							"system_len", systemLen,
 							"body_len", len(upstreamBody))
 					}
 				}

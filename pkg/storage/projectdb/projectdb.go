@@ -93,7 +93,11 @@ func migrate(db *sql.DB) error {
 
 func (s *Store) CreateProject(ctx context.Context, p storage.Project) (*storage.Project, error) {
 	if p.ID == "" {
-		p.ID = generateID()
+		id, err := generateID()
+		if err != nil {
+			return nil, err
+		}
+		p.ID = id
 	}
 	now := time.Now().UTC()
 	p.CreatedAt = now
@@ -194,7 +198,11 @@ func (s *Store) DeleteProject(ctx context.Context, id string) error {
 
 func (s *Store) CreateAPIKey(ctx context.Context, key storage.APIKey, fullKey string) (*storage.APIKey, error) {
 	if key.ID == "" {
-		key.ID = generateID()
+		id, err := generateID()
+		if err != nil {
+			return nil, err
+		}
+		key.ID = id
 	}
 	now := time.Now().UTC()
 	key.CreatedAt = now
@@ -310,14 +318,18 @@ func (s *Store) Close() error {
 
 // GenerateAPIKey creates a cryptographically secure API key.
 // Format: cdla_<32 hex chars> (40 chars total).
-func GenerateAPIKey() string {
+func GenerateAPIKey() (string, error) {
 	b := make([]byte, 16)
-	_, _ = rand.Read(b)
-	return "cdla_" + hex.EncodeToString(b)
+	if _, err := rand.Read(b); err != nil {
+		return "", fmt.Errorf("generating API key: %w", err)
+	}
+	return "cdla_" + hex.EncodeToString(b), nil
 }
 
-func generateID() string {
+func generateID() (string, error) {
 	b := make([]byte, 12)
-	_, _ = rand.Read(b)
-	return hex.EncodeToString(b)
+	if _, err := rand.Read(b); err != nil {
+		return "", fmt.Errorf("generating ID: %w", err)
+	}
+	return hex.EncodeToString(b), nil
 }

@@ -20,6 +20,7 @@ type Manager struct {
 	health    *Health
 	startedAt time.Time
 	cancel    context.CancelFunc
+	wg        sync.WaitGroup // tracks background goroutines (auto-pull)
 }
 
 // ManagerConfig configures the Manager's behavior.
@@ -109,7 +110,9 @@ func (m *Manager) cancelHealthLoop() {
 
 func (m *Manager) startAutoPull(ctx context.Context) {
 	if m.autoPull && len(m.models) > 0 {
+		m.wg.Add(1)
 		go func() {
+			defer m.wg.Done()
 			for _, model := range m.models {
 				slog.Info("pulling model", "model", model, "backend", m.rt.Name())
 				if err := m.rt.PullModel(ctx, model, nil); err != nil {
@@ -121,8 +124,10 @@ func (m *Manager) startAutoPull(ctx context.Context) {
 }
 
 // Stop stops health monitoring and shuts down the runtime.
+// It waits for any in-flight auto-pull goroutines to finish.
 func (m *Manager) Stop(ctx context.Context) error {
 	m.cancelHealthLoop()
+	m.wg.Wait() // wait for auto-pull goroutines to finish
 	err := m.rt.Stop(ctx)
 	// Update cached health immediately so GetHealth reflects the stopped state.
 	m.mu.Lock()

@@ -475,7 +475,7 @@ func (s *Store) GetTrace(ctx context.Context, traceID string) (*storage.Trace, e
 		return nil, fmt.Errorf("getting trace: %w", err)
 	}
 	if len(spans) == 0 {
-		return nil, fmt.Errorf("trace %s not found", traceID)
+		return nil, fmt.Errorf("trace %s: %w", traceID, storage.ErrNotFound)
 	}
 
 	return buildTrace(traceID, spans), nil

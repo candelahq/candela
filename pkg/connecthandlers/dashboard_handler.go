@@ -259,30 +259,7 @@ func (h *DashboardHandler) GetTeamLeaderboard(
 			fmt.Errorf("team leaderboard is admin-only"))
 	}
 
-	msg := req.Msg
-	q := storage.UsageQuery{ProjectID: msg.ProjectId}
-	if msg.TimeRange != nil {
-		if msg.TimeRange.Start != nil {
-			q.StartTime = msg.TimeRange.Start.AsTime()
-		}
-		if msg.TimeRange.End != nil {
-			q.EndTime = msg.TimeRange.End.AsTime()
-		}
-	}
-	if q.StartTime.IsZero() {
-		q.StartTime = time.Now().Add(-30 * 24 * time.Hour) // default: last 30 days
-	}
-	if q.EndTime.IsZero() {
-		q.EndTime = time.Now()
-	}
-
-	limit := int(msg.Limit)
-	if limit <= 0 {
-		limit = 20
-	}
-	if limit > 100 {
-		limit = 100
-	}
+	q, limit := parseLeaderboardParams(req.Msg)
 
 	users, err := h.store.GetUserLeaderboard(ctx, q, limit)
 	if err != nil {

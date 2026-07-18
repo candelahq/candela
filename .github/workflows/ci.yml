@@ -171,10 +171,18 @@ jobs:
             gcloud emulators firestore start \
               --host-port=0.0.0.0:8086 \
               --project=test-project &
+            emulator_ready=false
             for _ in \$(seq 1 30); do
-              curl -sf http://localhost:8086/ && break
+              if curl -sf http://localhost:8086/ > /dev/null 2>&1; then
+                emulator_ready=true
+                break
+              fi
               sleep 2
             done
+            if [ \"\$emulator_ready\" != true ]; then
+              echo '::error::Firestore emulator failed to start after 60 seconds'
+              exit 1
+            fi
           "
 
       - name: Generate proto stubs

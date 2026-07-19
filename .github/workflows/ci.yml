@@ -173,7 +173,7 @@ jobs:
               --project=test-project &
             emulator_ready=false
             for _ in \$(seq 1 30); do
-              if curl -sf http://localhost:8086/ > /dev/null 2>&1; then
+              if curl -sf --max-time 2 http://localhost:8086/ > /dev/null 2>&1; then
                 emulator_ready=true
                 break
               fi

@@ -12,6 +12,7 @@ import (
 	"go.opentelemetry.io/collector/pdata/pcommon"
 	"go.opentelemetry.io/collector/pdata/plog"
 	"go.opentelemetry.io/collector/pdata/plog/plogotlp"
+	"golang.org/x/oauth2"
 )
 
 var _ Sink = (*OTelSink)(nil)
@@ -22,19 +23,25 @@ type OTelSinkConfig struct {
 	// Endpoint is the OTLP/HTTP endpoint (e.g. "http://localhost:4318").
 	Endpoint string
 
-	// Headers are optional auth/routing headers for the OTLP export.
+	// Headers are optional static auth/routing headers for the OTLP export.
 	Headers map[string]string
 
 	// TimeoutSec is the per-export HTTP timeout in seconds. Default: 10.
 	TimeoutSec int
+
+	// TokenSource provides auto-refreshing OAuth2 tokens for authentication.
+	// When set, a fresh token is injected via the Authorization header on
+	// every request, preventing token expiry (GCP tokens expire after ~1hr).
+	TokenSource oauth2.TokenSource
 }
 
 // OTelSink exports AuditRecords as OTLP log records via HTTP.
 // It implements the Sink interface for the tetragonaudit pipeline.
 type OTelSink struct {
-	endpoint string
-	headers  map[string]string
-	client   *http.Client
+	endpoint    string
+	headers     map[string]string
+	client      *http.Client
+	tokenSource oauth2.TokenSource
 }
 
 // NewOTelSink creates a new OTel log exporter sink.
@@ -47,8 +54,9 @@ func NewOTelSink(cfg OTelSinkConfig) (*OTelSink, error) {
 	}
 
 	return &OTelSink{
-		endpoint: cfg.Endpoint,
-		headers:  cfg.Headers,
+		endpoint:    cfg.Endpoint,
+		headers:     cfg.Headers,
+		tokenSource: cfg.TokenSource,
 		client: &http.Client{
 			Timeout: time.Duration(cfg.TimeoutSec) * time.Second,
 		},
@@ -159,6 +167,15 @@ func (s *OTelSink) exportLogs(ctx context.Context, logs plog.Logs) error {
 	httpReq.Header.Set("Content-Type", "application/x-protobuf")
 	for k, v := range s.headers {
 		httpReq.Header.Set(k, v)
+	}
+
+	// Inject a fresh OAuth2 token if a TokenSource is configured.
+	if s.tokenSource != nil {
+		token, tokenErr := s.tokenSource.Token()
+		if tokenErr != nil {
+			return fmt.Errorf("tetragonaudit: refreshing auth token: %w", tokenErr)
+		}
+		httpReq.Header.Set("Authorization", "Bearer "+token.AccessToken)
 	}
 
 	resp, err := s.client.Do(httpReq)

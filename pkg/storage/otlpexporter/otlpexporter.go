@@ -4,11 +4,13 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"time"
 
 	"github.com/candelahq/candela/pkg/storage"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"
+	"golang.org/x/oauth2"
 )
 
 var _ storage.SpanWriter = (*Writer)(nil)
@@ -17,10 +19,16 @@ var _ storage.SpanWriter = (*Writer)(nil)
 type Config struct {
 	Endpoint    string            `yaml:"endpoint"`    // e.g. "http://localhost:4318"
 	Protocol    string            `yaml:"protocol"`    // "http" (default) or "grpc"
-	Headers     map[string]string `yaml:"headers"`     // optional auth headers
+	Headers     map[string]string `yaml:"headers"`     // optional static headers
 	Insecure    bool              `yaml:"insecure"`    // skip TLS verification
 	Compression string            `yaml:"compression"` // "gzip" (default) or "none"
 	TimeoutSec  int               `yaml:"timeout_sec"` // per-export timeout (default: 30)
+
+	// TokenSource provides auto-refreshing OAuth2 tokens for authentication.
+	// When set, a fresh token is injected via the Authorization header on every
+	// request, replacing any static "Authorization" entry in Headers.
+	// This prevents token expiry (e.g. GCP access tokens expire after ~1 hour).
+	TokenSource oauth2.TokenSource `yaml:"-"`
 }
 
 // Writer exports Candela spans as OTLP traces to any OTel-compatible backend.
@@ -132,5 +140,34 @@ func newHTTPClient(cfg Config) (otlptrace.Client, error) {
 		opts = append(opts, otlptracehttp.WithCompression(otlptracehttp.GzipCompression))
 	}
 
+	// When a TokenSource is provided, inject a custom HTTP client that
+	// refreshes the Authorization header on every request.
+	if cfg.TokenSource != nil {
+		opts = append(opts, otlptracehttp.WithHTTPClient(&http.Client{
+			Transport: &tokenTransport{
+				base:   http.DefaultTransport,
+				source: cfg.TokenSource,
+			},
+		}))
+	}
+
 	return otlptracehttp.NewClient(opts...), nil
+}
+
+// tokenTransport is an http.RoundTripper that injects a fresh OAuth2 token
+// on every outgoing request. This prevents token expiry for long-running
+// exporters (GCP access tokens expire after ~1 hour).
+type tokenTransport struct {
+	base   http.RoundTripper
+	source oauth2.TokenSource
+}
+
+func (t *tokenTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	token, err := t.source.Token()
+	if err != nil {
+		return nil, fmt.Errorf("otlpexporter: refreshing auth token: %w", err)
+	}
+	req = req.Clone(req.Context())
+	req.Header.Set("Authorization", "Bearer "+token.AccessToken)
+	return t.base.RoundTrip(req)
 }

@@ -36,6 +36,12 @@ func (c Config) WithDefaults() Config {
 
 // Backoff computes the delay for a given attempt with ±25% jitter.
 func Backoff(attempt int, c Config) time.Duration {
+	// Guard against overflow: math.Pow(2, 31+) → +Inf.
+	if attempt < 0 {
+		attempt = 0
+	} else if attempt > 30 {
+		attempt = 30
+	}
 	d := float64(c.InitialDelay) * math.Pow(c.Multiplier, float64(attempt))
 	if d > float64(c.MaxDelay) {
 		d = float64(c.MaxDelay)

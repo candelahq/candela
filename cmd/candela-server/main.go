@@ -1073,6 +1073,7 @@ func main() {
 	}()
 
 	<-ctx.Done()
+	stop() // Restore default signal handling — a second Ctrl+C force-quits.
 	slog.Info("shutting down...")
 
 	// Flip readiness BEFORE calling Shutdown so LBs stop sending traffic.

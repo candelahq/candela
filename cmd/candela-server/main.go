@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -340,8 +341,15 @@ func main() {
 
 	// Readiness probe: checks that the server can serve traffic.
 	// Used by Cloud Run / Kubernetes for traffic routing decisions.
+	// Returns 503 during graceful shutdown so LBs drain before srv.Shutdown().
+	var shuttingDown atomic.Bool
 	mux.HandleFunc("/readyz", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
+		if shuttingDown.Load() {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_, _ = fmt.Fprintln(w, `{"status": "shutting_down"}`)
+			return
+		}
 		if err := reader.Ping(r.Context()); err != nil {
 			slog.Error("readyz: storage ping failed", "error", err)
 			w.WriteHeader(http.StatusServiceUnavailable)
@@ -1065,7 +1073,13 @@ func main() {
 	}()
 
 	<-ctx.Done()
+	stop() // Restore default signal handling — a second Ctrl+C force-quits.
 	slog.Info("shutting down...")
+
+	// Flip readiness BEFORE calling Shutdown so LBs stop sending traffic.
+	shuttingDown.Store(true)
+	slog.Info("readyz now returns 503 — draining for 5s")
+	time.Sleep(5 * time.Second)
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()

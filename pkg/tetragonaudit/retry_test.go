@@ -5,6 +5,8 @@ import (
 	"errors"
 	"testing"
 	"time"
+
+	"github.com/candelahq/candela/pkg/grpcretry"
 )
 
 func TestStreamEventsWithRetry_ReconnectsAfterFailure(t *testing.T) {
@@ -85,7 +87,7 @@ func TestBackoff_ExponentialWithCap(t *testing.T) {
 	for _, tt := range tests {
 		// Run each sub-test multiple times to verify jitter range.
 		for range 20 {
-			d := backoff(tt.attempt, rc)
+			d := grpcretry.Backoff(tt.attempt, rc)
 			if d < tt.minDelay || d > tt.maxDelay {
 				t.Errorf("attempt %d: backoff=%v, want [%v, %v]",
 					tt.attempt, d, tt.minDelay, tt.maxDelay)
@@ -95,7 +97,7 @@ func TestBackoff_ExponentialWithCap(t *testing.T) {
 }
 
 func TestBackoff_DefaultConfig(t *testing.T) {
-	rc := RetryConfig{}.withDefaults()
+	rc := RetryConfig{}.WithDefaults()
 
 	if rc.InitialDelay != time.Second {
 		t.Errorf("InitialDelay=%v, want 1s", rc.InitialDelay)

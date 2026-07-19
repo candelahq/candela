@@ -3,6 +3,7 @@ package hubbleaudit
 import (
 	"testing"
 
+	"github.com/candelahq/candela/pkg/grpcretry"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 )
@@ -64,7 +65,7 @@ func TestGRPCFlowSource_SetConnected(t *testing.T) {
 }
 
 func TestRetryConfig_Defaults(t *testing.T) {
-	rc := RetryConfig{}.withDefaults()
+	rc := RetryConfig{}.WithDefaults()
 
 	if rc.InitialDelay != 1_000_000_000 { // 1s
 		t.Errorf("InitialDelay = %v", rc.InitialDelay)
@@ -78,11 +79,11 @@ func TestRetryConfig_Defaults(t *testing.T) {
 }
 
 func TestBackoff_ExponentialGrowth(t *testing.T) {
-	rc := RetryConfig{}.withDefaults()
+	rc := RetryConfig{}.WithDefaults()
 
-	d0 := backoff(0, rc)
-	d1 := backoff(1, rc)
-	d2 := backoff(2, rc)
+	d0 := grpcretry.Backoff(0, rc)
+	d1 := grpcretry.Backoff(1, rc)
+	d2 := grpcretry.Backoff(2, rc)
 
 	// With ±25% jitter, d1 should generally be > d0 and d2 > d1.
 	// We use a generous range to account for jitter.
@@ -98,9 +99,9 @@ func TestBackoff_ExponentialGrowth(t *testing.T) {
 }
 
 func TestBackoff_MaxCap(t *testing.T) {
-	rc := RetryConfig{}.withDefaults()
+	rc := RetryConfig{}.WithDefaults()
 
-	d := backoff(100, rc) // Very high attempt — should be capped.
+	d := grpcretry.Backoff(100, rc) // Very high attempt — should be capped.
 	if d > rc.MaxDelay+rc.MaxDelay/4 {
 		t.Errorf("attempt 100 backoff = %v, exceeds max %v + 25%% jitter", d, rc.MaxDelay)
 	}

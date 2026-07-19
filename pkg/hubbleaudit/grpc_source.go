@@ -6,11 +6,10 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"math"
-	"math/rand/v2"
 	"sync"
 	"time"
 
+	"github.com/candelahq/candela/pkg/grpcretry"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/encoding"
@@ -236,28 +235,9 @@ func (s *GRPCFlowSource) readLoop(ctx context.Context, stream grpc.ClientStream,
 
 // ── Retry / Health ──
 
-// RetryConfig controls the reconnect backoff behavior.
-type RetryConfig struct {
-	// InitialDelay is the first backoff duration (default: 1s).
-	InitialDelay time.Duration
-	// MaxDelay is the backoff ceiling (default: 30s).
-	MaxDelay time.Duration
-	// Multiplier is the backoff factor (default: 2.0).
-	Multiplier float64
-}
-
-func (rc RetryConfig) withDefaults() RetryConfig {
-	if rc.InitialDelay <= 0 {
-		rc.InitialDelay = time.Second
-	}
-	if rc.MaxDelay <= 0 {
-		rc.MaxDelay = 30 * time.Second
-	}
-	if rc.Multiplier <= 0 {
-		rc.Multiplier = 2.0
-	}
-	return rc
-}
+// RetryConfig is an alias for grpcretry.Config.
+// Kept for backward compatibility with existing callers.
+type RetryConfig = grpcretry.Config
 
 // FlowHandler is called for each flow received from the Hubble stream.
 // Returning an error logs a warning but does not stop the stream.
@@ -267,7 +247,7 @@ type FlowHandler func(ctx context.Context, flow Flow) error
 // exponential backoff. handler is called for each flow. The loop exits
 // when ctx is cancelled.
 func (s *GRPCFlowSource) StreamWithRetry(ctx context.Context, handler FlowHandler, rc RetryConfig) error {
-	rc = rc.withDefaults()
+	rc = rc.WithDefaults()
 	attempt := 0
 
 	for {
@@ -281,7 +261,7 @@ func (s *GRPCFlowSource) StreamWithRetry(ctx context.Context, handler FlowHandle
 			if ctx.Err() != nil {
 				return ctx.Err()
 			}
-			delay := backoff(attempt, rc)
+			delay := grpcretry.Backoff(attempt, rc)
 			slog.Warn("hubbleaudit: gRPC stream creation failed, retrying",
 				"error", err, "attempt", attempt+1, "backoff", delay)
 			attempt++
@@ -313,7 +293,7 @@ func (s *GRPCFlowSource) StreamWithRetry(ctx context.Context, handler FlowHandle
 			}
 		}
 
-		delay := backoff(attempt, rc)
+		delay := grpcretry.Backoff(attempt, rc)
 		slog.Warn("hubbleaudit: gRPC stream error, reconnecting",
 			"error", err, "attempt", attempt+1, "backoff", delay)
 		attempt++
@@ -392,14 +372,4 @@ func (s *GRPCFlowSource) Close() error {
 // Addr returns the configured gRPC address.
 func (s *GRPCFlowSource) Addr() string {
 	return s.cfg.Addr
-}
-
-// backoff computes the delay for a given attempt with ±25% jitter.
-func backoff(attempt int, rc RetryConfig) time.Duration {
-	d := float64(rc.InitialDelay) * math.Pow(rc.Multiplier, float64(attempt))
-	if d > float64(rc.MaxDelay) {
-		d = float64(rc.MaxDelay)
-	}
-	jitter := d * 0.25 * (2*rand.Float64() - 1) //nolint:gosec
-	return time.Duration(d + jitter)
 }

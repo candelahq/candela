@@ -6,10 +6,9 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"math"
-	"math/rand/v2"
 	"time"
 
+	"github.com/candelahq/candela/pkg/grpcretry"
 	tetragon "github.com/cilium/tetragon/api/v1/tetragon"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
@@ -95,28 +94,9 @@ func (s *GRPCSource) Addr() string {
 	return s.addr
 }
 
-// RetryConfig controls the reconnect backoff behavior.
-type RetryConfig struct {
-	// InitialDelay is the first backoff duration (default: 1s).
-	InitialDelay time.Duration
-	// MaxDelay is the backoff ceiling (default: 30s).
-	MaxDelay time.Duration
-	// Multiplier is the backoff factor (default: 2.0).
-	Multiplier float64
-}
-
-func (rc RetryConfig) withDefaults() RetryConfig {
-	if rc.InitialDelay <= 0 {
-		rc.InitialDelay = time.Second
-	}
-	if rc.MaxDelay <= 0 {
-		rc.MaxDelay = 30 * time.Second
-	}
-	if rc.Multiplier <= 0 {
-		rc.Multiplier = 2.0
-	}
-	return rc
-}
+// RetryConfig is an alias for grpcretry.Config.
+// Kept for backward compatibility with existing callers.
+type RetryConfig = grpcretry.Config
 
 // StreamEventsWithRetry streams events from the Tetragon gRPC API with
 // automatic reconnection on failure using exponential backoff.
@@ -127,7 +107,7 @@ func (rc RetryConfig) withDefaults() RetryConfig {
 //
 // The loop exits cleanly when ctx is cancelled (graceful shutdown).
 func (s *GRPCSource) StreamEventsWithRetry(ctx context.Context, pipeline *Pipeline, rc RetryConfig) error {
-	rc = rc.withDefaults()
+	rc = rc.WithDefaults()
 	attempt := 0
 
 	for {
@@ -142,7 +122,7 @@ func (s *GRPCSource) StreamEventsWithRetry(ctx context.Context, pipeline *Pipeli
 			if ctx.Err() != nil {
 				return ctx.Err()
 			}
-			delay := backoff(attempt, rc)
+			delay := grpcretry.Backoff(attempt, rc)
 			slog.Warn("tetragonaudit: gRPC stream creation failed, retrying",
 				"error", err, "attempt", attempt+1, "backoff", delay)
 			attempt++
@@ -175,7 +155,7 @@ func (s *GRPCSource) StreamEventsWithRetry(ctx context.Context, pipeline *Pipeli
 			}
 		}
 
-		delay := backoff(attempt, rc)
+		delay := grpcretry.Backoff(attempt, rc)
 		slog.Warn("tetragonaudit: gRPC stream error, reconnecting",
 			"error", err, "attempt", attempt+1, "backoff", delay)
 		attempt++
@@ -185,17 +165,6 @@ func (s *GRPCSource) StreamEventsWithRetry(ctx context.Context, pipeline *Pipeli
 		case <-time.After(delay):
 		}
 	}
-}
-
-// backoff computes the delay for a given attempt with ±25% jitter.
-func backoff(attempt int, rc RetryConfig) time.Duration {
-	d := float64(rc.InitialDelay) * math.Pow(rc.Multiplier, float64(attempt))
-	if d > float64(rc.MaxDelay) {
-		d = float64(rc.MaxDelay)
-	}
-	// Add ±25% jitter.
-	jitter := d * 0.25 * (2*rand.Float64() - 1) //nolint:gosec
-	return time.Duration(d + jitter)
 }
 
 // Conn returns the underlying gRPC connection for advanced usage

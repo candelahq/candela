@@ -86,6 +86,32 @@ resource "google_cloud_run_v2_service" "candela" {
         name  = "CLOUD_RUN_URL"
         value = var.cloud_run_url
       }
+
+      # ── Health probes ──
+      # startup_probe: generous timeout for cold starts (BigQuery/Firestore init).
+      # liveness_probe: ongoing health — restarts the instance if it becomes unresponsive.
+      # /readyz (readiness) is handled by Cloud Run's built-in traffic routing;
+      # the server flips it to 503 during graceful shutdown (see #692).
+      startup_probe {
+        http_get {
+          path = "/healthz"
+          port = 8181
+        }
+        initial_delay_seconds = 5
+        period_seconds        = 5
+        timeout_seconds       = 3
+        failure_threshold     = 6 # 5 + (5×6) = 35s max startup time
+      }
+
+      liveness_probe {
+        http_get {
+          path = "/healthz"
+          port = 8181
+        }
+        period_seconds    = 15
+        timeout_seconds   = 5
+        failure_threshold = 3 # 3 consecutive failures → restart
+      }
     }
   }
 

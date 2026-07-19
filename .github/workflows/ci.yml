@@ -167,23 +167,23 @@ jobs:
 
       - name: Start Firestore emulator
         run: |
-          nix develop . --command bash -c "
+          nix develop . --command bash -c '
             gcloud emulators firestore start \
               --host-port=0.0.0.0:8086 \
               --project=test-project &
             emulator_ready=false
-            for _ in \$(seq 1 30); do
-              if curl -sf http://localhost:8086/ > /dev/null 2>&1; then
+            for _ in $(seq 1 30); do
+              if curl -sf --max-time 2 http://localhost:8086/ > /dev/null 2>&1; then
                 emulator_ready=true
                 break
               fi
               sleep 2
             done
-            if [ \"\$emulator_ready\" != true ]; then
-              echo '::error::Firestore emulator failed to start after 60 seconds'
+            if [ "$emulator_ready" != true ]; then
+              echo "::error::Firestore emulator failed to start after 60 seconds"
               exit 1
             fi
-          "
+          '
 
       - name: Generate proto stubs
         run: nix develop . --command buf generate

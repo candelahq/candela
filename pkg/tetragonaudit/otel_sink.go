@@ -53,10 +53,15 @@ func NewOTelSink(cfg OTelSinkConfig) (*OTelSink, error) {
 		cfg.TimeoutSec = 10
 	}
 
+	tokenSource := cfg.TokenSource
+	if tokenSource != nil {
+		tokenSource = oauth2.ReuseTokenSource(nil, tokenSource)
+	}
+
 	return &OTelSink{
 		endpoint:    cfg.Endpoint,
 		headers:     cfg.Headers,
-		tokenSource: cfg.TokenSource,
+		tokenSource: tokenSource,
 		client: &http.Client{
 			Timeout: time.Duration(cfg.TimeoutSec) * time.Second,
 		},
@@ -175,7 +180,7 @@ func (s *OTelSink) exportLogs(ctx context.Context, logs plog.Logs) error {
 		if tokenErr != nil {
 			return fmt.Errorf("tetragonaudit: refreshing auth token: %w", tokenErr)
 		}
-		httpReq.Header.Set("Authorization", "Bearer "+token.AccessToken)
+		httpReq.Header.Set("Authorization", token.Type()+" "+token.AccessToken)
 	}
 
 	resp, err := s.client.Do(httpReq)

@@ -146,7 +146,7 @@ func newHTTPClient(cfg Config) (otlptrace.Client, error) {
 		opts = append(opts, otlptracehttp.WithHTTPClient(&http.Client{
 			Transport: &tokenTransport{
 				base:   http.DefaultTransport,
-				source: cfg.TokenSource,
+				source: oauth2.ReuseTokenSource(nil, cfg.TokenSource),
 			},
 		}))
 	}
@@ -168,6 +168,6 @@ func (t *tokenTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 		return nil, fmt.Errorf("otlpexporter: refreshing auth token: %w", err)
 	}
 	req = req.Clone(req.Context())
-	req.Header.Set("Authorization", "Bearer "+token.AccessToken)
+	req.Header.Set("Authorization", token.Type()+" "+token.AccessToken)
 	return t.base.RoundTrip(req)
 }

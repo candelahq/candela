@@ -235,6 +235,9 @@ func TestSearchSpans_PageSizeLimit(t *testing.T) {
 	if len(res.Msg.Spans) != 2 {
 		t.Fatalf("expected 2 spans, got %d", len(res.Msg.Spans))
 	}
+	if res.Msg.Spans[0].SpanId != "s1" || res.Msg.Spans[1].SpanId != "s2" {
+		t.Errorf("expected spans [s1, s2], got [%s, %s]", res.Msg.Spans[0].SpanId, res.Msg.Spans[1].SpanId)
+	}
 	// The total count should still reflect the total matched spans without page size limit
 	if res.Msg.Pagination.TotalCount != 4 {
 		t.Errorf("expected total count 4, got %d", res.Msg.Pagination.TotalCount)

@@ -254,7 +254,6 @@ jobs:
         run: nix develop . --command go tool cover -func=coverage.out | tail -1
 
       - name: govulncheck
-        continue-on-error: true
         run: nix develop . --command govulncheck ./...
 
   # ── Windows native CLI smoke ────────────────────────────────────────────────
@@ -419,7 +418,6 @@ jobs:
         run: nix develop . --command bash -c "cd rust && cargo test --workspace"
 
       - name: License & vulnerability audit
-        continue-on-error: true
         run: nix develop . --command bash -c "cd rust && cargo deny check"
 
   # ── Transparent proxy E2E (Linux + iptables) ────────────────────────────────

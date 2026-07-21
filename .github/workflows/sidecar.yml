@@ -5,6 +5,10 @@ on:
     tags:
       - 'sidecar-v*'
 
+permissions:
+  contents: read
+  packages: write      # push to GHCR
+
 jobs:
   build:
     uses: ./.github/workflows/docker-build-push.yml

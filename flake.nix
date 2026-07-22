@@ -94,7 +94,6 @@
             # Rust
             rustToolchain
             cargo-deny
-            cargo-watch
 
             # Git
             git

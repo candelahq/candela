@@ -17,7 +17,6 @@ anyhow = { workspace = true }
 rustls = { workspace = true }
 tokio-rustls = { workspace = true }
 rcgen = { workspace = true }
-rustls-pemfile = { workspace = true }
 time = { workspace = true }
 
 [target.'cfg(target_os = "linux")'.dependencies]

@@ -1,0 +1,39 @@
+# cargo-deny configuration for Candela Rust crates.
+# https://embarkstudios.github.io/cargo-deny/
+
+[advisories]
+# Deny any known vulnerability. Unmaintained crates generate warnings.
+version = 2
+
+[licenses]
+# Allow standard open-source licenses used by our dependency tree.
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "0BSD",
+    "ISC",
+    "Unlicense",
+    "Zlib",
+    "Unicode-3.0",
+    "Unicode-DFS-2016",
+    "OpenSSL",
+    "MPL-2.0",
+    "CDLA-Permissive-2.0",
+]
+# Some crates use non-standard SPDX expressions.
+exceptions = []
+
+[bans]
+# Warn on duplicate versions of the same crate.
+multiple-versions = "warn"
+# Workspace crates use wildcard versions — this is standard.
+wildcards = "allow"
+
+[sources]
+# Only allow crates from crates.io.
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []

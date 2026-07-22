@@ -263,8 +263,11 @@ func (s *Store) QueryTraces(ctx context.Context, q storage.TraceQuery) (*storage
 		dir = "ASC"
 	}
 
-	// Build WHERE clause dynamically for optional span-level filters.
-	where := `(? = '' OR project_id = ?) AND start_time >= ? AND start_time <= ?
+	// Build WHERE clause: base filters apply to all spans in aggregation,
+	// span-level filters (model, provider, search, job_id) go into a
+	// subquery to find matching trace_ids — this preserves sibling spans
+	// (root spans, DB spans, etc.) in the aggregation.
+	baseWhere := `(? = '' OR project_id = ?) AND start_time >= ? AND start_time <= ?
 			AND (? = '' OR user_id = ?)
 			AND (? = '' OR tenant_id = ?)
 			AND (? = '' OR environment = ?)`
@@ -276,25 +279,38 @@ func (s *Store) QueryTraces(ctx context.Context, q storage.TraceQuery) (*storage
 		q.UserID, q.UserID, q.TenantID, q.TenantID, q.Environment, q.Environment,
 	}
 
+	// Span-level filters: find trace_ids that contain matching spans.
+	var spanFilters []string
+	var spanArgs []any
 	if q.Model != "" {
-		where += `
-			AND gen_ai_model = ?`
-		args = append(args, q.Model)
+		spanFilters = append(spanFilters, `gen_ai_model = ?`)
+		spanArgs = append(spanArgs, q.Model)
 	}
 	if q.Provider != "" {
-		where += `
-			AND gen_ai_provider = ?`
-		args = append(args, q.Provider)
+		spanFilters = append(spanFilters, `gen_ai_provider = ?`)
+		spanArgs = append(spanArgs, q.Provider)
 	}
 	if q.Search != "" {
-		where += `
-			AND name LIKE '%' || ? || '%' ESCAPE '\'`
-		args = append(args, storage.EscapeLike(q.Search))
+		spanFilters = append(spanFilters, `name LIKE '%' || ? || '%' ESCAPE '\'`)
+		spanArgs = append(spanArgs, storage.EscapeLike(q.Search))
 	}
 	if q.JobID != "" {
-		where += `
-			AND job_id = ?`
-		args = append(args, q.JobID)
+		spanFilters = append(spanFilters, `job_id = ?`)
+		spanArgs = append(spanArgs, q.JobID)
+	}
+
+	// If we have span-level filters, wrap them in a trace_id IN subquery
+	// so the outer aggregation still sees ALL spans per trace.
+	where := baseWhere
+	if len(spanFilters) > 0 {
+		subWhere := baseWhere
+		for _, f := range spanFilters {
+			subWhere += "\n\t\t\tAND " + f
+		}
+		where += "\n\t\t\tAND trace_id IN (SELECT trace_id FROM spans WHERE " + subWhere + ")"
+		// Duplicate the base args for the subquery, then add span filter args.
+		args = append(args, q.ProjectID, q.ProjectID, q.StartTime.Format(time.RFC3339Nano), q.EndTime.Format(time.RFC3339Nano), q.UserID, q.UserID, q.TenantID, q.TenantID, q.Environment, q.Environment)
+		args = append(args, spanArgs...)
 	}
 
 	// Status is an aggregate (MAX), so it requires HAVING.

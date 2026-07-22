@@ -148,3 +148,8 @@ require (
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.11.0 // indirect
 )
+
+// cilium/tetragon/api v1.7.0 has a broken replace directive that introduces
+// an unresolvable pseudo-version for github.com/cilium/tetragon. Exclude it
+// so go mod tidy doesn't fail. (upstream: cilium/tetragon#3714)
+exclude github.com/cilium/tetragon v0.0.0-00010101000000-000000000000

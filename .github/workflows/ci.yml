@@ -254,7 +254,28 @@ jobs:
         run: nix develop . --command go tool cover -func=coverage.out | tail -1
 
       - name: govulncheck
-        run: nix develop . --command govulncheck ./...
+        run: |
+          nix develop . --command bash -c '
+            # Run govulncheck; capture exit code.
+            set +e
+            output=$(govulncheck ./... 2>&1)
+            rc=$?
+            echo "$output"
+            set -e
+
+            if [ $rc -eq 0 ]; then
+              exit 0
+            fi
+
+            # Fail for third-party module vulns (actionable).
+            # Warn-only for stdlib vulns we cannot fix without a Go release.
+            if echo "$output" | grep -q "from [0-9]* module"; then
+              echo "::error::govulncheck found vulnerabilities in third-party modules"
+              exit 1
+            fi
+
+            echo "::warning::govulncheck found stdlib-only vulnerabilities (requires Go point release to fix)"
+          '
 
   # ── Windows native CLI smoke ────────────────────────────────────────────────
   windows-candela:

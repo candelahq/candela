@@ -197,7 +197,13 @@ func TestQueryTraces_MultiSpanAggregation_SearchFilter(t *testing.T) {
 		Duration: 1 * time.Second, ProjectID: "proj-test", Environment: "test",
 	}
 
-	if err := store.IngestSpans(ctx, []storage.Span{root, llm, tool}); err != nil {
+	// Non-matching trace: no span name contains "weather".
+	other := testSpan("other-1", "trace-nomatch", storage.SpanKindLLM, "gpt-4o")
+	other.Name = "llm.summarize"
+	other.StartTime = now.Add(-5 * time.Second)
+	other.EndTime = now.Add(-4 * time.Second)
+
+	if err := store.IngestSpans(ctx, []storage.Span{root, llm, tool, other}); err != nil {
 		t.Fatalf("ingest: %v", err)
 	}
 
@@ -213,13 +219,21 @@ func TestQueryTraces_MultiSpanAggregation_SearchFilter(t *testing.T) {
 		t.Fatalf("query traces: %v", err)
 	}
 
+	// Should return 1 trace (trace-search), excluding trace-nomatch.
 	if len(result.Traces) != 1 {
 		t.Fatalf("trace count = %d, want 1", len(result.Traces))
 	}
 
 	tr := result.Traces[0]
+	if tr.TraceID != "trace-search" {
+		t.Errorf("trace_id = %q, want trace-search", tr.TraceID)
+	}
 	// All 3 spans must be counted even though only one name matched "weather".
 	if tr.SpanCount != 3 {
 		t.Errorf("span_count = %d, want 3", tr.SpanCount)
+	}
+	// Token aggregation from the LLM span.
+	if tr.TotalTokens != 150 {
+		t.Errorf("total_tokens = %d, want 150", tr.TotalTokens)
 	}
 }

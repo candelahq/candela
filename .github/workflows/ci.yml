@@ -266,8 +266,14 @@ jobs:
             exit 0
           fi
 
-          # Fail for third-party module vulns (actionable).
-          # Warn-only for stdlib vulns we cannot fix without a Go release.
+          # Exit 3 = vulnerabilities found (govulncheck contract).
+          # Any other non-zero = scan/loading failure — must hard-fail.
+          if [ $rc -ne 3 ]; then
+            echo "::error::govulncheck failed with unexpected exit code $rc"
+            exit $rc
+          fi
+
+          # Exit 3: classify as third-party (actionable) vs stdlib-only (warn).
           if echo "$output" | grep -q "from [0-9]* module"; then
             echo "::error::govulncheck found vulnerabilities in third-party modules"
             exit 1

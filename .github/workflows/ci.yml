@@ -254,8 +254,33 @@ jobs:
         run: nix develop . --command go tool cover -func=coverage.out | tail -1
 
       - name: govulncheck
-        continue-on-error: true
-        run: nix develop . --command govulncheck ./...
+        run: |
+          nix develop . --command bash <<'GOVULNCHECK'
+          set +e
+          output=$(govulncheck ./... 2>&1)
+          rc=$?
+          echo "$output"
+          set -e
+
+          if [ $rc -eq 0 ]; then
+            exit 0
+          fi
+
+          # Exit 3 = vulnerabilities found (govulncheck contract).
+          # Any other non-zero = scan/loading failure — must hard-fail.
+          if [ $rc -ne 3 ]; then
+            echo "::error::govulncheck failed with unexpected exit code $rc"
+            exit $rc
+          fi
+
+          # Exit 3: classify as third-party (actionable) vs stdlib-only (warn).
+          if echo "$output" | grep -q "from [0-9]* module"; then
+            echo "::error::govulncheck found vulnerabilities in third-party modules"
+            exit 1
+          fi
+
+          echo "::warning::govulncheck found stdlib-only vulnerabilities (requires Go point release to fix)"
+          GOVULNCHECK
 
   # ── Windows native CLI smoke ────────────────────────────────────────────────
   windows-candela:
@@ -419,7 +444,6 @@ jobs:
         run: nix develop . --command bash -c "cd rust && cargo test --workspace"
 
       - name: License & vulnerability audit
-        continue-on-error: true
         run: nix develop . --command bash -c "cd rust && cargo deny check"
 
   # ── Transparent proxy E2E (Linux + iptables) ────────────────────────────────

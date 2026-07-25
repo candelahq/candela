@@ -165,7 +165,7 @@ The GitHub Actions CI (`.github/workflows/ci.yml`) runs these jobs:
 - `go vet ./...`
 - `go test ./... -v -race -count=1 -coverprofile=coverage.out`
 - Coverage summary
-- `govulncheck ./...` (advisory, non-blocking)
+- `govulncheck ./...` (fails on third-party vulns; warns on stdlib-only)
 
 ### 2. `ui-build-and-lint` (Next.js)
 - `pnpm install`
@@ -283,4 +283,4 @@ test("should display cost analytics", async ({ page }) => {
 nix develop -c govulncheck ./...
 ```
 
-This runs as advisory in CI (non-blocking). Fix critical vulnerabilities by updating dependencies in `go.mod`.
+In CI, govulncheck **fails the build** for third-party module vulnerabilities and scan errors. Stdlib-only vulnerabilities (which require a Go point release to fix) are reported as warnings but do not block the pipeline. Fix third-party vulnerabilities by updating dependencies in `go.mod`.

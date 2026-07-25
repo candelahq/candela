@@ -28,6 +28,9 @@ concurrency:
   group: tetragon-${{ github.event.pull_request.number || github.sha }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
 jobs:
   tetragon-e2e:
     name: Tetragon E2E

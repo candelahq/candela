@@ -13,7 +13,7 @@ export default function TraceNotFound() {
     }}>
       <h2 style={{ fontSize: '2rem', marginBottom: '1rem' }}>Trace not found</h2>
       <p style={{ color: 'var(--text-secondary)', marginBottom: '2rem' }}>
-        The trace you're looking for doesn't exist or has been deleted.
+        The trace you&apos;re looking for doesn&apos;t exist or has been deleted.
       </p>
       <Link 
         href="/traces"

@@ -1,5 +1,7 @@
 'use client'
 
+/* eslint-disable @next/next/no-html-link-for-pages */
+
 export default function GlobalError({
   error,
   reset,
@@ -28,18 +30,15 @@ export default function GlobalError({
           borderRadius: '12px'
         }}>
           <h2 style={{ marginBottom: '1rem' }}>Something went wrong</h2>
-          <pre style={{
-            backgroundColor: '#1a1a2e',
-            color: '#f87171',
-            padding: '1rem',
-            borderRadius: '8px',
-            overflow: 'auto',
-            marginBottom: '1.5rem',
-            textAlign: 'left',
-            fontSize: '14px'
-          }}>
-            {error.message}
-          </pre>
+          {error.digest && (
+            <p style={{
+              color: '#9898b0',
+              fontSize: '14px',
+              marginBottom: '1.5rem'
+            }}>
+              Error ID: {error.digest}
+            </p>
+          )}
           <div style={{ display: 'flex', gap: '1rem', justifyContent: 'center' }}>
             <button 
               onClick={() => reset()}

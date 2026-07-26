@@ -1,5 +1,6 @@
 'use client'
 
+import { useEffect } from 'react'
 import Link from 'next/link'
 
 export default function Error({
@@ -9,6 +10,10 @@ export default function Error({
   error: Error & { digest?: string }
   reset: () => void
 }) {
+  useEffect(() => {
+    console.error('[candela] Unhandled error:', error)
+  }, [error])
+
   return (
     <div style={{
       display: 'flex',
@@ -27,18 +32,18 @@ export default function Error({
       }}>
         <div style={{ fontSize: '3rem', marginBottom: '1rem' }}>🕯️</div>
         <h2 style={{ color: 'var(--text-primary)', marginBottom: '1rem' }}>Something went wrong</h2>
-        <pre style={{
-          backgroundColor: 'var(--bg-tertiary)',
-          color: 'var(--error)',
-          padding: '1rem',
-          borderRadius: 'var(--radius-md)',
-          overflow: 'auto',
-          marginBottom: '1.5rem',
-          textAlign: 'left',
-          fontSize: '14px'
-        }}>
-          {error.message}
-        </pre>
+        <p style={{ color: 'var(--text-secondary)', marginBottom: '1.5rem' }}>
+          An unexpected error occurred. Please try again.
+        </p>
+        {error.digest && (
+          <p style={{
+            color: 'var(--text-muted)',
+            fontSize: '12px',
+            marginBottom: '1.5rem'
+          }}>
+            Error ID: {error.digest}
+          </p>
+        )}
         <div style={{ display: 'flex', gap: '1rem', justifyContent: 'center' }}>
           <button 
             onClick={() => reset()}

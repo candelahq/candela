@@ -1177,7 +1177,6 @@ func runForeground() {
 	select {
 	case err := <-errCh:
 		slog.Error("server failed to start", "error", err)
-		return
 	case <-sigCtx.Done():
 	}
 	slog.Info("shutting down...")

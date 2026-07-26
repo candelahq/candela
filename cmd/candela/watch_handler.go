@@ -29,13 +29,17 @@ func (h *watchHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		Provider:  r.URL.Query().Get("provider"),
 	}
 
+	if h.proc == nil {
+		http.Error(w, "trace processing not available", http.StatusServiceUnavailable)
+		return
+	}
+
 	ch, cleanup := h.proc.Subscribe(filter)
 	defer cleanup()
 
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
-	w.Header().Set("Access-Control-Allow-Origin", "*")
 	flusher.Flush()
 
 	ctx := r.Context()

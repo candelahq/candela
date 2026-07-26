@@ -297,9 +297,10 @@ func (p *SpanProcessor) Subscribe(filter WatchFilter) (<-chan TraceBroadcast, fu
 
 	p.subMu.Lock()
 	p.subscribers = append(p.subscribers, sub)
+	total := len(p.subscribers)
 	p.subMu.Unlock()
 
-	slog.Info("watch subscriber added", "total", len(p.subscribers))
+	slog.Info("watch subscriber added", "total", total)
 
 	cleanup := func() {
 		p.subMu.Lock()

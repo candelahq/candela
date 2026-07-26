@@ -131,15 +131,9 @@ func printTraceRow(t processor.TraceBroadcast) {
 		statusIcon = "❌"
 	}
 
-	name := t.RootSpanName
-	if len(name) > 20 {
-		name = name[:20]
-	}
+	name := truncateRunes(t.RootSpanName, 20)
 
-	model := t.Model
-	if len(model) > 14 {
-		model = model[:14]
-	}
+	model := truncateRunes(t.Model, 14)
 
 	spans := "span"
 	if t.SpanCount != 1 {
@@ -148,4 +142,13 @@ func printTraceRow(t processor.TraceBroadcast) {
 
 	fmt.Printf("%s  %s  %-20s  %-14s  $%.4f  %4dms  %d %s\n",
 		t.Timestamp, statusIcon, name, model, t.CostUSD, t.DurationMs, t.SpanCount, spans)
+}
+
+// truncateRunes truncates s to at most maxRunes Unicode characters.
+func truncateRunes(s string, maxRunes int) string {
+	runes := []rune(s)
+	if len(runes) > maxRunes {
+		return string(runes[:maxRunes])
+	}
+	return s
 }

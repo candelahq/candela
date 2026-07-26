@@ -968,6 +968,11 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 		requestModel = extractModelFromURLPath(upstreamPath)
 	}
 
+	var estimatedCost float64
+	if requestModel != "" {
+		estimatedCost = estimateRequestCost(p.calc, providerName, requestModel, reqBody)
+	}
+
 	// ── Pricing gate (#6) — blocks unpriced cloud models universally ──
 	// This runs for ALL requests (solo, team, local) to prevent untracked
 	// API calls that would show $0 cost. Only "local" provider is exempt.
@@ -1063,6 +1068,9 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 		// previous $0.001 reservation from allowing 1000x overdraft.
 		const reservationFloor = 0.05
 		budgetReserved = reservationFloor
+		if estimatedCost > reservationFloor {
+			budgetReserved = estimatedCost
+		}
 		p.pendingSpend.Reserve(effectiveUserID, budgetReserved)
 		// Release the reservation if we return before the response handlers
 		// (handleStreamingResponse / handleStandardResponse) take ownership.
@@ -1076,9 +1084,7 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 	// ── Per-request cost cap (#277) ──
 	// Estimates the request cost from body size and rejects if it exceeds
 	// the configured maximum. Runs for all users (solo + team mode).
-	var estimatedCost float64
 	if p.config.MaxRequestCost > 0 && requestModel != "" {
-		estimatedCost = estimateRequestCost(p.calc, providerName, requestModel, reqBody)
 		if estimatedCost > p.config.MaxRequestCost {
 			ProxyErrorResponse(w, http.StatusPaymentRequired, fmt.Sprintf("estimated request cost $%.2f exceeds cap $%.2f for model %s",
 				estimatedCost, p.config.MaxRequestCost, requestModel), "request_cost_exceeded")

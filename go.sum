@@ -305,6 +305,8 @@ go.opentelemetry.io/collector/pdata v1.54.0 h1:3LharKb792cQ3VrUGxd3IcpWwfu3ST+GS
 go.opentelemetry.io/collector/pdata v1.54.0/go.mod h1:+MqC3VVOv/EX9YVFUo+mI4F0YmwJ+fXBYwjmu+mRiZ8=
 go.opentelemetry.io/collector/pdata/pprofile v0.148.0 h1:MgrNZmqwhZGfiYwcKKtM/iXgTZqqvG5dUphriRXMZHU=
 go.opentelemetry.io/collector/pdata/pprofile v0.148.0/go.mod h1:MTTMnZPqWX1S/rBDatU0W19udlycBkWuzVV5qnemHdc=
+go.opentelemetry.io/collector/pdata/testdata v0.148.0 h1:yzakPuFgoKK8WcrlhyYHLMLA/kLScQKGsXkIgwieAQ8=
+go.opentelemetry.io/collector/pdata/testdata v0.148.0/go.mod h1:2rFvxm8qwd3nlO90FtJw6ZGAjt+bLndxmQuJaMO9kfQ=
 go.opentelemetry.io/collector/pipeline v1.54.0 h1:jYlCkdFLITVBdeB+IGS07zXWywEgvT3Ky46vdKKT+Ks=
 go.opentelemetry.io/collector/pipeline v1.54.0/go.mod h1:RD90NG3Jbk965Xaqym3JyHkuol4uZJjQVUkD9ddXJIs=
 go.opentelemetry.io/collector/processor v1.54.0 h1:zmHBFiEFmU9ZYuHhVP3lHIkbfy+ueapzGpTdXVMcWBg=
@@ -500,3 +502,5 @@ modernc.org/strutil v1.2.1 h1:UneZBkQA+DX2Rp35KcM69cSsNES9ly8mQWD71HKlOA0=
 modernc.org/strutil v1.2.1/go.mod h1:EHkiggD70koQxjVdSBM3JKM7k6L0FbGE5eymy9i3B9A=
 modernc.org/token v1.1.0 h1:Xl7Ap9dKaEs5kLoOQeQmPWevfnk/DM5qcLcYlA8ys6Y=
 modernc.org/token v1.1.0/go.mod h1:UGzOrNV1mAFSEB63lOFHIpNRUVMvYTc6yu1SMY/XTDM=
+pgregory.net/rapid v1.3.0 h1:vBvO0VSqti75J1jjYqpgPNBLKMd1+gxa9fYo7vk/Exc=
+pgregory.net/rapid v1.3.0/go.mod h1:dPlE4OBBxgXPqkP79flB6sJL1dx5azpI7HQ9MY9Z7uk=

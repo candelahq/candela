@@ -24,6 +24,7 @@ require (
 	github.com/stretchr/testify v1.11.1
 	go.opentelemetry.io/collector/component v1.54.0
 	go.opentelemetry.io/collector/consumer v1.54.0
+	go.opentelemetry.io/collector/consumer/consumertest v0.148.0
 	go.opentelemetry.io/collector/pdata v1.54.0
 	go.opentelemetry.io/collector/processor v1.54.0
 	go.opentelemetry.io/otel v1.44.0
@@ -44,6 +45,7 @@ require (
 	google.golang.org/protobuf v1.36.12-0.20260120151049-f2248ac996af
 	gopkg.in/yaml.v3 v3.0.1
 	modernc.org/sqlite v1.48.0
+	pgregory.net/rapid v1.3.0
 )
 
 require (
@@ -122,8 +124,10 @@ require (
 	github.com/zeebo/xxh3 v1.1.0 // indirect
 	go.opencensus.io v0.24.0 // indirect
 	go.opentelemetry.io/auto/sdk v1.2.1 // indirect
+	go.opentelemetry.io/collector/consumer/xconsumer v0.148.0 // indirect
 	go.opentelemetry.io/collector/featuregate v1.54.0 // indirect
 	go.opentelemetry.io/collector/internal/componentalias v0.148.0 // indirect
+	go.opentelemetry.io/collector/pdata/pprofile v0.148.0 // indirect
 	go.opentelemetry.io/collector/pipeline v1.54.0 // indirect
 	go.opentelemetry.io/contrib/detectors/gcp v1.39.0 // indirect
 	go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc v0.67.0 // indirect

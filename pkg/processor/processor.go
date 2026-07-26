@@ -30,6 +30,36 @@ type SpanProcessor struct {
 	done         chan struct{}
 	once         sync.Once
 	droppedSpans atomic.Int64
+
+	subMu       sync.RWMutex
+	subscribers []*subscriber
+}
+
+// TraceBroadcast is the data sent to watch subscribers.
+type TraceBroadcast struct {
+	TraceID      string  `json:"trace_id"`
+	RootSpanName string  `json:"root_name"`
+	Model        string  `json:"model"`
+	Provider     string  `json:"provider"`
+	CostUSD      float64 `json:"cost_usd"`
+	DurationMs   int64   `json:"duration_ms"`
+	SpanCount    int     `json:"span_count"`
+	Status       string  `json:"status"` // "ok" or "error"
+	Timestamp    string  `json:"time"`
+	ProjectID    string  `json:"project_id,omitempty"`
+}
+
+// WatchFilter controls which traces a subscriber receives.
+type WatchFilter struct {
+	ProjectID string
+	Model     string
+	Provider  string
+}
+
+type subscriber struct {
+	ch      chan TraceBroadcast
+	filter  WatchFilter
+	dropped atomic.Int64
 }
 
 // WithAnomalyDetector attaches a Detector to the processor. When set, the
@@ -193,6 +223,8 @@ func (p *SpanProcessor) Run(ctx context.Context) {
 			}(rw, sinkBatch)
 		}
 		wg.Wait()
+		// Broadcast to watch subscribers (best-effort, non-blocking).
+		p.broadcastToWatchers(batch)
 		slog.Debug("flushed spans to storage", "count", len(batch), "sinks", len(p.writers))
 		batch = batch[:0]
 	}
@@ -255,4 +287,92 @@ func (p *SpanProcessor) SinkHealth() []SinkHealth {
 		health[i] = rw.Health()
 	}
 	return health
+}
+
+// Subscribe registers a trace watcher. Returns a read channel and cleanup func.
+// The channel is buffered (cap=100). Slow consumers get dropped events, never blocking ingestion.
+func (p *SpanProcessor) Subscribe(filter WatchFilter) (<-chan TraceBroadcast, func()) {
+	ch := make(chan TraceBroadcast, 100)
+	sub := &subscriber{ch: ch, filter: filter}
+
+	p.subMu.Lock()
+	p.subscribers = append(p.subscribers, sub)
+	p.subMu.Unlock()
+
+	slog.Info("watch subscriber added", "total", len(p.subscribers))
+
+	cleanup := func() {
+		p.subMu.Lock()
+		defer p.subMu.Unlock()
+		for i, s := range p.subscribers {
+			if s == sub {
+				p.subscribers = append(p.subscribers[:i], p.subscribers[i+1:]...)
+				close(ch)
+				slog.Info("watch subscriber removed", "total", len(p.subscribers), "dropped", sub.dropped.Load())
+				break
+			}
+		}
+	}
+	return ch, cleanup
+}
+
+func (p *SpanProcessor) broadcastToWatchers(spans []storage.Span) {
+	p.subMu.RLock()
+	defer p.subMu.RUnlock()
+	if len(p.subscribers) == 0 {
+		return
+	}
+
+	// Group spans by trace to build per-trace summaries.
+	traces := make(map[string]*TraceBroadcast)
+	for _, s := range spans {
+		tb, ok := traces[s.TraceID]
+		if !ok {
+			status := "ok"
+			if s.Status == storage.SpanStatusError {
+				status = "error"
+			}
+			tb = &TraceBroadcast{
+				TraceID:   s.TraceID,
+				Timestamp: s.StartTime.Format("15:04:05"),
+				ProjectID: s.ProjectID,
+				Status:    status,
+			}
+			traces[s.TraceID] = tb
+		}
+		tb.SpanCount++
+		if s.ParentSpanID == "" {
+			tb.RootSpanName = s.Name
+			tb.DurationMs = s.EndTime.Sub(s.StartTime).Milliseconds()
+		}
+		if s.GenAI != nil {
+			tb.CostUSD += s.GenAI.CostUSD
+			if tb.Model == "" {
+				tb.Model = s.GenAI.Model
+				tb.Provider = s.GenAI.Provider
+			}
+		}
+		if s.Status == storage.SpanStatusError {
+			tb.Status = "error"
+		}
+	}
+
+	for _, tb := range traces {
+		for _, sub := range p.subscribers {
+			if sub.filter.ProjectID != "" && sub.filter.ProjectID != tb.ProjectID {
+				continue
+			}
+			if sub.filter.Model != "" && sub.filter.Model != tb.Model {
+				continue
+			}
+			if sub.filter.Provider != "" && sub.filter.Provider != tb.Provider {
+				continue
+			}
+			select {
+			case sub.ch <- *tb:
+			default:
+				sub.dropped.Add(1)
+			}
+		}
+	}
 }

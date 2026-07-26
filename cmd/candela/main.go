@@ -192,6 +192,12 @@ func main() {
 		cmdStatus()
 	case "doctor":
 		cmdDoctor()
+	case "watch":
+		var watchArgs []string
+		if len(os.Args) > 2 {
+			watchArgs = os.Args[2:]
+		}
+		cmdWatch(watchArgs)
 	case "auth":
 		// Guard: os.Args[2:] is safe (returns [] when len==2), but be explicit.
 		var authArgs []string
@@ -212,6 +218,7 @@ Usage:
   candela status         Show proxy status
   candela doctor         Check for port conflicts
   candela doctor --fix   Kill conflicting processes
+  candela watch [flags]  Stream live traces
   candela run [flags]    Run in foreground
   candela auth login --provider gcp   Login to GCP via browser
   candela auth login --provider aws   Login to AWS
@@ -1047,6 +1054,7 @@ func runForeground() {
 	// Register traces API endpoint (solo mode observability).
 	mux.Handle("/_local/api/traces", newTracesHandler(traceReader))
 	mux.Handle("/_local/api/leaderboard", newLeaderboardHandler(traceReader))
+	mux.Handle("/_local/api/watch", newWatchHandler(spanProc))
 
 	// Register runtime config API — cloudProxy is nil until built below.
 	configAPI := &localAPI{}

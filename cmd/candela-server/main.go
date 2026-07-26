@@ -1064,15 +1064,20 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
+	errCh := make(chan error, 1)
 	go func() {
 		slog.Info("🕯️ Candela server starting", "addr", addr)
-		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			slog.Error("server error", "error", err)
-			os.Exit(1)
+		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			errCh <- err
 		}
 	}()
 
-	<-ctx.Done()
+	select {
+	case err := <-errCh:
+		slog.Error("server failed to start", "error", err)
+		stop()
+	case <-ctx.Done():
+	}
 	stop() // Restore default signal handling — a second Ctrl+C force-quits.
 	slog.Info("shutting down...")
 

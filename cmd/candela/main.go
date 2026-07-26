@@ -21,6 +21,7 @@ import (
 	"context"
 	"embed"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io/fs"
@@ -1130,6 +1131,7 @@ func runForeground() {
 	sigCtx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
+	errCh := make(chan error, 1)
 	go func() {
 		if soloMode {
 			slog.Info("🕯️ candela started (solo mode)",
@@ -1150,9 +1152,8 @@ func runForeground() {
 			slog.Info("Point your tools at:", logFields...)
 		}
 
-		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			slog.Error("server error", "error", err)
-			os.Exit(1)
+		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			errCh <- err
 		}
 	}()
 
@@ -1168,12 +1169,17 @@ func runForeground() {
 		slog.Info("🖥️ LM Studio compat listener started",
 			"addr", fmt.Sprintf("http://%s", lmAddr),
 			"models", fmt.Sprintf("http://%s/v1/models", lmAddr))
-		if err := lmSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		if err := lmSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			slog.Warn("LM Studio listener failed (port may be in use)", "addr", lmAddr, "error", err)
 		}
 	}()
 
-	<-sigCtx.Done()
+	select {
+	case err := <-errCh:
+		slog.Error("server failed to start", "error", err)
+		return
+	case <-sigCtx.Done():
+	}
 	slog.Info("shutting down...")
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

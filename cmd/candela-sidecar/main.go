@@ -22,6 +22,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -247,11 +248,11 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
+	errCh := make(chan error, 1)
 	go func() {
 		slog.Info("🕯️ candela-sidecar listening", "addr", addr)
-		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			slog.Error("server error", "error", err)
-			os.Exit(1)
+		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			errCh <- err
 		}
 	}()
 
@@ -353,8 +354,12 @@ func main() {
 			}()
 		}
 	}
-
-	<-ctx.Done()
+	select {
+	case err := <-errCh:
+		slog.Error("server failed to start", "error", err)
+		stop()
+	case <-ctx.Done():
+	}
 	slog.Info("shutting down...")
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)

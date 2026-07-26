@@ -205,7 +205,7 @@ test.describe("Traces", () => {
     });
 
     await page.goto("/traces");
-    await expect(page.locator(".table-title")).toHaveText("1 trace");
+    await expect(page.locator(".table-title")).toHaveText("Page 1");
   });
 });
 
@@ -727,5 +727,62 @@ test.describe("Responsive sidebar", () => {
 
     // Nav items should still be clickable
     await page.locator(".nav-item").filter({ hasText: "" }).first().click();
+  });
+});
+
+// ──────────────────────────────────────────
+// Trace Pagination
+// ──────────────────────────────────────────
+
+test.describe("Trace Pagination", () => {
+  test("shows next button when more traces available", async ({ page }) => {
+    await mockConnectRPC(page, "/candela.v1.TraceService/ListTraces", {
+      traces: Array(50).fill(null).map((_, i) => ({
+        traceId: `trace-${i}`,
+        rootSpanName: `trace-${i}`,
+        startTime: "2024-03-31T00:00:00Z",
+        spanCount: 1,
+        llmCallCount: 1,
+        totalTokens: "100",
+        totalCostUsd: 0.01,
+        primaryModel: "gpt-4",
+        primaryProvider: "openai",
+        status: 1,
+      })),
+      pagination: {
+        nextPageToken: "eyJ0cyI6IjIwMjYtMDctMjZUMDA6MDA6MDBaIiwiaWQiOiJ0cmFjZS00OSJ9",
+        totalCount: 0,
+      },
+    });
+
+    await page.goto("/traces");
+    await expect(page.getByRole("button", { name: /next/i })).toBeEnabled();
+    await expect(page.getByRole("button", { name: /previous/i })).toBeDisabled();
+  });
+
+  test("hides pagination controls when no more pages", async ({ page }) => {
+    await mockConnectRPC(page, "/candela.v1.TraceService/ListTraces", {
+      traces: [{
+        traceId: "trace-1",
+        rootSpanName: "single trace",
+        startTime: "2024-03-31T00:00:00Z",
+        spanCount: 1,
+        llmCallCount: 1,
+        totalTokens: "100",
+        totalCostUsd: 0.01,
+        primaryModel: "gpt-4",
+        primaryProvider: "openai",
+        status: 1,
+      }],
+      pagination: {
+        nextPageToken: "",
+        totalCount: 0,
+      },
+    });
+
+    await page.goto("/traces");
+    await expect(page.locator(".table-title")).toHaveText("Page 1");
+    // Pagination bar should not render when there's only one page
+    await expect(page.locator(".pagination-controls")).not.toBeVisible();
   });
 });

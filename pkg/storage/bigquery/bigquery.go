@@ -487,6 +487,11 @@ func (s *Store) QueryTraces(ctx context.Context, tq storage.TraceQuery) (*storag
 		tq.PageSize = 20
 	}
 
+	cursor, err := storage.DecodePageCursor(tq.PageToken)
+	if err != nil {
+		return nil, fmt.Errorf("invalid page token: %w", err)
+	}
+
 	// Build optional WHERE conditions.
 	extraWhere := ""
 	extraHaving := ""
@@ -525,10 +530,21 @@ func (s *Store) QueryTraces(ctx context.Context, tq storage.TraceQuery) (*storag
 		extraWhere += "\n\t\t  AND trace_group = @traceGroup"
 		params = append(params, bigquery.QueryParameter{Name: "traceGroup", Value: tq.TraceGroup})
 	}
+	var havingClauses []string
 	if tq.Status != 0 {
-		extraHaving = "\n\t\tHAVING CASE WHEN MAX(CASE WHEN status = 2 THEN 1 ELSE 0 END) > 0 THEN 2 ELSE 1 END = @statusFilter"
+		havingClauses = append(havingClauses, "CASE WHEN MAX(CASE WHEN status = 2 THEN 1 ELSE 0 END) > 0 THEN 2 ELSE 1 END = @statusFilter")
 		params = append(params, bigquery.QueryParameter{Name: "statusFilter", Value: int(tq.Status)})
 	}
+	if cursor.ID != "" {
+		havingClauses = append(havingClauses, "(MIN(start_time) < @cursorTs OR (MIN(start_time) = @cursorTs AND trace_id < @cursorId))")
+		params = append(params, bigquery.QueryParameter{Name: "cursorTs", Value: cursor.Timestamp}, bigquery.QueryParameter{Name: "cursorId", Value: cursor.ID})
+	}
+	if len(havingClauses) > 0 {
+		extraHaving = "\n\t\tHAVING " + strings.Join(havingClauses, " AND ")
+	}
+
+	// Increment limit to detect if there are more pages
+	params = append(params, bigquery.QueryParameter{Name: "pageSize", Value: tq.PageSize + 1})
 
 	query := fmt.Sprintf(`
 		SELECT trace_id, MIN(start_time) AS earliest
@@ -538,7 +554,7 @@ func (s *Store) QueryTraces(ctx context.Context, tq storage.TraceQuery) (*storag
 		  AND start_time <= @endTime
 		  AND (@userID = '' OR user_id = @userID)%s
 		GROUP BY trace_id%s
-		ORDER BY earliest DESC
+		ORDER BY earliest DESC, trace_id DESC
 		LIMIT @pageSize
 	`, quoteTable(s.tableID), extraWhere, extraHaving)
 
@@ -651,13 +667,47 @@ func (s *Store) QueryTraces(ctx context.Context, tq storage.TraceQuery) (*storag
 		})
 	}
 
-	return &storage.TraceResult{Traces: traces, TotalCount: len(traces)}, nil
+	var nextPageToken string
+	if len(traces) > tq.PageSize {
+		traces = traces[:tq.PageSize]
+		last := traces[len(traces)-1]
+		nextPageToken = storage.EncodePageCursor(storage.PageCursor{
+			Timestamp: last.StartTime,
+			ID:        last.TraceID,
+		})
+	}
+
+	return &storage.TraceResult{Traces: traces, NextPageToken: nextPageToken, TotalCount: len(traces)}, nil
 }
 
 // SearchSpans searches spans with filtering.
 func (s *Store) SearchSpans(ctx context.Context, sq storage.SpanQuery) (*storage.SpanResult, error) {
 	if sq.PageSize == 0 {
 		sq.PageSize = 50
+	}
+
+	cursor, err := storage.DecodePageCursor(sq.PageToken)
+	if err != nil {
+		return nil, fmt.Errorf("invalid page token: %w", err)
+	}
+
+	extraWhere := ""
+	params := []bigquery.QueryParameter{
+		{Name: "projectID", Value: sq.ProjectID},
+		{Name: "startTime", Value: sq.StartTime},
+		{Name: "endTime", Value: sq.EndTime},
+		{Name: "kind", Value: int(sq.Kind)},
+		{Name: "model", Value: sq.Model},
+		{Name: "nameContains", Value: sq.NameContains},
+		{Name: "escapedName", Value: storage.EscapeLike(sq.NameContains)},
+		{Name: "userID", Value: sq.UserID},
+		{Name: "tenantID", Value: sq.TenantID},
+		{Name: "pageSize", Value: sq.PageSize + 1},
+	}
+
+	if cursor.ID != "" {
+		extraWhere = " AND (start_time < @cursorTs OR (start_time = @cursorTs AND span_id < @cursorId))"
+		params = append(params, bigquery.QueryParameter{Name: "cursorTs", Value: cursor.Timestamp}, bigquery.QueryParameter{Name: "cursorId", Value: cursor.ID})
 	}
 
 	query := fmt.Sprintf(`
@@ -669,31 +719,30 @@ func (s *Store) SearchSpans(ctx context.Context, sq storage.SpanQuery) (*storage
 		  AND (@model = '' OR gen_ai_model = @model)
 		  AND (@nameContains = '' OR name LIKE CONCAT('%%', @escapedName, '%%'))
 		  AND (@userID = '' OR user_id = @userID)
-		  AND (@tenantID = '' OR tenant_id = @tenantID)
-		ORDER BY start_time DESC
+		  AND (@tenantID = '' OR tenant_id = @tenantID)%s
+		ORDER BY start_time DESC, span_id DESC
 		LIMIT @pageSize
-	`, quoteTable(s.tableID))
+	`, quoteTable(s.tableID), extraWhere)
 
 	q := s.client.Query(query)
-	q.SetParameters([]bigquery.QueryParameter{
-		{Name: "projectID", Value: sq.ProjectID},
-		{Name: "startTime", Value: sq.StartTime},
-		{Name: "endTime", Value: sq.EndTime},
-		{Name: "kind", Value: int(sq.Kind)},
-		{Name: "model", Value: sq.Model},
-		{Name: "nameContains", Value: sq.NameContains},
-		{Name: "escapedName", Value: storage.EscapeLike(sq.NameContains)},
-		{Name: "userID", Value: sq.UserID},
-		{Name: "tenantID", Value: sq.TenantID},
-		{Name: "pageSize", Value: sq.PageSize},
-	})
+	q.SetParameters(params)
 
 	spans, err := s.querySpans(ctx, q)
 	if err != nil {
 		return nil, fmt.Errorf("searching spans: %w", err)
 	}
 
-	return &storage.SpanResult{Spans: spans, TotalCount: len(spans)}, nil
+	var nextPageToken string
+	if len(spans) > sq.PageSize {
+		spans = spans[:sq.PageSize]
+		last := spans[len(spans)-1]
+		nextPageToken = storage.EncodePageCursor(storage.PageCursor{
+			Timestamp: last.StartTime,
+			ID:        last.SpanID,
+		})
+	}
+
+	return &storage.SpanResult{Spans: spans, NextPageToken: nextPageToken, TotalCount: len(spans)}, nil
 }
 
 // GetUsageSummary returns aggregated usage statistics.

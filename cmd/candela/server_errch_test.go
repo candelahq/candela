@@ -51,15 +51,18 @@ func TestServerErrChPattern(t *testing.T) {
 // TestServerGracefulShutdown verifies that a server that starts
 // successfully can be shut down cleanly through the signal path.
 func TestServerGracefulShutdown(t *testing.T) {
-	srv := &http.Server{
-		Addr:    "127.0.0.1:0",
-		Handler: http.NewServeMux(),
-	}
+	mux := http.NewServeMux()
+	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
 
-	ln, err := net.Listen("tcp", srv.Addr)
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatalf("failed to listen: %v", err)
 	}
+	addr := ln.Addr().String()
+
+	srv := &http.Server{Handler: mux}
 
 	errCh := make(chan error, 1)
 	go func() {
@@ -68,8 +71,19 @@ func TestServerGracefulShutdown(t *testing.T) {
 		}
 	}()
 
-	// Give server a moment to start.
-	time.Sleep(50 * time.Millisecond)
+	// Confirm server is accepting connections (replaces time.Sleep).
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		resp, err := http.Get("http://" + addr + "/healthz")
+		if err == nil {
+			_ = resp.Body.Close()
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("server never became ready: %v", err)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()

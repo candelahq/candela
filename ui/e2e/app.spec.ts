@@ -205,7 +205,7 @@ test.describe("Traces", () => {
     });
 
     await page.goto("/traces");
-    await expect(page.locator(".table-title")).toHaveText("1 trace");
+    await expect(page.locator(".table-title")).toHaveText("Page 1");
   });
 });
 
@@ -760,7 +760,7 @@ test.describe("Trace Pagination", () => {
     await expect(page.getByRole("button", { name: /previous/i })).toBeDisabled();
   });
 
-  test("disables next when no more pages", async ({ page }) => {
+  test("hides pagination controls when no more pages", async ({ page }) => {
     await mockConnectRPC(page, "/candela.v1.TraceService/ListTraces", {
       traces: [{
         traceId: "trace-1",
@@ -781,6 +781,8 @@ test.describe("Trace Pagination", () => {
     });
 
     await page.goto("/traces");
-    await expect(page.getByRole("button", { name: /next/i })).toBeDisabled();
+    await expect(page.locator(".table-title")).toHaveText("Page 1");
+    // Pagination bar should not render when there's only one page
+    await expect(page.locator(".pagination-controls")).not.toBeVisible();
   });
 });

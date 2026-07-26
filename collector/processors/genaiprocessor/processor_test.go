@@ -101,8 +101,9 @@ func TestConsumeTraces(t *testing.T) {
 
 			processedTraces := allTraces[0]
 
-			// Validate if there are spans
-			if processedTraces.ResourceSpans().Len() > 0 && processedTraces.ResourceSpans().At(0).ScopeSpans().Len() > 0 && processedTraces.ResourceSpans().At(0).ScopeSpans().At(0).Spans().Len() > 0 {
+			if processedTraces.ResourceSpans().Len() > 0 {
+				require.GreaterOrEqual(t, processedTraces.ResourceSpans().At(0).ScopeSpans().Len(), 1, "expected at least one scope span")
+				require.GreaterOrEqual(t, processedTraces.ResourceSpans().At(0).ScopeSpans().At(0).Spans().Len(), 1, "expected at least one span")
 				span := processedTraces.ResourceSpans().At(0).ScopeSpans().At(0).Spans().At(0)
 				tt.validateSpan(t, span)
 			}

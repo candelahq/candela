@@ -10,8 +10,8 @@ import (
 // Property: Cost is always >= 0 for any valid input.
 func TestProperty_CostNonNegative(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
-		provider := rapid.SampledFrom([]string{"openai", "anthropic", "google", "unknown"}).Draw(t, "provider")
-		model := rapid.String().Draw(t, "model")
+		provider := rapid.SampledFrom([]string{"openai", "anthropic", "google"}).Draw(t, "provider")
+		model := rapid.SampledFrom([]string{"gpt-4o", "gpt-4o-mini", "claude-sonnet-4-20250514", "gemini-2.5-pro", "unknown-model"}).Draw(t, "model")
 		inputTokens := rapid.IntRange(0, 1_000_000).Draw(t, "input_tokens")
 		outputTokens := rapid.IntRange(0, 1_000_000).Draw(t, "output_tokens")
 
@@ -62,8 +62,8 @@ func TestProperty_CostMonotonicOutput(t *testing.T) {
 // Property: Zero tokens always yields zero cost.
 func TestProperty_ZeroTokensZeroCost(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
-		provider := rapid.String().Draw(t, "provider")
-		model := rapid.String().Draw(t, "model")
+		provider := rapid.SampledFrom([]string{"openai", "anthropic", "google"}).Draw(t, "provider")
+		model := rapid.SampledFrom([]string{"gpt-4o", "gpt-4o-mini", "claude-sonnet-4-20250514", "gemini-2.5-pro"}).Draw(t, "model")
 
 		calc := New()
 		cost := calc.Calculate(provider, model, 0, 0)

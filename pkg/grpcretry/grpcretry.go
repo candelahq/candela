@@ -37,6 +37,9 @@ func (c Config) WithDefaults() Config {
 	if c.Multiplier <= 0 {
 		c.Multiplier = 2.0
 	}
+	if c.MaxAttempts < 0 {
+		c.MaxAttempts = 0
+	}
 	return c
 }
 

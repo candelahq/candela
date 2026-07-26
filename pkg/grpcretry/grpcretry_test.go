@@ -79,7 +79,7 @@ func TestDo(t *testing.T) {
 		},
 		{
 			name:   "no retry on permanent error",
-			config: Config{MaxAttempts: 3},
+			config: Config{MaxAttempts: 3, InitialDelay: time.Millisecond},
 			setupCtx: func() (context.Context, context.CancelFunc) {
 				return context.WithTimeout(context.Background(), 5*time.Second)
 			},

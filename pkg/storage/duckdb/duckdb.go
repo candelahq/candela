@@ -229,6 +229,11 @@ func (s *Store) QueryTraces(ctx context.Context, q storage.TraceQuery) (*storage
 		q.PageSize = 50
 	}
 
+	cursor, err := storage.DecodePageCursor(q.PageToken)
+	if err != nil {
+		return nil, fmt.Errorf("invalid page token: %w", err)
+	}
+
 	// Allowlisted ORDER BY columns — never interpolate user input directly.
 	// Keys are the proto/API names sent from the frontend.
 	orderCols := map[string]string{
@@ -302,7 +307,25 @@ func (s *Store) QueryTraces(ctx context.Context, q storage.TraceQuery) (*storage
 		args = append(args, int(q.Status))
 	}
 
-	args = append(args, q.PageSize)
+	// Cursor condition for keyset pagination.
+	if cursor.ID != "" {
+		cursorOp := "<" // DESC: fetch rows earlier than cursor
+		if dir == "ASC" {
+			cursorOp = ">" // ASC: fetch rows later than cursor
+		}
+		cursorHaving := fmt.Sprintf(
+			`(MIN(start_time) %s ? OR (MIN(start_time) = ? AND trace_id %s ?))`,
+			cursorOp, cursorOp,
+		)
+		if having != "" {
+			having += " AND " + cursorHaving
+		} else {
+			having = "HAVING " + cursorHaving
+		}
+		args = append(args, cursor.Timestamp, cursor.Timestamp, cursor.ID)
+	}
+
+	args = append(args, q.PageSize+1)
 
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT
@@ -331,7 +354,7 @@ func (s *Store) QueryTraces(ctx context.Context, q storage.TraceQuery) (*storage
 		WHERE `+where+`
 		GROUP BY trace_id
 		`+having+`
-		ORDER BY `+orderExpr+` `+dir+`
+		ORDER BY `+orderExpr+` `+dir+`, trace_id `+dir+`
 		LIMIT ?
 	`, args...)
 	if err != nil {
@@ -363,13 +386,51 @@ func (s *Store) QueryTraces(ctx context.Context, q storage.TraceQuery) (*storage
 		return nil, fmt.Errorf("iterating traces: %w", err)
 	}
 
-	return &storage.TraceResult{Traces: traces, TotalCount: len(traces)}, nil
+	var nextPageToken string
+	if len(traces) > q.PageSize {
+		traces = traces[:q.PageSize]
+		last := traces[len(traces)-1]
+		nextPageToken = storage.EncodePageCursor(storage.PageCursor{
+			Timestamp: last.StartTime,
+			ID:        last.TraceID,
+		})
+	}
+
+	return &storage.TraceResult{Traces: traces, NextPageToken: nextPageToken, TotalCount: len(traces)}, nil
 }
 
 func (s *Store) SearchSpans(ctx context.Context, q storage.SpanQuery) (*storage.SpanResult, error) {
 	if q.PageSize == 0 {
 		q.PageSize = 50
 	}
+
+	cursor, err := storage.DecodePageCursor(q.PageToken)
+	if err != nil {
+		return nil, fmt.Errorf("invalid page token: %w", err)
+	}
+
+	where := `project_id = ? AND start_time >= ? AND start_time <= ?
+			AND (? = 0 OR kind = ?)
+			AND (? = '' OR gen_ai_model = ?)
+			AND (? = '' OR name LIKE '%' || ? || '%' ESCAPE '\')
+			AND (? = '' OR user_id = ?)
+			AND (? = '' OR tenant_id = ?)`
+
+	args := []any{
+		q.ProjectID, q.StartTime, q.EndTime,
+		int(q.Kind), int(q.Kind),
+		q.Model, q.Model,
+		q.NameContains, storage.EscapeLike(q.NameContains),
+		q.UserID, q.UserID,
+		q.TenantID, q.TenantID,
+	}
+
+	if cursor.ID != "" {
+		where += ` AND (start_time < ? OR (start_time = ? AND span_id < ?))`
+		args = append(args, cursor.Timestamp, cursor.Timestamp, cursor.ID)
+	}
+
+	args = append(args, q.PageSize+1)
 
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT span_id, trace_id, parent_span_id, name, kind, status, status_message,
@@ -378,22 +439,10 @@ func (s *Store) SearchSpans(ctx context.Context, q storage.SpanQuery) (*storage.
 			gen_ai_total_tokens, gen_ai_cost_usd, gen_ai_temperature, gen_ai_max_tokens,
 			gen_ai_input_content, gen_ai_output_content, attributes, user_id, session_id, tenant_id, job_id
 		FROM spans
-		WHERE project_id = ? AND start_time >= ? AND start_time <= ?
-			AND (? = 0 OR kind = ?)
-			AND (? = '' OR gen_ai_model = ?)
-			AND (? = '' OR name LIKE '%' || ? || '%' ESCAPE '\')
-			AND (? = '' OR user_id = ?)
-			AND (? = '' OR tenant_id = ?)
-		ORDER BY start_time DESC
+		WHERE `+where+`
+		ORDER BY start_time DESC, span_id DESC
 		LIMIT ?
-	`, q.ProjectID, q.StartTime, q.EndTime,
-		int(q.Kind), int(q.Kind),
-		q.Model, q.Model,
-		q.NameContains, storage.EscapeLike(q.NameContains),
-		q.UserID, q.UserID,
-		q.TenantID, q.TenantID,
-		q.PageSize,
-	)
+	`, args...)
 	if err != nil {
 		return nil, fmt.Errorf("searching spans: %w", err)
 	}
@@ -404,7 +453,17 @@ func (s *Store) SearchSpans(ctx context.Context, q storage.SpanQuery) (*storage.
 		return nil, err
 	}
 
-	return &storage.SpanResult{Spans: spans, TotalCount: len(spans)}, nil
+	var nextPageToken string
+	if len(spans) > q.PageSize {
+		spans = spans[:q.PageSize]
+		last := spans[len(spans)-1]
+		nextPageToken = storage.EncodePageCursor(storage.PageCursor{
+			Timestamp: last.StartTime,
+			ID:        last.SpanID,
+		})
+	}
+
+	return &storage.SpanResult{Spans: spans, NextPageToken: nextPageToken, TotalCount: len(spans)}, nil
 }
 
 func (s *Store) GetUsageSummary(ctx context.Context, q storage.UsageQuery) (*storage.UsageSummary, error) {

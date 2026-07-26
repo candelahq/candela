@@ -3,6 +3,7 @@ package connecthandlers
 import (
 	"context"
 	"fmt"
+	"strconv"
 
 	connect "connectrpc.com/connect"
 	typespb "github.com/candelahq/candela/gen/go/candela/types"
@@ -63,11 +64,20 @@ func (h *ProjectHandler) ListProjects(
 	ctx context.Context,
 	req *connect.Request[v1.ListProjectsRequest],
 ) (*connect.Response[v1.ListProjectsResponse], error) {
-	limit := 50
-	offset := 0
+	limit, offset := 50, 0
 	if req.Msg.Pagination != nil {
 		if req.Msg.Pagination.PageSize > 0 {
 			limit = int(req.Msg.Pagination.PageSize)
+		}
+		if req.Msg.Pagination.PageToken != "" {
+			const maxOffset = 100_000
+			if parsed, err := strconv.Atoi(req.Msg.Pagination.PageToken); err == nil && parsed > 0 {
+				if parsed > maxOffset {
+					return nil, connect.NewError(connect.CodeInvalidArgument,
+						fmt.Errorf("page_token exceeds maximum offset (%d)", maxOffset))
+				}
+				offset = parsed
+			}
 		}
 	}
 
@@ -82,10 +92,16 @@ func (h *ProjectHandler) ListProjects(
 		pbProjects[i] = projectToProto(&pp)
 	}
 
+	var nextPageToken string
+	if offset+limit < total {
+		nextPageToken = strconv.Itoa(offset + limit)
+	}
+
 	return connect.NewResponse(&v1.ListProjectsResponse{
 		Projects: pbProjects,
 		Pagination: &typespb.PaginationResponse{
-			TotalCount: int32(total),
+			NextPageToken: nextPageToken,
+			TotalCount:    int32(total),
 		},
 	}), nil
 }

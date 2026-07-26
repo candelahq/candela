@@ -31,6 +31,11 @@ export default function TracesPage() {
     clearFilters,
     refresh,
     fetchInitial,
+    fetchNextPage,
+    fetchPreviousPage,
+    hasNextPage,
+    hasPreviousPage,
+    currentPage,
   } = useTraces();
 
   const [filtersOpen, setFiltersOpen] = useState(false);
@@ -172,7 +177,7 @@ export default function TracesPage() {
             <span className="table-title">
               {loading
                 ? "Loading..."
-                : `${traces.length} trace${traces.length !== 1 ? "s" : ""}`}
+                : `Page ${currentPage}`}
             </span>
             {hasActiveFilters && (
               <span
@@ -270,6 +275,29 @@ export default function TracesPage() {
                 })}
               </tbody>
             </table>
+          )}
+
+          {/* Pagination controls */}
+          {(hasPreviousPage || hasNextPage) && (
+            <div className="pagination-controls" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "16px 20px", borderTop: "1px solid var(--border-subtle)" }}>
+              <button
+                className="btn btn-sm btn-ghost"
+                onClick={fetchPreviousPage}
+                disabled={!hasPreviousPage}
+              >
+                ← Previous
+              </button>
+              <span className="pagination-info" style={{ fontSize: "13px", color: "var(--text-secondary)" }}>
+                Page {currentPage}
+              </span>
+              <button
+                className="btn btn-sm btn-ghost"
+                onClick={fetchNextPage}
+                disabled={!hasNextPage}
+              >
+                Next →
+              </button>
+            </div>
           )}
         </div>
       </div>

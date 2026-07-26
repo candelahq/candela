@@ -5,7 +5,10 @@ package storage
 
 import (
 	"context"
+	"encoding/base64"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -185,6 +188,34 @@ type Trace struct {
 	TraceGroup   string        `json:"trace_group,omitempty"`
 }
 
+// PageCursor encodes the keyset position for cursor-based pagination.
+type PageCursor struct {
+	Timestamp time.Time `json:"ts"`
+	ID        string    `json:"id"`
+}
+
+// EncodePageCursor serializes a cursor to a base64 page token.
+func EncodePageCursor(c PageCursor) string {
+	b, _ := json.Marshal(c)
+	return base64.RawURLEncoding.EncodeToString(b)
+}
+
+// DecodePageCursor deserializes a base64 page token to a cursor.
+func DecodePageCursor(token string) (PageCursor, error) {
+	if token == "" {
+		return PageCursor{}, nil
+	}
+	b, err := base64.RawURLEncoding.DecodeString(token)
+	if err != nil {
+		return PageCursor{}, fmt.Errorf("invalid page token: %w", err)
+	}
+	var c PageCursor
+	if err := json.Unmarshal(b, &c); err != nil {
+		return PageCursor{}, fmt.Errorf("invalid page token: %w", err)
+	}
+	return c, nil
+}
+
 // TraceQuery defines filters for listing traces.
 type TraceQuery struct {
 	ProjectID   string
@@ -210,7 +241,7 @@ type TraceQuery struct {
 type TraceResult struct {
 	Traces        []TraceSummary
 	NextPageToken string
-	TotalCount    int
+	TotalCount    int // Deprecated: may be zero for cursor-paginated results.
 }
 
 // SpanQuery defines filters for searching individual spans.
@@ -233,7 +264,7 @@ type SpanQuery struct {
 type SpanResult struct {
 	Spans         []Span
 	NextPageToken string
-	TotalCount    int
+	TotalCount    int // Deprecated: may be zero for cursor-paginated results.
 }
 
 // UsageSummary holds aggregated usage metrics.

@@ -12,27 +12,50 @@ type State = {
   loading: boolean;
   error: string | null;
   filters: TraceFilters;
+  nextPageToken: string;
+  currentPageToken: string;
+  pageTokenHistory: string[];
 };
 
 type Action =
-  | { type: "fetch"; filters: TraceFilters }
-  | { type: "success"; traces: TraceSummaryRow[] }
+  | { type: "fetch"; filters: TraceFilters; resetPagination?: boolean }
+  | { type: "success"; traces: TraceSummaryRow[]; nextPageToken: string }
   | { type: "error"; message: string }
   | { type: "set_filters"; filters: TraceFilters }
-  | { type: "clear_filters" };
+  | { type: "clear_filters" }
+  | { type: "set_page_token"; direction: "next" | "prev"; token?: string };
 
 function reducer(state: State, action: Action): State {
   switch (action.type) {
     case "fetch":
+      if (action.resetPagination) {
+        return { ...state, loading: true, error: null, filters: action.filters, currentPageToken: "", pageTokenHistory: [], nextPageToken: "" };
+      }
       return { ...state, loading: true, error: null, filters: action.filters };
     case "success":
-      return { ...state, loading: false, traces: action.traces };
+      return { ...state, loading: false, traces: action.traces, nextPageToken: action.nextPageToken };
     case "error":
       return { ...state, loading: false, error: action.message };
     case "set_filters":
-      return { ...state, filters: action.filters };
+      return { ...state, filters: action.filters, currentPageToken: "", pageTokenHistory: [], nextPageToken: "" };
     case "clear_filters":
-      return { ...state, loading: true, error: null, filters: DEFAULT_FILTERS };
+      return { ...state, loading: true, error: null, filters: DEFAULT_FILTERS, currentPageToken: "", pageTokenHistory: [], nextPageToken: "" };
+    case "set_page_token":
+      if (action.direction === "next") {
+        return {
+          ...state,
+          pageTokenHistory: [...state.pageTokenHistory, state.currentPageToken],
+          currentPageToken: action.token || "",
+        };
+      } else {
+        const prevHistory = [...state.pageTokenHistory];
+        const prevToken = prevHistory.pop() || "";
+        return {
+          ...state,
+          pageTokenHistory: prevHistory,
+          currentPageToken: prevToken,
+        };
+      }
   }
 }
 
@@ -94,6 +117,9 @@ export function useTraces() {
     loading: true,
     error: null,
     filters: DEFAULT_FILTERS,
+    nextPageToken: "",
+    currentPageToken: "",
+    pageTokenHistory: [],
   });
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Track the previous scope mode so we can detect changes
@@ -101,12 +127,13 @@ export function useTraces() {
 
   const fetchRef = useRef<AbortController | null>(null);
 
-  const fetchTraces = useCallback((f: TraceFilters) => {
+  const fetchTraces = useCallback((f: TraceFilters, resetPagination = false) => {
     fetchRef.current?.abort();
     const controller = new AbortController();
     fetchRef.current = controller;
 
-    dispatch({ type: "fetch", filters: f });
+    dispatch({ type: "fetch", filters: f, resetPagination });
+    const pageToken = resetPagination ? "" : state.currentPageToken;
 
     // Build headers — the backend interprets the auth token + this hint
     // to decide whether to filter to the authenticated user's traces.
@@ -117,7 +144,7 @@ export function useTraces() {
     traceClient
       .listTraces({
         projectId: DEFAULT_PROJECT_ID,
-        pagination: { pageSize: 100 },
+        pagination: { pageSize: 100, pageToken },
         search: f.search,
         model: f.model,
         provider: f.provider,
@@ -130,9 +157,11 @@ export function useTraces() {
       })
       .then((res) => {
         if (!controller.signal.aborted) {
+          const nextToken = res.pagination?.nextPageToken ?? "";
           dispatch({
             type: "success",
             traces: (res.traces || []).map(mapTrace),
+            nextPageToken: nextToken,
           });
         }
       })
@@ -141,7 +170,7 @@ export function useTraces() {
           dispatch({ type: "error", message: err.message });
         }
       });
-  }, [isPersonalScope]);
+  }, [isPersonalScope, state.currentPageToken]);
 
   const updateFilters = useCallback(
     (patch: Partial<TraceFilters>) => {
@@ -152,9 +181,9 @@ export function useTraces() {
       if (debounceRef.current) clearTimeout(debounceRef.current);
 
       if (isSearch) {
-        debounceRef.current = setTimeout(() => fetchTraces(next), 300);
+        debounceRef.current = setTimeout(() => fetchTraces(next, true), 300);
       } else {
-        fetchTraces(next);
+        fetchTraces(next, true);
       }
     },
     [state.filters, fetchTraces]
@@ -162,7 +191,7 @@ export function useTraces() {
 
   const clearFilters = useCallback(() => {
     dispatch({ type: "clear_filters" });
-    fetchTraces(DEFAULT_FILTERS);
+    fetchTraces(DEFAULT_FILTERS, true);
   }, [fetchTraces]);
 
   const hasActiveFilters = !!(
@@ -182,9 +211,24 @@ export function useTraces() {
   useEffect(() => {
     if (prevModeRef.current !== mode) {
       prevModeRef.current = mode;
-      fetchTraces(state.filters);
+      fetchTraces(state.filters, true);
     }
   }, [mode, fetchTraces, state.filters]);
+
+  // Re-fetch when currentPageToken changes
+  useEffect(() => {
+    fetchTraces(state.filters);
+  }, [state.currentPageToken, fetchTraces, state.filters]);
+
+  const fetchNextPage = useCallback(() => {
+    if (!state.nextPageToken) return;
+    dispatch({ type: "set_page_token", direction: "next", token: state.nextPageToken });
+  }, [state.nextPageToken]);
+
+  const fetchPreviousPage = useCallback(() => {
+    if (state.pageTokenHistory.length === 0) return;
+    dispatch({ type: "set_page_token", direction: "prev" });
+  }, [state.pageTokenHistory]);
 
   // Abort in-flight request on unmount only. Cleanup must NOT be in the
   // mode/filters effect — fetchTraces already updates fetchRef.current
@@ -203,6 +247,11 @@ export function useTraces() {
     updateFilters,
     clearFilters,
     refresh,
-    fetchInitial: () => fetchTraces(state.filters),
+    fetchInitial: () => fetchTraces(state.filters, true),
+    fetchNextPage,
+    fetchPreviousPage,
+    hasNextPage: !!state.nextPageToken,
+    hasPreviousPage: state.pageTokenHistory.length > 0,
+    currentPage: state.pageTokenHistory.length + 1,
   };
 }

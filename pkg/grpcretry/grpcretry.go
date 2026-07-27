@@ -4,9 +4,13 @@
 package grpcretry
 
 import (
+	"context"
 	"math"
 	"math/rand/v2"
 	"time"
+
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 // Config controls the reconnect backoff behavior.
@@ -17,6 +21,8 @@ type Config struct {
 	MaxDelay time.Duration
 	// Multiplier is the backoff factor (default: 2.0).
 	Multiplier float64
+	// MaxAttempts is the maximum number of times to retry (0 means no retries).
+	MaxAttempts int
 }
 
 // WithDefaults returns a copy of the config with zero-valued fields
@@ -30,6 +36,9 @@ func (c Config) WithDefaults() Config {
 	}
 	if c.Multiplier <= 0 {
 		c.Multiplier = 2.0
+	}
+	if c.MaxAttempts < 0 {
+		c.MaxAttempts = 0
 	}
 	return c
 }
@@ -48,4 +57,38 @@ func Backoff(attempt int, c Config) time.Duration {
 	}
 	jitter := d * 0.25 * (2*rand.Float64() - 1) //nolint:gosec
 	return time.Duration(d + jitter)
+}
+
+// Do executes the operation with retries according to the Config.
+func Do(ctx context.Context, c Config, operation func(context.Context) error) error {
+	c = c.WithDefaults()
+
+	var err error
+	for attempt := 0; attempt <= c.MaxAttempts; attempt++ {
+		err = operation(ctx)
+		if err == nil {
+			return nil
+		}
+
+		code := status.Code(err)
+		switch code {
+		case codes.Unavailable, codes.DeadlineExceeded, codes.ResourceExhausted:
+			// Transient errors, retry
+		default:
+			// Permanent error, do not retry
+			return err
+		}
+
+		if attempt == c.MaxAttempts {
+			break
+		}
+
+		delay := Backoff(attempt, c)
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(delay):
+		}
+	}
+	return err
 }

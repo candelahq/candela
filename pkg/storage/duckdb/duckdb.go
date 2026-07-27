@@ -349,7 +349,8 @@ func (s *Store) QueryTraces(ctx context.Context, q storage.TraceQuery) (*storage
 				GROUP BY s2.gen_ai_model, s2.gen_ai_provider
 				ORDER BY SUM(s2.gen_ai_cost_usd) DESC
 				LIMIT 1) as primary_provider,
-			MAX(CASE WHEN status = 2 THEN 2 ELSE 0 END)::INTEGER as status
+			MAX(CASE WHEN status = 2 THEN 2 ELSE 0 END)::INTEGER as status,
+			MAX(project_id) as project_id
 		FROM spans
 		WHERE `+where+`
 		GROUP BY trace_id
@@ -371,7 +372,7 @@ func (s *Store) QueryTraces(ctx context.Context, q storage.TraceQuery) (*storage
 		err := rows.Scan(
 			&t.TraceID, &t.StartTime, &endTime, &t.SpanCount, &t.LLMCallCount,
 			&t.TotalTokens, &t.TotalCostUSD, &t.RootSpanName,
-			&t.PrimaryModel, &t.PrimaryProvider, &status,
+			&t.PrimaryModel, &t.PrimaryProvider, &status, &t.ProjectID,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("scanning trace: %w", err)
@@ -379,7 +380,6 @@ func (s *Store) QueryTraces(ctx context.Context, q storage.TraceQuery) (*storage
 
 		t.Duration = endTime.Sub(t.StartTime)
 		t.Status = storage.SpanStatus(status)
-		t.ProjectID = q.ProjectID
 		traces = append(traces, t)
 	}
 	if err := rows.Err(); err != nil {

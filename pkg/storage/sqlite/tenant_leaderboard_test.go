@@ -18,8 +18,8 @@ func TestGetTenantLeaderboard_RanksByCost(t *testing.T) {
 	now := time.Now().UTC()
 
 	spans := []storage.Span{
-		tenantSpan("span-1", "trace-A", "acme-corp", 0.05),
-		tenantSpan("span-2", "trace-B", "acme-corp", 0.10), // acme total = 0.15
+		tenantSpan("span-1", "trace-A", "acme-corp", 0.15),
+		tenantSpan("span-2", "trace-B", "acme-corp", 0.10), // acme total = 0.25
 		tenantSpan("span-3", "trace-C", "beta-inc", 0.20),  // beta total = 0.20
 		tenantSpan("span-4", "trace-D", "gamma-co", 0.01),  // gamma total = 0.01
 	}
@@ -45,8 +45,8 @@ func TestGetTenantLeaderboard_RanksByCost(t *testing.T) {
 		t.Fatalf("len(results) = %d, want 3", len(results))
 	}
 
-	// Ranked by cost descending: beta (0.20) > acme (0.15) > gamma (0.01).
-	wantOrder := []string{"beta-inc", "acme-corp", "gamma-co"}
+	// Ranked by cost descending: acme (0.25) > beta (0.20) > gamma (0.01).
+	wantOrder := []string{"acme-corp", "beta-inc", "gamma-co"}
 	for i, want := range wantOrder {
 		if results[i].TenantID != want {
 			t.Errorf("results[%d].TenantID = %q, want %q", i, results[i].TenantID, want)

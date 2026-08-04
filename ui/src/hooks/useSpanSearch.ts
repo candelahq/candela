@@ -3,11 +3,13 @@
 import { useCallback, useEffect, useReducer, useRef } from "react";
 import { traceClient } from "@/lib/api";
 import { DEFAULT_PROJECT_ID } from "@/lib/constants";
-import type { TraceSummaryRow, TraceFilters } from "@/types/traces";
-import { DEFAULT_FILTERS } from "@/types/traces";
+import { SpanKind } from "@/gen/candela/types/trace_pb";
+import type { Span } from "@/gen/candela/types/trace_pb";
 import { useScope } from "@/components/UserScopeProvider";
 import { create } from "@bufbuild/protobuf";
 import { TimestampSchema } from "@bufbuild/protobuf/wkt";
+import type { SpanResultRow, SpanSearchFilters } from "@/types/search";
+import { DEFAULT_SEARCH_FILTERS } from "@/types/search";
 
 function makeTimeRange(range: string) {
   const now = new Date();
@@ -20,20 +22,20 @@ function makeTimeRange(range: string) {
 }
 
 type State = {
-  traces: TraceSummaryRow[];
+  spans: SpanResultRow[];
   loading: boolean;
   error: string | null;
-  filters: TraceFilters;
+  filters: SpanSearchFilters;
   nextPageToken: string;
   currentPageToken: string;
   pageTokenHistory: string[];
 };
 
 type Action =
-  | { type: "fetch"; filters: TraceFilters; resetPagination?: boolean }
-  | { type: "success"; traces: TraceSummaryRow[]; nextPageToken: string }
+  | { type: "fetch"; filters: SpanSearchFilters; resetPagination?: boolean }
+  | { type: "success"; spans: SpanResultRow[]; nextPageToken: string }
   | { type: "error"; message: string }
-  | { type: "set_filters"; filters: TraceFilters }
+  | { type: "set_filters"; filters: SpanSearchFilters }
   | { type: "clear_filters" }
   | { type: "set_page_token"; direction: "next" | "prev"; token?: string };
 
@@ -45,13 +47,13 @@ function reducer(state: State, action: Action): State {
       }
       return { ...state, loading: true, error: null, filters: action.filters };
     case "success":
-      return { ...state, loading: false, traces: action.traces, nextPageToken: action.nextPageToken };
+      return { ...state, loading: false, spans: action.spans, nextPageToken: action.nextPageToken };
     case "error":
       return { ...state, loading: false, error: action.message };
     case "set_filters":
       return { ...state, filters: action.filters, currentPageToken: "", pageTokenHistory: [], nextPageToken: "" };
     case "clear_filters":
-      return { ...state, loading: true, error: null, filters: DEFAULT_FILTERS, currentPageToken: "", pageTokenHistory: [], nextPageToken: "" };
+      return { ...state, loading: true, error: null, filters: DEFAULT_SEARCH_FILTERS, currentPageToken: "", pageTokenHistory: [], nextPageToken: "" };
     case "set_page_token":
       if (action.direction === "next") {
         return {
@@ -71,75 +73,47 @@ function reducer(state: State, action: Action): State {
   }
 }
 
-function mapTrace(t: {
-  traceId: string;
-  rootSpanName: string;
-  primaryModel: string;
-  primaryProvider: string;
-  environment: string;
-  duration?: { seconds: bigint; nanos: number };
-  totalTokens: bigint;
-  totalCostUsd: number;
-  status: number;
-  spanCount: number;
-  llmCallCount: number;
-  startTime?: { seconds: bigint; nanos: number };
-  tenantId?: string;
-  jobId?: string;
-}): TraceSummaryRow {
-  const durSeconds = Number(t.duration?.seconds ?? 0);
-  const durNanos = Number(t.duration?.nanos ?? 0);
+function mapSpan(span: Span): SpanResultRow {
+  const durSeconds = Number(span.duration?.seconds ?? 0);
+  const durNanos = Number(span.duration?.nanos ?? 0);
+  
   return {
-    traceId: t.traceId,
-    rootSpanName: t.rootSpanName || "unknown",
-    primaryModel: t.primaryModel || "—",
-    primaryProvider: t.primaryProvider || "—",
-    environment: t.environment || "—",
+    spanId: span.spanId,
+    traceId: span.traceId,
+    name: span.name || "unknown",
+    kind: span.kind ?? SpanKind.UNSPECIFIED,
+    model: span.genAi?.model || "—",
+    provider: span.genAi?.provider || "—",
     durationMs: durSeconds * 1000 + durNanos / 1e6,
-    totalTokens: Number(t.totalTokens) || 0,
-    totalCostUsd: t.totalCostUsd || 0,
-    status: t.status,
-    spanCount: t.spanCount || 0,
-    llmCallCount: t.llmCallCount || 0,
-    startTime: t.startTime
+    totalTokens: Number(span.genAi?.totalTokens) || 0,
+    costUsd: span.genAi?.costUsd || 0,
+    status: span.status ?? 0,
+    startTime: span.startTime
       ? new Date(
-          Number(t.startTime.seconds) * 1000 +
-            Math.floor(Number(t.startTime.nanos) / 1e6)
+          Number(span.startTime.seconds) * 1000 +
+            Math.floor(Number(span.startTime.nanos) / 1e6)
         ).toLocaleString()
       : "—",
-    tenantId: t.tenantId,
-    jobId: t.jobId,
   };
 }
 
-/**
- * Hook for fetching and filtering traces.
- * Encapsulates the ListTraces RPC, debounced search, and filter state.
- *
- * Scope-aware: In "personal" mode the backend already scopes by the
- * authenticated user's Firebase token.  We pass `include_budget=true`
- * as a hint header so the backend knows this is a personal-scope request.
- * Re-fetches automatically when the scope mode changes.
- */
-export function useTraces() {
+export function useSpanSearch() {
   const { isPersonalScope, mode } = useScope();
 
   const [state, dispatch] = useReducer(reducer, {
-    traces: [],
+    spans: [],
     loading: true,
     error: null,
-    filters: DEFAULT_FILTERS,
+    filters: DEFAULT_SEARCH_FILTERS,
     nextPageToken: "",
     currentPageToken: "",
     pageTokenHistory: [],
   });
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  // Track the previous scope mode so we can detect changes
   const prevModeRef = useRef(mode);
-
   const fetchRef = useRef<AbortController | null>(null);
 
-  const fetchTraces = useCallback((f: TraceFilters, resetPagination = false) => {
+  const fetchSpans = useCallback((f: SpanSearchFilters, resetPagination = false) => {
     fetchRef.current?.abort();
     const controller = new AbortController();
     fetchRef.current = controller;
@@ -147,25 +121,21 @@ export function useTraces() {
     dispatch({ type: "fetch", filters: f, resetPagination });
     const pageToken = resetPagination ? "" : state.currentPageToken;
 
-    // Build headers — the backend interprets the auth token + this hint
-    // to decide whether to filter to the authenticated user's traces.
     const headers: Record<string, string> = {};
     if (f.jobId) headers["X-Candela-Job-Id"] = f.jobId;
     if (isPersonalScope) headers["X-Candela-Scope"] = "personal";
 
     traceClient
-      .listTraces({
+      .searchSpans({
         projectId: DEFAULT_PROJECT_ID,
         pagination: { pageSize: 100, pageToken },
-        search: f.search,
+        nameContains: f.nameContains,
+        kind: f.kind === null ? SpanKind.UNSPECIFIED : f.kind,
         model: f.model,
-        provider: f.provider,
-        status: f.status === "ok" ? 1 : f.status === "error" ? 2 : 0,
-        orderBy: f.orderBy,
-        descending: f.descending,
-        timeRange: makeTimeRange(f.timeRange),
-        environment: f.environment,
+        jobId: f.jobId,
         traceGroup: f.traceGroup,
+        timeRange: makeTimeRange(f.timeRange),
+        tenantId: "",
       }, {
         headers,
         signal: controller.signal,
@@ -175,7 +145,7 @@ export function useTraces() {
           const nextToken = res.pagination?.nextPageToken ?? "";
           dispatch({
             type: "success",
-            traces: (res.traces || []).map(mapTrace),
+            spans: (res.spans || []).map(mapSpan),
             nextPageToken: nextToken,
           });
         }
@@ -188,50 +158,51 @@ export function useTraces() {
   }, [isPersonalScope, state.currentPageToken]);
 
   const updateFilters = useCallback(
-    (patch: Partial<TraceFilters>) => {
+    (patch: Partial<SpanSearchFilters>) => {
       const next = { ...state.filters, ...patch };
       dispatch({ type: "set_filters", filters: next });
 
-      const isSearch = "search" in patch;
+      const isSearch = "nameContains" in patch;
       if (debounceRef.current) clearTimeout(debounceRef.current);
 
       if (isSearch) {
-        debounceRef.current = setTimeout(() => fetchTraces(next, true), 300);
+        debounceRef.current = setTimeout(() => fetchSpans(next, true), 300);
       } else {
-        fetchTraces(next, true);
+        fetchSpans(next, true);
       }
     },
-    [state.filters, fetchTraces]
+    [state.filters, fetchSpans]
   );
 
   const clearFilters = useCallback(() => {
+    if (debounceRef.current) {
+      clearTimeout(debounceRef.current);
+      debounceRef.current = null;
+    }
     dispatch({ type: "clear_filters" });
-    fetchTraces(DEFAULT_FILTERS, true);
-  }, [fetchTraces]);
+    fetchSpans(DEFAULT_SEARCH_FILTERS, true);
+  }, [fetchSpans]);
 
   const hasActiveFilters = !!(
-    state.filters.search ||
+    state.filters.nameContains ||
+    state.filters.kind !== null ||
     state.filters.model ||
-    state.filters.provider ||
-    state.filters.status ||
     state.filters.jobId ||
-    state.filters.environment ||
     state.filters.traceGroup ||
-    state.filters.timeRange !== DEFAULT_FILTERS.timeRange
+    state.filters.timeRange !== DEFAULT_SEARCH_FILTERS.timeRange
   );
 
   const refresh = useCallback(
-    () => fetchTraces(state.filters),
-    [state.filters, fetchTraces]
+    () => fetchSpans(state.filters),
+    [state.filters, fetchSpans]
   );
 
-  // Re-fetch when scope mode changes
   useEffect(() => {
     if (prevModeRef.current !== mode) {
       prevModeRef.current = mode;
-      fetchTraces(state.filters, true);
+      fetchSpans(state.filters, true);
     }
-  }, [mode, fetchTraces, state.filters]);
+  }, [mode, fetchSpans, state.filters]);
 
   // Only fetch on pagination token changes — filter-driven fetches
   // are handled imperatively by updateFilters/clearFilters.
@@ -239,7 +210,7 @@ export function useTraces() {
   useEffect(() => {
     if (prevTokenRef.current !== state.currentPageToken) {
       prevTokenRef.current = state.currentPageToken;
-      fetchTraces(state.filters);
+      fetchSpans(state.filters);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state.currentPageToken]);
@@ -254,10 +225,6 @@ export function useTraces() {
     dispatch({ type: "set_page_token", direction: "prev" });
   }, [state.pageTokenHistory]);
 
-  // Abort in-flight request on unmount only. Cleanup must NOT be in the
-  // mode/filters effect — fetchTraces already updates fetchRef.current
-  // before React runs the previous effect's cleanup, so that cleanup
-  // would abort the *new* request instead of the old one.
   useEffect(() => {
     return () => {
       fetchRef.current?.abort();
@@ -266,7 +233,7 @@ export function useTraces() {
   }, []);
 
   return {
-    traces: state.traces,
+    spans: state.spans,
     loading: state.loading,
     error: state.error,
     filters: state.filters,
@@ -274,7 +241,7 @@ export function useTraces() {
     updateFilters,
     clearFilters,
     refresh,
-    fetchInitial: () => fetchTraces(state.filters, true),
+    fetchInitial: () => fetchSpans(state.filters, true),
     fetchNextPage,
     fetchPreviousPage,
     hasNextPage: !!state.nextPageToken,

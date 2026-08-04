@@ -279,7 +279,10 @@ export default function TracesPage() {
                     <tr
                       key={t.traceId}
                       className="clickable-row"
+                      tabIndex={0}
+                      role="link"
                       onClick={() => router.push(`/traces/${t.traceId}`)}
+                      onKeyDown={(e) => { if (e.key === "Enter") router.push(`/traces/${t.traceId}`); }}
                     >
                       <td>
                         <span className="mono">{t.traceId.slice(0, 12)}…</span>

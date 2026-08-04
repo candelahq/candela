@@ -204,9 +204,16 @@ export function useSpanSearch() {
     }
   }, [mode, fetchSpans, state.filters]);
 
+  // Only fetch on pagination token changes — filter-driven fetches
+  // are handled imperatively by updateFilters/clearFilters.
+  const prevTokenRef = useRef(state.currentPageToken);
   useEffect(() => {
-    fetchSpans(state.filters);
-  }, [state.currentPageToken, fetchSpans, state.filters]);
+    if (prevTokenRef.current !== state.currentPageToken) {
+      prevTokenRef.current = state.currentPageToken;
+      fetchSpans(state.filters);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state.currentPageToken]);
 
   const fetchNextPage = useCallback(() => {
     if (!state.nextPageToken) return;

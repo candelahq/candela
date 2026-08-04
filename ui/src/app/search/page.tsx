@@ -237,7 +237,10 @@ export default function SearchPage() {
                     <tr
                       key={s.spanId}
                       className="clickable-row"
+                      tabIndex={0}
+                      role="link"
                       onClick={() => router.push(`/traces/${s.traceId}`)}
+                      onKeyDown={(e) => { if (e.key === "Enter") router.push(`/traces/${s.traceId}`); }}
                     >
                       <td>
                         <span className="mono">{s.spanId.slice(0, 12)}…</span>

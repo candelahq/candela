@@ -233,10 +233,16 @@ export function useTraces() {
     }
   }, [mode, fetchTraces, state.filters]);
 
-  // Re-fetch when currentPageToken changes
+  // Only fetch on pagination token changes — filter-driven fetches
+  // are handled imperatively by updateFilters/clearFilters.
+  const prevTokenRef = useRef(state.currentPageToken);
   useEffect(() => {
-    fetchTraces(state.filters);
-  }, [state.currentPageToken, fetchTraces, state.filters]);
+    if (prevTokenRef.current !== state.currentPageToken) {
+      prevTokenRef.current = state.currentPageToken;
+      fetchTraces(state.filters);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state.currentPageToken]);
 
   const fetchNextPage = useCallback(() => {
     if (!state.nextPageToken) return;
@@ -253,7 +259,10 @@ export function useTraces() {
   // before React runs the previous effect's cleanup, so that cleanup
   // would abort the *new* request instead of the old one.
   useEffect(() => {
-    return () => fetchRef.current?.abort();
+    return () => {
+      fetchRef.current?.abort();
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+    };
   }, []);
 
   return {

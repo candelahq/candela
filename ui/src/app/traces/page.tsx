@@ -47,7 +47,20 @@ export default function TracesPage() {
     <>
       <header className="main-header">
         <h1>Traces</h1>
-        <div style={{ display: "flex", gap: 8 }}>
+        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          {/* Time range buttons */}
+          <div className="time-range-selector" style={{ display: "flex", gap: "4px" }}>
+            {(["1h", "24h", "7d", "30d"] as const).map((r) => (
+              <button
+                key={r}
+                className={`btn btn-sm ${filters.timeRange === r ? "btn-active" : "btn-ghost"}`}
+                onClick={() => updateFilters({ timeRange: r })}
+                style={{ padding: "4px 8px", fontSize: "12px", borderRadius: "4px" }}
+              >
+                {r}
+              </button>
+            ))}
+          </div>
           <ScopeToggle />
           <button className="btn" onClick={refresh}>
             🔄 Refresh
@@ -153,6 +166,26 @@ export default function TracesPage() {
                 placeholder="e.g. experiment-1"
                 value={filters.jobId}
                 onChange={(e) => updateFilters({ jobId: e.target.value })}
+                className="filter-input"
+              />
+            </div>
+            <div className="filter-group">
+              <label className="filter-label">Environment</label>
+              <input
+                type="text"
+                placeholder="e.g. production, staging"
+                value={filters.environment}
+                onChange={(e) => updateFilters({ environment: e.target.value })}
+                className="filter-input"
+              />
+            </div>
+            <div className="filter-group">
+              <label className="filter-label">Trace Group</label>
+              <input
+                type="text"
+                placeholder="e.g. chat, completion"
+                value={filters.traceGroup}
+                onChange={(e) => updateFilters({ traceGroup: e.target.value })}
                 className="filter-input"
               />
             </div>

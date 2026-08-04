@@ -26,6 +26,9 @@ export interface TraceFilters {
   descending: boolean;
   tenantId: string;
   jobId: string;
+  timeRange: "1h" | "24h" | "7d" | "30d";
+  environment: string;
+  traceGroup: string;
 }
 
 export const DEFAULT_FILTERS: TraceFilters = {
@@ -37,4 +40,7 @@ export const DEFAULT_FILTERS: TraceFilters = {
   descending: true,
   tenantId: "",
   jobId: "",
+  timeRange: "24h",
+  environment: "",
+  traceGroup: "",
 };

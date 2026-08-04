@@ -12,6 +12,7 @@ const navItems = [
       { href: "/today", label: "Today", icon: "🕯️" },
       { href: "/", label: "Dashboard", icon: "📊" },
       { href: "/traces", label: "Traces", icon: "🔍" },
+      { href: "/search", label: "Search", icon: "🔎" },
       { href: "/usage", label: "My Usage", icon: "📈" },
       { href: "/costs", label: "Costs", icon: "💰" },
     ],

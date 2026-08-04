@@ -216,7 +216,8 @@ export function useTraces() {
     state.filters.status ||
     state.filters.jobId ||
     state.filters.environment ||
-    state.filters.traceGroup
+    state.filters.traceGroup ||
+    state.filters.timeRange !== DEFAULT_FILTERS.timeRange
   );
 
   const refresh = useCallback(

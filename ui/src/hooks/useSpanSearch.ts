@@ -4,6 +4,7 @@ import { useCallback, useEffect, useReducer, useRef } from "react";
 import { traceClient } from "@/lib/api";
 import { DEFAULT_PROJECT_ID } from "@/lib/constants";
 import { SpanKind } from "@/gen/candela/types/trace_pb";
+import type { Span } from "@/gen/candela/types/trace_pb";
 import { useScope } from "@/components/UserScopeProvider";
 import { create } from "@bufbuild/protobuf";
 import { TimestampSchema } from "@bufbuild/protobuf/wkt";
@@ -72,7 +73,7 @@ function reducer(state: State, action: Action): State {
   }
 }
 
-function mapSpan(span: any): SpanResultRow {
+function mapSpan(span: Span): SpanResultRow {
   const durSeconds = Number(span.duration?.seconds ?? 0);
   const durNanos = Number(span.duration?.nanos ?? 0);
   
@@ -81,11 +82,11 @@ function mapSpan(span: any): SpanResultRow {
     traceId: span.traceId,
     name: span.name || "unknown",
     kind: span.kind ?? SpanKind.UNSPECIFIED,
-    model: span.genai?.model || "—",
-    provider: span.genai?.provider || "—",
+    model: span.genAi?.model || "—",
+    provider: span.genAi?.provider || "—",
     durationMs: durSeconds * 1000 + durNanos / 1e6,
-    totalTokens: Number(span.genai?.totalTokens) || 0,
-    costUsd: span.genai?.costUsd || 0,
+    totalTokens: Number(span.genAi?.totalTokens) || 0,
+    costUsd: span.genAi?.costUsd || 0,
     status: span.status ?? 0,
     startTime: span.startTime
       ? new Date(
@@ -174,6 +175,10 @@ export function useSpanSearch() {
   );
 
   const clearFilters = useCallback(() => {
+    if (debounceRef.current) {
+      clearTimeout(debounceRef.current);
+      debounceRef.current = null;
+    }
     dispatch({ type: "clear_filters" });
     fetchSpans(DEFAULT_SEARCH_FILTERS, true);
   }, [fetchSpans]);
@@ -183,7 +188,8 @@ export function useSpanSearch() {
     state.filters.kind !== null ||
     state.filters.model ||
     state.filters.jobId ||
-    state.filters.traceGroup
+    state.filters.traceGroup ||
+    state.filters.timeRange !== DEFAULT_SEARCH_FILTERS.timeRange
   );
 
   const refresh = useCallback(
@@ -213,7 +219,10 @@ export function useSpanSearch() {
   }, [state.pageTokenHistory]);
 
   useEffect(() => {
-    return () => fetchRef.current?.abort();
+    return () => {
+      fetchRef.current?.abort();
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+    };
   }, []);
 
   return {

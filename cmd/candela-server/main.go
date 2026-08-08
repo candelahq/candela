@@ -690,7 +690,7 @@ func main() {
 			var filtered []proxy.Provider
 			for _, p := range allProviders {
 				switch p.Name {
-				case "gemini-oai", "google", "gemini-vertex", "mistral", "deepseek", "deepseek-v3", "qwen", "zai":
+				case "gemini-oai", "google", "gemini-vertex", "mistral", "deepseek", "deepseek-v3", "qwen", "zai", "meta", "xai":
 					// Skip — these need Vertex AI project ID
 				default:
 					filtered = append(filtered, p)
@@ -748,6 +748,10 @@ func main() {
 					defaultRegion = "us-south1"
 				case "zai":
 					defaultRegion = "global"
+				case "meta":
+					defaultRegion = "us-east5"
+				case "xai":
+					defaultRegion = "global"
 				default:
 					continue
 				}
@@ -776,7 +780,7 @@ func main() {
 		// Validate provider_overrides keys — warn on unknown providers.
 		if len(cfg.Proxy.VertexAI.ProviderOverrides) > 0 {
 			validOverrideProviders := map[string]bool{
-				"mistral": true, "deepseek": true, "deepseek-v3": true, "qwen": true, "zai": true,
+				"mistral": true, "deepseek": true, "deepseek-v3": true, "qwen": true, "zai": true, "meta": true, "xai": true,
 				"anthropic": true, "anthropic-vertex": true,
 				"gemini-oai": true, "gemini-vertex": true, "google": true,
 			}

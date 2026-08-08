@@ -763,6 +763,29 @@ func rewriteModelField(body []byte, newModel string) []byte {
 	})
 }
 
+// clampMaxTokensRe matches "max_tokens" : <number> in a JSON body.
+var clampMaxTokensRe = regexp.MustCompile(`("max_tokens"\s*:\s*)(\d+)`)
+
+// clampMaxTokens rewrites the max_tokens field in a JSON request body
+// if it exceeds maxAllowed. This prevents 400 errors from upstream
+// providers that have lower output token limits (e.g. Llama 4 on Vertex AI).
+func clampMaxTokens(body []byte, maxAllowed int) []byte {
+	return clampMaxTokensRe.ReplaceAllFunc(body, func(match []byte) []byte {
+		parts := clampMaxTokensRe.FindSubmatch(match)
+		if len(parts) < 3 {
+			return match
+		}
+		val := 0
+		for _, b := range parts[2] {
+			val = val*10 + int(b-'0')
+		}
+		if val <= maxAllowed {
+			return match
+		}
+		return append(parts[1], []byte(fmt.Sprintf("%d", maxAllowed))...)
+	})
+}
+
 // requestIDPattern validates that a request ID contains only safe characters
 // (alphanumeric, hyphens) and is between 1-128 chars.
 // This prevents log injection and trace poisoning via crafted X-Request-ID headers.
@@ -1342,6 +1365,13 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 						upstreamBody = rewriteModelField(upstreamBody, "xai/"+requestModel)
 					}
 				}
+			}
+
+			// --- max_tokens clamping for providers with low limits ---
+			// Llama 4 on Vertex AI caps output at 8192 tokens; many clients
+			// send a much higher default (e.g. 32000) which causes 400 errors.
+			if activeProvName == "meta" {
+				upstreamBody = clampMaxTokens(upstreamBody, 8192)
 			}
 
 			// --- Path rewriting ---

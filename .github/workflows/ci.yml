@@ -477,9 +477,11 @@ jobs:
               success=true
               break
             fi
-            echo "::warning::transparent proxy E2E failed (attempt $attempt/3), retrying..."
-            docker compose -f test/e2e/docker-compose.yml down -v || true
-            sleep 5
+            if [ "$attempt" -lt 3 ]; then
+              echo "::warning::transparent proxy E2E failed (attempt $attempt/3), retrying..."
+              docker compose -f test/e2e/docker-compose.yml down -v || true
+              sleep 5
+            fi
           done
           if [ "$success" != true ]; then
             echo "::error::transparent proxy E2E failed after 3 attempts"

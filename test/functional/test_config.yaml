@@ -23,6 +23,8 @@ disabled_providers:
   - deepseek-v3
   - qwen
   - zai
+  - meta
+  - xai
 # Re-add providers that don't need Vertex AI path rewriting,
 # pointing at the mock upstream.
 custom_providers:

@@ -686,15 +686,14 @@ func main() {
 		} else {
 			// Without a project ID, Vertex AI providers can't route.
 			// Remove them from allProviders to prevent broken defaults.
-			slog.Warn("⚠️ Vertex AI providers require vertex_ai.project_id — gemini-oai, google, gemini-vertex, mistral, deepseek, deepseek-v3, qwen, zai providers will be disabled")
+			slog.Warn("⚠️ Vertex AI providers require vertex_ai.project_id — Vertex AI providers will be disabled")
 			var filtered []proxy.Provider
 			for _, p := range allProviders {
-				switch p.Name {
-				case "gemini-oai", "google", "gemini-vertex", "mistral", "deepseek", "deepseek-v3", "qwen", "zai", "meta", "xai":
+				if vertexAIProviders[p.Name] {
 					// Skip — these need Vertex AI project ID
-				default:
-					filtered = append(filtered, p)
+					continue
 				}
+				filtered = append(filtered, p)
 			}
 			allProviders = filtered
 		}
@@ -738,21 +737,8 @@ func main() {
 		// Supports per-provider region/endpoint overrides.
 		if geminiProjectID != "" {
 			for i, p := range allProviders {
-				var defaultRegion string
-				switch p.Name {
-				case "deepseek":
-					defaultRegion = "us-central1"
-				case "deepseek-v3":
-					defaultRegion = "global"
-				case "qwen":
-					defaultRegion = "us-south1"
-				case "zai":
-					defaultRegion = "global"
-				case "meta":
-					defaultRegion = "us-east5"
-				case "xai":
-					defaultRegion = "global"
-				default:
+				defaultRegion, isMaaS := maaSProviderRegion[p.Name]
+				if !isMaaS {
 					continue
 				}
 				provRegion, provEndpoint := getProviderOverride(cfg.Proxy.VertexAI.ProviderOverrides, p.Name, defaultRegion)
@@ -779,13 +765,8 @@ func main() {
 
 		// Validate provider_overrides keys — warn on unknown providers.
 		if len(cfg.Proxy.VertexAI.ProviderOverrides) > 0 {
-			validOverrideProviders := map[string]bool{
-				"mistral": true, "deepseek": true, "deepseek-v3": true, "qwen": true, "zai": true, "meta": true, "xai": true,
-				"anthropic": true, "anthropic-vertex": true,
-				"gemini-oai": true, "gemini-vertex": true, "google": true,
-			}
 			for name := range cfg.Proxy.VertexAI.ProviderOverrides {
-				if !validOverrideProviders[name] {
+				if !vertexAIProviders[name] {
 					slog.Warn("⚠️ unknown provider in provider_overrides — will be ignored",
 						"provider", name)
 				}

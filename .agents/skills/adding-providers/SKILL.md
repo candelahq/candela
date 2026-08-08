@@ -111,7 +111,27 @@ case "myprovider":
     }
 ```
 
-### 7. `test/functional/test_config.yaml` — Disable in functional tests
+### 7. `deploy/entrypoint-server.sh` — Docker entrypoint config
+
+> [!CAUTION]
+> This was the ROOT CAUSE of staging 404s that took 5 deployment attempts
+> to find. The entrypoint generates `config.yaml` with an explicit
+> `providers:` list. If the provider is not listed here, it will NOT get
+> routes registered regardless of what `DefaultProviders()` returns.
+
+Add to both the `providers:` list AND `provider_overrides:` (for region):
+
+```yaml
+    provider_overrides:
+      # ...existing...
+      myprovider:
+        region: "${CANDELA_MYPROVIDER_REGION:-us-east5}"
+  providers:
+    # ...existing...
+    - myprovider
+```
+
+### 8. `test/functional/test_config.yaml` — Disable in functional tests
 
 Add to `disabled_providers` so Hurl tests don't hit real endpoints:
 
@@ -121,7 +141,7 @@ disabled_providers:
   - myprovider
 ```
 
-### 8. Firestore model catalog — Seed models
+### 9. Firestore model catalog — Seed models
 
 Seed model entries into ALL Firestore databases:
 - `candela` (production)
@@ -135,7 +155,7 @@ curl -X PATCH \
   -d '{"fields": {...}}'
 ```
 
-### 9. Release & Deploy
+### 10. Release & Deploy
 
 1. Commit, push, create PR
 2. After merge: tag release (`git tag vX.Y.Z && git push origin vX.Y.Z`)
@@ -156,6 +176,7 @@ curl -X PATCH \
 
 | Symptom | Cause |
 |---------|-------|
+| 404 in staging/prod, code looks correct | **Missing from `deploy/entrypoint-server.sh`** `providers:` list |
 | 404 on `/proxy/myprovider/` in staging/prod | Missing from `provider_config.go` |
 | 404 on `/proxy/myprovider/` locally | Missing from `cmd/candela/main.go` `buildCloudProxy()` |
 | "unknown provider" warning in CLI logs | Missing from CLI switch |

@@ -1503,6 +1503,22 @@ func buildCloudProxy(cfg Config, submitter *processor.SpanProcessor) (*proxy.Pro
 				ProjectID: project,
 				Region:    "global",
 			}
+		case "meta":
+			// Meta Llama via Vertex AI OpenAI-compat endpoint (us-east5).
+			p.UpstreamURL = proxy.VertexAIUpstreamURL("us-east5")
+			p.TokenSource = tokenSource
+			p.PathRewriter = &proxy.VertexAIGeminiOAIPathRewriter{
+				ProjectID: project,
+				Region:    "us-east5",
+			}
+		case "xai":
+			// xAI Grok via Vertex AI OpenAI-compat endpoint (global).
+			p.UpstreamURL = proxy.VertexAIUpstreamURL("global")
+			p.TokenSource = tokenSource
+			p.PathRewriter = &proxy.VertexAIGeminiOAIPathRewriter{
+				ProjectID: project,
+				Region:    "global",
+			}
 		default:
 			slog.Warn("unknown provider — skipping", "name", lp.Name)
 			continue

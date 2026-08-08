@@ -40,6 +40,10 @@ proxy:
         region: "${CANDELA_QWEN_REGION:-us-south1}"
       zai:
         region: "${CANDELA_ZAI_REGION:-global}"
+      meta:
+        region: "${CANDELA_META_REGION:-us-east5}"
+      xai:
+        region: "${CANDELA_XAI_REGION:-global}"
   providers:
     - openai
     - google
@@ -54,6 +58,8 @@ proxy:
     - deepseek-v3
     - qwen
     - zai
+    - meta
+    - xai
 
 cors:
   allowed_origins: []

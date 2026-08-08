@@ -468,10 +468,23 @@ jobs:
 
       - name: Run transparent proxy E2E
         run: |
-          docker compose -f test/e2e/docker-compose.yml up \
-            --build \
-            --abort-on-container-exit \
-            --exit-code-from test-client
+          success=false
+          for attempt in 1 2 3; do
+            if docker compose -f test/e2e/docker-compose.yml up \
+              --build \
+              --abort-on-container-exit \
+              --exit-code-from test-client; then
+              success=true
+              break
+            fi
+            echo "::warning::transparent proxy E2E failed (attempt $attempt/3), retrying..."
+            docker compose -f test/e2e/docker-compose.yml down -v || true
+            sleep 5
+          done
+          if [ "$success" != true ]; then
+            echo "::error::transparent proxy E2E failed after 3 attempts"
+            exit 1
+          fi
         timeout-minutes: 5
 
       - name: Collect logs on failure

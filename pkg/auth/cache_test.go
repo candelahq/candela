@@ -184,3 +184,51 @@ func TestCache_ResetForTest(t *testing.T) {
 	}
 	c.mu.RUnlock()
 }
+
+func TestCache_ZeroMaxSize(t *testing.T) {
+	c := NewIdentityCache(0, 60*time.Second)
+	c.Put("token-1", &Identity{ID: "uid"})
+
+	if c.Len() != 0 {
+		t.Errorf("Len() = %d for zero-size cache, want 0", c.Len())
+	}
+	if _, ok := c.Get("token-1"); ok {
+		t.Error("expected miss on zero-size cache")
+	}
+}
+
+func TestCache_NegativeMaxSize(t *testing.T) {
+	c := NewIdentityCache(-5, 60*time.Second)
+	c.Put("token-1", &Identity{ID: "uid"})
+
+	if c.Len() != 0 {
+		t.Errorf("Len() = %d for negative-size cache, want 0", c.Len())
+	}
+}
+
+func TestCache_UpdateExistingKeyNoEviction(t *testing.T) {
+	c := NewIdentityCache(2, 60*time.Second)
+
+	c.Put("t1", &Identity{ID: "1", Email: "1@b.com"})
+	c.Put("t2", &Identity{ID: "2", Email: "2@b.com"})
+
+	// Update t1 — should NOT evict t2
+	c.Put("t1", &Identity{ID: "1-updated", Email: "1-new@b.com"})
+
+	if c.Len() != 2 {
+		t.Fatalf("Len() = %d after update, want 2", c.Len())
+	}
+
+	got, ok := c.Get("t1")
+	if !ok {
+		t.Fatal("expected cache hit for t1")
+	}
+	if got.ID != "1-updated" {
+		t.Errorf("ID = %q, want %q", got.ID, "1-updated")
+	}
+
+	// t2 must still be present
+	if _, ok := c.Get("t2"); !ok {
+		t.Error("expected t2 to still be cached after updating t1")
+	}
+}

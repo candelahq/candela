@@ -28,7 +28,11 @@ type cacheEntry struct {
 
 // NewIdentityCache creates a cache with the given maximum size and TTL.
 // Typical values: maxSize=1000, ttl=120s.
+// A maxSize <= 0 creates a disabled cache that accepts no entries.
 func NewIdentityCache(maxSize int, ttl time.Duration) *IdentityCache {
+	if maxSize < 0 {
+		maxSize = 0
+	}
 	return &IdentityCache{
 		entries: make(map[string]cacheEntry, maxSize),
 		maxSize: maxSize,
@@ -48,9 +52,12 @@ func (c *IdentityCache) Get(token string) (*Identity, bool) {
 		return nil, false
 	}
 	if c.now().After(entry.expiresAt) {
-		// Expired — remove lazily
+		// Expired — remove lazily. Re-check after acquiring write lock
+		// to avoid deleting a fresh entry from a concurrent Put.
 		c.mu.Lock()
-		delete(c.entries, key)
+		if current, exists := c.entries[key]; exists && c.now().After(current.expiresAt) {
+			delete(c.entries, key)
+		}
 		c.mu.Unlock()
 		return nil, false
 	}
@@ -62,9 +69,21 @@ func (c *IdentityCache) Get(token string) (*Identity, bool) {
 // is evicted (simple eviction — not full LRU, but sufficient for auth tokens
 // where the working set is small).
 func (c *IdentityCache) Put(token string, id *Identity) {
+	if c.maxSize <= 0 {
+		return // cache is disabled
+	}
 	key := tokenHash(token)
 	c.mu.Lock()
 	defer c.mu.Unlock()
+
+	// If updating an existing entry, replace in-place without eviction.
+	if _, exists := c.entries[key]; exists {
+		c.entries[key] = cacheEntry{
+			identity:  id,
+			expiresAt: c.now().Add(c.ttl),
+		}
+		return
+	}
 
 	// Evict expired entries if at capacity
 	if len(c.entries) >= c.maxSize {

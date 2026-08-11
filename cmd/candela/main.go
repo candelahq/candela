@@ -758,63 +758,13 @@ func runForeground() {
 		}
 
 		// ── Get auth token source via ADC ──
-		// Strategy 1: idtoken.NewTokenSource (works for service accounts).
-		//   → AccessToken IS the audience-scoped OIDC ID token.
-		// Strategy 2: google.DefaultTokenSource (works for user credentials).
-		//   → AccessToken is an OAuth2 access token. The server validates it
-		//     via the userinfo endpoint (Strategy 3 in FirebaseAuthMiddleware).
-		//
-		// In both cases, token.AccessToken contains the correct bearer token.
-		// Do NOT use token.Extra("id_token") — for user credentials it returns
-		// a generic OIDC token without the required audience claim, which the
-		// server rejects.
-		var tokenSource oauth2.TokenSource
-		var userTokenSource oauth2.TokenSource // User's ADC token for server-side identity validation.
-
-		ts, err := idtoken.NewTokenSource(ctx, cfg.Audience)
-		if err == nil {
-			// Strategy 1: Service account credentials → audience-scoped OIDC ID token.
-			slog.Info("using service account ID token source")
-			tokenSource = ts
-		} else if cfg.IAPServiceAccount != "" {
-			// Strategy 1.5: User credentials + SA impersonation → dual token.
-			// - IAP token: OIDC ID token (via SA impersonation) for Proxy-Authorization
-			// - User token: ADC OAuth2 access token for Authorization (server validates via userinfo)
-			slog.Debug("idtoken.NewTokenSource unavailable, trying IAP impersonation", "reason", err)
-			baseTSr, err2 := google.DefaultTokenSource(ctx, "https://www.googleapis.com/auth/cloud-platform")
-			if err2 != nil {
-				slog.Error("failed to get credentials — run 'candela auth login' first",
-					"error", err2)
-				os.Exit(1)
-			}
-			tokenSource = oauth2.ReuseTokenSource(nil, &iapImpersonatingTokenSource{
-				base:           baseTSr,
-				serviceAccount: cfg.IAPServiceAccount,
-				audience:       cfg.Audience,
-			})
-			// Keep the user's ADC token source for server-side auth.
-			// The server validates this via Google's userinfo endpoint.
-			userTSr, err3 := google.DefaultTokenSource(ctx, "openid", "email")
-			if err3 != nil {
-				slog.Warn("failed to get user ADC token source — server auth may fail", "error", err3)
-			} else {
-				userTokenSource = userTSr
-			}
-			slog.Info("using IAP via service account impersonation",
-				"sa", cfg.IAPServiceAccount)
-		} else {
-			// Strategy 2: User credentials → OAuth2 access token.
-			// Works when the server validates via userinfo (no IAP).
-			slog.Debug("idtoken.NewTokenSource unavailable (user credentials fallback)", "reason", err)
-			ts2, err2 := google.DefaultTokenSource(ctx, "openid", "email")
-			if err2 != nil {
-				slog.Error("failed to get credentials — run 'candela auth login' first",
-					"error", err2)
-				os.Exit(1)
-			}
-			slog.Info("using user ADC credentials (OAuth2 access token)")
-			tokenSource = ts2
+		auth, err := resolveAuthStrategy(ctx, cfg, idtoken.NewTokenSource, google.DefaultTokenSource)
+		if err != nil {
+			slog.Error("failed to resolve auth strategy", "error", err)
+			os.Exit(1)
 		}
+		tokenSource := auth.tokenSource
+		userTokenSource := auth.userTokenSource
 
 		// ── Build reverse proxy ──
 		remoteProxy = &httputil.ReverseProxy{

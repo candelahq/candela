@@ -21,8 +21,9 @@ import (
 //
 // This token source solves the problem by using the user's access token to call
 // IAM's generateIdToken endpoint, which returns an ID token scoped to the IAP
-// audience. The user needs `roles/iam.serviceAccountTokenCreator` on the target
-// service account (project owners/editors have this by default).
+// audience. The caller needs `roles/iam.serviceAccountTokenCreator` (for local dev) or
+// a custom role with `iam.serviceAccounts.getOpenIdToken` (for CI with WIF) on the target
+// service account.
 //
 // Flow:
 //
@@ -31,6 +32,7 @@ type iapImpersonatingTokenSource struct {
 	base           oauth2.TokenSource
 	serviceAccount string
 	audience       string
+	endpointURL    string // Override IAM endpoint for testing. Empty = production.
 }
 
 func (s *iapImpersonatingTokenSource) Token() (*oauth2.Token, error) {
@@ -41,10 +43,13 @@ func (s *iapImpersonatingTokenSource) Token() (*oauth2.Token, error) {
 	}
 
 	// Call IAM Credentials API to generate an ID token with the IAP audience.
-	url := fmt.Sprintf(
-		"https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/%s:generateIdToken",
-		s.serviceAccount,
-	)
+	endpoint := s.endpointURL
+	if endpoint == "" {
+		endpoint = fmt.Sprintf(
+			"https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/%s:generateIdToken",
+			s.serviceAccount,
+		)
+	}
 	reqPayload := struct {
 		Audience     string `json:"audience"`
 		IncludeEmail bool   `json:"includeEmail"`
@@ -57,7 +62,7 @@ func (s *iapImpersonatingTokenSource) Token() (*oauth2.Token, error) {
 		return nil, fmt.Errorf("IAP: failed to marshal request body: %w", err)
 	}
 
-	req, err := http.NewRequest("POST", url, bytes.NewReader(bodyBytes))
+	req, err := http.NewRequest("POST", endpoint, bytes.NewReader(bodyBytes))
 	if err != nil {
 		return nil, fmt.Errorf("IAP: failed to build request: %w", err)
 	}
@@ -74,7 +79,7 @@ func (s *iapImpersonatingTokenSource) Token() (*oauth2.Token, error) {
 	if resp.StatusCode != http.StatusOK {
 		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 		return nil, fmt.Errorf("IAP: generateIdToken returned %d: %s\n"+
-			"Ensure you have roles/iam.serviceAccountTokenCreator on %s",
+			"Ensure you have roles/iam.serviceAccountTokenCreator (local) or a custom role with iam.serviceAccounts.getOpenIdToken (CI) on %s",
 			resp.StatusCode, respBody, s.serviceAccount)
 	}
 

@@ -9,8 +9,6 @@ import (
 	"net/http"
 	"strings"
 	"time"
-
-	"google.golang.org/api/idtoken"
 )
 
 // ErrNotRegistered is the sentinel error that UserAuthorizer should return
@@ -78,6 +76,16 @@ func FirebaseAuthMiddleware(next http.Handler, fbAuth TokenVerifier, cloudRunAud
 	} else {
 		slog.Info("🔐 service account allowlist empty — all SAs will be denied")
 	}
+	var resolvers []IdentityResolver
+	if devMode {
+		resolvers = append(resolvers, NewDevResolver())
+	}
+	resolvers = append(resolvers, NewFirebaseResolver(fbAuth))
+	resolvers = append(resolvers, NewGoogleOIDCResolver(cloudRunAudience, saAllowlist))
+	resolvers = append(resolvers, NewGoogleOAuthResolver(cfg.accessTokenValidator, saAllowlist))
+
+	chain := NewResolverChain(nil, resolvers...)
+
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Skip auth for health checks (liveness + readiness).
 		if r.URL.Path == "/healthz" || r.URL.Path == "/readyz" {
@@ -108,102 +116,25 @@ func FirebaseAuthMiddleware(next http.Handler, fbAuth TokenVerifier, cloudRunAud
 			return
 		}
 
-		// Strategy 1: Try Firebase ID token (browser users).
-		if fbAuth != nil {
-			decoded, err := fbAuth.VerifyIDToken(r.Context(), token)
-			if err == nil {
-				email, ok := decoded.Claims["email"].(string)
-				if !ok || email == "" {
-					slog.Warn("Firebase token missing email claim", "uid", decoded.UID, "path", r.URL.Path)
-					writeError(w, http.StatusUnauthorized, "token missing email claim")
-					return
-				}
-				user := &User{
-					ID:    decoded.UID,
-					Email: strings.ToLower(email),
-				}
-				if !isSelfService && !verifyRegistered(r.Context(), w, user, userAuth) {
-					return
-				}
-				slog.Debug("authenticated via Firebase",
-					"uid", user.ID, "email", user.Email, "path", r.URL.Path)
-				next.ServeHTTP(w, r.WithContext(NewContext(r.Context(), user)))
+		user, err := chain.Resolve(r.Context(), token)
+		if err != nil {
+			var forbiddenErr *ForbiddenError
+			if errors.As(err, &forbiddenErr) {
+				slog.Warn("auth forbidden", "error", err, "path", r.URL.Path)
+				writeError(w, http.StatusForbidden, forbiddenErr.Error())
 				return
 			}
-			slog.Debug("Firebase token validation failed, trying Google ID token",
-				"error", err, "path", r.URL.Path)
-		}
-
-		// Strategy 2: Try Google ID token (candela-local / service accounts).
-		if cloudRunAudience != "" {
-			payload, err := idtoken.Validate(r.Context(), token, cloudRunAudience)
-			if err == nil {
-				email, ok := payload.Claims["email"].(string)
-				if !ok || email == "" {
-					slog.Warn("Google ID token missing email claim", "sub", payload.Subject, "path", r.URL.Path)
-					writeError(w, http.StatusUnauthorized, "token missing email claim")
-					return
-				}
-				if payload.Subject == "" {
-					slog.Warn("Google ID token missing sub claim", "email", email, "path", r.URL.Path)
-					writeError(w, http.StatusUnauthorized, "token missing subject claim")
-					return
-				}
-				user := &User{
-					ID:    payload.Subject,
-					Email: strings.ToLower(email),
-				}
-				// Service accounts must be explicitly allowlisted via
-				// auth.allowed_service_accounts. Deny by default to prevent
-				// untracked usage (SAs bypass budget deduction).
-				if strings.HasSuffix(user.Email, ".gserviceaccount.com") {
-					if !saAllowlist.IsAllowed(user.Email) {
-						slog.Warn("service account not in allowlist — access denied",
-							"email", user.Email, "path", r.URL.Path)
-						writeError(w, http.StatusForbidden, errServiceAccountDenied)
-						return
-					}
-					slog.Debug("service account authenticated (allowlisted)",
-						"email", user.Email, "path", r.URL.Path)
-				} else if !isSelfService && !verifyRegistered(r.Context(), w, user, userAuth) {
-					return
-				}
-				slog.Debug("authenticated via Google ID token",
-					"uid", user.ID, "email", user.Email, "path", r.URL.Path)
-				next.ServeHTTP(w, r.WithContext(NewContext(r.Context(), user)))
-				return
-			}
-			slog.Debug("Google ID token validation failed, trying OAuth2 access token",
-				"error", err, "path", r.URL.Path)
-		}
-
-		// Strategy 3: Try Google OAuth2 access token (candela-local with user ADC).
-		// Validates via the AccessTokenValidator (production: Google userinfo endpoint).
-		user, err := cfg.accessTokenValidator.ValidateAccessToken(r.Context(), token)
-		if err == nil {
-			// Service account check must also apply to OAuth2 tokens —
-			// otherwise SAs can bypass the allowlist by using an access
-			// token instead of an ID token.
-			if strings.HasSuffix(user.Email, ".gserviceaccount.com") {
-				if !saAllowlist.IsAllowed(user.Email) {
-					slog.Warn("service account not in allowlist — access denied (OAuth2)",
-						"email", user.Email, "path", r.URL.Path)
-					writeError(w, http.StatusForbidden, errServiceAccountDenied)
-					return
-				}
-				slog.Debug("service account authenticated via OAuth2 (allowlisted)",
-					"email", user.Email, "path", r.URL.Path)
-			} else if !isSelfService && !verifyRegistered(r.Context(), w, user, userAuth) {
-				return
-			}
-			slog.Debug("authenticated via OAuth2 access token",
-				"uid", user.ID, "email", user.Email, "path", r.URL.Path)
-			next.ServeHTTP(w, r.WithContext(NewContext(r.Context(), user)))
+			slog.Warn("auth failed", "error", err, "path", r.URL.Path)
+			writeError(w, http.StatusUnauthorized, "invalid authentication token")
 			return
 		}
-		slog.Warn("all auth strategies failed", "path", r.URL.Path, "lastError", err)
 
-		writeError(w, http.StatusUnauthorized, "invalid authentication token")
+		if !isSelfService && !verifyRegistered(r.Context(), w, user, userAuth) {
+			return
+		}
+
+		slog.Debug("authenticated", "provider", user.Provider, "uid", user.ID, "email", user.Email, "path", r.URL.Path)
+		next.ServeHTTP(w, r.WithContext(NewContext(r.Context(), user)))
 	})
 }
 

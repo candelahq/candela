@@ -23,3 +23,10 @@ func TestTenantValidator(t *testing.T) {
 		t.Error("expected error for empty tenant")
 	}
 }
+
+func TestTenantValidator_NilIdentity(t *testing.T) {
+	v := NewTenantValidator(TenantModeVerified)
+	if err := v.Validate(nil, "t1"); err == nil {
+		t.Error("expected error for nil identity in verified mode")
+	}
+}

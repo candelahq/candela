@@ -24,6 +24,10 @@ func (v *TenantValidator) Validate(identity *Identity, requestedTenant string) e
 		return nil
 	}
 
+	if identity == nil {
+		return errors.New("identity required for tenant validation")
+	}
+
 	if requestedTenant == "" {
 		return errors.New("tenant ID required")
 	}

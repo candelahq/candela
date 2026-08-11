@@ -35,6 +35,7 @@ func (r *GoogleOAuthResolver) Resolve(ctx context.Context, token string) (*Ident
 		}
 	}
 
+	user.Email = emailLower
 	user.Provider = "google-oauth"
 	return user, nil
 }

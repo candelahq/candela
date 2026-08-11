@@ -84,7 +84,8 @@ func FirebaseAuthMiddleware(next http.Handler, fbAuth TokenVerifier, cloudRunAud
 	resolvers = append(resolvers, NewGoogleOIDCResolver(cloudRunAudience, saAllowlist))
 	resolvers = append(resolvers, NewGoogleOAuthResolver(cfg.accessTokenValidator, saAllowlist))
 
-	chain := NewResolverChain(nil, resolvers...)
+	cache := NewIdentityCache(1000, 120*time.Second)
+	chain := NewResolverChain(cache, resolvers...)
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Skip auth for health checks (liveness + readiness).
@@ -98,19 +99,15 @@ func FirebaseAuthMiddleware(next http.Handler, fbAuth TokenVerifier, cloudRunAud
 		// Auth token is still validated — only the user-store lookup is skipped.
 		isSelfService := selfServicePaths[r.URL.Path]
 
-		if devMode {
-			// Dev mode: inject a synthetic admin user.
-			user := &User{
-				ID:    "dev-admin",
-				Email: "admin@localhost",
-			}
-			next.ServeHTTP(w, r.WithContext(NewContext(r.Context(), user)))
-			return
-		}
-
 		// Extract Bearer token from Authorization header.
 		token := extractBearerToken(r)
 		if token == "" {
+			if devMode {
+				// Dev mode without token: inject synthetic admin via chain.
+				user := &User{ID: "dev-admin", Email: "admin@localhost", Provider: "dev"}
+				next.ServeHTTP(w, r.WithContext(NewContext(r.Context(), user)))
+				return
+			}
 			slog.Warn("missing authorization header", "path", r.URL.Path)
 			writeError(w, http.StatusUnauthorized, "missing authentication")
 			return

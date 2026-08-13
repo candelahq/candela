@@ -1,0 +1,113 @@
+# Candela Server Helm Values
+# Deploy the Candela server with proxy, dashboard, and observability.
+
+image:
+  repository: ghcr.io/candelahq/candela-server
+  tag: "latest"
+  pullPolicy: IfNotPresent
+
+replicaCount: 1
+
+# ── Server configuration ──
+server:
+  # Port for the Go backend (ConnectRPC + proxy)
+  port: 8181
+
+# ── Storage backend ──
+# Options: "duckdb", "bigquery", "sqlite"
+storage:
+  backend: duckdb
+  # DuckDB data directory (mounted as PVC)
+  duckdb:
+    path: /data
+    storageSize: 10Gi
+    storageClass: ""
+  # BigQuery settings (when backend: bigquery)
+  bigquery:
+    projectId: ""
+    dataset: "candela"
+
+# ── Proxy ──
+proxy:
+  enabled: true
+
+# ── Auth ──
+auth:
+  # Set to true for local development (bypasses all auth)
+  devMode: false
+  # Comma-separated list of allowed service account emails
+  allowedServiceAccounts: ""
+  # Firebase project ID (for web dashboard auth)
+  firebase:
+    projectId: ""
+    apiKey: ""
+    authDomain: ""
+    appId: ""
+
+# ── Model catalog ──
+catalog:
+  # Options: "embedded", "bigquery"
+  backend: embedded
+
+# ── Budget ──
+budget:
+  # IANA timezone for budget period boundaries
+  timezone: "UTC"
+
+# ── Vertex AI (optional) ──
+vertex:
+  region: ""
+
+# ── Observability export ──
+# Configure where processed spans are sent.
+export:
+  pubsub:
+    topic: ""
+  otlp:
+    endpoint: ""
+
+# ── Ingress ──
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  hosts:
+    - host: candela.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+
+# ── Horizontal Pod Autoscaler ──
+autoscaling:
+  enabled: false
+  minReplicas: 1
+  maxReplicas: 5
+  targetCPUUtilizationPercentage: 70
+
+# ── Resources ──
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    cpu: "2"
+    memory: 1Gi
+
+# ── Service ──
+service:
+  type: ClusterIP
+  port: 8181
+
+# ── Service Account ──
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+
+# ── Pod configuration ──
+nodeSelector: {}
+tolerations: []
+affinity: {}
+podAnnotations: {}
+podLabels: {}

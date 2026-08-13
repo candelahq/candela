@@ -1,0 +1,19 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "candela-server.fullname" . }}-config
+  labels:
+    {{- include "candela-server.labels" . | nindent 4 }}
+data:
+  candela.yaml: |
+    port: {{ .Values.server.port }}
+    storage_backend: {{ .Values.storage.backend }}
+    {{- if eq .Values.storage.backend "duckdb" }}
+    duckdb_path: {{ .Values.storage.duckdb.path }}/candela.db
+    {{- end }}
+    {{- if eq .Values.storage.backend "bigquery" }}
+    bigquery_project: {{ .Values.storage.bigquery.projectId }}
+    bigquery_dataset: {{ .Values.storage.bigquery.dataset }}
+    {{- end }}
+    proxy_enabled: {{ .Values.proxy.enabled }}
+    catalog_backend: {{ .Values.catalog.backend }}

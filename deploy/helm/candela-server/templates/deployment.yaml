@@ -1,0 +1,119 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "candela-server.fullname" . }}
+  labels:
+    {{- include "candela-server.labels" . | nindent 4 }}
+spec:
+  {{- if not .Values.autoscaling.enabled }}
+  replicas: {{ .Values.replicaCount }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "candela-server.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      labels:
+        {{- include "candela-server.labels" . | nindent 8 }}
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      serviceAccountName: {{ include "candela-server.serviceAccountName" . }}
+      containers:
+        - name: {{ .Chart.Name }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.server.port }}
+              protocol: TCP
+          env:
+            - name: CANDELA_CONFIG
+              value: /etc/candela/candela.yaml
+            - name: CANDELA_STORAGE_BACKEND
+              value: {{ .Values.storage.backend | quote }}
+            {{- if .Values.auth.devMode }}
+            - name: CANDELA_DEV_MODE
+              value: "true"
+            {{- end }}
+            {{- if .Values.auth.allowedServiceAccounts }}
+            - name: CANDELA_ALLOWED_SERVICE_ACCOUNTS
+              value: {{ .Values.auth.allowedServiceAccounts | quote }}
+            {{- end }}
+            {{- if .Values.budget.timezone }}
+            - name: CANDELA_BUDGET_TIMEZONE
+              value: {{ .Values.budget.timezone | quote }}
+            {{- end }}
+            {{- if .Values.vertex.region }}
+            - name: CANDELA_VERTEX_REGION
+              value: {{ .Values.vertex.region | quote }}
+            {{- end }}
+            {{- if .Values.catalog.backend }}
+            - name: CANDELA_CATALOG_BACKEND
+              value: {{ .Values.catalog.backend | quote }}
+            {{- end }}
+            {{- if .Values.auth.firebase.projectId }}
+            - name: NEXT_PUBLIC_FIREBASE_PROJECT_ID
+              value: {{ .Values.auth.firebase.projectId | quote }}
+            - name: NEXT_PUBLIC_FIREBASE_API_KEY
+              value: {{ .Values.auth.firebase.apiKey | quote }}
+            - name: NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN
+              value: {{ .Values.auth.firebase.authDomain | quote }}
+            - name: NEXT_PUBLIC_FIREBASE_APP_ID
+              value: {{ .Values.auth.firebase.appId | quote }}
+            {{- end }}
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 15
+            timeoutSeconds: 3
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            initialDelaySeconds: 3
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          volumeMounts:
+            - name: config
+              mountPath: /etc/candela
+              readOnly: true
+            {{- if eq .Values.storage.backend "duckdb" }}
+            - name: data
+              mountPath: {{ .Values.storage.duckdb.path }}
+            {{- end }}
+          {{- with .Values.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+      volumes:
+        - name: config
+          configMap:
+            name: {{ include "candela-server.fullname" . }}-config
+        {{- if eq .Values.storage.backend "duckdb" }}
+        - name: data
+          persistentVolumeClaim:
+            claimName: {{ include "candela-server.fullname" . }}-data
+        {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

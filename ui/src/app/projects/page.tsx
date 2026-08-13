@@ -87,7 +87,7 @@ export default function ProjectsPage() {
     <>
       <header className="main-header">
         <h1>Projects</h1>
-        <button className="btn btn-primary" onClick={() => setShowModal(true)}>+ New Project</button>
+        <button className="btn btn-primary" onClick={() => setShowModal(true)} disabled={loading}>+ New Project</button>
       </header>
 
       <div className="main-body">
@@ -154,8 +154,9 @@ export default function ProjectsPage() {
             <form onSubmit={handleCreateProject} className="modal-body">
               {createError && <ErrorBanner title="Error">{createError}</ErrorBanner>}
               <div className="form-group">
-                <label>Name</label>
+                <label htmlFor="project-name">Name</label>
                 <input
+                  id="project-name"
                   type="text"
                   required
                   value={newName}
@@ -165,8 +166,9 @@ export default function ProjectsPage() {
                 />
               </div>
               <div className="form-group">
-                <label>Description</label>
+                <label htmlFor="project-desc">Description</label>
                 <textarea
+                  id="project-desc"
                   value={newDesc}
                   onChange={(e) => setNewDesc(e.target.value)}
                   placeholder="Optional context about this project"

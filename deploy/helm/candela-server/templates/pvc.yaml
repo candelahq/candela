@@ -1,0 +1,17 @@
+{{- if eq .Values.storage.backend "duckdb" }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "candela-server.fullname" . }}-data
+  labels:
+    {{- include "candela-server.labels" . | nindent 4 }}
+spec:
+  accessModes:
+    - ReadWriteOnce
+  {{- if .Values.storage.duckdb.storageClass }}
+  storageClassName: {{ .Values.storage.duckdb.storageClass | quote }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.storage.duckdb.storageSize }}
+{{- end }}

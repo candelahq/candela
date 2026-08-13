@@ -1,0 +1,17 @@
+apiVersion: v2
+name: candela-server
+description: Candela AI cost observability server with proxy, dashboard, and budget management
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+keywords:
+  - llm
+  - observability
+  - cost
+  - proxy
+  - budget
+home: https://github.com/candelahq/candela
+sources:
+  - https://github.com/candelahq/candela
+maintainers:
+  - name: candelahq

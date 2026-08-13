@@ -5,9 +5,9 @@ import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
 export default function LoginPage() {
-  const { user, loading, configured, signIn } = useAuth();
+  const { user, loading, configured, signIn, authError, clearAuthError } = useAuth();
   const router = useRouter();
-  const [error, setError] = useState<string | null>(null);
+  const [localError, setLocalError] = useState<string | null>(null);
   const [signingIn, setSigningIn] = useState(false);
 
   useEffect(() => {
@@ -19,17 +19,17 @@ export default function LoginPage() {
   const handleSignIn = async () => {
     if (!configured) {
       console.error("[Candela] Firebase not configured — NEXT_PUBLIC_FIREBASE_* env vars are missing.");
-      setError("Authentication is currently unavailable. Please contact your administrator.");
+      setLocalError("Authentication is currently unavailable. Please contact your administrator.");
       return;
     }
-    setError(null);
+    setLocalError(null);
+    clearAuthError();
     setSigningIn(true);
     try {
       await signIn();
     } catch (err) {
-      const message = err instanceof Error ? err.message.replace(/^Firebase: /, "") : "Sign-in failed";
+      // AuthProvider already sets authError, but we catch so it doesn't crash
       console.error("Sign-in error:", err);
-      setError(message);
     } finally {
       setSigningIn(false);
     }
@@ -51,8 +51,11 @@ export default function LoginPage() {
         <div className="login-logo">🕯️</div>
         <h1>Candela</h1>
         <p className="login-subtitle">LLM Observability & Proxy</p>
-        {error && (
-          <p className="login-error" role="alert">{error}</p>
+        {localError && (
+          <p className="login-error" role="alert">{localError}</p>
+        )}
+        {authError && (
+          <p className="login-error" role="alert">{authError}</p>
         )}
         <button
           className="login-button"

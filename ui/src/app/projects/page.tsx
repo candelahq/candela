@@ -57,8 +57,8 @@ export default function ProjectsPage() {
         ]);
       }
       handleCloseModal();
-    } catch (err: any) {
-      setCreateError(err.message || "Failed to create project");
+    } catch (err: unknown) {
+      setCreateError(err instanceof Error ? err.message : "Failed to create project");
     } finally {
       setCreating(false);
     }

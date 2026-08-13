@@ -18,6 +18,52 @@ export default function ProjectsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  const [showModal, setShowModal] = useState(false);
+  const [newName, setNewName] = useState("");
+  const [newDesc, setNewDesc] = useState("");
+  const [creating, setCreating] = useState(false);
+  const [createError, setCreateError] = useState<string | null>(null);
+
+  const handleCloseModal = () => {
+    setShowModal(false);
+    setNewName("");
+    setNewDesc("");
+    setCreateError(null);
+  };
+
+  const handleCreateProject = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newName.trim()) return;
+    setCreating(true);
+    setCreateError(null);
+    try {
+      const client = createClient(ProjectService, transport);
+      const res = await client.createProject({
+        name: newName,
+        description: newDesc,
+      });
+      const newP = res.project;
+      if (newP) {
+        setProjects((prev) => [
+          ...prev,
+          {
+            id: newP.id,
+            name: newP.name,
+            description: newP.description,
+            createdAt: newP.createdAt
+              ? new Date(Number(newP.createdAt.seconds) * 1000).toLocaleDateString()
+              : "—",
+          }
+        ]);
+      }
+      handleCloseModal();
+    } catch (err: unknown) {
+      setCreateError(err instanceof Error ? err.message : "Failed to create project");
+    } finally {
+      setCreating(false);
+    }
+  };
+
   useEffect(() => {
     const client = createClient(ProjectService, transport);
     client
@@ -41,7 +87,7 @@ export default function ProjectsPage() {
     <>
       <header className="main-header">
         <h1>Projects</h1>
-        <button className="btn btn-primary">+ New Project</button>
+        <button className="btn btn-primary" onClick={() => setShowModal(true)} disabled={loading}>+ New Project</button>
       </header>
 
       <div className="main-body">
@@ -97,6 +143,48 @@ export default function ProjectsPage() {
           )}
         </div>
       </div>
+
+      {showModal && (
+        <div className="modal-overlay" onClick={handleCloseModal} role="dialog" aria-modal="true" aria-label="New Project">
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3>New Project</h3>
+              <button type="button" className="modal-close" onClick={handleCloseModal} aria-label="Close dialog">×</button>
+            </div>
+            <form onSubmit={handleCreateProject} className="modal-body">
+              {createError && <ErrorBanner title="Error">{createError}</ErrorBanner>}
+              <div className="form-group">
+                <label htmlFor="project-name">Name</label>
+                <input
+                  id="project-name"
+                  type="text"
+                  required
+                  value={newName}
+                  onChange={(e) => setNewName(e.target.value)}
+                  placeholder="e.g. Production Backend"
+                  autoFocus
+                />
+              </div>
+              <div className="form-group">
+                <label htmlFor="project-desc">Description</label>
+                <textarea
+                  id="project-desc"
+                  value={newDesc}
+                  onChange={(e) => setNewDesc(e.target.value)}
+                  placeholder="Optional context about this project"
+                  rows={3}
+                />
+              </div>
+              <div className="modal-footer">
+                <button type="button" className="btn" onClick={handleCloseModal}>Cancel</button>
+                <button type="submit" className="btn btn-primary" disabled={creating || !newName.trim()}>
+                  {creating ? "Creating..." : "Create Project"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </>
   );
 }

@@ -153,10 +153,13 @@ worker:
 
 auth:
   dev_mode: false
-  # Service accounts allowed to authenticate via Google ID token.
+  # Service accounts allowed to use the proxy via Google ID token or OAuth2.
   # Deny-by-default: if this list is empty (or omitted), ALL service accounts
-  # are rejected with 403. Users must authenticate with personal ADC
-  # (gcloud auth application-default login) instead.
+  # are rejected with 403.
+  #
+  # Allowlisted SAs bypass two gates:
+  #   1. Authentication — the resolver chain permits them (non-listed SAs are rejected)
+  #   2. Registration — they skip the Firestore user-store lookup (no user doc needed)
   #
   # Only add SAs that genuinely need proxy access (e.g. CI runners, shared
   # build agents). SA traffic bypasses per-user budget deduction, so each

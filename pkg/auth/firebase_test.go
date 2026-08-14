@@ -243,7 +243,7 @@ func TestVerifyRegistered_RegisteredUserAllowed(t *testing.T) {
 	user := &User{ID: "uid-larry", Email: "larry.david@example-corp.com"}
 	rr := httptest.NewRecorder()
 
-	allowed := verifyRegistered(context.Background(), rr, user, authorizer)
+	allowed := verifyRegistered(context.Background(), rr, user, authorizer, nil)
 	if !allowed {
 		t.Fatal("expected registered user to be allowed")
 	}
@@ -262,7 +262,7 @@ func TestVerifyRegistered_UnregisteredUserBlocked(t *testing.T) {
 	user := &User{ID: "uid-rando", Email: "mocha.joe@spite-store.com"}
 	rr := httptest.NewRecorder()
 
-	allowed := verifyRegistered(context.Background(), rr, user, authorizer)
+	allowed := verifyRegistered(context.Background(), rr, user, authorizer, nil)
 	if allowed {
 		t.Fatal("expected unregistered user to be blocked")
 	}
@@ -290,7 +290,7 @@ func TestVerifyRegistered_TransientErrorReturns500(t *testing.T) {
 	user := &User{ID: "uid-jeff", Email: "jeff.greene@example-corp.com"}
 	rr := httptest.NewRecorder()
 
-	allowed := verifyRegistered(context.Background(), rr, user, authorizer)
+	allowed := verifyRegistered(context.Background(), rr, user, authorizer, nil)
 	if allowed {
 		t.Fatal("expected transient error to block the request")
 	}
@@ -314,17 +314,16 @@ func TestVerifyRegistered_NilAuthorizerAllowsAll(t *testing.T) {
 	user := &User{ID: "uid-leon", Email: "leon.black@example-corp.com"}
 	rr := httptest.NewRecorder()
 
-	allowed := verifyRegistered(context.Background(), rr, user, nil)
+	allowed := verifyRegistered(context.Background(), rr, user, nil, nil)
 	if !allowed {
 		t.Fatal("expected nil authorizer to allow all users")
 	}
 }
 
 func TestVerifyRegistered_ServiceAccountBlocked(t *testing.T) {
-	// verifyRegistered itself blocks unknown service accounts when called
-	// directly. In production, the middleware skips verifyRegistered for SAs
-	// authenticated via Google ID token (Strategy 2) — but if a SA were to
-	// reach verifyRegistered through another path, it would still be rejected.
+	// verifyRegistered blocks unknown service accounts that are NOT on the
+	// SA allowlist. Allowlisted SAs bypass this check entirely (see
+	// TestVerifyRegistered_AllowlistedSA_BypassesRegistration).
 	authorizer := UserAuthorizer(func(_ context.Context, email string) error {
 		// Only known team emails pass.
 		known := map[string]bool{
@@ -340,13 +339,132 @@ func TestVerifyRegistered_ServiceAccountBlocked(t *testing.T) {
 	sa := &User{ID: "100000000000000000000", Email: "susie-bot@other-project.iam.gserviceaccount.com"}
 	rr := httptest.NewRecorder()
 
-	allowed := verifyRegistered(context.Background(), rr, sa, authorizer)
+	allowed := verifyRegistered(context.Background(), rr, sa, authorizer, nil)
 	if allowed {
 		t.Fatal("expected external service account to be blocked")
 	}
 	if rr.Code != http.StatusForbidden {
 		t.Errorf("status = %d, want 403", rr.Code)
 	}
+}
+
+func TestVerifyRegistered_AllowlistedSA_BypassesRegistration(t *testing.T) {
+	// Regression test for #763: allowlisted service accounts must bypass the
+	// Firestore user-store lookup. Before the resolver chain refactor, SAs on
+	// the allowlist could use the proxy without a Firestore user document.
+	// The refactor inadvertently broke this by always calling verifyRegistered
+	// without checking the allowlist.
+
+	// Authorizer that rejects everything — simulates "no Firestore doc".
+	authorizer := UserAuthorizer(func(_ context.Context, email string) error {
+		return fmt.Errorf("%w: %s", ErrNotRegistered, email)
+	})
+
+	allowedSA := "cicd-bot@my-project.iam.gserviceaccount.com"
+	deniedSA := "rogue-bot@other-project.iam.gserviceaccount.com"
+	saAllowlist := NewServiceAccountAllowlist([]string{allowedSA})
+
+	// Allowlisted SA should pass even though the authorizer would reject it.
+	t.Run("allowlisted SA passes", func(t *testing.T) {
+		user := &User{ID: "sa-allowed", Email: allowedSA}
+		rr := httptest.NewRecorder()
+
+		ok := verifyRegistered(context.Background(), rr, user, authorizer, saAllowlist)
+		if !ok {
+			t.Fatal("expected allowlisted SA to bypass registration check")
+		}
+		if rr.Body.Len() != 0 {
+			t.Errorf("expected empty body, got %q", rr.Body.String())
+		}
+	})
+
+	// Non-allowlisted SA should still be blocked.
+	t.Run("non-allowlisted SA blocked", func(t *testing.T) {
+		user := &User{ID: "sa-denied", Email: deniedSA}
+		rr := httptest.NewRecorder()
+
+		ok := verifyRegistered(context.Background(), rr, user, authorizer, saAllowlist)
+		if ok {
+			t.Fatal("expected non-allowlisted SA to be blocked")
+		}
+		if rr.Code != http.StatusForbidden {
+			t.Errorf("status = %d, want 403", rr.Code)
+		}
+	})
+
+	// Nil allowlist should not bypass (backward compat).
+	t.Run("nil allowlist does not bypass", func(t *testing.T) {
+		user := &User{ID: "sa-nil", Email: allowedSA}
+		rr := httptest.NewRecorder()
+
+		ok := verifyRegistered(context.Background(), rr, user, authorizer, nil)
+		if ok {
+			t.Fatal("expected nil allowlist to not bypass registration")
+		}
+		if rr.Code != http.StatusForbidden {
+			t.Errorf("status = %d, want 403", rr.Code)
+		}
+	})
+}
+
+func TestVerifyRegistered_AllowlistedSA_RequiresSAEmailSuffix(t *testing.T) {
+	// Defense-in-depth: the SA bypass requires BOTH that the email is in the
+	// allowlist AND that it ends with ".gserviceaccount.com". A human email
+	// coincidentally present in the allowlist must NOT bypass registration.
+
+	// Authorizer that rejects everything — simulates "no Firestore doc".
+	authorizer := UserAuthorizer(func(_ context.Context, email string) error {
+		return fmt.Errorf("%w: %s", ErrNotRegistered, email)
+	})
+
+	allowedSA := "cicd-bot@my-project.iam.gserviceaccount.com"
+	humanEmail := "alice@example.com"
+	deniedSA := "rogue-bot@other-project.iam.gserviceaccount.com"
+
+	// Allowlist contains both the real SA and a human email (misconfiguration).
+	saAllowlist := NewServiceAccountAllowlist([]string{allowedSA, humanEmail})
+
+	t.Run("allowlisted SA with correct suffix passes", func(t *testing.T) {
+		user := &User{ID: "sa-good", Email: allowedSA}
+		rr := httptest.NewRecorder()
+
+		ok := verifyRegistered(context.Background(), rr, user, authorizer, saAllowlist)
+		if !ok {
+			t.Fatal("expected allowlisted SA to bypass registration check")
+		}
+		if rr.Body.Len() != 0 {
+			t.Errorf("expected empty body, got %q", rr.Body.String())
+		}
+	})
+
+	t.Run("non-allowlisted SA is blocked", func(t *testing.T) {
+		user := &User{ID: "sa-bad", Email: deniedSA}
+		rr := httptest.NewRecorder()
+
+		ok := verifyRegistered(context.Background(), rr, user, authorizer, saAllowlist)
+		if ok {
+			t.Fatal("expected non-allowlisted SA to be blocked")
+		}
+		if rr.Code != http.StatusForbidden {
+			t.Errorf("status = %d, want 403", rr.Code)
+		}
+	})
+
+	t.Run("human email in allowlist does NOT bypass", func(t *testing.T) {
+		// Even though humanEmail is in the allowlist, it lacks the
+		// .gserviceaccount.com suffix, so the defense-in-depth check
+		// should prevent bypass.
+		user := &User{ID: "human-1", Email: humanEmail}
+		rr := httptest.NewRecorder()
+
+		ok := verifyRegistered(context.Background(), rr, user, authorizer, saAllowlist)
+		if ok {
+			t.Fatal("expected human email to NOT bypass registration even if in allowlist")
+		}
+		if rr.Code != http.StatusForbidden {
+			t.Errorf("status = %d, want 403", rr.Code)
+		}
+	})
 }
 
 // --- ServiceAccountAllowlist tests ---

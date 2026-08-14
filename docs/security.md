@@ -23,9 +23,9 @@ flowchart TD
     CTX --> HANDLER[ConnectRPC Handler]
 ```
 
-### Strategy Waterfall
+### Strategy Waterfall (Resolver Chain)
 
-The middleware (`pkg/auth/firebase.go`) tries three strategies in sequence. The first successful validation wins:
+The middleware (`pkg/auth/firebase.go`) uses a pluggable `ResolverChain` that tries multiple identity resolvers in sequence. The first successful validation wins:
 
 | # | Strategy | Client | Token Source | Validation Method |
 |---|----------|--------|-------------|-------------------|
@@ -124,7 +124,50 @@ Users with `role = admin` bypass all access tag and tenant checks. Admins always
 
 ### Service Account Behavior
 
-Service accounts (SAs) are treated as **individual users** for access gating purposes. SAs must have the appropriate `access_tags` and belong to an allowed tenant — there is no implicit SA bypass.
+Service accounts (SAs) authenticate via Strategy 2 (Google ID Token) or Strategy 3 (OAuth2 Access Token). SA access is governed by two independent gates:
+
+1. **Authentication** — The SA must be on the `allowed_service_accounts` allowlist (deny-by-default). SAs not on the list are rejected with 403 at the resolver chain level.
+2. **Authorization** — Allowlisted SAs bypass the Firestore user-store registration check (`verifyRegistered`). They do **not** need a Firestore user document. This is because SAs are pre-authorized by the allowlist — requiring a separate user record would be redundant and break CI/CD integrations.
+
+> [!IMPORTANT]
+> SAs on the allowlist bypass **both** the registration gate **and** per-user budget deduction. Each allowlist entry is an unmetered cost vector. Only add SAs that genuinely need proxy access (e.g., CI runners, shared build agents).
+
+#### SA Allowlist Configuration
+
+Configure in `config.yaml` under `auth.allowed_service_accounts`:
+
+```yaml
+auth:
+  allowed_service_accounts:
+    - "candela-ci@my-project.iam.gserviceaccount.com"
+    - "deploy-bot@my-project.iam.gserviceaccount.com"
+```
+
+Behavior:
+- **Deny-by-default**: If the list is empty or omitted, ALL service accounts are rejected with 403.
+- **Case-insensitive**: Lookups are case-insensitive (`Candela-CI@...` matches `candela-ci@...`).
+- **Whitespace-tolerant**: Leading/trailing whitespace is trimmed during construction.
+- **Defense-in-depth**: The bypass only applies to emails ending in `.gserviceaccount.com`, preventing accidental human-user bypasses.
+
+#### SA Auth Flow Diagram
+
+```
+SA Request
+  ↓
+ResolverChain.Resolve(token)
+  ↓
+GoogleOIDCResolver or GoogleOAuthResolver
+  ↓ (extracts email)
+IsAllowed(email)? ──── NO ──→ 403 Forbidden
+  ↓ YES
+verifyRegistered()
+  ↓
+IsAllowed(email) + .gserviceaccount.com? ──── YES ──→ ✅ Skip Firestore
+  ↓ NO
+Firestore lookup ──── not found ──→ 403 "user not registered"
+  ↓ found
+✅ Proceed
+```
 
 ### Fail-Closed on Errors
 

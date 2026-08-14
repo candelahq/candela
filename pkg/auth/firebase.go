@@ -148,7 +148,9 @@ func verifyRegistered(ctx context.Context, w http.ResponseWriter, user *User, us
 		return true // no user store — allow all authenticated users
 	}
 	// Allowlisted SAs are pre-authorized — skip the user-store lookup.
-	if saAllowlist != nil && saAllowlist.IsAllowed(user.Email) {
+	// Defense-in-depth: also verify the email suffix so a human user whose
+	// email coincidentally matches an allowlist entry cannot bypass registration.
+	if saAllowlist != nil && strings.HasSuffix(strings.ToLower(user.Email), ".gserviceaccount.com") && saAllowlist.IsAllowed(user.Email) {
 		slog.Debug("allowlisted SA — skipping registration check",
 			"email", user.Email, "uid", user.ID)
 		return true

@@ -407,6 +407,66 @@ func TestVerifyRegistered_AllowlistedSA_BypassesRegistration(t *testing.T) {
 	})
 }
 
+func TestVerifyRegistered_AllowlistedSA_RequiresSAEmailSuffix(t *testing.T) {
+	// Defense-in-depth: the SA bypass requires BOTH that the email is in the
+	// allowlist AND that it ends with ".gserviceaccount.com". A human email
+	// coincidentally present in the allowlist must NOT bypass registration.
+
+	// Authorizer that rejects everything — simulates "no Firestore doc".
+	authorizer := UserAuthorizer(func(_ context.Context, email string) error {
+		return fmt.Errorf("%w: %s", ErrNotRegistered, email)
+	})
+
+	allowedSA := "cicd-bot@my-project.iam.gserviceaccount.com"
+	humanEmail := "alice@example.com"
+	deniedSA := "rogue-bot@other-project.iam.gserviceaccount.com"
+
+	// Allowlist contains both the real SA and a human email (misconfiguration).
+	saAllowlist := NewServiceAccountAllowlist([]string{allowedSA, humanEmail})
+
+	t.Run("allowlisted SA with correct suffix passes", func(t *testing.T) {
+		user := &User{ID: "sa-good", Email: allowedSA}
+		rr := httptest.NewRecorder()
+
+		ok := verifyRegistered(context.Background(), rr, user, authorizer, saAllowlist)
+		if !ok {
+			t.Fatal("expected allowlisted SA to bypass registration check")
+		}
+		if rr.Body.Len() != 0 {
+			t.Errorf("expected empty body, got %q", rr.Body.String())
+		}
+	})
+
+	t.Run("non-allowlisted SA is blocked", func(t *testing.T) {
+		user := &User{ID: "sa-bad", Email: deniedSA}
+		rr := httptest.NewRecorder()
+
+		ok := verifyRegistered(context.Background(), rr, user, authorizer, saAllowlist)
+		if ok {
+			t.Fatal("expected non-allowlisted SA to be blocked")
+		}
+		if rr.Code != http.StatusForbidden {
+			t.Errorf("status = %d, want 403", rr.Code)
+		}
+	})
+
+	t.Run("human email in allowlist does NOT bypass", func(t *testing.T) {
+		// Even though humanEmail is in the allowlist, it lacks the
+		// .gserviceaccount.com suffix, so the defense-in-depth check
+		// should prevent bypass.
+		user := &User{ID: "human-1", Email: humanEmail}
+		rr := httptest.NewRecorder()
+
+		ok := verifyRegistered(context.Background(), rr, user, authorizer, saAllowlist)
+		if ok {
+			t.Fatal("expected human email to NOT bypass registration even if in allowlist")
+		}
+		if rr.Code != http.StatusForbidden {
+			t.Errorf("status = %d, want 403", rr.Code)
+		}
+	})
+}
+
 // --- ServiceAccountAllowlist tests ---
 
 func TestServiceAccountAllowlist_DenyByDefault(t *testing.T) {

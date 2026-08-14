@@ -30,6 +30,7 @@ These are used by the container entrypoint (`deploy/entrypoint.sh`) to generate 
 |----------|---------|-------------|
 | `CANDELA_DEV_MODE` | `false` | Skip auth, inject synthetic admin user. **Never use in production.** |
 | `CLOUD_RUN_URL` | _(empty)_ | Cloud Run service URL. Used as the audience for Google ID token validation (Strategy 2). Set this to enable `candela` Team Mode auth. |
+| `CANDELA_ALLOWED_SERVICE_ACCOUNTS` | _(empty)_ | Comma-separated list of SA emails allowed to use the proxy. Deny-by-default: if empty, all SAs are rejected. Allowlisted SAs bypass Firestore registration. See [Security — SA Allowlist](security.md#sa-allowlist-configuration). |
 
 ### Firestore
 

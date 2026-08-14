@@ -126,7 +126,7 @@ func FirebaseAuthMiddleware(next http.Handler, fbAuth TokenVerifier, cloudRunAud
 			return
 		}
 
-		if !isSelfService && !verifyRegistered(r.Context(), w, user, userAuth) {
+		if !isSelfService && !verifyRegistered(r.Context(), w, user, userAuth, saAllowlist) {
 			return
 		}
 
@@ -136,12 +136,22 @@ func FirebaseAuthMiddleware(next http.Handler, fbAuth TokenVerifier, cloudRunAud
 }
 
 // verifyRegistered checks if the authenticated user exists in the user store.
-// Returns true if the user is allowed (registered or no store configured).
+// Returns true if the user is allowed (registered, allowlisted SA, or no store configured).
 // Returns false and writes an error response if the user is not registered (403)
 // or if the lookup fails with a transient error (500).
-func verifyRegistered(ctx context.Context, w http.ResponseWriter, user *User, userAuth UserAuthorizer) bool {
+//
+// Service accounts on the SA allowlist bypass the user-store lookup entirely.
+// They were already authenticated and authorized by the resolver chain;
+// requiring a separate Firestore document is redundant.
+func verifyRegistered(ctx context.Context, w http.ResponseWriter, user *User, userAuth UserAuthorizer, saAllowlist *ServiceAccountAllowlist) bool {
 	if userAuth == nil {
 		return true // no user store — allow all authenticated users
+	}
+	// Allowlisted SAs are pre-authorized — skip the user-store lookup.
+	if saAllowlist != nil && saAllowlist.IsAllowed(user.Email) {
+		slog.Debug("allowlisted SA — skipping registration check",
+			"email", user.Email, "uid", user.ID)
+		return true
 	}
 	if err := userAuth(ctx, user.Email); err != nil {
 		if errors.Is(err, ErrNotRegistered) {

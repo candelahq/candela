@@ -4,6 +4,7 @@ import { AuthProvider } from "@/components/AuthProvider";
 import { AuthGuard } from "@/components/AuthGuard";
 import { AppShell } from "@/components/AppShell";
 import { UserScopeProvider } from "@/components/UserScopeProvider";
+import { ToastProvider } from "@/components/Toast";
 
 export const metadata: Metadata = {
   title: "Candela — LLM Observability",
@@ -18,13 +19,15 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body>
-        <AuthProvider>
-          <AuthGuard>
-            <UserScopeProvider>
-              <AppShell>{children}</AppShell>
-            </UserScopeProvider>
-          </AuthGuard>
-        </AuthProvider>
+        <ToastProvider>
+          <AuthProvider>
+            <AuthGuard>
+              <UserScopeProvider>
+                <AppShell>{children}</AppShell>
+              </UserScopeProvider>
+            </AuthGuard>
+          </AuthProvider>
+        </ToastProvider>
       </body>
     </html>
   );

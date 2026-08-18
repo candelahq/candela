@@ -2898,3 +2898,92 @@ tr:hover .model-bar {
   color: var(--text-muted);
   font-family: var(--font-mono);
 }
+
+/* ── Toast Notifications ── */
+.toast-container {
+  position: fixed;
+  top: 16px;
+  right: 16px;
+  z-index: 10000;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-width: 400px;
+}
+.toast {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 16px;
+  border-radius: var(--radius-md);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
+  font-size: 13px;
+  color: var(--text-primary);
+  animation: toast-slide-in 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.toast-success {
+  border-color: var(--success);
+  background: linear-gradient(135deg, var(--bg-elevated) 0%, rgba(52, 211, 153, 0.06) 100%);
+}
+.toast-error {
+  border-color: var(--error);
+  background: linear-gradient(135deg, var(--bg-elevated) 0%, rgba(248, 113, 113, 0.06) 100%);
+}
+.toast-info {
+  border-color: var(--info);
+  background: linear-gradient(135deg, var(--bg-elevated) 0%, rgba(96, 165, 250, 0.06) 100%);
+}
+.toast-icon {
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  font-size: 11px;
+  font-weight: 700;
+}
+.toast-success .toast-icon {
+  background: rgba(52, 211, 153, 0.15);
+  color: var(--success);
+}
+.toast-error .toast-icon {
+  background: rgba(248, 113, 113, 0.15);
+  color: var(--error);
+}
+.toast-info .toast-icon {
+  background: rgba(96, 165, 250, 0.15);
+  color: var(--info);
+}
+.toast-message {
+  flex: 1;
+  line-height: 1.4;
+}
+.toast-close {
+  flex-shrink: 0;
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 16px;
+  padding: 0 2px;
+  line-height: 1;
+  opacity: 0.6;
+  transition: opacity 0.15s;
+}
+.toast-close:hover {
+  opacity: 1;
+}
+@keyframes toast-slide-in {
+  from {
+    opacity: 0;
+    transform: translateX(100%);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}

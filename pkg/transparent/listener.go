@@ -325,6 +325,7 @@ func (l *Listener) tunnelToOrigDest(clientConn net.Conn, peeked []byte, sni stri
 func (l *Listener) resolveOrigDst(conn net.Conn, sni string) string {
 	// Try SO_ORIGINAL_DST first (works when traffic was iptables-redirected).
 	if tcpConn, ok := conn.(*net.TCPConn); ok {
+		//nolint:staticcheck // SA4023: on non-Linux, GetOriginalDst always errors — but this code runs on Linux in production.
 		if origDst, err := GetOriginalDst(tcpConn); err == nil {
 			// Guard against self-connection: when there is no iptables
 			// REDIRECT rule, SO_ORIGINAL_DST returns the actual destination

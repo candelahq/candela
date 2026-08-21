@@ -1,7 +1,7 @@
 # Candela — Deploy to Cloud Run
 #
 # Deploys a container image to Cloud Run using the canary pattern:
-#   1. Deploy new revision with --no-traffic (tagged "canary")
+#   1. Validate inputs and deploy new revision with --no-traffic (tagged "canary")
 #   2. Run smoke tests against the canary revision URL
 #   3. If smoke passes: promote canary to 100% traffic
 #   4. If smoke fails: delete canary revision, keep previous revision live
@@ -9,8 +9,8 @@
 # Creates a GitHub Deployment record for audit trail.
 #
 # Requires:
-#   - Workload Identity Federation or GCP_SA_KEY secret
-#   - GCP_PROJECT_ID, GCP_REGION, CLOUD_RUN_SERVICE secrets/vars
+#   - Workload Identity Federation (WIF_PROVIDER + WIF_SERVICE_ACCOUNT secrets)
+#   - GCP_PROJECT_ID, GCP_REGION, CLOUD_RUN_SERVICE vars
 
 name: Deploy
 
@@ -38,23 +38,30 @@ permissions:
   id-token: write        # Workload Identity Federation
   deployments: write     # GitHub Deployments API
 
-env:
-  IMAGE: ghcr.io/candelahq/candela-server:${{ inputs.image_tag }}
-
 jobs:
-  # ── Gate: staging must pass before production ───────────────────────
-  # Production deploys require a successful staging deploy of the same
-  # image tag. This is enforced via GitHub Environment protection rules.
-
   deploy:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     environment: ${{ inputs.environment }}
 
+    # Pass workflow inputs via env to avoid shell injection.
+    env:
+      DEPLOY_IMAGE_TAG: ${{ inputs.image_tag }}
+      DEPLOY_ENVIRONMENT: ${{ inputs.environment }}
+
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
         with:
           persist-credentials: false
+
+      # ── Validate inputs ──────────────────────────────────────────────
+      - name: Validate image tag
+        run: |
+          if [[ ! "$DEPLOY_IMAGE_TAG" =~ ^[a-zA-Z0-9._-]+$ ]]; then
+            echo "❌ Invalid image tag: must be alphanumeric with . _ -"
+            exit 1
+          fi
+          echo "IMAGE=ghcr.io/candelahq/candela-server:${DEPLOY_IMAGE_TAG}" >> "$GITHUB_ENV"
 
       # ── Authenticate to GCP ──────────────────────────────────────────
       - name: Authenticate to Google Cloud
@@ -71,85 +78,107 @@ jobs:
       - name: Create deployment
         id: deployment
         uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7
+        env:
+          DEPLOY_IMAGE: ${{ env.IMAGE }}
         with:
           script: |
             const deployment = await github.rest.repos.createDeployment({
               owner: context.repo.owner,
               repo: context.repo.repo,
               ref: context.sha,
-              environment: '${{ inputs.environment }}',
-              description: 'Deploy ${{ env.IMAGE }} to ${{ inputs.environment }}',
+              environment: process.env.DEPLOY_ENVIRONMENT,
+              description: `Deploy ${process.env.DEPLOY_IMAGE} to ${process.env.DEPLOY_ENVIRONMENT}`,
               auto_merge: false,
               required_contexts: [],
-              payload: { image: '${{ env.IMAGE }}' },
+              payload: { image: process.env.DEPLOY_IMAGE },
             });
             core.setOutput('id', deployment.data.id);
 
       - name: Set deployment in_progress
         uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7
+        env:
+          DEPLOYMENT_ID: ${{ steps.deployment.outputs.id }}
         with:
           script: |
             await github.rest.repos.createDeploymentStatus({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              deployment_id: ${{ steps.deployment.outputs.id }},
+              deployment_id: parseInt(process.env.DEPLOYMENT_ID, 10),
               state: 'in_progress',
               description: 'Deploying canary revision',
             });
+
+      # ── Save current traffic allocation ──────────────────────────────
+      - name: Save current traffic state
+        id: traffic
+        run: |
+          CURRENT=$(gcloud run services describe "${{ vars.CLOUD_RUN_SERVICE }}" \
+            --project "${{ vars.GCP_PROJECT_ID }}" \
+            --region "${{ vars.GCP_REGION }}" \
+            --format='value(status.traffic.revisionName,status.traffic.percent)' \
+            | head -1)
+          echo "previous=$CURRENT" >> "$GITHUB_OUTPUT"
+          echo "📊 Current traffic: $CURRENT"
 
       # ── Deploy canary (no traffic) ───────────────────────────────────
       - name: Deploy canary revision
         id: canary
         run: |
-          gcloud run deploy ${{ vars.CLOUD_RUN_SERVICE }} \
-            --project ${{ vars.GCP_PROJECT_ID }} \
-            --region ${{ vars.GCP_REGION }} \
-            --image ${{ env.IMAGE }} \
+          gcloud run deploy "${{ vars.CLOUD_RUN_SERVICE }}" \
+            --project "${{ vars.GCP_PROJECT_ID }}" \
+            --region "${{ vars.GCP_REGION }}" \
+            --image "$IMAGE" \
             --no-traffic \
             --tag canary \
-            --format='value(status.url)' \
             2>&1 | tee /tmp/deploy-output.txt
 
-          # Extract the canary URL from the tagged revision
-          CANARY_URL=$(gcloud run services describe ${{ vars.CLOUD_RUN_SERVICE }} \
-            --project ${{ vars.GCP_PROJECT_ID }} \
-            --region ${{ vars.GCP_REGION }} \
+          # Extract the canary URL and canonical service URL
+          CANARY_URL=$(gcloud run services describe "${{ vars.CLOUD_RUN_SERVICE }}" \
+            --project "${{ vars.GCP_PROJECT_ID }}" \
+            --region "${{ vars.GCP_REGION }}" \
             --format='value(status.traffic[tag=canary].url)')
 
+          SERVICE_URL=$(gcloud run services describe "${{ vars.CLOUD_RUN_SERVICE }}" \
+            --project "${{ vars.GCP_PROJECT_ID }}" \
+            --region "${{ vars.GCP_REGION }}" \
+            --format='value(status.url)')
+
           echo "canary_url=$CANARY_URL" >> "$GITHUB_OUTPUT"
+          echo "service_url=$SERVICE_URL" >> "$GITHUB_OUTPUT"
           echo "🕯️ Canary URL: $CANARY_URL"
 
       # ── Smoke test canary ────────────────────────────────────────────
       - name: Smoke test canary
         id: smoke
+        env:
+          CANARY_URL: ${{ steps.canary.outputs.canary_url }}
+          SERVICE_URL: ${{ steps.canary.outputs.service_url }}
         run: |
           chmod +x scripts/smoke-test.sh
 
-          # Get an identity token for the canary URL
+          # Get an identity token using the canonical service URL as audience
           TOKEN=$(gcloud auth print-identity-token \
-            --audiences=${{ steps.canary.outputs.canary_url }} 2>/dev/null || echo "")
+            --audiences="$SERVICE_URL" 2>/dev/null || echo "")
 
           if [[ -n "$TOKEN" ]]; then
-            ./scripts/smoke-test.sh "${{ steps.canary.outputs.canary_url }}" \
-              --token "$TOKEN" --timeout 90
+            ./scripts/smoke-test.sh "$CANARY_URL" --token "$TOKEN" --timeout 60
           else
-            ./scripts/smoke-test.sh "${{ steps.canary.outputs.canary_url }}" \
-              --timeout 90
+            ./scripts/smoke-test.sh "$CANARY_URL" --timeout 60
           fi
 
       # ── Promote: shift 100% traffic to canary ───────────────────────
       - name: Promote canary to live
         if: success()
         run: |
-          gcloud run services update-traffic ${{ vars.CLOUD_RUN_SERVICE }} \
-            --project ${{ vars.GCP_PROJECT_ID }} \
-            --region ${{ vars.GCP_REGION }} \
+          gcloud run services update-traffic "${{ vars.CLOUD_RUN_SERVICE }}" \
+            --project "${{ vars.GCP_PROJECT_ID }}" \
+            --region "${{ vars.GCP_REGION }}" \
             --to-tags canary=100
 
           # Clean up the canary tag
-          gcloud run services update-traffic ${{ vars.CLOUD_RUN_SERVICE }} \
-            --project ${{ vars.GCP_PROJECT_ID }} \
-            --region ${{ vars.GCP_REGION }} \
+          gcloud run services update-traffic "${{ vars.CLOUD_RUN_SERVICE }}" \
+            --project "${{ vars.GCP_PROJECT_ID }}" \
+            --region "${{ vars.GCP_REGION }}" \
             --clear-tags
 
           echo "✅ Traffic shifted to new revision"
@@ -160,22 +189,34 @@ jobs:
         run: |
           echo "❌ Smoke tests failed — rolling back canary"
 
-          # Remove the canary tag and delete the failed revision
-          CANARY_REVISION=$(gcloud run services describe ${{ vars.CLOUD_RUN_SERVICE }} \
-            --project ${{ vars.GCP_PROJECT_ID }} \
-            --region ${{ vars.GCP_REGION }} \
+          # Identify the canary revision
+          CANARY_REVISION=$(gcloud run services describe "${{ vars.CLOUD_RUN_SERVICE }}" \
+            --project "${{ vars.GCP_PROJECT_ID }}" \
+            --region "${{ vars.GCP_REGION }}" \
             --format='value(status.traffic[tag=canary].revisionName)')
 
-          gcloud run services update-traffic ${{ vars.CLOUD_RUN_SERVICE }} \
-            --project ${{ vars.GCP_PROJECT_ID }} \
-            --region ${{ vars.GCP_REGION }} \
+          # Clear canary tag (removes it from traffic, even if it had 0%)
+          gcloud run services update-traffic "${{ vars.CLOUD_RUN_SERVICE }}" \
+            --project "${{ vars.GCP_PROJECT_ID }}" \
+            --region "${{ vars.GCP_REGION }}" \
             --clear-tags
 
+          # Verify canary is no longer serving before deleting
           if [[ -n "$CANARY_REVISION" ]]; then
-            gcloud run revisions delete "$CANARY_REVISION" \
-              --project ${{ vars.GCP_PROJECT_ID }} \
-              --region ${{ vars.GCP_REGION }} \
-              --quiet || true
+            SERVING=$(gcloud run services describe "${{ vars.CLOUD_RUN_SERVICE }}" \
+              --project "${{ vars.GCP_PROJECT_ID }}" \
+              --region "${{ vars.GCP_REGION }}" \
+              --format='value(status.traffic[revisionName='"$CANARY_REVISION"'].percent)' || echo "0")
+
+            if [[ "${SERVING:-0}" == "0" || -z "$SERVING" ]]; then
+              gcloud run revisions delete "$CANARY_REVISION" \
+                --project "${{ vars.GCP_PROJECT_ID }}" \
+                --region "${{ vars.GCP_REGION }}" \
+                --quiet || true
+              echo "🗑️  Deleted failed canary revision: $CANARY_REVISION"
+            else
+              echo "⚠️  Canary still serving ${SERVING}% — skipping deletion"
+            fi
           fi
 
           echo "🔙 Traffic remains on previous revision"
@@ -184,26 +225,31 @@ jobs:
       - name: Mark deployment success
         if: success()
         uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7
+        env:
+          DEPLOYMENT_ID: ${{ steps.deployment.outputs.id }}
+          SERVICE_URL: ${{ steps.canary.outputs.service_url }}
         with:
           script: |
             await github.rest.repos.createDeploymentStatus({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              deployment_id: ${{ steps.deployment.outputs.id }},
+              deployment_id: parseInt(process.env.DEPLOYMENT_ID, 10),
               state: 'success',
               description: 'Deployed and verified',
-              environment_url: '${{ steps.canary.outputs.canary_url }}'.replace('canary---', ''),
+              environment_url: process.env.SERVICE_URL,
             });
 
       - name: Mark deployment failure
         if: failure()
         uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7
+        env:
+          DEPLOYMENT_ID: ${{ steps.deployment.outputs.id }}
         with:
           script: |
             await github.rest.repos.createDeploymentStatus({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              deployment_id: ${{ steps.deployment.outputs.id }},
+              deployment_id: parseInt(process.env.DEPLOYMENT_ID, 10),
               state: 'failure',
               description: 'Smoke tests failed — canary rolled back',
             });
@@ -211,9 +257,14 @@ jobs:
       # ── Notify on failure ────────────────────────────────────────────
       - name: Notify on failure
         if: failure() && vars.SLACK_WEBHOOK_URL != ''
+        env:
+          SLACK_WEBHOOK_URL: ${{ vars.SLACK_WEBHOOK_URL }}
+          SLACK_MESSAGE: |
+            🚨 Candela deploy FAILED (${{ inputs.environment }})
+            Image: `${{ env.IMAGE }}`
+            Triggered by: ${{ github.actor }}
+            Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
-          curl -s -X POST "${{ vars.SLACK_WEBHOOK_URL }}" \
+          curl -s -X POST "$SLACK_WEBHOOK_URL" \
             -H 'Content-Type: application/json' \
-            -d '{
-              "text": "🚨 Candela deploy FAILED (${{ inputs.environment }})\nImage: `${{ env.IMAGE }}`\nTriggered by: ${{ github.actor }}\nRun: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-            }' || true
+            -d "$(jq -n --arg text "$SLACK_MESSAGE" '{text: $text}')" || true

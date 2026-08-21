@@ -2,6 +2,7 @@
 #
 # One-click rollback to a previous Cloud Run revision.
 # Can specify a target revision or auto-select the previous one.
+# Validates the target revision exists and is ready before shifting traffic.
 #
 # Usage:
 #   1. Go to Actions → Rollback → Run workflow
@@ -41,6 +42,11 @@ jobs:
     timeout-minutes: 10
     environment: ${{ inputs.environment }}
 
+    # Pass workflow inputs via env to avoid shell injection.
+    env:
+      ROLLBACK_REVISION: ${{ inputs.revision }}
+      ROLLBACK_ENVIRONMENT: ${{ inputs.environment }}
+
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
         with:
@@ -55,7 +61,7 @@ jobs:
       - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@77e7a554d41e2ee56fc945c52dfd3f33d12def9a # v2
 
-      # ── Determine target revision ────────────────────────────────────
+      # ── Validate and resolve target revision ─────────────────────────
       - name: Resolve rollback target
         id: target
         run: |
@@ -63,8 +69,13 @@ jobs:
           PROJECT="${{ vars.GCP_PROJECT_ID }}"
           REGION="${{ vars.GCP_REGION }}"
 
-          if [[ -n "${{ inputs.revision }}" ]]; then
-            TARGET="${{ inputs.revision }}"
+          if [[ -n "$ROLLBACK_REVISION" ]]; then
+            # Validate revision name format (Cloud Run: service-nnnnn-xxx)
+            if [[ ! "$ROLLBACK_REVISION" =~ ^[a-z0-9-]+$ ]]; then
+              echo "❌ Invalid revision name: must be lowercase alphanumeric with hyphens"
+              exit 1
+            fi
+            TARGET="$ROLLBACK_REVISION"
             echo "📌 Rolling back to specified revision: $TARGET"
           else
             # Get the second-most-recent active revision
@@ -83,14 +94,33 @@ jobs:
             echo "📌 Rolling back to previous revision: $TARGET"
           fi
 
+          # Validate target revision exists and is ready
+          READY=$(gcloud run revisions describe "$TARGET" \
+            --project "$PROJECT" \
+            --region "$REGION" \
+            --format='value(status.conditions[type=Ready].status)' 2>/dev/null || echo "")
+
+          if [[ "$READY" != "True" ]]; then
+            echo "❌ Revision $TARGET is not ready (status: ${READY:-not found})"
+            echo "Available revisions:"
+            gcloud run revisions list \
+              --project "$PROJECT" \
+              --region "$REGION" \
+              --service "$SERVICE" \
+              --format='table(metadata.name, status.conditions[type=Ready].status, metadata.creationTimestamp)' \
+              --limit=5
+            exit 1
+          fi
+
           echo "revision=$TARGET" >> "$GITHUB_OUTPUT"
+          echo "✅ Revision $TARGET is ready"
 
       # ── Shift traffic ────────────────────────────────────────────────
       - name: Route traffic to target revision
         run: |
-          gcloud run services update-traffic ${{ vars.CLOUD_RUN_SERVICE }} \
-            --project ${{ vars.GCP_PROJECT_ID }} \
-            --region ${{ vars.GCP_REGION }} \
+          gcloud run services update-traffic "${{ vars.CLOUD_RUN_SERVICE }}" \
+            --project "${{ vars.GCP_PROJECT_ID }}" \
+            --region "${{ vars.GCP_REGION }}" \
             --to-revisions=${{ steps.target.outputs.revision }}=100 \
             --clear-tags
 
@@ -99,9 +129,9 @@ jobs:
       # ── Verify rollback ──────────────────────────────────────────────
       - name: Smoke test after rollback
         run: |
-          SERVICE_URL=$(gcloud run services describe ${{ vars.CLOUD_RUN_SERVICE }} \
-            --project ${{ vars.GCP_PROJECT_ID }} \
-            --region ${{ vars.GCP_REGION }} \
+          SERVICE_URL=$(gcloud run services describe "${{ vars.CLOUD_RUN_SERVICE }}" \
+            --project "${{ vars.GCP_PROJECT_ID }}" \
+            --region "${{ vars.GCP_REGION }}" \
             --format='value(status.url)')
 
           chmod +x scripts/smoke-test.sh
@@ -119,35 +149,45 @@ jobs:
       - name: Record rollback deployment
         if: always()
         uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7
+        env:
+          TARGET_REVISION: ${{ steps.target.outputs.revision }}
+          JOB_STATUS: ${{ job.status }}
         with:
           script: |
             const deployment = await github.rest.repos.createDeployment({
               owner: context.repo.owner,
               repo: context.repo.repo,
               ref: context.sha,
-              environment: '${{ inputs.environment }}',
-              description: 'Rollback to ${{ steps.target.outputs.revision }}',
+              environment: process.env.ROLLBACK_ENVIRONMENT,
+              description: `Rollback to ${process.env.TARGET_REVISION}`,
               auto_merge: false,
               required_contexts: [],
-              payload: { rollback: true, revision: '${{ steps.target.outputs.revision }}' },
+              payload: { rollback: true, revision: process.env.TARGET_REVISION },
             });
             await github.rest.repos.createDeploymentStatus({
               owner: context.repo.owner,
               repo: context.repo.repo,
               deployment_id: deployment.data.id,
-              state: '${{ job.status }}' === 'success' ? 'success' : 'failure',
-              description: 'Rollback to ${{ steps.target.outputs.revision }}',
+              state: process.env.JOB_STATUS === 'success' ? 'success' : 'failure',
+              description: `Rollback to ${process.env.TARGET_REVISION}`,
             });
 
       # ── Notify ───────────────────────────────────────────────────────
       - name: Notify
         if: always() && vars.SLACK_WEBHOOK_URL != ''
+        env:
+          SLACK_WEBHOOK_URL: ${{ vars.SLACK_WEBHOOK_URL }}
+          TARGET_REVISION: ${{ steps.target.outputs.revision }}
+          JOB_STATUS: ${{ job.status }}
         run: |
-          STATUS="${{ job.status }}"
-          EMOJI=$(if [[ "$STATUS" == "success" ]]; then echo "🔙"; else echo "🚨"; fi)
+          if [[ "$JOB_STATUS" == "success" ]]; then EMOJI="🔙"; else EMOJI="🚨"; fi
 
-          curl -s -X POST "${{ vars.SLACK_WEBHOOK_URL }}" \
+          MSG="$EMOJI Candela ROLLBACK ($ROLLBACK_ENVIRONMENT)
+          Revision: \`$TARGET_REVISION\`
+          Status: $JOB_STATUS
+          Triggered by: ${{ github.actor }}
+          Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+
+          curl -s -X POST "$SLACK_WEBHOOK_URL" \
             -H 'Content-Type: application/json' \
-            -d "{
-              \"text\": \"${EMOJI} Candela ROLLBACK (${{ inputs.environment }})\nRevision: \`${{ steps.target.outputs.revision }}\`\nStatus: ${STATUS}\nTriggered by: ${{ github.actor }}\nRun: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}\"
-            }" || true
+            -d "$(jq -n --arg text "$MSG" '{text: $text}')" || true

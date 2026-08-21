@@ -16,7 +16,7 @@
 set -euo pipefail
 
 # ── Defaults ──────────────────────────────────────────────────────────
-TIMEOUT=90
+TIMEOUT=60
 TOKEN=""
 RETRY_INTERVAL=5
 
@@ -130,10 +130,10 @@ echo "   Auth:    $(if [[ -n "$TOKEN" ]]; then echo "token provided"; else echo 
 echo ""
 
 # 1. Liveness — process is alive
-check_endpoint "$BASE_URL/healthz" "200" "Liveness  (/healthz)" '"status":"ok"'
+check_endpoint "$BASE_URL/healthz" "200" "Liveness  (/healthz)" '"status": "ok"'
 
 # 2. Readiness — storage backend reachable
-check_endpoint "$BASE_URL/readyz" "200" "Readiness (/readyz)" '"status":"ready"'
+check_endpoint "$BASE_URL/readyz" "200" "Readiness (/readyz)" '"status": "ready"'
 
 # 3. UI serving — HTML page loads
 check_endpoint "$BASE_URL/" "200" "UI served (/)"

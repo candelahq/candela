@@ -1,0 +1,153 @@
+# Candela — Emergency Rollback
+#
+# One-click rollback to a previous Cloud Run revision.
+# Can specify a target revision or auto-select the previous one.
+#
+# Usage:
+#   1. Go to Actions → Rollback → Run workflow
+#   2. Select environment
+#   3. Optionally specify a revision name (from `gcloud run revisions list`)
+#   4. Click "Run workflow"
+
+name: Rollback
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Target environment"
+        required: true
+        type: choice
+        options:
+          - staging
+          - production
+      revision:
+        description: "Revision to rollback to (leave empty for previous)"
+        required: false
+        type: string
+
+concurrency:
+  group: deploy-${{ inputs.environment }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  id-token: write
+  deployments: write
+
+jobs:
+  rollback:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: ${{ inputs.environment }}
+
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          persist-credentials: false
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@ba79af03959ebeac9769e648f473a284504d9193 # v2
+        with:
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+          service_account: ${{ secrets.WIF_SERVICE_ACCOUNT }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@77e7a554d41e2ee56fc945c52dfd3f33d12def9a # v2
+
+      # ── Determine target revision ────────────────────────────────────
+      - name: Resolve rollback target
+        id: target
+        run: |
+          SERVICE="${{ vars.CLOUD_RUN_SERVICE }}"
+          PROJECT="${{ vars.GCP_PROJECT_ID }}"
+          REGION="${{ vars.GCP_REGION }}"
+
+          if [[ -n "${{ inputs.revision }}" ]]; then
+            TARGET="${{ inputs.revision }}"
+            echo "📌 Rolling back to specified revision: $TARGET"
+          else
+            # Get the second-most-recent active revision
+            TARGET=$(gcloud run revisions list \
+              --project "$PROJECT" \
+              --region "$REGION" \
+              --service "$SERVICE" \
+              --sort-by='~metadata.creationTimestamp' \
+              --format='value(metadata.name)' \
+              --limit=2 | tail -1)
+
+            if [[ -z "$TARGET" ]]; then
+              echo "❌ No previous revision found"
+              exit 1
+            fi
+            echo "📌 Rolling back to previous revision: $TARGET"
+          fi
+
+          echo "revision=$TARGET" >> "$GITHUB_OUTPUT"
+
+      # ── Shift traffic ────────────────────────────────────────────────
+      - name: Route traffic to target revision
+        run: |
+          gcloud run services update-traffic ${{ vars.CLOUD_RUN_SERVICE }} \
+            --project ${{ vars.GCP_PROJECT_ID }} \
+            --region ${{ vars.GCP_REGION }} \
+            --to-revisions=${{ steps.target.outputs.revision }}=100 \
+            --clear-tags
+
+          echo "✅ 100% traffic now on: ${{ steps.target.outputs.revision }}"
+
+      # ── Verify rollback ──────────────────────────────────────────────
+      - name: Smoke test after rollback
+        run: |
+          SERVICE_URL=$(gcloud run services describe ${{ vars.CLOUD_RUN_SERVICE }} \
+            --project ${{ vars.GCP_PROJECT_ID }} \
+            --region ${{ vars.GCP_REGION }} \
+            --format='value(status.url)')
+
+          chmod +x scripts/smoke-test.sh
+
+          TOKEN=$(gcloud auth print-identity-token \
+            --audiences="$SERVICE_URL" 2>/dev/null || echo "")
+
+          if [[ -n "$TOKEN" ]]; then
+            ./scripts/smoke-test.sh "$SERVICE_URL" --token "$TOKEN" --timeout 60
+          else
+            ./scripts/smoke-test.sh "$SERVICE_URL" --timeout 60
+          fi
+
+      # ── Audit trail ──────────────────────────────────────────────────
+      - name: Record rollback deployment
+        if: always()
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7
+        with:
+          script: |
+            const deployment = await github.rest.repos.createDeployment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              ref: context.sha,
+              environment: '${{ inputs.environment }}',
+              description: 'Rollback to ${{ steps.target.outputs.revision }}',
+              auto_merge: false,
+              required_contexts: [],
+              payload: { rollback: true, revision: '${{ steps.target.outputs.revision }}' },
+            });
+            await github.rest.repos.createDeploymentStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              deployment_id: deployment.data.id,
+              state: '${{ job.status }}' === 'success' ? 'success' : 'failure',
+              description: 'Rollback to ${{ steps.target.outputs.revision }}',
+            });
+
+      # ── Notify ───────────────────────────────────────────────────────
+      - name: Notify
+        if: always() && vars.SLACK_WEBHOOK_URL != ''
+        run: |
+          STATUS="${{ job.status }}"
+          EMOJI=$(if [[ "$STATUS" == "success" ]]; then echo "🔙"; else echo "🚨"; fi)
+
+          curl -s -X POST "${{ vars.SLACK_WEBHOOK_URL }}" \
+            -H 'Content-Type: application/json' \
+            -d "{
+              \"text\": \"${EMOJI} Candela ROLLBACK (${{ inputs.environment }})\nRevision: \`${{ steps.target.outputs.revision }}\`\nStatus: ${STATUS}\nTriggered by: ${{ github.actor }}\nRun: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}\"
+            }" || true

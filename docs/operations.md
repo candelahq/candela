@@ -4,6 +4,21 @@ This runbook covers day-to-day operations, monitoring, incident response, and ma
 
 ## Deployment
 
+### Automated Deploy (Recommended)
+
+Use the **Deploy** GitHub Actions workflow for zero-downtime canary deployments:
+
+1. Go to **Actions → Deploy → Run workflow**
+2. Select environment (`staging` or `production`)
+3. Enter the image tag (SHA from Publish workflow, e.g. `abc1234`)
+4. The workflow will:
+   - Deploy the new revision with **zero traffic** (canary)
+   - Run smoke tests against the canary URL
+   - **Promote** to 100% traffic if smoke passes
+   - **Rollback** automatically if smoke fails
+
+Deploy audit trail is recorded in the repo's **Environments** tab.
+
 ### Manual Deploy to Cloud Run
 
 ```bash
@@ -27,7 +42,32 @@ gcloud run services update candela \
   --image $REGION-docker.pkg.dev/$PROJECT/candela/candela-server:latest
 ```
 
+### Post-Deploy Verification
+
+Run smoke tests against any Candela deployment:
+
+```bash
+# Local
+./scripts/smoke-test.sh http://localhost:8181
+
+# Staging/Production (with auth)
+./scripts/smoke-test.sh https://candela-xxx.a.run.app \
+  --token "$(gcloud auth print-identity-token)" \
+  --timeout 90
+```
+
+The smoke test verifies liveness (`/healthz`), readiness (`/readyz`), UI serving (`/`), and optionally an authenticated probe (`GetCurrentUser`).
+
 ### Rolling Back
+
+**Automated (recommended):**
+
+1. Go to **Actions → Rollback → Run workflow**
+2. Select environment
+3. Optionally specify a revision name (leave empty for previous revision)
+4. The workflow shifts traffic, runs smoke tests, and records the rollback
+
+**Manual:**
 
 ```bash
 # List revisions

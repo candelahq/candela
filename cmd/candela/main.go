@@ -768,11 +768,11 @@ func runForeground() {
 
 		// ── Build reverse proxy ──
 		remoteProxy = &httputil.ReverseProxy{
-			Director: func(req *http.Request) {
+			Rewrite: func(r *httputil.ProxyRequest) {
 				// Rewrite the request to point at the remote server.
-				req.URL.Scheme = remoteURL.Scheme
-				req.URL.Host = remoteURL.Host
-				req.Host = remoteURL.Host
+				r.Out.URL.Scheme = remoteURL.Scheme
+				r.Out.URL.Host = remoteURL.Host
+				r.Out.Host = remoteURL.Host
 
 				// Inject auth tokens for IAP + backend server.
 				token, err := tokenSource.Token()
@@ -782,7 +782,7 @@ func runForeground() {
 				}
 
 				// Proxy-Authorization: consumed by IAP at the load balancer.
-				req.Header.Set("Proxy-Authorization", "Bearer "+token.AccessToken)
+				r.Out.Header.Set("Proxy-Authorization", "Bearer "+token.AccessToken)
 
 				if userTokenSource != nil {
 					// Dual-token mode (IAP impersonation):
@@ -790,35 +790,35 @@ func runForeground() {
 					//   and replaces it with its own JWT before forwarding)
 					// - X-Candela-Auth gets the user's ADC OAuth2 access token
 					//   (the server checks this first for user identity)
-					req.Header.Set("Authorization", "Bearer "+token.AccessToken)
+					r.Out.Header.Set("Authorization", "Bearer "+token.AccessToken)
 					userToken, err := userTokenSource.Token()
 					if err != nil {
 						slog.Error("failed to get user auth token", "error", err)
 						return
 					}
-					req.Header.Set("X-Candela-Auth", "Bearer "+userToken.AccessToken)
+					r.Out.Header.Set("X-Candela-Auth", "Bearer "+userToken.AccessToken)
 				} else {
 					// Single-token mode: same token for IAP and server.
-					req.Header.Set("Authorization", "Bearer "+token.AccessToken)
-					req.Header.Set("X-Candela-Auth", "Bearer "+token.AccessToken)
+					r.Out.Header.Set("Authorization", "Bearer "+token.AccessToken)
+					r.Out.Header.Set("X-Candela-Auth", "Bearer "+token.AccessToken)
 				}
 
 				// Preserve the original path.
-				if _, ok := req.Header["User-Agent"]; !ok {
-					req.Header.Set("User-Agent", "candela/1.0")
+				if _, ok := r.Out.Header["User-Agent"]; !ok {
+					r.Out.Header.Set("User-Agent", "candela/1.0")
 				}
 
 				// Strip hop-by-hop headers that break HTTP/2 upstream.
 				// Clients (JetBrains/ktor) may send Upgrade: h2c which causes
 				// "http2: invalid Upgrade request header" on the remote connection.
-				req.Header.Del("Upgrade")
-				req.Header.Del("Connection")
-				req.Header.Del("HTTP2-Settings")
+				r.Out.Header.Del("Upgrade")
+				r.Out.Header.Del("Connection")
+				r.Out.Header.Del("HTTP2-Settings")
 
 				// Inject developer's Anthropic cache preferences for Team Mode.
 				// These headers are read by the server's proxy and stripped
 				// before forwarding to upstream LLM providers.
-				injectCacheHeaders(req, cfg.VertexAI)
+				injectCacheHeaders(r.Out, cfg.VertexAI)
 			},
 			ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
 				slog.Error("proxy error", "path", r.URL.Path, "error", err)
@@ -922,18 +922,18 @@ func runForeground() {
 		}
 
 		localProxy := &httputil.ReverseProxy{
-			Director: func(req *http.Request) {
+			Rewrite: func(r *httputil.ProxyRequest) {
 				// Strip the /proxy/local prefix and prepend the upstream path.
-				req.URL.Scheme = localURL.Scheme
-				req.URL.Host = localURL.Host
-				req.Host = localURL.Host
-				stripped := strings.TrimPrefix(req.URL.Path, "/proxy/local")
+				r.Out.URL.Scheme = localURL.Scheme
+				r.Out.URL.Host = localURL.Host
+				r.Out.Host = localURL.Host
+				stripped := strings.TrimPrefix(r.Out.URL.Path, "/proxy/local")
 				if stripped == "" {
 					stripped = "/"
 				}
-				req.URL.Path = singleJoiningSlash(localURL.Path, stripped)
-				if _, ok := req.Header["User-Agent"]; !ok {
-					req.Header.Set("User-Agent", "candela/1.0")
+				r.Out.URL.Path = singleJoiningSlash(localURL.Path, stripped)
+				if _, ok := r.Out.Header["User-Agent"]; !ok {
+					r.Out.Header.Set("User-Agent", "candela/1.0")
 				}
 			},
 			ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
@@ -1265,12 +1265,12 @@ func buildLocalProxy(upstream string) *httputil.ReverseProxy {
 		return nil
 	}
 	return &httputil.ReverseProxy{
-		Director: func(req *http.Request) {
-			req.URL.Scheme = u.Scheme
-			req.URL.Host = u.Host
-			req.Host = u.Host
-			if _, ok := req.Header["User-Agent"]; !ok {
-				req.Header.Set("User-Agent", "candela/1.0")
+		Rewrite: func(r *httputil.ProxyRequest) {
+			r.Out.URL.Scheme = u.Scheme
+			r.Out.URL.Host = u.Host
+			r.Out.Host = u.Host
+			if _, ok := r.Out.Header["User-Agent"]; !ok {
+				r.Out.Header.Set("User-Agent", "candela/1.0")
 			}
 		},
 		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {

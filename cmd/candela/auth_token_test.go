@@ -29,22 +29,22 @@ func (s *staticTokenSource) Token() (*oauth2.Token, error) {
 	return tok, nil
 }
 
-// buildTestProxy creates a reverse proxy using the same Director logic as
+// buildTestProxy creates a reverse proxy using the same Rewrite logic as
 // runForeground — always uses token.AccessToken, never token.Extra("id_token").
 func buildTestProxy(t *testing.T, ts oauth2.TokenSource, remoteURL *url.URL) *httputil.ReverseProxy {
 	t.Helper()
 	return &httputil.ReverseProxy{
-		Director: func(req *http.Request) {
-			req.URL.Scheme = remoteURL.Scheme
-			req.URL.Host = remoteURL.Host
-			req.Host = remoteURL.Host
+		Rewrite: func(r *httputil.ProxyRequest) {
+			r.Out.URL.Scheme = remoteURL.Scheme
+			r.Out.URL.Host = remoteURL.Host
+			r.Out.Host = remoteURL.Host
 
 			token, err := ts.Token()
 			if err != nil {
 				t.Fatalf("Token() error: %v", err)
 			}
-			// This matches the production Director logic exactly.
-			req.Header.Set("Authorization", "Bearer "+token.AccessToken)
+			// This matches the production Rewrite logic exactly.
+			r.Out.Header.Set("Authorization", "Bearer "+token.AccessToken)
 		},
 	}
 }

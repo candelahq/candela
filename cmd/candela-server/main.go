@@ -528,10 +528,14 @@ func main() {
 		"catalog", catalogPath)
 
 	// ── Task Spend API ──────────────────────────────────────────────────
-	spendCache := taskspend.New(userStore, taskspend.DefaultTTL)
-	spendCache.StartEvictor(context.Background(), 30*time.Second)
-	mux.HandleFunc("/api/v1/task-spend/", taskspend.Handler(spendCache))
-	slog.Info("task spend API registered", "path", "/api/v1/task-spend/{taskID}")
+	if userStore != nil {
+		spendCache := taskspend.New(userStore, taskspend.DefaultTTL)
+		spendCache.StartEvictor(context.Background(), 30*time.Second)
+		mux.HandleFunc("/api/v1/task-spend/", taskspend.Handler(spendCache))
+		slog.Info("task spend API registered", "path", "/api/v1/task-spend/{taskID}")
+	} else {
+		slog.Warn("task spend API disabled: no user store configured")
+	}
 
 	// Register LLM proxy routes (selective activation).
 	if cfg.Proxy.Enabled {

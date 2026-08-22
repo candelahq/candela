@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/candelahq/candela/pkg/billing"
+	"golang.org/x/sync/singleflight"
 )
 
 // DefaultTTL is the default cache entry lifetime.
@@ -30,6 +31,9 @@ type entry struct {
 // Cache is an in-memory cache for task budget spend data.
 // It provides read-through to a backing Store with a configurable TTL.
 //
+// Concurrent requests for the same cold/stale task ID are coalesced via
+// singleflight so only one Firestore fetch runs per task.
+//
 // Safe for concurrent use.
 type Cache struct {
 	store Store
@@ -37,6 +41,8 @@ type Cache struct {
 
 	mu      sync.RWMutex
 	entries map[string]*entry
+
+	group singleflight.Group
 }
 
 // New creates a TaskSpendCache backed by the given store.
@@ -64,6 +70,9 @@ type SpendSnapshot struct {
 
 // Get returns the cached spend snapshot for a task, fetching from
 // the store if the cache is cold or stale.
+//
+// Concurrent callers for the same stale/missing taskID share a single
+// store fetch via singleflight, preventing thundering-herd on Firestore.
 func (c *Cache) Get(ctx context.Context, taskID string) (*SpendSnapshot, error) {
 	if taskID == "" {
 		return nil, fmt.Errorf("taskspend: task_id is required")
@@ -78,23 +87,38 @@ func (c *Cache) Get(ctx context.Context, taskID string) (*SpendSnapshot, error) 
 	}
 	c.mu.RUnlock()
 
-	// Slow path: fetch from store.
-	budget, err := c.store.GetTaskBudget(ctx, taskID)
+	// Slow path: fetch from store, coalescing concurrent requests.
+	val, err, _ := c.group.Do(taskID, func() (interface{}, error) {
+		// Re-check cache — another goroutine in the same flight may have populated it.
+		c.mu.RLock()
+		if e, ok := c.entries[taskID]; ok && time.Since(e.fetchedAt) < c.ttl {
+			c.mu.RUnlock()
+			return toSnapshot(e), nil
+		}
+		c.mu.RUnlock()
+
+		budget, err := c.store.GetTaskBudget(ctx, taskID)
+		if err != nil {
+			return nil, fmt.Errorf("taskspend: fetching task budget: %w", err)
+		}
+
+		now := time.Now().UTC()
+		e := &entry{
+			budget:    budget,
+			fetchedAt: now,
+		}
+
+		c.mu.Lock()
+		c.entries[taskID] = e
+		c.mu.Unlock()
+
+		return toSnapshot(e), nil
+	})
 	if err != nil {
-		return nil, fmt.Errorf("taskspend: fetching task budget: %w", err)
+		return nil, err
 	}
 
-	now := time.Now().UTC()
-	e := &entry{
-		budget:    budget,
-		fetchedAt: now,
-	}
-
-	c.mu.Lock()
-	c.entries[taskID] = e
-	c.mu.Unlock()
-
-	return toSnapshot(e), nil
+	return val.(*SpendSnapshot), nil
 }
 
 // Invalidate removes a task's cached entry, forcing the next Get to

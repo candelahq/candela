@@ -214,7 +214,7 @@ jobs:
 
       # ── Notify ───────────────────────────────────────────────────────
       - name: Notify
-        if: always() && secrets.SLACK_WEBHOOK_URL != ''
+        if: always()
         env:
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
           TARGET_REVISION: ${{ steps.target.outputs.revision }}

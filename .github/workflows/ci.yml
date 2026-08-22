@@ -127,15 +127,7 @@ jobs:
         run: nix develop . --command go vet ./...
 
       - name: Format check (gofmt)
-        run: |
-          nix develop . --command bash -c '
-            unformatted=$(gofmt -l $(find . -name "*.go" -not -path "./gen/*" -not -path "./vendor/*"))
-            if [ -n "$unformatted" ]; then
-              echo "::error::The following files are not gofmt-formatted:"
-              echo "$unformatted"
-              exit 1
-            fi
-          '
+        run: nix develop . --command bash -c "test -z \"$(gofmt -l . | grep -v '^gen/' | grep -v '^vendor/')\" || { echo '::error::Files not gofmt-formatted:'; gofmt -l . | grep -v '^gen/' | grep -v '^vendor/'; exit 1; }"
 
       - name: Verify go.mod/go.sum tidy
         run: nix develop . --command go mod tidy -diff

@@ -46,6 +46,7 @@ import (
 	otlpexporter "github.com/candelahq/candela/pkg/storage/otlpexporter"
 	"github.com/candelahq/candela/pkg/storage/projectdb"
 	sqlitestore "github.com/candelahq/candela/pkg/storage/sqlite"
+	"github.com/candelahq/candela/pkg/taskspend"
 )
 
 // ProviderConfig defines a custom LLM provider added via YAML config.
@@ -525,6 +526,12 @@ func main() {
 		"dashboard", dashboardPath,
 		"project", projectPath,
 		"catalog", catalogPath)
+
+	// ── Task Spend API ──────────────────────────────────────────────────
+	spendCache := taskspend.New(userStore, taskspend.DefaultTTL)
+	spendCache.StartEvictor(context.Background(), 30*time.Second)
+	mux.HandleFunc("/api/v1/task-spend/", taskspend.Handler(spendCache))
+	slog.Info("task spend API registered", "path", "/api/v1/task-spend/{taskID}")
 
 	// Register LLM proxy routes (selective activation).
 	if cfg.Proxy.Enabled {

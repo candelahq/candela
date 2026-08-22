@@ -42,9 +42,11 @@ deploy/candela.production.yaml
 !deploy/config.production.example.yaml
 !deploy/candela.production.example.yaml
 
-# Nix
+# Nix / direnv
 result
 result-*
+.direnv/
+.lefthook-remotes/
 
 # Rust
 rust/target/

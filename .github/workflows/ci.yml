@@ -46,6 +46,7 @@ jobs:
               - 'go.sum'
               - 'gen/**'
               - 'proto/**'
+              - '.editorconfig'
               - '.github/workflows/ci.yml'
               - 'flake.nix'
               - 'flake.lock'
@@ -125,8 +126,28 @@ jobs:
       - name: Vet
         run: nix develop . --command go vet ./...
 
+      - name: Format check (gofmt)
+        run: |
+          nix develop . --command bash -c '
+            unformatted=$(gofmt -l $(find . -name "*.go" -not -path "./gen/*" -not -path "./vendor/*"))
+            if [ -n "$unformatted" ]; then
+              echo "::error::The following files are not gofmt-formatted:"
+              echo "$unformatted"
+              exit 1
+            fi
+          '
+
+      - name: Verify go.mod/go.sum tidy
+        run: nix develop . --command go mod tidy -diff
+
       - name: Lint
         run: nix develop . --command golangci-lint run --timeout=5m
+
+      - name: Install editorconfig-checker
+        run: nix develop . --command go install github.com/editorconfig-checker/editorconfig-checker/v3/cmd/editorconfig-checker@latest
+
+      - name: Editorconfig check
+        run: nix develop . --command editorconfig-checker
 
   # ── tests — parallel matrix by package group ────────────────────────────────
   go-test:

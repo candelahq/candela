@@ -6,8 +6,12 @@ All notable changes to Candela are documented here, organized by development pha
 
 ### Added
 
-- Webhook budget alert notifier with HMAC-SHA256 signing, exponential backoff retry, and configurable event type filtering (#TBD)
+- Webhook budget alert notifier with HMAC-SHA256 signing, exponential backoff retry, and configurable event type filtering (#776)
+- Ephemeral task budget engine: per-job spend isolation via `X-Candela-Job-Id` header (#TBD)
+- `TaskBudget` type with CRUD and enforcement (create, get, delete, check, deduct)
+- Firestore implementation at `tasks/{taskID}/budgets/config` with atomic `DeductTaskSpend`
 - `TaskID` field on `BudgetAlert` for task-scoped notification context
+- Spend outbox extended with `TaskID` for durable task deduction retry
 
 ## v0.10.1 — 2026-07-07
 

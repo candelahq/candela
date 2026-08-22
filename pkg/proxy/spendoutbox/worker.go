@@ -10,6 +10,7 @@ import (
 // UserStore is the subset of storage.UserStore needed for spend retry.
 type UserStore interface {
 	DeductSpend(ctx context.Context, userID string, costUSD float64, tokens int64) error
+	DeductTaskSpend(ctx context.Context, taskID string, costUSD float64) error
 }
 
 // SpendSyncWorker periodically retries failed DeductSpend calls stored
@@ -105,7 +106,18 @@ func (w *SpendSyncWorker) processRetries() {
 			continue
 		}
 
-		// Attempt the DeductSpend retry.
+		// Attempt task budget deduction first (best-effort).
+		if rec.TaskID != "" {
+			if taskErr := w.users.DeductTaskSpend(ctx, rec.TaskID, rec.CostUSD); taskErr != nil {
+				slog.Warn("spend_outbox: task deduction failed (best-effort)",
+					"id", rec.ID,
+					"task_id", rec.TaskID,
+					"cost_usd", rec.CostUSD,
+					"error", taskErr)
+			}
+		}
+
+		// Attempt the DeductSpend retry for user budget.
 		if err := w.users.DeductSpend(ctx, rec.UserID, rec.CostUSD, rec.Tokens); err != nil {
 			if retryErr := w.outbox.RetryLater(ctx, rec.ID, rec.AttemptCount); retryErr != nil {
 				slog.Error("SpendSyncWorker failed to schedule retry", "error", retryErr)
@@ -113,6 +125,7 @@ func (w *SpendSyncWorker) processRetries() {
 			slog.Warn("spend_outbox: retry scheduled",
 				"id", rec.ID,
 				"user_id", rec.UserID,
+				"task_id", rec.TaskID,
 				"cost_usd", rec.CostUSD,
 				"attempt", rec.AttemptCount+1,
 				"next_retry_in", backoffDelay(rec.AttemptCount),

@@ -26,6 +26,7 @@ const sqliteTimeFormat = "2006-01-02T15:04:05.000000000Z"
 type SpendRecord struct {
 	ID           string
 	UserID       string
+	TaskID       string // optional: from X-Candela-Job-Id header
 	CostUSD      float64
 	Tokens       int64
 	AttemptCount int
@@ -73,6 +74,7 @@ func New(path string) (*Outbox, error) {
 	_, err = db.Exec(`CREATE TABLE IF NOT EXISTS spend_outbox (
 		id TEXT PRIMARY KEY,
 		user_id TEXT NOT NULL,
+		task_id TEXT DEFAULT '',
 		cost_usd REAL NOT NULL,
 		tokens INTEGER NOT NULL,
 		attempt_count INTEGER DEFAULT 0,
@@ -83,6 +85,10 @@ func New(path string) (*Outbox, error) {
 		_ = db.Close()
 		return nil, fmt.Errorf("creating table: %w", err)
 	}
+
+	// Backward-compat migration: add task_id column if the table
+	// already exists from a pre-task-budget version.
+	_, _ = db.Exec(`ALTER TABLE spend_outbox ADD COLUMN task_id TEXT DEFAULT ''`)
 
 	return &Outbox{db: db}, nil
 }
@@ -110,9 +116,9 @@ func (o *Outbox) Enqueue(ctx context.Context, rec SpendRecord) error {
 	createdStr := rec.CreatedAt.UTC().Format(sqliteTimeFormat)
 
 	_, err := o.db.ExecContext(ctx,
-		`INSERT INTO spend_outbox (id, user_id, cost_usd, tokens, attempt_count, created_at, next_retry_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		rec.ID, rec.UserID, rec.CostUSD, rec.Tokens, rec.AttemptCount,
+		`INSERT INTO spend_outbox (id, user_id, task_id, cost_usd, tokens, attempt_count, created_at, next_retry_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		rec.ID, rec.UserID, rec.TaskID, rec.CostUSD, rec.Tokens, rec.AttemptCount,
 		createdStr,
 		createdStr,
 	)
@@ -127,7 +133,7 @@ func (o *Outbox) Enqueue(ctx context.Context, rec SpendRecord) error {
 func (o *Outbox) Peek(ctx context.Context, limit int) ([]SpendRecord, error) {
 	now := time.Now().UTC().Format(sqliteTimeFormat)
 	rows, err := o.db.QueryContext(ctx,
-		`SELECT id, user_id, cost_usd, tokens, attempt_count, created_at
+		`SELECT id, user_id, task_id, cost_usd, tokens, attempt_count, created_at
 		 FROM spend_outbox
 		 WHERE next_retry_at <= ?
 		 ORDER BY created_at ASC LIMIT ?`, now, limit)
@@ -140,7 +146,7 @@ func (o *Outbox) Peek(ctx context.Context, limit int) ([]SpendRecord, error) {
 	for rows.Next() {
 		var rec SpendRecord
 		var createdAt string
-		if err := rows.Scan(&rec.ID, &rec.UserID, &rec.CostUSD, &rec.Tokens, &rec.AttemptCount, &createdAt); err != nil {
+		if err := rows.Scan(&rec.ID, &rec.UserID, &rec.TaskID, &rec.CostUSD, &rec.Tokens, &rec.AttemptCount, &createdAt); err != nil {
 			return nil, fmt.Errorf("scanning spend record: %w", err)
 		}
 		t, err := time.Parse(sqliteTimeFormat, createdAt)

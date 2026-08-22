@@ -227,6 +227,17 @@ func (s *integrationStore) ListAuditLog(_ context.Context, userID string, limit 
 }
 
 func (s *integrationStore) Close() error { return nil }
+func (s *integrationStore) CreateTaskBudget(context.Context, *storage.TaskBudget) error {
+	return nil
+}
+func (s *integrationStore) GetTaskBudget(context.Context, string) (*storage.TaskBudget, error) {
+	return nil, storage.ErrNotFound
+}
+func (s *integrationStore) DeleteTaskBudget(context.Context, string) error { return nil }
+func (s *integrationStore) CheckTaskBudget(_ context.Context, _ string, _ float64) (*storage.TaskBudgetCheckResult, error) {
+	return &storage.TaskBudgetCheckResult{Allowed: true}, nil
+}
+func (s *integrationStore) DeductTaskSpend(context.Context, string, float64) error { return nil }
 
 // ──────────────────────────────────────────
 // Test server helpers

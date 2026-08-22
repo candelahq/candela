@@ -77,6 +77,17 @@ func (b *budgetUserStore) ListAuditLog(context.Context, string, int) ([]*storage
 	return nil, nil
 }
 func (b *budgetUserStore) Close() error { return nil }
+func (b *budgetUserStore) CreateTaskBudget(context.Context, *storage.TaskBudget) error {
+	return nil
+}
+func (b *budgetUserStore) GetTaskBudget(context.Context, string) (*storage.TaskBudget, error) {
+	return nil, storage.ErrNotFound
+}
+func (b *budgetUserStore) DeleteTaskBudget(context.Context, string) error { return nil }
+func (b *budgetUserStore) CheckTaskBudget(_ context.Context, _ string, _ float64) (*storage.TaskBudgetCheckResult, error) {
+	return &storage.TaskBudgetCheckResult{Allowed: true}, nil
+}
+func (b *budgetUserStore) DeductTaskSpend(context.Context, string, float64) error { return nil }
 
 // ====================================================================
 // Pre-flight Budget Gate

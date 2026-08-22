@@ -30,6 +30,9 @@ func TestHandler_HappyPath(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
 	}
+	if ct := rec.Header().Get("Content-Type"); ct != "application/json" {
+		t.Errorf("Content-Type = %q, want %q", ct, "application/json")
+	}
 
 	var snap SpendSnapshot
 	if err := json.NewDecoder(rec.Body).Decode(&snap); err != nil {

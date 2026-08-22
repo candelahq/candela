@@ -195,3 +195,136 @@ func TestCache_ExpiredBudget(t *testing.T) {
 		t.Error("expected Expired=true for expired budget")
 	}
 }
+
+func TestCache_DefaultTTL(t *testing.T) {
+	c := New(&mockStore{}, 0)
+	if c.ttl != DefaultTTL {
+		t.Errorf("ttl = %v, want %v", c.ttl, DefaultTTL)
+	}
+}
+
+func TestCache_SingleflightColdMiss(t *testing.T) {
+	// Concurrent requests for the same cold task should produce exactly 1 fetch.
+	store := &slowStore{
+		budget: &billing.TaskBudget{
+			TaskID:   "job-sf",
+			LimitUSD: 10.0,
+			SpentUSD: 1.0,
+		},
+		delay: 50 * time.Millisecond,
+	}
+	c := New(store, 5*time.Second)
+
+	const n = 10
+	errs := make(chan error, n)
+	snaps := make(chan *SpendSnapshot, n)
+
+	for i := 0; i < n; i++ {
+		go func() {
+			snap, err := c.Get(context.Background(), "job-sf")
+			errs <- err
+			snaps <- snap
+		}()
+	}
+
+	for i := 0; i < n; i++ {
+		if err := <-errs; err != nil {
+			t.Fatalf("goroutine %d: %v", i, err)
+		}
+		snap := <-snaps
+		if snap.TaskID != "job-sf" {
+			t.Errorf("goroutine %d: TaskID = %q, want %q", i, snap.TaskID, "job-sf")
+		}
+	}
+
+	fetches := store.fetches.Load()
+	if fetches != 1 {
+		t.Errorf("fetches = %d, want 1 (singleflight should coalesce)", fetches)
+	}
+}
+
+func TestCache_SingleflightStaleRefresh(t *testing.T) {
+	// Concurrent requests for the same stale entry should coalesce into 1 re-fetch.
+	store := &slowStore{
+		budget: &billing.TaskBudget{
+			TaskID:   "job-stale",
+			LimitUSD: 10.0,
+			SpentUSD: 2.0,
+		},
+		delay: 50 * time.Millisecond,
+	}
+	c := New(store, 30*time.Millisecond)
+
+	// Prime cache.
+	if _, err := c.Get(context.Background(), "job-stale"); err != nil {
+		t.Fatalf("priming: %v", err)
+	}
+	if store.fetches.Load() != 1 {
+		t.Fatalf("priming fetches = %d, want 1", store.fetches.Load())
+	}
+
+	// Wait for TTL to expire.
+	time.Sleep(40 * time.Millisecond)
+
+	// Fire concurrent refreshes.
+	const n = 10
+	errs := make(chan error, n)
+	for i := 0; i < n; i++ {
+		go func() {
+			_, err := c.Get(context.Background(), "job-stale")
+			errs <- err
+		}()
+	}
+	for i := 0; i < n; i++ {
+		if err := <-errs; err != nil {
+			t.Fatalf("goroutine %d: %v", i, err)
+		}
+	}
+
+	fetches := store.fetches.Load()
+	if fetches != 2 {
+		t.Errorf("fetches = %d, want 2 (1 prime + 1 coalesced refresh)", fetches)
+	}
+}
+
+func TestCache_SingleflightErrorPropagation(t *testing.T) {
+	// All waiters should see the same error.
+	store := &slowStore{
+		err:   fmt.Errorf("boom"),
+		delay: 50 * time.Millisecond,
+	}
+	c := New(store, 5*time.Second)
+
+	const n = 5
+	errs := make(chan error, n)
+	for i := 0; i < n; i++ {
+		go func() {
+			_, err := c.Get(context.Background(), "job-err-sf")
+			errs <- err
+		}()
+	}
+	for i := 0; i < n; i++ {
+		if err := <-errs; err == nil {
+			t.Errorf("goroutine %d: expected error, got nil", i)
+		}
+	}
+}
+
+// slowStore adds a configurable delay to simulate Firestore latency
+// for singleflight tests.
+type slowStore struct {
+	budget  *billing.TaskBudget
+	err     error
+	delay   time.Duration
+	fetches atomic.Int64
+}
+
+func (s *slowStore) GetTaskBudget(_ context.Context, _ string) (*billing.TaskBudget, error) {
+	s.fetches.Add(1)
+	time.Sleep(s.delay)
+	if s.err != nil {
+		return nil, s.err
+	}
+	b := *s.budget
+	return &b, nil
+}

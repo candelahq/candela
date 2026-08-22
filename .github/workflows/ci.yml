@@ -129,7 +129,7 @@ jobs:
       - name: Format check (gofmt)
         shell: bash
         run: |
-          unformatted=$(nix develop . --command gofmt -l . | grep -v "^gen/" | grep -v "^vendor/" || true)
+          unformatted=$(nix develop . --command gofmt -l . 2>/dev/null | grep '\.go$' | grep -v '^gen/' | grep -v '^vendor/' || true)
           if [ -n "$unformatted" ]; then
             echo "::error::Files not gofmt-formatted:"
             echo "$unformatted"

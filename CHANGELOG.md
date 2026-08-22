@@ -12,6 +12,7 @@ All notable changes to Candela are documented here, organized by development pha
 - Firestore implementation at `tasks/{taskID}/budgets/config` with atomic `DeductTaskSpend`
 - `TaskID` field on `BudgetAlert` for task-scoped notification context
 - Spend outbox extended with `TaskID` for durable task deduction retry
+- Fast task spend API: `GET /api/v1/task-spend/{taskID}` with in-memory cache (5s TTL)
 
 ## v0.10.1 — 2026-07-07
 

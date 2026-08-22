@@ -256,7 +256,7 @@ jobs:
 
       # ── Notify on failure ────────────────────────────────────────────
       - name: Notify on failure
-        if: failure() && secrets.SLACK_WEBHOOK_URL != ''
+        if: failure()
         env:
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
           SLACK_MESSAGE: |

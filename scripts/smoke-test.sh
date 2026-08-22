@@ -85,10 +85,9 @@ check_endpoint() {
     local remaining=$((deadline - SECONDS))
     if [[ $remaining -le 0 ]]; then break; fi
 
-    # Cap curl timeout to remaining budget (min 2s)
+    # Cap curl timeout to remaining budget
     local curl_timeout=$remaining
     if [[ $curl_timeout -gt 15 ]]; then curl_timeout=15; fi
-    if [[ $curl_timeout -lt 2 ]]; then curl_timeout=2; fi
 
     # Build curl args
     local curl_args=(-s -o /dev/null -w "%{http_code}" --connect-timeout "$curl_timeout" --max-time "$curl_timeout")
@@ -101,6 +100,12 @@ check_endpoint() {
     if [[ "$status" == "$expected_status" ]]; then
       # If we need to check body content, fetch the body
       if [[ -n "$body_contains" ]]; then
+        # Recompute remaining budget for body request
+        remaining=$((deadline - SECONDS))
+        if [[ $remaining -le 0 ]]; then break; fi
+        curl_timeout=$remaining
+        if [[ $curl_timeout -gt 15 ]]; then curl_timeout=15; fi
+
         local body_args=(-s --connect-timeout "$curl_timeout" --max-time "$curl_timeout")
         if [[ -n "$TOKEN" ]]; then
           body_args+=(-H "Authorization: Bearer $TOKEN")
@@ -123,7 +128,12 @@ check_endpoint() {
       info "$description — got ${status}, want ${expected_status}, retrying..."
     fi
 
-    sleep "$RETRY_INTERVAL"
+    # Sleep only if time remains; cap sleep to remaining budget
+    remaining=$((deadline - SECONDS))
+    if [[ $remaining -le 0 ]]; then break; fi
+    local sleep_time=$RETRY_INTERVAL
+    if [[ $sleep_time -gt $remaining ]]; then sleep_time=$remaining; fi
+    sleep "$sleep_time"
   done
 
   fail "$description — timed out after ${TIMEOUT}s (last status: ${status})"

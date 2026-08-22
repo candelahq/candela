@@ -130,10 +130,11 @@ jobs:
         id: tag
         run: |
           # Tag the target revision so we can test it without shifting traffic
+          # Use --update-tags to preserve any existing tags on other revisions
           gcloud run services update-traffic "${{ vars.CLOUD_RUN_SERVICE }}" \
             --project "${{ vars.GCP_PROJECT_ID }}" \
             --region "${{ vars.GCP_REGION }}" \
-            --set-tags rollback-test=${{ steps.target.outputs.revision }}
+            --update-tags rollback-test=${{ steps.target.outputs.revision }}
 
           TAG_URL=$(gcloud run services describe "${{ vars.CLOUD_RUN_SERVICE }}" \
             --project "${{ vars.GCP_PROJECT_ID }}" \
@@ -171,10 +172,18 @@ jobs:
           gcloud run services update-traffic "${{ vars.CLOUD_RUN_SERVICE }}" \
             --project "${{ vars.GCP_PROJECT_ID }}" \
             --region "${{ vars.GCP_REGION }}" \
-            --to-revisions=${{ steps.target.outputs.revision }}=100 \
-            --clear-tags
+            --to-revisions=${{ steps.target.outputs.revision }}=100
 
           echo "✅ 100% traffic now on: ${{ steps.target.outputs.revision }}"
+
+      # ── Clean up test tag (runs on success and failure) ─────────────
+      - name: Remove rollback-test tag
+        if: always() && steps.tag.outcome == 'success'
+        run: |
+          gcloud run services update-traffic "${{ vars.CLOUD_RUN_SERVICE }}" \
+            --project "${{ vars.GCP_PROJECT_ID }}" \
+            --region "${{ vars.GCP_REGION }}" \
+            --remove-tags rollback-test || true
 
       # ── Audit trail ──────────────────────────────────────────────────
       - name: Record rollback deployment

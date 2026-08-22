@@ -2,6 +2,13 @@
 
 All notable changes to Candela are documented here, organized by development phase. PRs are merged to `main`.
 
+## [Unreleased]
+
+### Added
+
+- Webhook budget alert notifier with HMAC-SHA256 signing, exponential backoff retry, and configurable event type filtering (#TBD)
+- `TaskID` field on `BudgetAlert` for task-scoped notification context
+
 ## v0.10.1 — 2026-07-07
 
 ### Breaking Change — Anthropic Caching Config Restructured

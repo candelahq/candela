@@ -71,7 +71,8 @@ const (
 type BudgetAlert struct {
 	UserID    string    `json:"user_id" firestore:"user_id"`
 	Email     string    `json:"email" firestore:"email"`
-	Threshold float64   `json:"threshold" firestore:"threshold"` // 0.8, 0.9, 1.0
+	TaskID    string    `json:"task_id,omitempty" firestore:"task_id,omitempty"` // optional: from X-Candela-Job-Id
+	Threshold float64   `json:"threshold" firestore:"threshold"`                 // 0.8, 0.9, 1.0
 	SpentUSD  float64   `json:"spent_usd" firestore:"spent_usd"`
 	LimitUSD  float64   `json:"limit_usd" firestore:"limit_usd"`
 	PeriodKey string    `json:"period_key" firestore:"period_key"`

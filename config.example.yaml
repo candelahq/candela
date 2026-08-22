@@ -193,3 +193,12 @@ sinks:
 # Budget alert notifications.
 # notifications:
 #   slack_webhook_url: "https://hooks.slack.com/services/T.../B.../xxx"  # Slack incoming webhook
+#   webhook:
+#     enabled: true
+#     endpoint: "https://your-service.example.com/webhooks/candela"
+#     secret: "${CANDELA_WEBHOOK_SECRET}"      # HMAC-SHA256 signing key (supports env var expansion)
+#     events:                                  # Filter which events to send (omit for all)
+#       - "budget.exhausted"                   # User budget fully consumed
+#       - "budget.threshold"                   # User budget threshold crossed (80%, 90%)
+#       - "task.budget.exhausted"              # Task budget fully consumed
+#       - "task.budget.threshold"              # Task budget threshold crossed

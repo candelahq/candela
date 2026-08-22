@@ -145,7 +145,8 @@ type Config struct {
 		Timezone string `yaml:"timezone"` // IANA timezone for budget period reset (default: UTC)
 	} `yaml:"budget"`
 	Notifications struct {
-		SlackWebhookURL string `yaml:"slack_webhook_url"` // Slack incoming webhook URL
+		SlackWebhookURL string               `yaml:"slack_webhook_url"` // Slack incoming webhook URL
+		Webhook         notify.WebhookConfig `yaml:"webhook"`           // Generic webhook notifier
 	} `yaml:"notifications"`
 }
 
@@ -812,6 +813,12 @@ func main() {
 				if cfg.Notifications.SlackWebhookURL != "" {
 					channels = append(channels, notify.NewSlackNotifier(cfg.Notifications.SlackWebhookURL))
 					slog.Info("🔔 Slack budget alerts enabled")
+				}
+				if cfg.Notifications.Webhook.Enabled {
+					wh := notify.NewWebhookNotifier(cfg.Notifications.Webhook)
+					channels = append(channels, wh)
+					slog.Info("🔔 Webhook budget alerts enabled",
+						"endpoint", wh.RedactedEndpoint())
 				}
 				llmProxy.SetBudgetChecker(notify.NewBudgetChecker(channels...))
 

@@ -1094,19 +1094,17 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 				"remaining_usd", check.RemainingUSD)
 			return
 		} else {
-			// TOCTOU: check task-level pending spend.
-			effectiveTaskRemaining := check.RemainingUSD - p.taskPendingSpend.Get(jobID)
-			if effectiveTaskRemaining < budgetCheckFloor {
+			// TOCTOU: atomic check-and-reserve for task-level pending spend.
+			taskReserved = reservationFloor
+			if estimatedCost > reservationFloor {
+				taskReserved = estimatedCost
+			}
+			if !p.taskPendingSpend.ReserveIfUnder(jobID, check.RemainingUSD, taskReserved, budgetCheckFloor) {
 				ProxyErrorResponse(w, http.StatusPaymentRequired,
 					"task budget exhausted (concurrent requests in flight)",
 					"task_budget_exhausted")
 				return
 			}
-			taskReserved = reservationFloor
-			if estimatedCost > reservationFloor {
-				taskReserved = estimatedCost
-			}
-			p.taskPendingSpend.Reserve(jobID, taskReserved)
 			defer func() {
 				if taskReserved > 0 {
 					p.taskPendingSpend.Release(jobID, taskReserved)
@@ -1636,6 +1634,16 @@ done:
 	taskRes := taskReserved
 	taskReserved = 0
 
+	// Safety net: release task reservation if handler returns without
+	// clearing it (e.g. read failure, response-size error). The handler
+	// sets *taskReserved=0 after successful deduction, making this a no-op
+	// in the normal path.
+	defer func() {
+		if taskRes > 0 {
+			p.taskPendingSpend.Release(jobID, taskRes)
+		}
+	}()
+
 	if isStreaming && resp.StatusCode == http.StatusOK {
 		p.handleStreamingResponse(w, r, resp, provider, reqBody, startTime, ttfb, requestID, sessionID, effectiveUserID, tenantID, jobID, cbAllow, traceCtx, proxySpanID, extendedTTL, &reserved, &taskRes)
 	} else {
@@ -2099,11 +2107,26 @@ func (p *Proxy) deductBudget(ctx context.Context, provider Provider, model, user
 		return
 	}
 
-	// #779: Best-effort task budget deduction (separate Firestore document group).
+	// #779: Task budget deduction (separate Firestore document group).
+	// On failure, enqueue to outbox so the worker retries DeductTaskSpend.
 	if jobID != "" && cost > 0 {
 		if taskErr := p.users.DeductTaskSpend(ctx, jobID, cost); taskErr != nil {
-			slog.Warn("task_deduct_spend: failed (best-effort)",
+			slog.Warn("task_deduct_spend: failed, enqueueing to outbox",
 				"job_id", jobID, "cost_usd", cost, "error", taskErr)
+			if p.spendOutbox != nil {
+				// Enqueue a task-only record (UserID already deducted above).
+				// The worker calls DeductTaskSpend when TaskID is set.
+				if qErr := p.spendOutbox.Enqueue(ctx, spendoutbox.SpendRecord{
+					UserID:  userID,
+					TaskID:  jobID,
+					CostUSD: cost,
+					Tokens:  0, // user spend already recorded; task-only retry
+				}); qErr != nil {
+					slog.Error("task_deduct_spend: CRITICAL — failed to enqueue to outbox",
+						"job_id", jobID, "cost_usd", cost,
+						"enqueue_error", qErr, "original_error", taskErr)
+				}
+			}
 		}
 	}
 

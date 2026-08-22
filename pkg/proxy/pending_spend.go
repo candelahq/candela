@@ -54,3 +54,20 @@ func (t *pendingSpendTracker) Get(userID string) float64 {
 	defer t.mu.Unlock()
 	return t.pending[userID]
 }
+
+// ReserveIfUnder atomically checks whether (remaining - currentPending - reserveAmount)
+// stays above floor, and if so, records the reservation. Returns true if reserved.
+// This prevents the TOCTOU race between separate Get and Reserve calls.
+func (t *pendingSpendTracker) ReserveIfUnder(id string, remaining, reserveAmount, floor float64) bool {
+	if reserveAmount <= 0 || id == "" {
+		return false
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	effective := remaining - t.pending[id] - reserveAmount
+	if effective < floor {
+		return false
+	}
+	t.pending[id] += reserveAmount
+	return true
+}

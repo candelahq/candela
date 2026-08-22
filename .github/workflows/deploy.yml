@@ -256,9 +256,9 @@ jobs:
 
       # ── Notify on failure ────────────────────────────────────────────
       - name: Notify on failure
-        if: failure() && vars.SLACK_WEBHOOK_URL != ''
+        if: failure() && secrets.SLACK_WEBHOOK_URL != ''
         env:
-          SLACK_WEBHOOK_URL: ${{ vars.SLACK_WEBHOOK_URL }}
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
           SLACK_MESSAGE: |
             🚨 Candela deploy FAILED (${{ inputs.environment }})
             Image: `${{ env.IMAGE }}`

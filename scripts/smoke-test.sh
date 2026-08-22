@@ -77,13 +77,21 @@ check_endpoint() {
   local description="$3"
   local body_contains="${4:-}"
 
-  local elapsed=0
   local status=""
   local body=""
+  local deadline=$((SECONDS + TIMEOUT))
 
-  while [[ $elapsed -lt $TIMEOUT ]]; do
+  while [[ $SECONDS -lt $deadline ]]; do
+    local remaining=$((deadline - SECONDS))
+    if [[ $remaining -le 0 ]]; then break; fi
+
+    # Cap curl timeout to remaining budget (min 2s)
+    local curl_timeout=$remaining
+    if [[ $curl_timeout -gt 15 ]]; then curl_timeout=15; fi
+    if [[ $curl_timeout -lt 2 ]]; then curl_timeout=2; fi
+
     # Build curl args
-    local curl_args=(-s -o /dev/null -w "%{http_code}" --connect-timeout 10 --max-time 15)
+    local curl_args=(-s -o /dev/null -w "%{http_code}" --connect-timeout "$curl_timeout" --max-time "$curl_timeout")
     if [[ -n "$TOKEN" ]]; then
       curl_args+=(-H "Authorization: Bearer $TOKEN")
     fi
@@ -93,28 +101,29 @@ check_endpoint() {
     if [[ "$status" == "$expected_status" ]]; then
       # If we need to check body content, fetch the body
       if [[ -n "$body_contains" ]]; then
-        local body_args=(-s --connect-timeout 10 --max-time 15)
+        local body_args=(-s --connect-timeout "$curl_timeout" --max-time "$curl_timeout")
         if [[ -n "$TOKEN" ]]; then
           body_args+=(-H "Authorization: Bearer $TOKEN")
         fi
         body=$(curl "${body_args[@]}" "$url" 2>/dev/null || echo "")
 
         if echo "$body" | grep -q "$body_contains"; then
+          local elapsed=$((TIMEOUT - (deadline - SECONDS)))
           pass "$description (${status}, ${elapsed}s)"
           return 0
         else
-          info "$description — status OK but body missing '$body_contains', retrying... (${elapsed}s)"
+          info "$description — status OK but body missing '$body_contains', retrying..."
         fi
       else
+        local elapsed=$((TIMEOUT - (deadline - SECONDS)))
         pass "$description (${status}, ${elapsed}s)"
         return 0
       fi
     else
-      info "$description — got ${status}, want ${expected_status}, retrying... (${elapsed}s)"
+      info "$description — got ${status}, want ${expected_status}, retrying..."
     fi
 
     sleep "$RETRY_INTERVAL"
-    elapsed=$((elapsed + RETRY_INTERVAL))
   done
 
   fail "$description — timed out after ${TIMEOUT}s (last status: ${status})"

@@ -115,7 +115,57 @@ jobs:
           echo "revision=$TARGET" >> "$GITHUB_OUTPUT"
           echo "✅ Revision $TARGET is ready"
 
-      # ── Shift traffic ────────────────────────────────────────────────
+      # ── Save current traffic and test target via tag ─────────────────
+      - name: Save current traffic state
+        id: current
+        run: |
+          CURRENT_REVISION=$(gcloud run services describe "${{ vars.CLOUD_RUN_SERVICE }}" \
+            --project "${{ vars.GCP_PROJECT_ID }}" \
+            --region "${{ vars.GCP_REGION }}" \
+            --format='value(status.traffic[0].revisionName)')
+          echo "revision=$CURRENT_REVISION" >> "$GITHUB_OUTPUT"
+          echo "📊 Current live revision: $CURRENT_REVISION"
+
+      - name: Tag target revision for testing
+        id: tag
+        run: |
+          # Tag the target revision so we can test it without shifting traffic
+          gcloud run services update-traffic "${{ vars.CLOUD_RUN_SERVICE }}" \
+            --project "${{ vars.GCP_PROJECT_ID }}" \
+            --region "${{ vars.GCP_REGION }}" \
+            --set-tags rollback-test=${{ steps.target.outputs.revision }}
+
+          TAG_URL=$(gcloud run services describe "${{ vars.CLOUD_RUN_SERVICE }}" \
+            --project "${{ vars.GCP_PROJECT_ID }}" \
+            --region "${{ vars.GCP_REGION }}" \
+            --format='value(status.traffic[tag=rollback-test].url)')
+
+          SERVICE_URL=$(gcloud run services describe "${{ vars.CLOUD_RUN_SERVICE }}" \
+            --project "${{ vars.GCP_PROJECT_ID }}" \
+            --region "${{ vars.GCP_REGION }}" \
+            --format='value(status.url)')
+
+          echo "tag_url=$TAG_URL" >> "$GITHUB_OUTPUT"
+          echo "service_url=$SERVICE_URL" >> "$GITHUB_OUTPUT"
+          echo "🏷️ Tag URL: $TAG_URL"
+
+      - name: Smoke test target via tag (before traffic shift)
+        env:
+          TAG_URL: ${{ steps.tag.outputs.tag_url }}
+          SERVICE_URL: ${{ steps.tag.outputs.service_url }}
+        run: |
+          chmod +x scripts/smoke-test.sh
+
+          TOKEN=$(gcloud auth print-identity-token \
+            --audiences="$SERVICE_URL" 2>/dev/null || echo "")
+
+          if [[ -n "$TOKEN" ]]; then
+            ./scripts/smoke-test.sh "$TAG_URL" --token "$TOKEN" --timeout 60
+          else
+            ./scripts/smoke-test.sh "$TAG_URL" --timeout 60
+          fi
+
+      # ── Promote: shift traffic to verified target ──────────────────
       - name: Route traffic to target revision
         run: |
           gcloud run services update-traffic "${{ vars.CLOUD_RUN_SERVICE }}" \
@@ -125,25 +175,6 @@ jobs:
             --clear-tags
 
           echo "✅ 100% traffic now on: ${{ steps.target.outputs.revision }}"
-
-      # ── Verify rollback ──────────────────────────────────────────────
-      - name: Smoke test after rollback
-        run: |
-          SERVICE_URL=$(gcloud run services describe "${{ vars.CLOUD_RUN_SERVICE }}" \
-            --project "${{ vars.GCP_PROJECT_ID }}" \
-            --region "${{ vars.GCP_REGION }}" \
-            --format='value(status.url)')
-
-          chmod +x scripts/smoke-test.sh
-
-          TOKEN=$(gcloud auth print-identity-token \
-            --audiences="$SERVICE_URL" 2>/dev/null || echo "")
-
-          if [[ -n "$TOKEN" ]]; then
-            ./scripts/smoke-test.sh "$SERVICE_URL" --token "$TOKEN" --timeout 60
-          else
-            ./scripts/smoke-test.sh "$SERVICE_URL" --timeout 60
-          fi
 
       # ── Audit trail ──────────────────────────────────────────────────
       - name: Record rollback deployment
@@ -174,9 +205,9 @@ jobs:
 
       # ── Notify ───────────────────────────────────────────────────────
       - name: Notify
-        if: always() && vars.SLACK_WEBHOOK_URL != ''
+        if: always() && secrets.SLACK_WEBHOOK_URL != ''
         env:
-          SLACK_WEBHOOK_URL: ${{ vars.SLACK_WEBHOOK_URL }}
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
           TARGET_REVISION: ${{ steps.target.outputs.revision }}
           JOB_STATUS: ${{ job.status }}
         run: |

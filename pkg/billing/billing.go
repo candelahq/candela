@@ -45,6 +45,26 @@ type Service interface {
 	// Grants absorb overflow when the budget is exhausted.
 	// This must be transactional.
 	DeductSpend(ctx context.Context, userID string, costUSD float64, tokens int64) error
+
+	// ── Task Budgets ──
+
+	// CreateTaskBudget creates an ephemeral budget for a single agent task.
+	// The task is identified by its job_id (from X-Candela-Job-Id header).
+	CreateTaskBudget(ctx context.Context, budget *TaskBudget) error
+
+	// GetTaskBudget returns the task budget for a given task ID.
+	GetTaskBudget(ctx context.Context, taskID string) (*TaskBudget, error)
+
+	// DeleteTaskBudget removes a task budget (typically when the task completes).
+	DeleteTaskBudget(ctx context.Context, taskID string) error
+
+	// CheckTaskBudget evaluates whether an estimated cost is within the task's budget.
+	// This is a read-only pre-flight check.
+	CheckTaskBudget(ctx context.Context, taskID string, estimatedCostUSD float64) (*TaskBudgetCheckResult, error)
+
+	// DeductTaskSpend atomically increments the spent_usd on a task budget.
+	// If the task budget doesn't exist or is expired, it returns an error.
+	DeductTaskSpend(ctx context.Context, taskID string, costUSD float64) error
 }
 
 // Notifier sends budget alerts through a specific channel.

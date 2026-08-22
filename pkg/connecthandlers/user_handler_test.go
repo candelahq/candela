@@ -246,6 +246,17 @@ func (m *mockUserStore) ListAuditLog(_ context.Context, userID string, limit int
 }
 
 func (m *mockUserStore) Close() error { return nil }
+func (m *mockUserStore) CreateTaskBudget(context.Context, *storage.TaskBudget) error {
+	return nil
+}
+func (m *mockUserStore) GetTaskBudget(context.Context, string) (*storage.TaskBudget, error) {
+	return nil, storage.ErrNotFound
+}
+func (m *mockUserStore) DeleteTaskBudget(context.Context, string) error { return nil }
+func (m *mockUserStore) CheckTaskBudget(_ context.Context, _ string, _ float64) (*storage.TaskBudgetCheckResult, error) {
+	return &storage.TaskBudgetCheckResult{Allowed: true}, nil
+}
+func (m *mockUserStore) DeductTaskSpend(context.Context, string, float64) error { return nil }
 
 // ──────────────────────────────────────────
 // Tests

@@ -281,9 +281,53 @@ gcloud alpha monitoring policies create \
 |------|---------|
 | `pkg/billing/types.go` | `BudgetRecord`, `GrantRecord`, `BudgetCheckResult`, `BudgetAlert`, reason constants |
 | `pkg/billing/billing.go` | `Service` interface — storage-agnostic billing contract |
+| `pkg/billing/task_budget.go` | `TaskBudget`, `TaskBudgetCheckResult` — ephemeral per-job budget types |
 | `pkg/notify/notifier.go` | `BudgetChecker`, `LogNotifier`, threshold logic |
 | `pkg/notify/notifier_test.go` | Unit tests for dedup and threshold evaluation |
 | `pkg/storage/store.go` | Type aliases for `billing.*` types, `UserStore` interface |
 | `pkg/storage/firestoredb/firestoredb.go` | `DeductSpend()`, `CheckBudget()`, `GetGrant()`, grant waterfall with `StartsAt` filtering |
+| `pkg/storage/firestoredb/task_budget.go` | Task budget Firestore CRUD + `DeductTaskSpend()` |
 | `pkg/proxy/proxy.go` | Budget deduction call in `buildSpan()` |
 | `cmd/candela-server/main.go` | Wiring `BudgetChecker` into the proxy, budget timezone config |
+
+## Ephemeral Task Budgets
+
+Task budgets provide per-job spend isolation. When multiple agent tasks run under the same user or service account, each task can have its own independent spending limit.
+
+### Firestore Schema
+
+```
+tasks/{taskID}/budgets/config
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `task_id` | string | Job ID from `X-Candela-Job-Id` header |
+| `user_id` | string | Owner — the user who created the task budget |
+| `limit_usd` | float64 | Maximum spend for this task |
+| `spent_usd` | float64 | Current total spend (atomically incremented) |
+| `created_at` | timestamp | When the budget was created |
+| `expires_at` | timestamp | Auto-expiry time (optional, zero = no expiry) |
+
+### How It Works
+
+1. **Create**: An admin or orchestrator calls `POST /api/v1/task-budgets` with `task_id`, `limit_usd`, and optional `expires_at`.
+2. **Pre-flight**: When a proxy request arrives with `X-Candela-Job-Id`, the budget gate checks the task budget *first*. If the task budget is exhausted or expired, the request is rejected with HTTP 402 before the user budget is even consulted.
+3. **Deduction**: After the LLM response completes, the proxy deducts from the task budget (best-effort) *and then* from the user budget. These are **not** atomic — if the task deduction fails, the user deduction still proceeds.
+4. **Cleanup**: When the task completes, call `DELETE /api/v1/task-budgets/{taskID}` to remove the budget.
+
+### Relationship to User Budgets
+
+```
+┌──────────────────────┐
+│    Task Budget       │  ← checked first (if X-Candela-Job-Id present)
+│    $5.00 / job       │
+└──────┬───────────────┘
+       │ if task allows...
+┌──────▼───────────────┐
+│    User Budget       │  ← always checked
+│    $100.00 / day     │
+└──────────────────────┘
+```
+
+Task budgets are **additive guards** — they never increase a user's budget. A request must pass *both* the task budget and user budget checks to proceed.

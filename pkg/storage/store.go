@@ -625,6 +625,23 @@ type UserStore interface {
 	// This must be transactional.
 	DeductSpend(ctx context.Context, userID string, costUSD float64, tokens int64) error
 
+	// ── Task Budgets ──
+
+	// CreateTaskBudget creates an ephemeral budget for a single agent task.
+	CreateTaskBudget(ctx context.Context, budget *TaskBudget) error
+
+	// GetTaskBudget returns the task budget for a given task ID.
+	GetTaskBudget(ctx context.Context, taskID string) (*TaskBudget, error)
+
+	// DeleteTaskBudget removes a task budget (typically when the task completes).
+	DeleteTaskBudget(ctx context.Context, taskID string) error
+
+	// CheckTaskBudget evaluates whether an estimated cost is within the task's budget.
+	CheckTaskBudget(ctx context.Context, taskID string, estimatedCostUSD float64) (*TaskBudgetCheckResult, error)
+
+	// DeductTaskSpend atomically increments the spent_usd on a task budget.
+	DeductTaskSpend(ctx context.Context, taskID string, costUSD float64) error
+
 	// ── Rate Limiting ──
 
 	// CheckRateLimit atomically increments and checks the current-minute counter.
@@ -647,6 +664,12 @@ type UserStore interface {
 	// Close releases resources.
 	Close() error
 }
+
+// TaskBudget is a type alias for billing.TaskBudget.
+type TaskBudget = billing.TaskBudget
+
+// TaskBudgetCheckResult is a type alias for billing.TaskBudgetCheckResult.
+type TaskBudgetCheckResult = billing.TaskBudgetCheckResult
 
 // BudgetAlert is a type alias for billing.BudgetAlert.
 type BudgetAlert = billing.BudgetAlert

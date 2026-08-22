@@ -28,6 +28,10 @@ func (m *mockUserStore) DeductSpend(_ context.Context, userID string, costUSD fl
 	return m.err
 }
 
+func (m *mockUserStore) DeductTaskSpend(_ context.Context, _ string, _ float64) error {
+	return nil
+}
+
 func (m *mockUserStore) callCount() int {
 	m.mu.Lock()
 	defer m.mu.Unlock()

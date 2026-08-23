@@ -303,7 +303,7 @@ The `X-Candela-Job-Id` request header connects proxy requests to task budgets fo
 
 **Lifecycle:**
 
-```
+```text
 1. Client sets X-Candela-Job-Id on proxy request
           │
 2. Proxy pre-flight: CheckTaskBudget → enforce limits

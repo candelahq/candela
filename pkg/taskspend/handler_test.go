@@ -55,13 +55,55 @@ func newTestCache(budget *billing.TaskBudget) *Cache {
 }
 
 func doRequest(handler http.HandlerFunc, taskID string, user *auth.User) *httptest.ResponseRecorder {
-	req := httptest.NewRequest("GET", "/api/v1/task-spend/"+taskID, nil)
+	return doRequestMethod(handler, http.MethodGet, taskID, user)
+}
+
+func doRequestMethod(handler http.HandlerFunc, method, taskID string, user *auth.User) *httptest.ResponseRecorder {
+	req := httptest.NewRequest(method, "/api/v1/task-spend/"+taskID, nil)
 	if user != nil {
 		req = req.WithContext(auth.NewContext(req.Context(), user))
 	}
 	rr := httptest.NewRecorder()
 	handler.ServeHTTP(rr, req)
 	return rr
+}
+
+// ── Test: non-GET → 405 ──
+
+func TestHandler_NonGET_Returns405(t *testing.T) {
+	h := Handler(newTestCache(testBudget()), nil)
+	owner := &auth.User{ID: "owner@example.com", Email: "owner@example.com"}
+	rr := doRequestMethod(h, http.MethodPost, "task-123", owner)
+	if rr.Code != http.StatusMethodNotAllowed {
+		t.Errorf("status = %d, want 405", rr.Code)
+	}
+}
+
+// ── Test: empty task ID → 400 ──
+
+func TestHandler_EmptyTaskID_Returns400(t *testing.T) {
+	h := Handler(newTestCache(testBudget()), nil)
+	owner := &auth.User{ID: "owner@example.com", Email: "owner@example.com"}
+	rr := doRequest(h, "", owner)
+	if rr.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400", rr.Code)
+	}
+}
+
+// ── Test: extractTaskID ──
+
+func TestExtractTaskID(t *testing.T) {
+	cases := map[string]string{
+		"/api/v1/task-spend/task-123":  "task-123",
+		"/api/v1/task-spend/task-123/": "task-123",
+		"/api/v1/task-spend/":          "",
+		"/api/v1/other/task-123":       "",
+	}
+	for path, want := range cases {
+		if got := extractTaskID(path); got != want {
+			t.Errorf("extractTaskID(%q) = %q, want %q", path, got, want)
+		}
+	}
 }
 
 // ── Test: no auth → 401 ──

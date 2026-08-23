@@ -56,11 +56,15 @@ func Handler(cache *Cache, users UserLookup) http.HandlerFunc {
 		// ── Authorization: owner, admin, or service account ──
 		callerID := caller.EffectiveID()
 		isOwner := snap.OwnerID == callerID
-		isSA := strings.HasSuffix(callerID, ".gserviceaccount.com")
+		isSA := strings.HasSuffix(callerID, ".iam.gserviceaccount.com")
 		isAdmin := false
 
 		if !isOwner && !isSA && users != nil {
-			if record, lookupErr := users.GetUser(r.Context(), callerID); lookupErr == nil && record != nil {
+			record, lookupErr := users.GetUser(r.Context(), callerID)
+			switch {
+			case lookupErr != nil && !errors.Is(lookupErr, storage.ErrNotFound):
+				slog.Error("taskspend: admin lookup failed", "error", lookupErr)
+			case lookupErr == nil && record != nil:
 				isAdmin = record.Role == storage.RoleAdmin
 			}
 		}

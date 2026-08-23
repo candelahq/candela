@@ -88,6 +88,13 @@ func (b *budgetUserStore) CheckTaskBudget(_ context.Context, _ string, _ float64
 	return &storage.TaskBudgetCheckResult{Allowed: true}, nil
 }
 func (b *budgetUserStore) DeductTaskSpend(context.Context, string, float64) error { return nil }
+func (b *budgetUserStore) SetModelLimit(context.Context, *storage.ModelLimitRecord) error {
+	return nil
+}
+func (b *budgetUserStore) GetModelLimits(context.Context, string) ([]*storage.ModelLimitRecord, error) {
+	return nil, nil
+}
+func (b *budgetUserStore) DeleteModelLimit(context.Context, string, string) error { return nil }
 
 // ====================================================================
 // Pre-flight Budget Gate

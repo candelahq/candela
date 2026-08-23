@@ -329,6 +329,96 @@ curl -X POST http://localhost:8181/v1/messages \
   -d '{"model":"claude-sonnet-4-20250514","max_tokens":1024,"messages":[{"role":"user","content":"Hello"}]}'
 ```
 
+### Per-Model Daily Spend Limits
+
+Candela supports per-model daily spend ceilings to prevent expensive models from consuming the entire budget. Limits are enforced pre-flight — requests that would exceed the limit are rejected with `402 Payment Required` before reaching the upstream provider.
+
+#### Global Limits (YAML Config)
+
+Set global per-model limits in `config.yaml` that apply to all users:
+
+```yaml
+proxy:
+  daily_limits:
+    - model: "claude-opus-4"
+      max_daily_usd: 50.00
+    - model: "gpt-4o"
+      max_daily_usd: 25.00
+```
+
+- **Model matching:** Uses longest-prefix matching. `"claude-opus-4"` matches `claude-opus-4`, `claude-opus-4-20250514`, etc.
+- **Reset:** Counters reset at UTC midnight.
+- **Scope:** Per-user — each user gets their own daily counter per model.
+- **In-memory:** Counters are tracked in-memory and reset on proxy restart.
+
+#### Per-User Limits (REST API)
+
+Admins can set per-user model limits that override the global YAML config. These are stored in Firestore and persist across restarts.
+
+### `PUT /api/v1/users/{userID}/model-limits/{modelPrefix}`
+
+Create or update a per-user model limit.
+
+**Authentication:** Required. **Authorization:** Admin only.
+
+**Request body:**
+
+```json
+{"max_daily_usd": 10.00}
+```
+
+**Example:**
+
+```bash
+# Cap alice's Claude Opus usage to $10/day
+curl -X PUT -H "Authorization: Bearer $ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"max_daily_usd": 10.00}' \
+  http://localhost:8181/api/v1/users/alice/model-limits/claude-opus-4
+```
+
+### `GET /api/v1/users/{userID}/model-limits`
+
+List all per-user model limits.
+
+**Authentication:** Required. **Authorization:** Admin only.
+
+**Response (200):**
+
+```json
+{
+  "user_id": "alice",
+  "limits": [
+    {"user_id": "alice", "model_prefix": "claude-opus-4", "max_daily_usd": 10.00, "created_at": "...", "updated_at": "..."},
+    {"user_id": "alice", "model_prefix": "gpt-4o", "max_daily_usd": 25.00, "created_at": "...", "updated_at": "..."}
+  ]
+}
+```
+
+### `DELETE /api/v1/users/{userID}/model-limits/{modelPrefix}`
+
+Remove a per-user model limit. The global YAML limit (if any) will apply after deletion.
+
+**Authentication:** Required. **Authorization:** Admin only.
+
+```bash
+curl -X DELETE -H "Authorization: Bearer $ADMIN_TOKEN" \
+  http://localhost:8181/api/v1/users/alice/model-limits/claude-opus-4
+```
+
+**Status Codes (all model limit endpoints):**
+
+| Code | Meaning |
+|------|---------|
+| 200 | Success |
+| 400 | Missing userID, modelPrefix, or invalid body |
+| 401 | Authentication required |
+| 403 | Admin access required |
+| 405 | Method not allowed |
+| 500 | Internal server error |
+
+**Precedence:** Per-user Firestore limit > Global YAML limit > No limit.
+
 ---
 
 ## Interacting with gRPC

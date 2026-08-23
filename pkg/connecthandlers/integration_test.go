@@ -238,6 +238,13 @@ func (s *integrationStore) CheckTaskBudget(_ context.Context, _ string, _ float6
 	return &storage.TaskBudgetCheckResult{Allowed: true}, nil
 }
 func (s *integrationStore) DeductTaskSpend(context.Context, string, float64) error { return nil }
+func (s *integrationStore) SetModelLimit(context.Context, *storage.ModelLimitRecord) error {
+	return nil
+}
+func (s *integrationStore) GetModelLimits(context.Context, string) ([]*storage.ModelLimitRecord, error) {
+	return nil, nil
+}
+func (s *integrationStore) DeleteModelLimit(context.Context, string, string) error { return nil }
 
 // ──────────────────────────────────────────
 // Test server helpers

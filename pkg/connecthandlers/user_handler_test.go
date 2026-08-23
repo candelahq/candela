@@ -257,6 +257,13 @@ func (m *mockUserStore) CheckTaskBudget(_ context.Context, _ string, _ float64) 
 	return &storage.TaskBudgetCheckResult{Allowed: true}, nil
 }
 func (m *mockUserStore) DeductTaskSpend(context.Context, string, float64) error { return nil }
+func (m *mockUserStore) SetModelLimit(context.Context, *storage.ModelLimitRecord) error {
+	return nil
+}
+func (m *mockUserStore) GetModelLimits(context.Context, string) ([]*storage.ModelLimitRecord, error) {
+	return nil, nil
+}
+func (m *mockUserStore) DeleteModelLimit(context.Context, string, string) error { return nil }
 
 // ──────────────────────────────────────────
 // Tests

@@ -853,6 +853,79 @@ func (s *Store) GetGrant(ctx context.Context, userID, grantID string) (*storage.
 }
 
 // ──────────────────────────────────────────
+// Model Limits (#721)
+// ──────────────────────────────────────────
+
+const modelLimitsCol = "model_limits"
+
+// SetModelLimit creates or updates a per-user per-model daily spend limit.
+// Uses the sanitized model prefix as the document ID for upsert semantics.
+func (s *Store) SetModelLimit(ctx context.Context, limit *storage.ModelLimitRecord) error {
+	if limit.UserID == "" || limit.ModelPrefix == "" {
+		return fmt.Errorf("firestoredb: SetModelLimit: user_id and model_prefix are required")
+	}
+	if limit.MaxDailyUSD <= 0 {
+		return fmt.Errorf("firestoredb: SetModelLimit: max_daily_usd must be > 0")
+	}
+	now := time.Now().UTC()
+	if limit.CreatedAt.IsZero() {
+		limit.CreatedAt = now
+	}
+	limit.UpdatedAt = now
+
+	userID := sanitizeID(limit.UserID)
+	docID := sanitizeID(limit.ModelPrefix)
+	ref := s.client.Collection(usersCol).Doc(userID).
+		Collection(modelLimitsCol).Doc(docID)
+	_, err := ref.Set(ctx, map[string]interface{}{
+		"user_id":       limit.UserID,
+		"model_prefix":  limit.ModelPrefix,
+		"max_daily_usd": limit.MaxDailyUSD,
+		"created_at":    limit.CreatedAt,
+		"updated_at":    limit.UpdatedAt,
+	})
+	if err != nil {
+		return fmt.Errorf("firestoredb: setting model limit: %w", err)
+	}
+	return nil
+}
+
+// GetModelLimits returns all per-model daily limits for a user.
+func (s *Store) GetModelLimits(ctx context.Context, userID string) ([]*storage.ModelLimitRecord, error) {
+	userID = sanitizeID(userID)
+	snaps, err := s.client.Collection(usersCol).Doc(userID).
+		Collection(modelLimitsCol).Documents(ctx).GetAll()
+	if err != nil {
+		return nil, fmt.Errorf("firestoredb: listing model limits: %w", err)
+	}
+
+	limits := make([]*storage.ModelLimitRecord, 0, len(snaps))
+	for _, snap := range snaps {
+		var rec storage.ModelLimitRecord
+		if err := snap.DataTo(&rec); err != nil {
+			slog.Warn("firestoredb: skipping malformed model limit",
+				"doc_id", snap.Ref.ID, "error", err)
+			continue
+		}
+		limits = append(limits, &rec)
+	}
+	return limits, nil
+}
+
+// DeleteModelLimit removes a per-user model limit by model prefix.
+func (s *Store) DeleteModelLimit(ctx context.Context, userID, modelPrefix string) error {
+	userID = sanitizeID(userID)
+	docID := sanitizeID(modelPrefix)
+	ref := s.client.Collection(usersCol).Doc(userID).
+		Collection(modelLimitsCol).Doc(docID)
+	_, err := ref.Delete(ctx)
+	if err != nil {
+		return fmt.Errorf("firestoredb: deleting model limit: %w", err)
+	}
+	return nil
+}
+
+// ──────────────────────────────────────────
 // Budget Enforcement
 // ──────────────────────────────────────────
 

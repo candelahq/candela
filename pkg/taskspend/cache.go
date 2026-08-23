@@ -66,6 +66,10 @@ type SpendSnapshot struct {
 	RemainingUSD float64 `json:"remaining_usd"`
 	Expired      bool    `json:"expired"`
 	CachedAt     string  `json:"cached_at"`
+
+	// OwnerID is the task budget creator's effective ID.
+	// Used for authorization checks — not included in JSON responses.
+	OwnerID string `json:"-"`
 }
 
 // Get returns the cached spend snapshot for a task, fetching from
@@ -177,5 +181,6 @@ func toSnapshot(e *entry) *SpendSnapshot {
 		RemainingUSD: b.Remaining(),
 		Expired:      b.IsExpired(),
 		CachedAt:     e.fetchedAt.Format(time.RFC3339Nano),
+		OwnerID:      b.UserID,
 	}
 }

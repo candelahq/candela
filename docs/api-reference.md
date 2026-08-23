@@ -243,6 +243,94 @@ Controls local LLM runtimes from `candela`. Served via ConnectRPC on the managem
 
 ---
 
+## REST Endpoints (non-Protobuf)
+
+The following endpoints use standard REST conventions and return JSON directly. They do **not** require ConnectRPC framing.
+
+> **Why REST?** The task spend endpoint is designed for lightweight, high-frequency polling (e.g., from CI runners or agent loops). A simple `GET` with no request body is easier to integrate than a ConnectRPC procedure.
+>
+> Task budget _management_ (create, get, delete) uses ConnectRPC via `UserService` (see above).
+
+### `GET /api/v1/task-spend/{taskID}`
+
+Returns the current spend snapshot for a task budget.
+
+**Authentication:** Required (Bearer token via `Authorization` or `X-Candela-Auth` header).
+
+**Authorization:** Owner + admin + service account.
+- The task budget's **owner** can view their own task's spend.
+- **Admins** (`role = "admin"`) can view any task's spend.
+- **Service accounts** (allowlisted `*.iam.gserviceaccount.com`) can view any task's spend.
+- All other callers receive `404 Not Found` (to prevent task ID enumeration).
+
+**Response (200):**
+
+```json
+{
+  "task_id": "task-abc-123",
+  "limit_usd": 10.00,
+  "spent_usd": 3.42,
+  "remaining_usd": 6.58,
+  "expired": false,
+  "cached_at": "2025-01-15T12:00:05.123456789Z"
+}
+```
+
+> **Note:** Responses may be cached for up to 5 seconds. The `cached_at` field indicates when the data was last fetched from Firestore.
+
+**Status Codes:**
+
+| Code | Meaning |
+|------|---------|
+| 200 | Success |
+| 400 | Missing `taskID` in path |
+| 401 | Authentication required (no valid token) |
+| 404 | Task budget not found, or caller not authorized |
+| 405 | Method not allowed (only GET is supported) |
+| 500 | Internal server error |
+
+**Example:**
+
+```bash
+# Poll task spend (replace TOKEN and TASK_ID)
+curl -s -H "Authorization: Bearer $TOKEN" \
+  http://localhost:8181/api/v1/task-spend/$TASK_ID | jq .
+```
+
+### `X-Candela-Job-Id` Header
+
+The `X-Candela-Job-Id` request header connects proxy requests to task budgets for spend tracking.
+
+**Lifecycle:**
+
+```text
+1. Client sets X-Candela-Job-Id on proxy request
+          │
+2. Proxy pre-flight: CheckTaskBudget → enforce limits
+          │
+3. Proxy forwards to upstream LLM provider
+          │
+4. Proxy post-response: DeductTaskSpend
+          │
+5. Client polls GET /api/v1/task-spend/{taskID}
+```
+
+- Set this header on LLM proxy requests (e.g., `POST /v1/messages`) to associate spend with a task budget.
+- The task budget must be created _before_ sending requests with its ID.
+- If the header is set but no matching task budget exists, the proxy returns `402 Payment Required` with error type `task_budget_missing` (fail-closed).
+- If the task budget is exhausted or expired, the proxy returns `402` with `task_budget_exhausted` or `task_budget_expired`.
+
+```bash
+# Proxy request with task budget tracking
+curl -X POST http://localhost:8181/v1/messages \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "X-Candela-Job-Id: task-abc-123" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"claude-sonnet-4-20250514","max_tokens":1024,"messages":[{"role":"user","content":"Hello"}]}'
+```
+
+---
+
 ## Interacting with gRPC
 
 Since Candela uses ConnectRPC (which supports both HTTP/JSON and gRPC), you can also use `grpcurl`:

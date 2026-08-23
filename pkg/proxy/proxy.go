@@ -874,12 +874,11 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 	var isServiceAccount bool
 	if caller != nil {
 		effectiveUserID = caller.EffectiveID()
-		isServiceAccount = strings.HasSuffix(effectiveUserID, ".gserviceaccount.com")
+		isServiceAccount = isServiceAccountID(effectiveUserID)
 	}
 
 	// ── Service account rate limiting ──
-	// SAs bypass user-level rate limits and budget checks, so they need their
-	// own throttle to prevent runaway automation from burning through quota.
+	// SAs have their own per-SA rate limiter separate from user-level rate limits.
 	if isServiceAccount && p.saRL != nil {
 		allowed, count, limit := p.saRL.Allow(effectiveUserID)
 		if !allowed {
@@ -1115,11 +1114,19 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 
 	// ── Budget pre-flight with conservative reservation ──
 	// Only applies in team mode (UserStore configured).
+	// Service accounts are included (#736) — SAs without a budget/grant
+	// record are blocked (fail-closed). Admins opt SAs in via CreateBudget.
 	var budgetReserved float64 // track reservation for Release in deductBudget
-	if p.users != nil && effectiveUserID != "" && !isServiceAccount && !isAdmin {
-		// Budget check floor: minimum cost to allow a request through.
-		const budgetCheckFloor = 0.001 // $0.001 — lower than any cloud model's minimum call
-		check, err := p.users.CheckBudget(r.Context(), effectiveUserID, budgetCheckFloor)
+	if p.users != nil && effectiveUserID != "" && !isAdmin {
+		// Check whether the user can afford this request. Use the estimated
+		// cost when available; fall back to a minimal floor for requests
+		// where the model/cost is unknown ($0.001 is below any cloud model).
+		const budgetCheckFloor = 0.001
+		checkAmount := budgetCheckFloor
+		if estimatedCost > checkAmount {
+			checkAmount = estimatedCost
+		}
+		check, err := p.users.CheckBudget(r.Context(), effectiveUserID, checkAmount)
 		if err != nil {
 			slog.Error("budget check failed, blocking request",
 				"user_id", effectiveUserID, "error", err)
@@ -1131,35 +1138,35 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 			ProxyErrorResponse(w, http.StatusServiceUnavailable, "budget check failed — try again shortly", "service_error")
 			return
 		} else if !check.Allowed {
-			ProxyErrorResponse(w, http.StatusPaymentRequired, "budget exhausted — contact your admin for a grant or budget increase", "insufficient_budget")
+			msg := "budget exhausted — contact your admin for a grant or budget increase"
+			if checkAmount > budgetCheckFloor && check.RemainingUSD > 0 {
+				msg = fmt.Sprintf("estimated cost $%.4f exceeds remaining budget $%.4f — contact your admin", checkAmount, check.RemainingUSD)
+			}
+			ProxyErrorResponse(w, http.StatusPaymentRequired, msg, "insufficient_budget")
 			slog.Info("blocked request: budget exhausted",
-				"user_id", effectiveUserID, "remaining_usd", check.RemainingUSD)
-			return
-		}
-
-		// TOCTOU mitigation: Firestore says remaining=$X, but other in-flight
-		// requests may have already passed CheckBudget without DeductSpend yet.
-		// Subtract their pending spend from the effective remaining balance.
-		effectiveRemaining := check.RemainingUSD - p.pendingSpend.Get(effectiveUserID)
-		if effectiveRemaining < budgetCheckFloor {
-			ProxyErrorResponse(w, http.StatusPaymentRequired, "budget exhausted (concurrent requests in flight) — try again shortly", "insufficient_budget")
-			slog.Info("blocked request: budget exhausted after pending spend",
 				"user_id", effectiveUserID,
-				"firestore_remaining", check.RemainingUSD,
-				"pending_spend", p.pendingSpend.Get(effectiveUserID))
+				"remaining_usd", check.RemainingUSD,
+				"estimated_cost", checkAmount)
 			return
 		}
 
-		// Reserve a conservative estimate so concurrent requests see lower balance.
-		// $0.05 is a realistic floor for most LLM API calls (a small GPT-4o
-		// request costs ~$0.01–0.10, Claude ~$0.03–0.50). This prevents the
-		// previous $0.001 reservation from allowing 1000x overdraft.
+		// TOCTOU mitigation: atomic check-and-reserve via ReserveIfUnder.
+		// This is the same pattern used by the task budget gate (#779).
+		// Reserve a conservative estimate so concurrent requests see lower
+		// balance. $0.05 is a realistic floor for most LLM API calls.
 		const reservationFloor = 0.05
 		budgetReserved = reservationFloor
 		if estimatedCost > reservationFloor {
 			budgetReserved = estimatedCost
 		}
-		p.pendingSpend.Reserve(effectiveUserID, budgetReserved)
+		if !p.pendingSpend.ReserveIfUnder(effectiveUserID, check.RemainingUSD, budgetReserved, budgetCheckFloor) {
+			ProxyErrorResponse(w, http.StatusPaymentRequired, "budget exhausted (concurrent requests in flight) — try again shortly", "insufficient_budget")
+			slog.Info("blocked request: budget exhausted after pending spend",
+				"user_id", effectiveUserID,
+				"firestore_remaining", check.RemainingUSD,
+				"reservation", budgetReserved)
+			return
+		}
 		// Release the reservation if we return before the response handlers
 		// (handleStreamingResponse / handleStandardResponse) take ownership.
 		defer func() {
@@ -2009,40 +2016,29 @@ func (p *Proxy) deductBudget(ctx context.Context, provider Provider, model, user
 	if p.users == nil || userID == "" {
 		return
 	}
-	if strings.HasSuffix(userID, ".gserviceaccount.com") {
-		// HIGH-2: Log SA spend instead of silently skipping.
-		totalTokens := inputTokens + outputTokens
-		cost := p.calc.Calculate(pricingProvider(provider.Name), model, inputTokens, outputTokens)
-		if cost == 0 {
-			cost = p.calc.CalculateTimeBased(pricingProvider(provider.Name), model, duration)
-		}
-		if cost > 0 || totalTokens > 0 {
-			p.saSpendMicroUSD.Add(int64(math.Round(cost * 1_000_000)))
-			slog.Info("sa_spend: service account usage",
-				"sa_id", userID,
-				"provider", provider.Name,
-				"model", model,
-				"cost_usd", cost,
-				"input_tokens", inputTokens,
-				"output_tokens", outputTokens,
-				"total_tokens", totalTokens,
-			)
-		}
-		// #779: Even for SAs, deduct from task budget if one exists.
-		if jobID != "" && cost > 0 {
-			if taskErr := p.users.DeductTaskSpend(ctx, jobID, cost); taskErr != nil {
-				slog.Warn("sa_task_deduct: failed (best-effort)",
-					"sa_id", userID, "job_id", jobID, "cost_usd", cost, "error", taskErr)
-			}
-		}
-		return
-	}
+
+	isSA := isServiceAccountID(userID)
 
 	totalTokens := inputTokens + outputTokens
 	cost := p.calc.Calculate(pricingProvider(provider.Name), model, inputTokens, outputTokens)
 	// Time-based cost fallback for self-hosted models.
 	if cost == 0 {
 		cost = p.calc.CalculateTimeBased(pricingProvider(provider.Name), model, duration)
+	}
+
+	// #736: SA-specific spend logging for observability (in addition to
+	// the normal DeductSpend path that SAs now share with human users).
+	if isSA && (cost > 0 || totalTokens > 0) {
+		p.saSpendMicroUSD.Add(int64(math.Round(cost * 1_000_000)))
+		slog.Info("sa_spend: service account usage",
+			"sa_id", userID,
+			"provider", provider.Name,
+			"model", model,
+			"cost_usd", cost,
+			"input_tokens", inputTokens,
+			"output_tokens", outputTokens,
+			"total_tokens", totalTokens,
+		)
 	}
 
 	// #278: Record per-model daily spend in the in-memory tracker.
@@ -2565,4 +2561,12 @@ func pricingProvider(provider string) string {
 	default:
 		return provider
 	}
+}
+
+// isServiceAccountID returns true for Google Cloud IAM service accounts.
+// All SA emails end in .iam.gserviceaccount.com — the broader
+// .gserviceaccount.com suffix includes legacy App Engine SAs that should
+// not receive automatic SA treatment.
+func isServiceAccountID(id string) bool {
+	return strings.HasSuffix(id, ".iam.gserviceaccount.com")
 }

@@ -325,7 +325,8 @@ func (s *trackingDeductUserStore) DeductSpend(_ context.Context, _ string, _ flo
 	return nil
 }
 
-func TestProxy_ServiceAccountBypassesBudget(t *testing.T) {
+func TestProxy_ServiceAccountBudgetEnforced(t *testing.T) {
+	// #736: SAs now go through the same DeductSpend path as human users.
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = fmt.Fprint(w, `{"content":[{"type":"text","text":"ok"}],"usage":{"input_tokens":10,"output_tokens":5},"model":"claude-sonnet-4-20250514"}`)
@@ -372,8 +373,8 @@ func TestProxy_ServiceAccountBypassesBudget(t *testing.T) {
 	// Give async processing a moment.
 	time.Sleep(200 * time.Millisecond)
 
-	if got := store.deductCount.Load(); got != 0 {
-		t.Errorf("DeductSpend called %d times for SA, want 0", got)
+	if got := store.deductCount.Load(); got != 1 {
+		t.Errorf("DeductSpend called %d times for SA, want 1", got)
 	}
 }
 
@@ -473,7 +474,8 @@ func TestDeductBudget_CallsForPositiveTokens(t *testing.T) {
 	}
 }
 
-func TestDeductBudget_SkipsServiceAccount(t *testing.T) {
+func TestDeductBudget_CallsForServiceAccount(t *testing.T) {
+	// #736: SAs now go through DeductSpend just like human users.
 	store := &trackingDeductUserStore{
 		budgetUserStore: budgetUserStore{
 			checkResult: &storage.BudgetCheckResult{Allowed: true, RemainingUSD: 100},
@@ -486,8 +488,8 @@ func TestDeductBudget_SkipsServiceAccount(t *testing.T) {
 	p.deductBudget(context.Background(), Provider{Name: "anthropic"}, "claude-sonnet-4-20250514",
 		"my-sa@project.iam.gserviceaccount.com", "", 1000, 500, 0)
 
-	if got := store.deductCount.Load(); got != 0 {
-		t.Errorf("DeductSpend called %d times for SA, want 0", got)
+	if got := store.deductCount.Load(); got != 1 {
+		t.Errorf("DeductSpend called %d times for SA, want 1", got)
 	}
 }
 

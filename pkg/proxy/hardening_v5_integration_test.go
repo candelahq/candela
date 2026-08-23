@@ -236,7 +236,7 @@ func TestIntegration_CompatModelsEndpoint(t *testing.T) {
 // I-5: Service account auth skips budget check
 // ──────────────────────────────────────────
 
-func TestIntegration_ServiceAccountSkipsBudget(t *testing.T) {
+func TestIntegration_ServiceAccountBudgetEnforced(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = fmt.Fprint(w, `{"choices":[{"message":{"content":"ok"}}],"usage":{"prompt_tokens":1,"completion_tokens":1}}`)
@@ -251,7 +251,7 @@ func TestIntegration_ServiceAccountSkipsBudget(t *testing.T) {
 		ProjectID: "test-sa-v5",
 	}, submitter, calc)
 
-	// Budget is exhausted — but SA should bypass.
+	// #736: Budget is exhausted — SA should be blocked (no longer bypasses).
 	p.SetUserStore(&budgetUserStore{
 		checkResult: &storage.BudgetCheckResult{
 			Allowed:      false,
@@ -282,10 +282,10 @@ func TestIntegration_ServiceAccountSkipsBudget(t *testing.T) {
 	}
 	defer func() { _ = resp.Body.Close() }()
 
-	// SA bypasses budget → 200, not 402.
-	if resp.StatusCode != http.StatusOK {
+	// #736: SA with exhausted budget → 402.
+	if resp.StatusCode != http.StatusPaymentRequired {
 		body, _ := io.ReadAll(resp.Body)
-		t.Errorf("status = %d, want 200 (SA bypasses budget), body = %s", resp.StatusCode, body)
+		t.Errorf("status = %d, want 402 (SA budget enforced), body = %s", resp.StatusCode, body)
 	}
 }
 

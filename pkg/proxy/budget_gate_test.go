@@ -246,8 +246,8 @@ func TestBudgetGate_CheckErrorBlocksRequest(t *testing.T) {
 	}
 }
 
-func TestBudgetGate_SkippedForServiceAccount(t *testing.T) {
-	// Service accounts bypass budget entirely — CheckBudget should NOT be called.
+func TestBudgetGate_EnforcedForServiceAccount(t *testing.T) {
+	// #736: SAs are now budget-enforced. An SA with exhausted budget gets 402.
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = fmt.Fprint(w, `{"content":[{"type":"text","text":"ok"}],"usage":{"input_tokens":1,"output_tokens":1}}`)
@@ -262,7 +262,7 @@ func TestBudgetGate_SkippedForServiceAccount(t *testing.T) {
 		ProjectID: "test",
 	}, submitter, calc)
 
-	// Wire in a store that returns "budget exhausted" — SA should bypass this.
+	// Wire in a store that returns "budget exhausted".
 	p.SetUserStore(&budgetUserStore{
 		checkResult: &storage.BudgetCheckResult{
 			Allowed:      false,
@@ -293,9 +293,63 @@ func TestBudgetGate_SkippedForServiceAccount(t *testing.T) {
 	}
 	defer func() { _ = resp.Body.Close() }()
 
-	// SA should bypass budget → 200 OK, not 402.
+	// SA with exhausted budget → 402 (no longer bypasses).
+	if resp.StatusCode != http.StatusPaymentRequired {
+		body, _ := io.ReadAll(resp.Body)
+		t.Errorf("status = %d, want 402 (SA budget enforced); body = %s", resp.StatusCode, body)
+	}
+}
+
+func TestBudgetGate_SAWithBudget_Allowed(t *testing.T) {
+	// #736: SA with sufficient budget should pass through.
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprint(w, `{"content":[{"type":"text","text":"ok"}],"usage":{"input_tokens":1,"output_tokens":1}}`)
+	}))
+	defer upstream.Close()
+
+	submitter := &mockSubmitter{}
+	calc := costcalc.New()
+
+	p, _ := New(Config{
+		Providers: []Provider{{Name: "anthropic", UpstreamURL: upstream.URL}},
+		ProjectID: "test",
+	}, submitter, calc)
+
+	// Wire in a store that returns "budget available".
+	p.SetUserStore(&budgetUserStore{
+		checkResult: &storage.BudgetCheckResult{
+			Allowed:      true,
+			RemainingUSD: 50.00,
+		},
+	})
+
+	mux := http.NewServeMux()
+	p.RegisterRoutes(mux)
+
+	// Inject a service account identity.
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sa := &auth.User{ID: "sa-uid", Email: "candela-proxy@my-project.iam.gserviceaccount.com"}
+		mux.ServeHTTP(w, r.WithContext(auth.NewContext(r.Context(), sa)))
+	})
+	srv := httptest.NewServer(handler)
+	defer srv.Close()
+
+	req, _ := http.NewRequest("POST",
+		srv.URL+"/proxy/anthropic/v1/messages",
+		strings.NewReader(`{"model":"claude-sonnet-4-20250514","messages":[{"role":"user","content":"hi"}]}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer tok")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	// SA with budget → 200 OK.
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
-		t.Errorf("status = %d, want 200 (SA bypasses budget); body = %s", resp.StatusCode, body)
+		t.Errorf("status = %d, want 200 (SA with budget); body = %s", resp.StatusCode, body)
 	}
 }

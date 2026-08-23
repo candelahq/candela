@@ -1115,8 +1115,10 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 
 	// ── Budget pre-flight with conservative reservation ──
 	// Only applies in team mode (UserStore configured).
+	// Service accounts are included (#736) — SAs without a budget/grant
+	// record are blocked (fail-closed). Admins opt SAs in via CreateBudget.
 	var budgetReserved float64 // track reservation for Release in deductBudget
-	if p.users != nil && effectiveUserID != "" && !isServiceAccount && !isAdmin {
+	if p.users != nil && effectiveUserID != "" && !isAdmin {
 		// Budget check floor: minimum cost to allow a request through.
 		const budgetCheckFloor = 0.001 // $0.001 — lower than any cloud model's minimum call
 		check, err := p.users.CheckBudget(r.Context(), effectiveUserID, budgetCheckFloor)
@@ -2009,40 +2011,29 @@ func (p *Proxy) deductBudget(ctx context.Context, provider Provider, model, user
 	if p.users == nil || userID == "" {
 		return
 	}
-	if strings.HasSuffix(userID, ".gserviceaccount.com") {
-		// HIGH-2: Log SA spend instead of silently skipping.
-		totalTokens := inputTokens + outputTokens
-		cost := p.calc.Calculate(pricingProvider(provider.Name), model, inputTokens, outputTokens)
-		if cost == 0 {
-			cost = p.calc.CalculateTimeBased(pricingProvider(provider.Name), model, duration)
-		}
-		if cost > 0 || totalTokens > 0 {
-			p.saSpendMicroUSD.Add(int64(math.Round(cost * 1_000_000)))
-			slog.Info("sa_spend: service account usage",
-				"sa_id", userID,
-				"provider", provider.Name,
-				"model", model,
-				"cost_usd", cost,
-				"input_tokens", inputTokens,
-				"output_tokens", outputTokens,
-				"total_tokens", totalTokens,
-			)
-		}
-		// #779: Even for SAs, deduct from task budget if one exists.
-		if jobID != "" && cost > 0 {
-			if taskErr := p.users.DeductTaskSpend(ctx, jobID, cost); taskErr != nil {
-				slog.Warn("sa_task_deduct: failed (best-effort)",
-					"sa_id", userID, "job_id", jobID, "cost_usd", cost, "error", taskErr)
-			}
-		}
-		return
-	}
+
+	isSA := strings.HasSuffix(userID, ".iam.gserviceaccount.com")
 
 	totalTokens := inputTokens + outputTokens
 	cost := p.calc.Calculate(pricingProvider(provider.Name), model, inputTokens, outputTokens)
 	// Time-based cost fallback for self-hosted models.
 	if cost == 0 {
 		cost = p.calc.CalculateTimeBased(pricingProvider(provider.Name), model, duration)
+	}
+
+	// #736: SA-specific spend logging for observability (in addition to
+	// the normal DeductSpend path that SAs now share with human users).
+	if isSA && (cost > 0 || totalTokens > 0) {
+		p.saSpendMicroUSD.Add(int64(math.Round(cost * 1_000_000)))
+		slog.Info("sa_spend: service account usage",
+			"sa_id", userID,
+			"provider", provider.Name,
+			"model", model,
+			"cost_usd", cost,
+			"input_tokens", inputTokens,
+			"output_tokens", outputTokens,
+			"total_tokens", totalTokens,
+		)
 	}
 
 	// #278: Record per-model daily spend in the in-memory tracker.

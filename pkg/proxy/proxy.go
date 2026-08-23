@@ -874,12 +874,11 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 	var isServiceAccount bool
 	if caller != nil {
 		effectiveUserID = caller.EffectiveID()
-		isServiceAccount = strings.HasSuffix(effectiveUserID, ".gserviceaccount.com")
+		isServiceAccount = isServiceAccountID(effectiveUserID)
 	}
 
 	// ── Service account rate limiting ──
-	// SAs bypass user-level rate limits and budget checks, so they need their
-	// own throttle to prevent runaway automation from burning through quota.
+	// SAs have their own per-SA rate limiter separate from user-level rate limits.
 	if isServiceAccount && p.saRL != nil {
 		allowed, count, limit := p.saRL.Allow(effectiveUserID)
 		if !allowed {
@@ -2012,7 +2011,7 @@ func (p *Proxy) deductBudget(ctx context.Context, provider Provider, model, user
 		return
 	}
 
-	isSA := strings.HasSuffix(userID, ".iam.gserviceaccount.com")
+	isSA := isServiceAccountID(userID)
 
 	totalTokens := inputTokens + outputTokens
 	cost := p.calc.Calculate(pricingProvider(provider.Name), model, inputTokens, outputTokens)
@@ -2556,4 +2555,12 @@ func pricingProvider(provider string) string {
 	default:
 		return provider
 	}
+}
+
+// isServiceAccountID returns true for Google Cloud IAM service accounts.
+// All SA emails end in .iam.gserviceaccount.com — the broader
+// .gserviceaccount.com suffix includes legacy App Engine SAs that should
+// not receive automatic SA treatment.
+func isServiceAccountID(id string) bool {
+	return strings.HasSuffix(id, ".iam.gserviceaccount.com")
 }

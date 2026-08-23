@@ -773,6 +773,72 @@ func (s *Store) ResetSpend(ctx context.Context, userID string) error {
 }
 
 // ──────────────────────────────────────────
+// Spend History (#719)
+// ──────────────────────────────────────────
+
+// GetSpendHistory returns daily spend totals for the last N days by reading
+// the budget period documents (users/{uid}/budgets/YYYY-MM-DD).
+// Only returns days that have a corresponding period document. Days with
+// no API usage will be omitted (no document exists for that day).
+//
+// TODO(#719): This only works for daily budget periods. Weekly/monthly budgets
+// use non-daily period keys (YYYY-WNN, YYYY-MM), so their history will be
+// empty. Currently all users are on daily budgets. If weekly/monthly budgets
+// are added, we need a separate daily spend ledger. See CodeRabbit PR #797.
+func (s *Store) GetSpendHistory(ctx context.Context, userID string, days int) ([]storage.DailySpendRecord, error) {
+	userID = sanitizeID(userID)
+	userRef := s.client.Collection(usersCol).Doc(userID)
+	budgetsRef := userRef.Collection(budgetsCol)
+
+	now := time.Now().In(s.budgetLocation)
+	today := now.Format("2006-01-02")
+
+	// Generate date keys for the last N days (excluding today).
+	var dateKeys []string
+	for i := 1; i <= days; i++ {
+		day := now.AddDate(0, 0, -i)
+		dateKeys = append(dateKeys, day.Format("2006-01-02"))
+	}
+
+	// Batch-read via GetAll for efficiency (single Firestore RPC).
+	refs := make([]*firestore.DocumentRef, len(dateKeys))
+	for i, key := range dateKeys {
+		refs[i] = budgetsRef.Doc(key)
+	}
+
+	snaps, err := s.client.GetAll(ctx, refs)
+	if err != nil {
+		return nil, fmt.Errorf("firestoredb: getting spend history: %w", err)
+	}
+
+	var records []storage.DailySpendRecord
+	for i, snap := range snaps {
+		if snap == nil || !snap.Exists() {
+			continue
+		}
+		// Skip today's document (it's the current period, not history).
+		if dateKeys[i] == today {
+			continue
+		}
+		data := snap.Data()
+		spentUSD := firestoreFloat(data["spent_usd"])
+		// all_tokens_used gives total tokens across budget + grants.
+		var callCount int64
+		if v, ok := data["all_tokens_used"].(int64); ok {
+			callCount = v
+		}
+		if spentUSD > 0 || callCount > 0 {
+			records = append(records, storage.DailySpendRecord{
+				Date:       dateKeys[i],
+				SpendUSD:   spentUSD,
+				TokenCount: callCount,
+			})
+		}
+	}
+	return records, nil
+}
+
+// ──────────────────────────────────────────
 // Grants
 // ──────────────────────────────────────────
 

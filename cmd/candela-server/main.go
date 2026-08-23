@@ -35,6 +35,7 @@ import (
 	"github.com/candelahq/candela/pkg/catalog"
 	"github.com/candelahq/candela/pkg/connecthandlers"
 	"github.com/candelahq/candela/pkg/costcalc"
+	"github.com/candelahq/candela/pkg/forecast"
 	"github.com/candelahq/candela/pkg/modellimits"
 	"github.com/candelahq/candela/pkg/notify"
 	"github.com/candelahq/candela/pkg/processor"
@@ -540,9 +541,18 @@ func main() {
 		mux.HandleFunc("/api/v1/task-spend/", taskspend.Handler(spendCache, userStore))
 		slog.Info("task spend API registered", "path", "/api/v1/task-spend/{taskID}")
 
-		// ── Model Limits API (#721) ─────────────────────────────────────
-		mux.HandleFunc("/api/v1/users/", modellimits.Handler(userStore, userStore))
+		// ── Model Limits API (#721) + Budget Forecast API (#719) ──────
+		mlHandler := modellimits.Handler(userStore, userStore)
+		fcHandler := forecast.Handler(userStore, userStore)
+		mux.HandleFunc("/api/v1/users/", func(w http.ResponseWriter, r *http.Request) {
+			if strings.HasSuffix(r.URL.Path, "/budget-forecast") {
+				fcHandler.ServeHTTP(w, r)
+				return
+			}
+			mlHandler.ServeHTTP(w, r)
+		})
 		slog.Info("model limits API registered", "path", "/api/v1/users/{userID}/model-limits")
+		slog.Info("budget forecast API registered", "path", "/api/v1/users/{userID}/budget-forecast")
 	} else {
 		slog.Warn("task spend API disabled: no user store configured")
 	}

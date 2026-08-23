@@ -424,6 +424,54 @@ curl -X DELETE -H "Authorization: Bearer $ADMIN_TOKEN" \
 
 ---
 
+### Budget Forecast (#719)
+
+#### `GET /api/v1/users/{userID}/budget-forecast`
+
+Returns budget forecast including burn rate, projected end-of-day spend, and
+estimated budget exhaustion date based on 7-day historical spend.
+
+**Authentication:** Required. **Authorization:** Self-service (own data) or admin.
+
+**Algorithm:**
+- **Burn rate:** today's spend ÷ hours elapsed since midnight UTC
+- **Projected EOD:** burn rate × 24 hours
+- **Average daily spend:** 7-day rolling average, excluding zero-spend days (weekends/holidays)
+- **Exhaustion date:** remaining budget ÷ average daily spend
+
+**Response:**
+
+```json
+{
+  "burn_rate_usd_per_hour": 1.23,
+  "projected_eod_spend_usd": 29.52,
+  "will_exceed_budget": true,
+  "avg_daily_spend_usd": 18.50,
+  "estimated_exhaustion_date": "2026-08-28",
+  "days_until_exhaustion": 5,
+  "spend_history": [
+    {"date": "2026-08-22", "spend_usd": 20.10, "token_count": 142},
+    {"date": "2026-08-21", "spend_usd": 16.90, "token_count": 98}
+  ]
+}
+```
+
+When no budget is configured (`limit_usd = 0`), returns only `spend_history` with all
+forecast fields zeroed and `days_until_exhaustion = -1`.
+
+> [!TIP]
+> Forecast results are cached for 5 minutes per user. Changes in spend may take
+> up to 5 minutes to be reflected in the forecast.
+
+| Status | Meaning |
+|--------|---------|
+| 200 | Forecast returned |
+| 401 | Not authenticated |
+| 404 | Not found (user accessing another user's data without admin role) |
+| 500 | Internal server error |
+
+---
+
 ## Interacting with gRPC
 
 Since Candela uses ConnectRPC (which supports both HTTP/JSON and gRPC), you can also use `grpcurl`:

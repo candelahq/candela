@@ -95,6 +95,9 @@ func (b *budgetUserStore) GetModelLimits(context.Context, string) ([]*storage.Mo
 	return nil, nil
 }
 func (b *budgetUserStore) DeleteModelLimit(context.Context, string, string) error { return nil }
+func (b *budgetUserStore) GetSpendHistory(context.Context, string, int) ([]storage.DailySpendRecord, error) {
+	return nil, nil
+}
 
 // ====================================================================
 // Pre-flight Budget Gate

@@ -78,3 +78,14 @@ type BudgetAlert struct {
 	PeriodKey string    `json:"period_key" firestore:"period_key"`
 	SentAt    time.Time `json:"sent_at" firestore:"sent_at"`
 }
+
+// ModelLimitRecord is a per-user per-model daily spend ceiling.
+// Stored in Firestore at users/{uid}/model_limits/{model_prefix}.
+// When present, overrides any global daily_limits YAML config for that model prefix.
+type ModelLimitRecord struct {
+	UserID      string    `json:"user_id" firestore:"user_id"`
+	ModelPrefix string    `json:"model_prefix" firestore:"model_prefix"` // e.g. "claude-opus-4", "gpt-4o"
+	MaxDailyUSD float64   `json:"max_daily_usd" firestore:"max_daily_usd"`
+	CreatedAt   time.Time `json:"created_at" firestore:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at" firestore:"updated_at"`
+}

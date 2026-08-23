@@ -556,6 +556,9 @@ type AuditRecord struct {
 // BudgetCheckResult is a type alias for billing.BudgetCheckResult.
 type BudgetCheckResult = billing.BudgetCheckResult
 
+// ModelLimitRecord is a type alias for billing.ModelLimitRecord.
+type ModelLimitRecord = billing.ModelLimitRecord
+
 // UserStore manages users, budgets, grants, audit, and rate limits.
 // Implemented by firestoredb for production.
 type UserStore interface {
@@ -612,6 +615,17 @@ type UserStore interface {
 
 	// GetGrant returns a specific grant by ID.
 	GetGrant(ctx context.Context, userID, grantID string) (*GrantRecord, error)
+
+	// ── Model Limits (#721) ──
+
+	// SetModelLimit creates or updates a per-user per-model daily spend limit.
+	SetModelLimit(ctx context.Context, limit *ModelLimitRecord) error
+
+	// GetModelLimits returns all model limits for a user.
+	GetModelLimits(ctx context.Context, userID string) ([]*ModelLimitRecord, error)
+
+	// DeleteModelLimit removes a per-user model limit.
+	DeleteModelLimit(ctx context.Context, userID, modelPrefix string) error
 
 	// ── Budget Enforcement ──
 

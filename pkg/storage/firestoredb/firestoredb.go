@@ -14,6 +14,8 @@ package firestoredb
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -850,6 +852,105 @@ func (s *Store) GetGrant(ctx context.Context, userID, grantID string) (*storage.
 		return nil, fmt.Errorf("firestoredb: getting grant %s: %w", grantID, err)
 	}
 	return snapToGrant(snap)
+}
+
+// ──────────────────────────────────────────
+// Model Limits (#721)
+// ──────────────────────────────────────────
+
+const modelLimitsCol = "model_limits"
+
+// modelLimitDocID returns a collision-resistant document ID for a model prefix.
+// We use SHA-256 hex digest instead of sanitizeID because sanitizeID maps
+// distinct prefixes (e.g. "foo/bar" and "foo_bar") to the same key.
+func modelLimitDocID(modelPrefix string) string {
+	h := sha256.Sum256([]byte(modelPrefix))
+	return hex.EncodeToString(h[:])
+}
+
+// SetModelLimit creates or updates a per-user per-model daily spend limit.
+// Uses a Firestore transaction to preserve CreatedAt on updates.
+func (s *Store) SetModelLimit(ctx context.Context, limit *storage.ModelLimitRecord) error {
+	if limit.UserID == "" || limit.ModelPrefix == "" {
+		return fmt.Errorf("firestoredb: SetModelLimit: user_id and model_prefix are required")
+	}
+	if limit.MaxDailyUSD <= 0 {
+		return fmt.Errorf("firestoredb: SetModelLimit: max_daily_usd must be > 0")
+	}
+
+	userID := sanitizeID(limit.UserID)
+	docID := modelLimitDocID(limit.ModelPrefix)
+	ref := s.client.Collection(usersCol).Doc(userID).
+		Collection(modelLimitsCol).Doc(docID)
+
+	now := time.Now().UTC()
+	var createdAt time.Time
+
+	err := s.client.RunTransaction(ctx, func(_ context.Context, tx *firestore.Transaction) error {
+		// Read existing doc to preserve CreatedAt if it exists.
+		snap, err := tx.Get(ref)
+		createdAt = now
+		if err == nil {
+			// Existing doc — preserve its CreatedAt.
+			if t, ok := snap.Data()["created_at"].(time.Time); ok {
+				createdAt = t
+			}
+		} else if status.Code(err) != codes.NotFound {
+			// Real read error — abort the transaction.
+			return err
+		}
+		// If NotFound, createdAt stays as now (new record).
+
+		return tx.Set(ref, map[string]interface{}{
+			"user_id":       limit.UserID,
+			"model_prefix":  limit.ModelPrefix,
+			"max_daily_usd": limit.MaxDailyUSD,
+			"created_at":    createdAt,
+			"updated_at":    now,
+		})
+	})
+	if err != nil {
+		return fmt.Errorf("firestoredb: setting model limit: %w", err)
+	}
+
+	limit.CreatedAt = createdAt
+	limit.UpdatedAt = now
+	return nil
+}
+
+// GetModelLimits returns all per-model daily limits for a user.
+func (s *Store) GetModelLimits(ctx context.Context, userID string) ([]*storage.ModelLimitRecord, error) {
+	userID = sanitizeID(userID)
+	snaps, err := s.client.Collection(usersCol).Doc(userID).
+		Collection(modelLimitsCol).Documents(ctx).GetAll()
+	if err != nil {
+		return nil, fmt.Errorf("firestoredb: listing model limits: %w", err)
+	}
+
+	limits := make([]*storage.ModelLimitRecord, 0, len(snaps))
+	for _, snap := range snaps {
+		var rec storage.ModelLimitRecord
+		if err := snap.DataTo(&rec); err != nil {
+			slog.Warn("firestoredb: skipping malformed model limit",
+				"doc_id", snap.Ref.ID, "error", err)
+			continue
+		}
+		limits = append(limits, &rec)
+	}
+	return limits, nil
+}
+
+// DeleteModelLimit removes a per-user model limit by model prefix.
+func (s *Store) DeleteModelLimit(ctx context.Context, userID, modelPrefix string) error {
+	userID = sanitizeID(userID)
+	docID := modelLimitDocID(modelPrefix)
+	ref := s.client.Collection(usersCol).Doc(userID).
+		Collection(modelLimitsCol).Doc(docID)
+	_, err := ref.Delete(ctx)
+	if err != nil {
+		return fmt.Errorf("firestoredb: deleting model limit: %w", err)
+	}
+	return nil
 }
 
 // ──────────────────────────────────────────

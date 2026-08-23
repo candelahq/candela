@@ -35,6 +35,7 @@ import (
 	"github.com/candelahq/candela/pkg/catalog"
 	"github.com/candelahq/candela/pkg/connecthandlers"
 	"github.com/candelahq/candela/pkg/costcalc"
+	"github.com/candelahq/candela/pkg/modellimits"
 	"github.com/candelahq/candela/pkg/notify"
 	"github.com/candelahq/candela/pkg/processor"
 	"github.com/candelahq/candela/pkg/proxy"
@@ -534,6 +535,10 @@ func main() {
 		// NOTE: StartEvictor deferred to after signal.NotifyContext (#782).
 		mux.HandleFunc("/api/v1/task-spend/", taskspend.Handler(spendCache, userStore))
 		slog.Info("task spend API registered", "path", "/api/v1/task-spend/{taskID}")
+
+		// ── Model Limits API (#721) ─────────────────────────────────────
+		mux.HandleFunc("/api/v1/users/", modellimits.Handler(userStore, userStore))
+		slog.Info("model limits API registered", "path", "/api/v1/users/{userID}/model-limits")
 	} else {
 		slog.Warn("task spend API disabled: no user store configured")
 	}

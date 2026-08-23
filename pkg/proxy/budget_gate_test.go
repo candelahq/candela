@@ -353,3 +353,111 @@ func TestBudgetGate_SAWithBudget_Allowed(t *testing.T) {
 		t.Errorf("status = %d, want 200 (SA with budget); body = %s", resp.StatusCode, body)
 	}
 }
+
+// realisticBudgetStore simulates Firestore's CheckBudget behavior:
+// Allowed = (remaining >= estimatedCostUSD).
+type realisticBudgetStore struct {
+	budgetUserStore
+	remaining float64
+}
+
+func (r *realisticBudgetStore) CheckBudget(_ context.Context, _ string, estimatedCostUSD float64) (*storage.BudgetCheckResult, error) {
+	allowed := r.remaining >= estimatedCostUSD
+	return &storage.BudgetCheckResult{
+		Allowed:      allowed,
+		RemainingUSD: r.remaining,
+	}, nil
+}
+
+func TestBudgetGate_OverdraftPrevention(t *testing.T) {
+	// User has $0.10 remaining, but request estimated at ~$0.02+ (claude-sonnet).
+	// Before the fix, CheckBudget only checked $0.001, allowing overdraft.
+	// After the fix, CheckBudget checks the estimated cost.
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		t.Error("upstream should NOT be called when estimated cost exceeds remaining")
+		w.WriteHeader(500)
+	}))
+	defer upstream.Close()
+
+	submitter := &mockSubmitter{}
+	calc := costcalc.New()
+
+	p, _ := New(Config{
+		Providers: []Provider{{Name: "anthropic", UpstreamURL: upstream.URL}},
+		ProjectID: "test",
+	}, submitter, calc)
+
+	// $0.001 remaining — even a tiny request's estimate (~$0.02) exceeds this.
+	p.SetUserStore(&realisticBudgetStore{remaining: 0.001})
+
+	mux := http.NewServeMux()
+	p.RegisterRoutes(mux)
+	srv := httptest.NewServer(withTestAuth(mux))
+	defer srv.Close()
+
+	// Send a normal request — its estimated cost will exceed $0.001.
+	req, _ := http.NewRequest("POST",
+		srv.URL+"/proxy/anthropic/v1/messages",
+		strings.NewReader(`{"model":"claude-sonnet-4-20250514","messages":[{"role":"user","content":"hello world, this is a test message with enough text to generate a non-trivial estimate"}]}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer tok")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusPaymentRequired {
+		body, _ := io.ReadAll(resp.Body)
+		t.Errorf("status = %d, want 402 (overdraft prevented); body = %s", resp.StatusCode, body)
+	}
+
+	// Verify the enhanced error message includes "estimated cost" and "remaining budget".
+	body, _ := io.ReadAll(resp.Body)
+	bodyStr := string(body)
+	if !strings.Contains(bodyStr, "estimated cost") {
+		t.Errorf("402 response should contain 'estimated cost', got: %s", bodyStr)
+	}
+}
+
+func TestBudgetGate_SufficientBudgetAllowed(t *testing.T) {
+	// User has $50 remaining — any normal request should pass.
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprint(w, `{"content":[{"type":"text","text":"ok"}],"usage":{"input_tokens":1,"output_tokens":1}}`)
+	}))
+	defer upstream.Close()
+
+	submitter := &mockSubmitter{}
+	calc := costcalc.New()
+
+	p, _ := New(Config{
+		Providers: []Provider{{Name: "anthropic", UpstreamURL: upstream.URL}},
+		ProjectID: "test",
+	}, submitter, calc)
+
+	p.SetUserStore(&realisticBudgetStore{remaining: 50.00})
+
+	mux := http.NewServeMux()
+	p.RegisterRoutes(mux)
+	srv := httptest.NewServer(withTestAuth(mux))
+	defer srv.Close()
+
+	req, _ := http.NewRequest("POST",
+		srv.URL+"/proxy/anthropic/v1/messages",
+		strings.NewReader(`{"model":"claude-sonnet-4-20250514","messages":[{"role":"user","content":"hi"}]}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer tok")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Errorf("status = %d, want 200 (sufficient budget); body = %s", resp.StatusCode, body)
+	}
+}

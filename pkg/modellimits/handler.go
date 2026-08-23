@@ -67,6 +67,10 @@ func Handler(store Store, users UserLookup) http.HandlerFunc {
 		case http.MethodPut:
 			handleSet(w, r, store, userID, modelPrefix)
 		case http.MethodGet:
+			if modelPrefix != "" {
+				jsonError(w, "model_prefix not accepted on GET — use GET /api/v1/users/{userID}/model-limits", http.StatusBadRequest)
+				return
+			}
 			handleList(w, r, store, userID)
 		case http.MethodDelete:
 			handleDelete(w, r, store, userID, modelPrefix)
@@ -151,6 +155,8 @@ func handleDelete(w http.ResponseWriter, r *http.Request, store Store, userID, m
 
 // parsePath extracts userID and optional modelPrefix from the URL path.
 // Expected: /api/v1/users/{userID}/model-limits[/{modelPrefix}]
+//
+// Requires "model-limits" as an exact path segment — rejects "model-limits-extra".
 func parsePath(path string) (userID, modelPrefix string) {
 	const prefix = "/api/v1/users/"
 	if !strings.HasPrefix(path, prefix) {
@@ -158,15 +164,21 @@ func parsePath(path string) (userID, modelPrefix string) {
 	}
 	rest := strings.TrimPrefix(path, prefix)
 
-	// Split on /model-limits
-	parts := strings.SplitN(rest, "/model-limits", 2)
-	if len(parts) < 2 {
+	// Split remaining path into segments: [userID, "model-limits", modelPrefix?]
+	segments := strings.Split(strings.Trim(rest, "/"), "/")
+	if len(segments) < 2 {
 		return "", ""
 	}
 
-	userID = strings.TrimRight(parts[0], "/")
-	modelPrefix = strings.TrimLeft(parts[1], "/")
-	modelPrefix = strings.TrimRight(modelPrefix, "/")
+	// segments[0] = userID, segments[1] must be exactly "model-limits"
+	if segments[1] != "model-limits" {
+		return "", ""
+	}
+
+	userID = segments[0]
+	if len(segments) >= 3 && segments[2] != "" {
+		modelPrefix = segments[2]
+	}
 
 	return userID, modelPrefix
 }

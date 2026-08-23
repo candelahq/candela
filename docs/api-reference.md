@@ -331,11 +331,11 @@ curl -X POST http://localhost:8181/v1/messages \
 
 ### Per-Model Daily Spend Limits
 
-Candela supports per-model daily spend ceilings to prevent expensive models from consuming the entire budget. Limits are enforced pre-flight — requests that would exceed the limit are rejected with `402 Payment Required` before reaching the upstream provider.
+Candela supports per-model daily spend ceilings to prevent expensive models from consuming the entire budget.
 
 #### Global Limits (YAML Config)
 
-Set global per-model limits in `config.yaml` that apply to all users:
+Global limits are enforced pre-flight via the in-memory `SpendTracker`. Set them in `config.yaml`:
 
 ```yaml
 proxy:
@@ -353,7 +353,10 @@ proxy:
 
 #### Per-User Limits (REST API)
 
-Admins can set per-user model limits that override the global YAML config. These are stored in Firestore and persist across restarts.
+Admins can store per-user model limits in Firestore via the REST API below. These persist across restarts.
+
+> [!NOTE]
+> **Enforcement not yet active.** This API only stores per-user limits. The proxy does not yet consult Firestore limits during the pre-flight gate — that will be wired in a follow-up PR. For now, only the global YAML `daily_limits` are enforced.
 
 ### `PUT /api/v1/users/{userID}/model-limits/{modelPrefix}`
 
@@ -417,7 +420,7 @@ curl -X DELETE -H "Authorization: Bearer $ADMIN_TOKEN" \
 | 405 | Method not allowed |
 | 500 | Internal server error |
 
-**Precedence:** Per-user Firestore limit > Global YAML limit > No limit.
+**Planned precedence (once enforcement is wired):** Per-user Firestore limit > Global YAML limit > No limit.
 
 ---
 

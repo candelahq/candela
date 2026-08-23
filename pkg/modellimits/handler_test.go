@@ -286,6 +286,11 @@ func TestParsePath(t *testing.T) {
 		{"/api/v1/users/bob@example.com/model-limits/gemini-2.5-flash", "bob@example.com", "gemini-2.5-flash"},
 		{"/api/v1/other/path", "", ""},
 		{"", "", ""},
+		// CR #2: Exact segment matching — reject "model-limits-extra".
+		{"/api/v1/users/alice/model-limits-extra", "", ""},
+		{"/api/v1/users/alice/model-limitsx/foo", "", ""},
+		// Only users prefix, no model-limits segment.
+		{"/api/v1/users/alice/other-segment", "", ""},
 	}
 
 	for _, tt := range tests {
@@ -294,5 +299,29 @@ func TestParsePath(t *testing.T) {
 			t.Errorf("parsePath(%q) = (%q, %q), want (%q, %q)",
 				tt.path, user, prefix, tt.wantUser, tt.wantPrefix)
 		}
+	}
+}
+
+func TestHandler_GET_RejectsModelPrefix(t *testing.T) {
+	h := Handler(&mockStore{limits: []*storage.ModelLimitRecord{
+		{UserID: "alice", ModelPrefix: "gpt-4o", MaxDailyUSD: 10},
+	}}, &mockUserLookup{role: "admin"})
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/v1/users/", h)
+	srv := httptest.NewServer(withAuth(mux, "admin-user", "admin@test.com", "admin"))
+	defer srv.Close()
+
+	// GET with model prefix should be rejected.
+	req, _ := http.NewRequest("GET",
+		srv.URL+"/api/v1/users/alice/model-limits/gpt-4o", nil)
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("GET with model prefix: status = %d, want 400", resp.StatusCode)
 	}
 }

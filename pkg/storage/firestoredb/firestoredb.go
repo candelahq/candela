@@ -884,18 +884,22 @@ func (s *Store) SetModelLimit(ctx context.Context, limit *storage.ModelLimitReco
 		Collection(modelLimitsCol).Doc(docID)
 
 	now := time.Now().UTC()
+	var createdAt time.Time
 
 	err := s.client.RunTransaction(ctx, func(_ context.Context, tx *firestore.Transaction) error {
 		// Read existing doc to preserve CreatedAt if it exists.
 		snap, err := tx.Get(ref)
-		createdAt := now
+		createdAt = now
 		if err == nil {
 			// Existing doc — preserve its CreatedAt.
 			if t, ok := snap.Data()["created_at"].(time.Time); ok {
 				createdAt = t
 			}
+		} else if status.Code(err) != codes.NotFound {
+			// Real read error — abort the transaction.
+			return err
 		}
-		// If the doc doesn't exist (status.Code == codes.NotFound), createdAt stays as now.
+		// If NotFound, createdAt stays as now (new record).
 
 		return tx.Set(ref, map[string]interface{}{
 			"user_id":       limit.UserID,
@@ -909,6 +913,7 @@ func (s *Store) SetModelLimit(ctx context.Context, limit *storage.ModelLimitReco
 		return fmt.Errorf("firestoredb: setting model limit: %w", err)
 	}
 
+	limit.CreatedAt = createdAt
 	limit.UpdatedAt = now
 	return nil
 }

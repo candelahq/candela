@@ -30,6 +30,7 @@ import (
 	"time"
 
 	"golang.org/x/oauth2"
+	"golang.org/x/sync/singleflight"
 
 	"github.com/candelahq/candela/pkg/attribution"
 	"github.com/candelahq/candela/pkg/auth"
@@ -289,7 +290,8 @@ type Proxy struct {
 	// #608: Default daily budget for SAs without an explicit budget.
 	// When > 0, SAs hitting ReasonNoBudget are auto-provisioned with this limit.
 	saDefaultBudgetUSD float64
-	saProvisioned      sync.Map // tracks which SA IDs have been auto-provisioned this process
+	saProvisionFlight  singleflight.Group // coalesces concurrent first-request provisions
+	saProvisioned      sync.Map           // tracks which SA IDs have been successfully provisioned
 
 	// TOCTOU mitigation: tracks in-flight spend between CheckBudget and
 	// DeductSpend. Without this, concurrent requests all pass CheckBudget
@@ -1154,7 +1156,7 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 	// Service accounts are included (#736) — SAs without a budget/grant
 	// record are auto-provisioned with a default daily limit (#608).
 	var budgetReserved float64 // track reservation for Release in deductBudget
-	if p.users != nil && effectiveUserID != "" && !isAdmin {
+	if p.users != nil && effectiveUserID != "" && (!isAdmin || isServiceAccount) {
 		// Check whether the user can afford this request. Use the estimated
 		// cost when available; fall back to a minimal floor for requests
 		// where the model/cost is unknown ($0.001 is below any cloud model).
@@ -1177,15 +1179,33 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// #608: Auto-provision default budget for SAs with no budget.
-		// Uses sync.Map to ensure we only write to Firestore once per SA per process.
-		// Fail-open: if auto-provision fails, allow the request (availability > precision).
+		// Uses singleflight to coalesce concurrent first requests into one
+		// SetBudget call. Fail-open: if provision fails, allow the request.
 		if !check.Allowed && check.Reason == billing.ReasonNoBudget &&
 			isServiceAccount && p.saDefaultBudgetUSD > 0 {
-			if _, alreadyDone := p.saProvisioned.LoadOrStore(effectiveUserID, true); !alreadyDone {
-				provErr := p.users.SetBudget(r.Context(), &billing.BudgetRecord{
-					UserID:     effectiveUserID,
-					LimitUSD:   p.saDefaultBudgetUSD,
-					PeriodType: "daily",
+			if _, ok := p.saProvisioned.Load(effectiveUserID); !ok {
+				// singleflight.Do coalesces concurrent calls — only the
+				// first goroutine executes SetBudget; others block and
+				// receive the same result.
+				_, provErr, _ := p.saProvisionFlight.Do(effectiveUserID, func() (interface{}, error) {
+					// Double-check: another request may have succeeded
+					// between our CheckBudget and this Do call.
+					if _, done := p.saProvisioned.Load(effectiveUserID); done {
+						return nil, nil
+					}
+					err := p.users.SetBudget(r.Context(), &billing.BudgetRecord{
+						UserID:     effectiveUserID,
+						LimitUSD:   p.saDefaultBudgetUSD,
+						PeriodType: "daily",
+					})
+					if err != nil {
+						return nil, err
+					}
+					p.saProvisioned.Store(effectiveUserID, true)
+					slog.Info("sa_budget: auto-provisioned default daily budget",
+						"sa_id", effectiveUserID,
+						"daily_limit_usd", p.saDefaultBudgetUSD)
+					return nil, nil
 				})
 				if provErr != nil {
 					// Fail-open: allow this request, log the error.
@@ -1193,12 +1213,8 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 						"sa_id", effectiveUserID,
 						"default_daily_usd", p.saDefaultBudgetUSD,
 						"error", provErr)
-					p.saProvisioned.Delete(effectiveUserID) // allow retry next request
 					goto skipBudget
 				}
-				slog.Info("sa_budget: auto-provisioned default daily budget",
-					"sa_id", effectiveUserID,
-					"daily_limit_usd", p.saDefaultBudgetUSD)
 			}
 			// Re-check budget now that it's provisioned.
 			check, err = p.users.CheckBudget(r.Context(), effectiveUserID, checkAmount)

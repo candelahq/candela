@@ -1208,6 +1208,7 @@ func loadConfig() (*Config, error) {
 	}
 
 	var cfg Config
+	cfg.ServiceAccounts.DefaultDailyBudgetUSD = 10.0 // #608: default before YAML so explicit 0 disables
 
 	data, err := os.ReadFile(cfgPath)
 	if err != nil {
@@ -1261,12 +1262,9 @@ func loadConfig() (*Config, error) {
 	}
 
 	// Service account default daily budget — env var override.
-	// Default: $10/day (conservative, easy to raise per-SA).
-	if cfg.ServiceAccounts.DefaultDailyBudgetUSD == 0 {
-		cfg.ServiceAccounts.DefaultDailyBudgetUSD = 10.0
-	}
+	// Default $10/day is set before YAML unmarshal; explicit YAML 0 or env 0 disables.
 	if env := os.Getenv("CANDELA_SA_DAILY_BUDGET_USD"); env != "" {
-		if val, err := strconv.ParseFloat(env, 64); err == nil && val > 0 {
+		if val, err := strconv.ParseFloat(env, 64); err == nil && val >= 0 {
 			cfg.ServiceAccounts.DefaultDailyBudgetUSD = val
 		}
 	}

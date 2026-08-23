@@ -76,7 +76,7 @@ The next request will retry auto-provisioning.
 
 When SA budget enforcement is active, you'll see this log at startup:
 
-```
+```text
 ⚠️  SA budget enforcement active — service accounts without a configured budget
 will be auto-provisioned at the default daily limit.
 Use SetBudget RPC or CANDELA_SA_DAILY_BUDGET_USD to adjust.

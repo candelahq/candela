@@ -528,10 +528,11 @@ func main() {
 		"catalog", catalogPath)
 
 	// ── Task Spend API ──────────────────────────────────────────────────
+	var spendCache *taskspend.Cache
 	if userStore != nil {
-		spendCache := taskspend.New(userStore, taskspend.DefaultTTL)
-		spendCache.StartEvictor(context.Background(), 30*time.Second)
-		mux.HandleFunc("/api/v1/task-spend/", taskspend.Handler(spendCache))
+		spendCache = taskspend.New(userStore, taskspend.DefaultTTL)
+		// NOTE: StartEvictor deferred to after signal.NotifyContext (#782).
+		mux.HandleFunc("/api/v1/task-spend/", taskspend.Handler(spendCache, userStore))
 		slog.Info("task spend API registered", "path", "/api/v1/task-spend/{taskID}")
 	} else {
 		slog.Warn("task spend API disabled: no user store configured")
@@ -1066,6 +1067,11 @@ func main() {
 	// Graceful shutdown.
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+
+	// Start the task spend cache evictor now that we have the signal context (#782).
+	if spendCache != nil {
+		spendCache.StartEvictor(ctx, 30*time.Second)
+	}
 
 	errCh := make(chan error, 1)
 	go func() {

@@ -448,7 +448,7 @@ func TestDeductBudget_SkipsZeroCostZeroTokens(t *testing.T) {
 	p.SetUserStore(store)
 
 	// Zero tokens + zero cost → should skip DeductSpend.
-	p.deductBudget(context.Background(), Provider{Name: "local"}, "llama3", "user@test.com", 0, 0, 0)
+	p.deductBudget(context.Background(), Provider{Name: "local"}, "llama3", "user@test.com", "", 0, 0, 0)
 
 	if got := store.deductCount.Load(); got != 0 {
 		t.Errorf("DeductSpend called %d times for zero tokens, want 0", got)
@@ -466,7 +466,7 @@ func TestDeductBudget_CallsForPositiveTokens(t *testing.T) {
 	p.SetUserStore(store)
 
 	// Positive tokens → should call DeductSpend.
-	p.deductBudget(context.Background(), Provider{Name: "anthropic"}, "claude-sonnet-4-20250514", "user@test.com", 100, 50, 0)
+	p.deductBudget(context.Background(), Provider{Name: "anthropic"}, "claude-sonnet-4-20250514", "user@test.com", "", 100, 50, 0)
 
 	if got := store.deductCount.Load(); got != 1 {
 		t.Errorf("DeductSpend called %d times, want 1", got)
@@ -484,7 +484,7 @@ func TestDeductBudget_SkipsServiceAccount(t *testing.T) {
 	p.SetUserStore(store)
 
 	p.deductBudget(context.Background(), Provider{Name: "anthropic"}, "claude-sonnet-4-20250514",
-		"my-sa@project.iam.gserviceaccount.com", 1000, 500, 0)
+		"my-sa@project.iam.gserviceaccount.com", "", 1000, 500, 0)
 
 	if got := store.deductCount.Load(); got != 0 {
 		t.Errorf("DeductSpend called %d times for SA, want 0", got)
@@ -501,7 +501,7 @@ func TestDeductBudget_SkipsEmptyUserID(t *testing.T) {
 	p, _ := New(Config{ProjectID: "test"}, &mockSubmitter{}, calc)
 	p.SetUserStore(store)
 
-	p.deductBudget(context.Background(), Provider{Name: "anthropic"}, "claude-sonnet-4-20250514", "", 1000, 500, 0)
+	p.deductBudget(context.Background(), Provider{Name: "anthropic"}, "claude-sonnet-4-20250514", "", "", 1000, 500, 0)
 
 	if got := store.deductCount.Load(); got != 0 {
 		t.Errorf("DeductSpend called %d times for empty userID, want 0", got)

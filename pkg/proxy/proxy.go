@@ -287,6 +287,11 @@ type Proxy struct {
 	// because none have been recorded in Firestore yet.
 	pendingSpend *pendingSpendTracker
 
+	// Task-level TOCTOU mitigation: tracks in-flight spend per jobID
+	// between CheckTaskBudget and DeductTaskSpend. Prevents concurrent
+	// subagents in the same task from blowing through the task budget.
+	taskPendingSpend *pendingSpendTracker
+
 	// HIGH-5: Spans dropped at proxy semaphore (circuit breaker full).
 	droppedSpans atomic.Int64
 
@@ -413,18 +418,19 @@ func New(cfg Config, submitter SpanSubmitter, calc *costcalc.Calculator) (*Proxy
 	}
 
 	p := &Proxy{
-		providers:    providers,
-		submitter:    submitter,
-		calc:         calc,
-		projectID:    cfg.ProjectID,
-		config:       cfg,
-		breakers:     breakers,
-		retryConfig:  cfg.Retry,
-		spanSem:      make(chan struct{}, 200), // CRIT-16: cap concurrent span goroutines
-		asyncSem:     make(chan struct{}, 50),  // #333: cap best-effort async goroutines
-		saRL:         newSARateLimiter(0),      // default 120 RPM per SA
-		pendingSpend: newPendingSpendTracker(),
-		client:       newUpstreamHTTPClient(cfg),
+		providers:        providers,
+		submitter:        submitter,
+		calc:             calc,
+		projectID:        cfg.ProjectID,
+		config:           cfg,
+		breakers:         breakers,
+		retryConfig:      cfg.Retry,
+		spanSem:          make(chan struct{}, 200), // CRIT-16: cap concurrent span goroutines
+		asyncSem:         make(chan struct{}, 50),  // #333: cap best-effort async goroutines
+		saRL:             newSARateLimiter(0),      // default 120 RPM per SA
+		pendingSpend:     newPendingSpendTracker(),
+		taskPendingSpend: newPendingSpendTracker(),
+		client:           newUpstreamHTTPClient(cfg),
 	}
 
 	// Initialize fallback resolver if configured.
@@ -1052,6 +1058,61 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// ── Task budget pre-flight (#779) ──────────────────────────────────
+	// Applies when a job ID is present, even for SAs and admins.
+	// Task budgets are explicitly created to cap a specific agent run.
+	// FAIL-CLOSED: if jobID is set, a task budget MUST exist.
+	var taskReserved float64
+	if p.users != nil && jobID != "" {
+		const budgetCheckFloor = 0.001
+		const reservationFloor = 0.05
+		check, err := p.users.CheckTaskBudget(r.Context(), jobID, estimatedCost)
+		if err != nil {
+			if errors.Is(err, storage.ErrNotFound) {
+				ProxyErrorResponse(w, http.StatusPaymentRequired,
+					"task budget required — create a budget for job "+jobID,
+					"task_budget_missing")
+				slog.Info("blocked request: no task budget",
+					"job_id", jobID, "user_id", effectiveUserID)
+				return
+			}
+			slog.Error("task budget check failed, blocking request",
+				"job_id", jobID, "error", err)
+			ProxyErrorResponse(w, http.StatusServiceUnavailable,
+				"task budget check unavailable — try again shortly", "service_error")
+			return
+		} else if !check.Allowed {
+			reason := "task_budget_exhausted"
+			if check.Reason != "" {
+				reason = check.Reason
+			}
+			ProxyErrorResponse(w, http.StatusPaymentRequired,
+				fmt.Sprintf("task budget %s — remaining $%.4f of $%.2f",
+					reason, check.RemainingUSD, check.LimitUSD), reason)
+			slog.Info("blocked request: task budget",
+				"job_id", jobID, "reason", reason,
+				"remaining_usd", check.RemainingUSD)
+			return
+		} else {
+			// TOCTOU: atomic check-and-reserve for task-level pending spend.
+			taskReserved = reservationFloor
+			if estimatedCost > reservationFloor {
+				taskReserved = estimatedCost
+			}
+			if !p.taskPendingSpend.ReserveIfUnder(jobID, check.RemainingUSD, taskReserved, budgetCheckFloor) {
+				ProxyErrorResponse(w, http.StatusPaymentRequired,
+					"task budget exhausted (concurrent requests in flight)",
+					"task_budget_exhausted")
+				return
+			}
+			defer func() {
+				if taskReserved > 0 {
+					p.taskPendingSpend.Release(jobID, taskReserved)
+				}
+			}()
+		}
+	}
+
 	// ── Budget pre-flight with conservative reservation ──
 	// Only applies in team mode (UserStore configured).
 	var budgetReserved float64 // track reservation for Release in deductBudget
@@ -1570,11 +1631,23 @@ done:
 	// Zero out so the deferred release guard (above) becomes a no-op.
 	reserved := budgetReserved
 	budgetReserved = 0
+	taskRes := taskReserved
+	taskReserved = 0
+
+	// Safety net: release task reservation if handler returns without
+	// clearing it (e.g. read failure, response-size error). The handler
+	// sets *taskReserved=0 after successful deduction, making this a no-op
+	// in the normal path.
+	defer func() {
+		if taskRes > 0 {
+			p.taskPendingSpend.Release(jobID, taskRes)
+		}
+	}()
 
 	if isStreaming && resp.StatusCode == http.StatusOK {
-		p.handleStreamingResponse(w, r, resp, provider, reqBody, startTime, ttfb, requestID, sessionID, effectiveUserID, tenantID, jobID, cbAllow, traceCtx, proxySpanID, extendedTTL, &reserved)
+		p.handleStreamingResponse(w, r, resp, provider, reqBody, startTime, ttfb, requestID, sessionID, effectiveUserID, tenantID, jobID, cbAllow, traceCtx, proxySpanID, extendedTTL, &reserved, &taskRes)
 	} else {
-		p.handleStandardResponse(w, r, resp, provider, reqBody, startTime, ttfb, requestID, sessionID, effectiveUserID, tenantID, jobID, cbAllow, traceCtx, proxySpanID, extendedTTL, &reserved)
+		p.handleStandardResponse(w, r, resp, provider, reqBody, startTime, ttfb, requestID, sessionID, effectiveUserID, tenantID, jobID, cbAllow, traceCtx, proxySpanID, extendedTTL, &reserved, &taskRes)
 	}
 }
 
@@ -1611,6 +1684,7 @@ func (p *Proxy) handleStandardResponse(
 	proxySpanID string,
 	extendedTTL bool, // true = Anthropic 1h TTL (2.0× cache creation rate)
 	budgetReserved *float64, // pending-spend reservation to release after DeductSpend
+	taskReserved *float64, // task-level pending-spend reservation (#779)
 ) {
 	// Read the full response (reject if over 10MB to prevent OOM under concurrent load).
 	// CRIT-15: Previously 50MB — with 100 concurrent requests that's 5GB of heap.
@@ -1680,7 +1754,7 @@ func (p *Proxy) handleStandardResponse(
 		}
 		inputTokens = p.calc.NormalizeCachedInputWithTTL(provider.Name, model, inputTokens, ct.CacheReadTokens, ct.CacheCreationTokens, extendedTTL)
 		deductCtx, deductCancel := context.WithTimeout(context.WithoutCancel(r.Context()), 15*time.Second)
-		p.deductBudget(deductCtx, provider, model, effectiveUserID, inputTokens, outputTokens, time.Since(startTime))
+		p.deductBudget(deductCtx, provider, model, effectiveUserID, jobID, inputTokens, outputTokens, time.Since(startTime))
 		deductCancel()
 		// Clear the pending-spend reservation now that DeductSpend has
 		// recorded the actual cost in Firestore. The deferred Release in
@@ -1688,6 +1762,10 @@ func (p *Proxy) handleStandardResponse(
 		if budgetReserved != nil && *budgetReserved > 0 {
 			p.pendingSpend.Release(effectiveUserID, *budgetReserved)
 			*budgetReserved = 0
+		}
+		if taskReserved != nil && *taskReserved > 0 {
+			p.taskPendingSpend.Release(jobID, *taskReserved)
+			*taskReserved = 0
 		}
 	} else if p.spendTracker != nil {
 		// Solo mode: no UserStore but spend tracker is active.
@@ -1744,6 +1822,7 @@ func (p *Proxy) handleStreamingResponse(
 	proxySpanID string,
 	extendedTTL bool, // true = Anthropic 1h TTL (2.0× cache creation rate)
 	budgetReserved *float64, // pending-spend reservation to release after DeductSpend
+	taskReserved *float64, // task-level pending-spend reservation (#779)
 ) {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
@@ -1847,11 +1926,15 @@ func (p *Proxy) handleStreamingResponse(
 		}
 		inputTokens = p.calc.NormalizeCachedInputWithTTL(provider.Name, model, inputTokens, ct.CacheReadTokens, ct.CacheCreationTokens, extendedTTL)
 		deductCtx, deductCancel := context.WithTimeout(context.WithoutCancel(r.Context()), 15*time.Second)
-		p.deductBudget(deductCtx, provider, model, effectiveUserID, inputTokens, outputTokens, time.Since(startTime))
+		p.deductBudget(deductCtx, provider, model, effectiveUserID, jobID, inputTokens, outputTokens, time.Since(startTime))
 		deductCancel()
 		if budgetReserved != nil && *budgetReserved > 0 {
 			p.pendingSpend.Release(effectiveUserID, *budgetReserved)
 			*budgetReserved = 0
+		}
+		if taskReserved != nil && *taskReserved > 0 {
+			p.taskPendingSpend.Release(jobID, *taskReserved)
+			*taskReserved = 0
 		}
 	} else if p.spendTracker != nil {
 		// Solo mode: record per-model spend for daily limits.
@@ -1922,7 +2005,7 @@ type spanParams struct {
 // written. This MUST run in the request handler goroutine (not async) so that
 // the next request's CheckBudget reads the updated spend from Firestore.
 // Extracted from buildSpan to decouple billing timing from span creation.
-func (p *Proxy) deductBudget(ctx context.Context, provider Provider, model, userID string, inputTokens, outputTokens int64, duration time.Duration) {
+func (p *Proxy) deductBudget(ctx context.Context, provider Provider, model, userID, jobID string, inputTokens, outputTokens int64, duration time.Duration) {
 	if p.users == nil || userID == "" {
 		return
 	}
@@ -1944,6 +2027,13 @@ func (p *Proxy) deductBudget(ctx context.Context, provider Provider, model, user
 				"output_tokens", outputTokens,
 				"total_tokens", totalTokens,
 			)
+		}
+		// #779: Even for SAs, deduct from task budget if one exists.
+		if jobID != "" && cost > 0 {
+			if taskErr := p.users.DeductTaskSpend(ctx, jobID, cost); taskErr != nil {
+				slog.Warn("sa_task_deduct: failed (best-effort)",
+					"sa_id", userID, "job_id", jobID, "cost_usd", cost, "error", taskErr)
+			}
 		}
 		return
 	}
@@ -1997,6 +2087,7 @@ func (p *Proxy) deductBudget(ctx context.Context, provider Provider, model, user
 		if p.spendOutbox != nil {
 			if qErr := p.spendOutbox.Enqueue(ctx, spendoutbox.SpendRecord{
 				UserID:  userID,
+				TaskID:  jobID,
 				CostUSD: cost,
 				Tokens:  totalTokens,
 			}); qErr != nil {
@@ -2014,6 +2105,29 @@ func (p *Proxy) deductBudget(ctx context.Context, provider Provider, model, user
 				"attempts", maxDeductAttempts, "error", deductErr)
 		}
 		return
+	}
+
+	// #779: Task budget deduction (separate Firestore document group).
+	// On failure, enqueue to outbox so the worker retries DeductTaskSpend.
+	if jobID != "" && cost > 0 {
+		if taskErr := p.users.DeductTaskSpend(ctx, jobID, cost); taskErr != nil {
+			slog.Warn("task_deduct_spend: failed, enqueueing to outbox",
+				"job_id", jobID, "cost_usd", cost, "error", taskErr)
+			if p.spendOutbox != nil {
+				// Enqueue a task-only record (UserID already deducted above).
+				// The worker calls DeductTaskSpend when TaskID is set.
+				if qErr := p.spendOutbox.Enqueue(ctx, spendoutbox.SpendRecord{
+					UserID:  userID,
+					TaskID:  jobID,
+					CostUSD: cost,
+					Tokens:  0, // user spend already recorded; task-only retry
+				}); qErr != nil {
+					slog.Error("task_deduct_spend: CRITICAL — failed to enqueue to outbox",
+						"job_id", jobID, "cost_usd", cost,
+						"enqueue_error", qErr, "original_error", taskErr)
+				}
+			}
+		}
 	}
 
 	// Best-effort: update the user's last-active timestamp (proxy usage).

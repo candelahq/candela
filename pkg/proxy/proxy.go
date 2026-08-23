@@ -272,6 +272,10 @@ type Proxy struct {
 	config       Config        // retained for limit config access
 	spendTracker *SpendTracker // per-user per-model daily spend tracker (nil if no limits)
 
+	// #721: Per-user model limit cache — merges Firestore limits with YAML
+	// defaults. Nil in solo mode (no UserStore). 60s TTL, fail-open.
+	modelLimits *modelLimitCache
+
 	// #207: Model allowlist policy gate.
 	policy *ModelPolicy
 
@@ -463,8 +467,18 @@ func New(cfg Config, submitter SpanSubmitter, calc *costcalc.Calculator) (*Proxy
 }
 
 // SetUserStore sets the optional UserStore for budget deduction.
+// Also initializes the per-user model limit cache (#721) so the proxy
+// can merge Firestore limits with YAML defaults in the pre-flight gate.
 func (p *Proxy) SetUserStore(users storage.UserStore) {
 	p.users = users
+	if users != nil {
+		p.modelLimits = newModelLimitCache(users, 60*time.Second)
+		// Ensure spendTracker exists — user-specific limits need it
+		// even if no global YAML daily_limits are configured.
+		if p.spendTracker == nil {
+			p.spendTracker = NewSpendTracker()
+		}
+	}
 }
 
 // SetBudgetChecker sets the optional BudgetChecker for threshold notifications.
@@ -480,6 +494,17 @@ func (p *Proxy) SetCatalog(c catalog.ModelCatalogStore) {
 // SetSpendOutbox sets the optional spend outbox for durable DeductSpend retries (CRIT-3).
 func (p *Proxy) SetSpendOutbox(o *spendoutbox.Outbox) {
 	p.spendOutbox = o
+}
+
+// effectiveLimits returns the merged per-model daily spend limits for a user.
+// If a model limit cache is available (team mode), user-specific Firestore
+// limits override global YAML defaults. Falls back to YAML-only if the cache
+// is nil (solo mode) or on Firestore errors (fail-open).
+func (p *Proxy) effectiveLimits(ctx context.Context, userID string) []SpendLimitConfig {
+	if p.modelLimits == nil {
+		return p.config.DailyLimits
+	}
+	return p.modelLimits.mergedLimits(ctx, userID, p.config.DailyLimits)
 }
 
 // DroppedSpans returns the total number of spans dropped at the proxy semaphore (HIGH-5).
@@ -1191,21 +1216,36 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// ── Per-model daily spend limit (#278) ──
-	// Checks in-memory per-user per-model daily spend against configured limits.
+	// ── Per-model daily spend limit (#278, #721) ──
+	// Checks in-memory per-user per-model daily spend against merged limits
+	// (per-user Firestore overrides > global YAML defaults).
 	// Uses "local" fallback for solo mode where effectiveUserID is empty.
 	if p.spendTracker != nil && requestModel != "" {
 		limitUser := effectiveUserID
 		if limitUser == "" {
 			limitUser = "local"
 		}
-		allowed, spent, limit := p.spendTracker.Check(limitUser, requestModel, p.config.DailyLimits, estimatedCost)
+		limits := p.effectiveLimits(r.Context(), limitUser)
+		allowed, spent, limit := p.spendTracker.Check(limitUser, requestModel, limits, estimatedCost)
 		if !allowed {
+			// Determine limit source for operator debugging.
+			limitSource := "yaml"
+			if p.modelLimits != nil {
+				if ul := p.modelLimits.getUserLimits(r.Context(), limitUser); len(ul) > 0 {
+					for _, u := range ul {
+						if strings.EqualFold(u.Model, requestModel) || strings.HasPrefix(strings.ToLower(requestModel), strings.ToLower(u.Model)) {
+							limitSource = "firestore"
+							break
+						}
+					}
+				}
+			}
 			ProxyErrorResponse(w, http.StatusPaymentRequired, fmt.Sprintf("daily spend limit for %s reached ($%.2f/$%.2f)",
 				requestModel, spent, limit), "daily_limit_exceeded")
 			slog.Info("blocked request: daily model spend limit exceeded",
 				"user_id", limitUser, "model", requestModel,
-				"spent_usd", spent, "limit_usd", limit)
+				"spent_usd", spent, "limit_usd", limit,
+				"limit_source", limitSource)
 			return
 		}
 	}
@@ -1789,7 +1829,7 @@ func (p *Proxy) handleStandardResponse(
 		if limitUser == "" {
 			limitUser = "local"
 		}
-		p.spendTracker.Record(limitUser, model, cost, p.config.DailyLimits)
+		p.spendTracker.Record(limitUser, model, cost, p.effectiveLimits(r.Context(), limitUser))
 	}
 
 	// Create observability span (async — don't block the handler).
@@ -1957,7 +1997,7 @@ func (p *Proxy) handleStreamingResponse(
 		if limitUser == "" {
 			limitUser = "local"
 		}
-		p.spendTracker.Record(limitUser, model, cost, p.config.DailyLimits)
+		p.spendTracker.Record(limitUser, model, cost, p.effectiveLimits(r.Context(), limitUser))
 	}
 
 	// Create observability span (async — don't block the handler).
@@ -2045,7 +2085,7 @@ func (p *Proxy) deductBudget(ctx context.Context, provider Provider, model, user
 	// This must happen even if DeductSpend fails, since the upstream
 	// response was already forwarded (spend happened, we're tracking it).
 	if p.spendTracker != nil && cost > 0 {
-		p.spendTracker.Record(userID, model, cost, p.config.DailyLimits)
+		p.spendTracker.Record(userID, model, cost, p.effectiveLimits(ctx, userID))
 	}
 
 	// #10: DeductSpend is called when CostUSD>0 OR TotalTokens>0.

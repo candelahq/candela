@@ -353,10 +353,10 @@ proxy:
 
 #### Per-User Limits (REST API)
 
-Admins can store per-user model limits in Firestore via the REST API below. These persist across restarts.
+Admins can set per-user model limits that override the global YAML config. These are stored in Firestore and persist across restarts. The proxy merges per-user limits with YAML defaults at request time.
 
-> [!NOTE]
-> **Enforcement not yet active.** This API only stores per-user limits. The proxy does not yet consult Firestore limits during the pre-flight gate — that will be wired in a follow-up PR. For now, only the global YAML `daily_limits` are enforced.
+> [!TIP]
+> Per-user limits are cached for 60 seconds. Changes made via the REST API may take up to 60 seconds to take effect in the proxy.
 
 ### `PUT /api/v1/users/{userID}/model-limits/{modelPrefix}`
 
@@ -420,7 +420,7 @@ curl -X DELETE -H "Authorization: Bearer $ADMIN_TOKEN" \
 | 405 | Method not allowed |
 | 500 | Internal server error |
 
-**Planned precedence (once enforcement is wired):** Per-user Firestore limit > Global YAML limit > No limit.
+**Precedence:** Per-user Firestore limit > Global YAML limit > No limit.
 
 ---
 

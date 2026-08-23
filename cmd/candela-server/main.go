@@ -131,6 +131,9 @@ type Config struct {
 	Users   struct {
 		DefaultDailyBudgetUSD float64 `yaml:"default_daily_budget_usd"` // auto-assigned to new users (0 = no default)
 	} `yaml:"users"`
+	ServiceAccounts struct {
+		DefaultDailyBudgetUSD float64 `yaml:"default_daily_budget_usd"` // auto-assigned to SAs without a budget (default: 10.0)
+	} `yaml:"service_accounts"`
 	Sinks struct {
 		OTLP struct {
 			Enabled     bool              `yaml:"enabled"`
@@ -880,6 +883,18 @@ func main() {
 				}
 
 				slog.Info("🔔 Budget deduction + notifications wired into proxy")
+
+				// #608: Wire SA default budget for auto-provisioning.
+				if cfg.ServiceAccounts.DefaultDailyBudgetUSD > 0 {
+					llmProxy.SetSADefaultBudget(cfg.ServiceAccounts.DefaultDailyBudgetUSD)
+					if len(cfg.Auth.AllowedServiceAccounts) > 0 {
+						slog.Warn("⚠️  SA budget enforcement active — service accounts without a configured budget "+
+							"will be auto-provisioned at the default daily limit. "+
+							"Use SetBudget RPC or CANDELA_SA_DAILY_BUDGET_USD to adjust.",
+							"default_daily_usd", cfg.ServiceAccounts.DefaultDailyBudgetUSD,
+							"allowed_sa_count", len(cfg.Auth.AllowedServiceAccounts))
+					}
+				}
 			}
 
 			llmProxy.RegisterRoutes(mux)
@@ -1243,6 +1258,17 @@ func loadConfig() (*Config, error) {
 			}
 		}
 		cfg.Auth.AllowedServiceAccounts = append(cfg.Auth.AllowedServiceAccounts, sas...)
+	}
+
+	// Service account default daily budget — env var override.
+	// Default: $10/day (conservative, easy to raise per-SA).
+	if cfg.ServiceAccounts.DefaultDailyBudgetUSD == 0 {
+		cfg.ServiceAccounts.DefaultDailyBudgetUSD = 10.0
+	}
+	if env := os.Getenv("CANDELA_SA_DAILY_BUDGET_USD"); env != "" {
+		if val, err := strconv.ParseFloat(env, 64); err == nil && val > 0 {
+			cfg.ServiceAccounts.DefaultDailyBudgetUSD = val
+		}
 	}
 
 	// Auth: dev mode — env var override.

@@ -157,15 +157,17 @@ auth:
   # Deny-by-default: if this list is empty (or omitted), ALL service accounts
   # are rejected with 403.
   #
-  # Allowlisted SAs bypass two gates:
-  #   1. Authentication — the resolver chain permits them (non-listed SAs are rejected)
-  #   2. Registration — they skip the Firestore user-store lookup (no user doc needed)
-  #
-  # Only add SAs that genuinely need proxy access (e.g. CI runners, shared
-  # build agents). SA traffic bypasses per-user budget deduction, so each
-  # entry here is an unmetered cost vector.
+  # Allowlisted SAs are subject to budget enforcement (#608). SAs without a
+  # configured budget are auto-provisioned with the default daily limit
+  # (see service_accounts.default_daily_budget_usd below).
   # allowed_service_accounts:
   #   - "candela-ci@my-project.iam.gserviceaccount.com"
+
+# Service account budget defaults (#608).
+# SAs without an explicit budget are auto-provisioned with this daily limit.
+# Set to 0 to disable auto-provisioning (SAs without a budget will be blocked).
+# service_accounts:
+#   default_daily_budget_usd: 10.0
 
 # Optional export sinks — fan-out to external systems alongside primary storage.
 # These are write-only; the primary storage backend handles reads.

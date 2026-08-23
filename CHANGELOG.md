@@ -13,6 +13,11 @@ All notable changes to Candela are documented here, organized by development pha
 - `TaskID` field on `BudgetAlert` for task-scoped notification context
 - Spend outbox extended with `TaskID` for durable task deduction retry
 - Fast task spend API: `GET /api/v1/task-spend/{taskID}` with in-memory cache (5s TTL)
+- **⚠️ BREAKING**: Service account daily budget enforcement (#608) — SAs without a configured budget are auto-provisioned with a `$10/day` daily limit. SAs that previously ran with unbounded spend will now be capped. Set `CANDELA_SA_DAILY_BUDGET_USD` to adjust or set to `0` to disable auto-provisioning.
+- `service_accounts.default_daily_budget_usd` config option (default: 10.0)
+- `CANDELA_SA_DAILY_BUDGET_USD` environment variable override
+- Fail-open auto-provisioning: if Firestore is unavailable during first SA request, the request is allowed through
+- SA startup log warning when budget enforcement is active
 
 ## v0.10.1 — 2026-07-07
 

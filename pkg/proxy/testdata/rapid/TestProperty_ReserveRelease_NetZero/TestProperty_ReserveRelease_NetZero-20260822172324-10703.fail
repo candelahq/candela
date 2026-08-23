@@ -1,0 +1,29 @@
+# 2026/08/22 17:23:24.301523 [TestProperty_ReserveRelease_NetZero] [rapid] draw id: "aaa"
+# 2026/08/22 17:23:24.301527 [TestProperty_ReserveRelease_NetZero] [rapid] draw n: 16
+# 2026/08/22 17:23:24.301528 [TestProperty_ReserveRelease_NetZero] [rapid] draw amount: 0.0010000000000000013
+# 2026/08/22 17:23:24.301530 [TestProperty_ReserveRelease_NetZero] net-zero violated: after 16 reserve+release of $0.0010, got $0.0000
+# 
+v0.4.8#1837326160426760005
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x9867f1f40f739
+0xf
+0x0
+0x10000000000000
+0xc05c654ab866b
+0x9
+0x0
+0x33
+0x6

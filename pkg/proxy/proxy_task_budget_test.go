@@ -436,3 +436,166 @@ func TestTaskBudget_CheckUnavailable(t *testing.T) {
 		t.Fatalf("status = %d, want 503; body = %s", resp.StatusCode, body)
 	}
 }
+
+// ── Test: deductBudget with failed DeductTaskSpend still succeeds overall ──
+
+func TestDeductBudget_TaskDeductFailureDoesNotBlockUser(t *testing.T) {
+	// When DeductTaskSpend fails, the user's DeductSpend should still succeed.
+	store := &taskBudgetStore{
+		budgetUserStore: budgetUserStore{
+			checkResult: &storage.BudgetCheckResult{Allowed: true, RemainingUSD: 100},
+		},
+		taskDeductErr: fmt.Errorf("firestore timeout"),
+	}
+	calc := costcalc.New()
+	p, _ := New(Config{ProjectID: "test"}, &mockSubmitter{}, calc)
+	p.SetUserStore(store)
+
+	// Should not panic or hang — user deduction proceeds despite task failure.
+	p.deductBudget(context.Background(), Provider{Name: "anthropic"}, "claude-sonnet-4-20250514",
+		"user@test.com", "task-fail-1", 100, 50, 0)
+
+	// DeductTaskSpend was attempted (even though it failed).
+	if got := store.taskDeductCount.Load(); got != 1 {
+		t.Errorf("DeductTaskSpend called %d times, want 1", got)
+	}
+}
+
+// ── Test: deductBudget passes correct cost to DeductTaskSpend ──
+
+func TestDeductBudget_TaskDeductReceivesCorrectCost(t *testing.T) {
+	var capturedCost float64
+	store := &taskBudgetStoreCapturer{
+		budgetUserStore: budgetUserStore{
+			checkResult: &storage.BudgetCheckResult{Allowed: true, RemainingUSD: 100},
+		},
+		onDeductTask: func(taskID string, costUSD float64) error {
+			capturedCost = costUSD
+			return nil
+		},
+	}
+	calc := costcalc.New()
+	p, _ := New(Config{ProjectID: "test"}, &mockSubmitter{}, calc)
+	p.SetUserStore(store)
+
+	p.deductBudget(context.Background(), Provider{Name: "anthropic"}, "claude-sonnet-4-20250514",
+		"user@test.com", "task-cost-1", 1000, 500, 0)
+
+	if capturedCost <= 0 {
+		t.Errorf("DeductTaskSpend received cost $%.6f, want > 0", capturedCost)
+	}
+}
+
+// taskBudgetStoreCapturer captures DeductTaskSpend args for assertion.
+type taskBudgetStoreCapturer struct {
+	budgetUserStore
+	onDeductTask func(taskID string, costUSD float64) error
+}
+
+func (t *taskBudgetStoreCapturer) CheckTaskBudget(_ context.Context, _ string, _ float64) (*storage.TaskBudgetCheckResult, error) {
+	return &storage.TaskBudgetCheckResult{Allowed: true, RemainingUSD: 100}, nil
+}
+
+func (t *taskBudgetStoreCapturer) DeductTaskSpend(_ context.Context, taskID string, costUSD float64) error {
+	if t.onDeductTask != nil {
+		return t.onDeductTask(taskID, costUSD)
+	}
+	return nil
+}
+
+// ── Test: task budget pending spend released on upstream error ──
+
+func TestTaskBudget_PendingSpendReleasedOnUpstreamError(t *testing.T) {
+	// Upstream returns 500 → handler exits without deduction →
+	// deferred release should clean up task pending spend.
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte(`{"error":"upstream failure"}`))
+	}))
+	defer upstream.Close()
+
+	store := &taskBudgetStore{
+		budgetUserStore: budgetUserStore{
+			checkResult: &storage.BudgetCheckResult{Allowed: true, RemainingUSD: 100},
+		},
+		taskCheckResult: &storage.TaskBudgetCheckResult{
+			Allowed:      true,
+			RemainingUSD: 5.0,
+			LimitUSD:     10.0,
+		},
+	}
+
+	p, _ := New(Config{
+		Providers: []Provider{{Name: "anthropic", UpstreamURL: upstream.URL}},
+		ProjectID: "test",
+	}, &mockSubmitter{}, costcalc.New())
+	p.SetUserStore(store)
+
+	mux := http.NewServeMux()
+	p.RegisterRoutes(mux)
+	srv := httptest.NewServer(withTestAuth(mux))
+	defer srv.Close()
+
+	resp, err := makeAnthropicRequest(srv.URL, "task-upstream-err")
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	_ = resp.Body.Close()
+
+	// After the request completes, the task pending spend should be fully released.
+	if got := p.taskPendingSpend.Get("task-upstream-err"); got != 0 {
+		t.Errorf("task pending spend leaked: $%.4f, want $0", got)
+	}
+}
+
+// ── Test: task pending spend released on successful response ──
+
+func TestTaskBudget_PendingSpendReleasedOnSuccess(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprint(w, `{"content":[{"type":"text","text":"ok"}],"usage":{"input_tokens":10,"output_tokens":5}}`)
+	}))
+	defer upstream.Close()
+
+	store := &taskBudgetStore{
+		budgetUserStore: budgetUserStore{
+			checkResult: &storage.BudgetCheckResult{Allowed: true, RemainingUSD: 100},
+		},
+		taskCheckResult: &storage.TaskBudgetCheckResult{
+			Allowed:      true,
+			RemainingUSD: 5.0,
+			LimitUSD:     10.0,
+		},
+	}
+
+	p, _ := New(Config{
+		Providers: []Provider{{Name: "anthropic", UpstreamURL: upstream.URL}},
+		ProjectID: "test",
+	}, &mockSubmitter{}, costcalc.New())
+	p.SetUserStore(store)
+
+	mux := http.NewServeMux()
+	p.RegisterRoutes(mux)
+	srv := httptest.NewServer(withTestAuth(mux))
+	defer srv.Close()
+
+	resp, err := makeAnthropicRequest(srv.URL, "task-success-release")
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	_ = resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+
+	// Pending spend should be fully released after successful deduction.
+	if got := p.taskPendingSpend.Get("task-success-release"); got != 0 {
+		t.Errorf("task pending spend leaked after success: $%.4f, want $0", got)
+	}
+
+	// DeductTaskSpend should have been called.
+	if got := store.taskDeductCount.Load(); got != 1 {
+		t.Errorf("DeductTaskSpend called %d times, want 1", got)
+	}
+}

@@ -138,24 +138,16 @@ provider uses custom claim names for tenant or role information.
 | `google_oidc` | Google ID tokens (Cloud Run) | `candela-local` behind Cloud Run |
 | `google_oauth` | Google OAuth2 access tokens | `candela auth login --provider gcp` |
 
-## Tenant Validation
+## Tenant Validation (Planned)
 
-When using OIDC with multi-tenancy, switch to verified tenant mode:
+> **Note**: The `TenantValidator` infrastructure exists internally but is not yet
+> exposed as a config option. When wired, you'll be able to switch to `verified`
+> tenant mode so that `X-Candela-Tenant-Id` headers are validated against signed
+> JWT claims.
 
-```yaml
-auth:
-  tenant_mode: verified
-  resolvers:
-    - type: oidc
-      issuer: https://your-idp.example.com
-      audience: candela-server
-      claim_mapping:
-        tenants: "candela.tenants"
-```
-
-In `verified` mode, the `X-Candela-Tenant-Id` header is validated against the
-tenant IDs in the signed JWT claims. Requests for unauthorized tenants are
-rejected with 403.
+For now, configure `claim_mapping.tenants` to extract tenant IDs from your OIDC
+tokens. The tenant IDs are populated on `Identity.TenantIDs` and available for
+application-level validation.
 
 ## Backward Compatibility
 

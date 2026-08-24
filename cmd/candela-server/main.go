@@ -119,8 +119,9 @@ type Config struct {
 		FlushInterval string `yaml:"flush_interval"`
 	} `yaml:"worker"`
 	Auth struct {
-		DevMode                bool     `yaml:"dev_mode"`                 // If true, skip auth validation
-		AllowedServiceAccounts []string `yaml:"allowed_service_accounts"` // SAs allowed to proxy — deny all if empty
+		DevMode                bool                 `yaml:"dev_mode"`                 // If true, skip auth validation
+		AllowedServiceAccounts []string             `yaml:"allowed_service_accounts"` // SAs allowed to proxy — deny all if empty
+		Resolvers              []auth.ResolverEntry `yaml:"resolvers"`                // Config-driven resolver chain (#764)
 	} `yaml:"auth"`
 	Firestore struct {
 		Enabled    bool   `yaml:"enabled"`
@@ -1024,6 +1025,7 @@ func main() {
 	}
 
 	// Initialize Firebase Admin SDK for token verification.
+	// Needed for both legacy and config-driven paths when "firebase" resolver is used.
 	var tokenVerifier auth.TokenVerifier
 	if !devMode {
 		fbApp, err := firebase.NewApp(context.Background(), nil)
@@ -1058,14 +1060,40 @@ func main() {
 		}
 	}
 
-	authedMux := auth.FirebaseAuthMiddleware(
-		corsMiddleware(mux, cfg.CORS.AllowedOrigins),
-		tokenVerifier,
-		cloudRunURL,
-		userAuth,
-		devMode,
-		cfg.Auth.AllowedServiceAccounts,
-	)
+	saAllowlist := auth.NewServiceAccountAllowlist(cfg.Auth.AllowedServiceAccounts)
+
+	var authedMux http.Handler
+	if len(cfg.Auth.Resolvers) > 0 {
+		// #764: Config-driven resolver chain — supports OIDC, Firebase, Google, etc.
+		chain, err := auth.BuildResolverChain(context.Background(), cfg.Auth.Resolvers, auth.BuildOptions{
+			FirebaseVerifier: tokenVerifier,
+			CloudRunAudience: cloudRunURL,
+			SAAllowlist:      saAllowlist,
+			DevMode:          devMode,
+		})
+		if err != nil {
+			slog.Error("FATAL: failed to build auth resolver chain", "error", err)
+			os.Exit(1)
+		}
+		slog.Info("🔐 Config-driven resolver chain active", "resolver_count", len(cfg.Auth.Resolvers))
+		authedMux = auth.ChainAuthMiddleware(
+			corsMiddleware(mux, cfg.CORS.AllowedOrigins),
+			chain,
+			userAuth,
+			saAllowlist,
+			devMode,
+		)
+	} else {
+		// Legacy path: hardcoded Firebase → Google OIDC → Google OAuth chain.
+		authedMux = auth.FirebaseAuthMiddleware(
+			corsMiddleware(mux, cfg.CORS.AllowedOrigins),
+			tokenVerifier,
+			cloudRunURL,
+			userAuth,
+			devMode,
+			cfg.Auth.AllowedServiceAccounts,
+		)
+	}
 	if devMode {
 		slog.Info("🔓 Running in dev mode — auth disabled")
 	}

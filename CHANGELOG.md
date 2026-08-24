@@ -18,6 +18,12 @@ All notable changes to Candela are documented here, organized by development pha
 - `CANDELA_SA_DAILY_BUDGET_USD` environment variable override
 - Fail-open auto-provisioning: if Firestore is unavailable during first SA request, the request is allowed through
 - SA startup log warning when budget enforcement is active
+- **Generic OIDC authentication** (#764) — config-driven resolver chain supporting any OIDC provider (Zitadel, Auth0, Okta, Keycloak, Cognito). Add `auth.resolvers` to `config.yaml` with issuer/audience. Zero config change required for existing Firebase deployments.
+- `auth.resolvers` config: ordered list of identity resolvers (`oidc`, `firebase`, `google_oidc`, `google_oauth`)
+- `ChainAuthMiddleware`: clean auth middleware decoupled from Firebase SDK
+- `BuildResolverChain`: config-driven resolver chain construction with validation
+- Configurable OIDC claim mapping (subject, email, roles, tenants) with sensible defaults
+- New docs page: `docs/generic-oidc.md` with provider-specific quickstarts
 
 ## v0.10.1 — 2026-07-07
 

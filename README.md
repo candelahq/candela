@@ -9,6 +9,26 @@ Candela is a production-grade observatory for your LLM applications. It captures
 [![CI](https://github.com/candelahq/candela/actions/workflows/ci.yml/badge.svg)](https://github.com/candelahq/candela/actions/workflows/ci.yml)
 [![Go Reference](https://pkg.go.dev/badge/github.com/candelahq/candela.svg)](https://pkg.go.dev/github.com/candelahq/candela)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
+---
+
+<div align="center">
+  <h3>📸 Dashboard Preview</h3>
+  <p><em>Dark theme · Warm amber accent · Real-time LLM observability</em></p>
+</div>
+
+| Today | Traces |
+|:---:|:---:|
+| ![Today — Budget gauge, daily stats, hourly spend](assets/screenshots/dashboard-today.jpg) | ![Traces — Filterable LLM call log](assets/screenshots/dashboard-traces.jpg) |
+
+| Trace Detail | Admin Budgets |
+|:---:|:---:|
+| ![Trace Detail — Waterfall spans, request/response inspection](assets/screenshots/dashboard-trace-detail.jpg) | ![Admin Budgets — Team spend limits and alerts](assets/screenshots/dashboard-admin-budgets.jpg) |
+
+<div align="center">
+
+![Leaderboard — Top spenders with progress bars](assets/screenshots/dashboard-leaderboard.jpg)
+
+</div>
 
 ---
 

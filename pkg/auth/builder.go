@@ -110,6 +110,11 @@ func buildResolver(ctx context.Context, cfg ResolverEntry, opts BuildOptions) (I
 
 	case "firebase":
 		if opts.FirebaseVerifier == nil {
+			if opts.DevMode {
+				// In dev mode, DevResolver handles all tokens before Firebase
+				// is reached. Return a no-op Firebase resolver for chain integrity.
+				return NewFirebaseResolver(nil), nil
+			}
 			return nil, fmt.Errorf("firebase resolver requires Firebase Admin SDK (is dev_mode on?)")
 		}
 		return NewFirebaseResolver(opts.FirebaseVerifier), nil

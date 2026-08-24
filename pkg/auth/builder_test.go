@@ -60,6 +60,24 @@ func TestBuildResolverChain_FirebaseWithoutVerifier(t *testing.T) {
 	}
 }
 
+func TestBuildResolverChain_FirebaseDevModeNoVerifier(t *testing.T) {
+	// In dev mode, DevResolver handles all tokens — firebase resolver
+	// can be configured without a verifier for config portability.
+	entries := []ResolverEntry{{Type: "firebase"}}
+	chain, err := BuildResolverChain(context.Background(), entries, BuildOptions{DevMode: true})
+	if err != nil {
+		t.Fatalf("dev mode should allow firebase without verifier: %v", err)
+	}
+	// DevResolver is prepended, so any token resolves via dev
+	id, err := chain.Resolve(context.Background(), "any-token")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if id.Provider != "dev" {
+		t.Errorf("expected dev provider in dev mode, got %q", id.Provider)
+	}
+}
+
 func TestBuildResolverChain_FirebaseWithVerifier(t *testing.T) {
 	entries := []ResolverEntry{{Type: "firebase"}}
 	chain, err := BuildResolverChain(context.Background(), entries, BuildOptions{

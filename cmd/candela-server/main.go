@@ -1025,9 +1025,18 @@ func main() {
 	}
 
 	// Initialize Firebase Admin SDK for token verification.
-	// Needed for both legacy and config-driven paths when "firebase" resolver is used.
+	// Only needed for legacy path (no resolvers configured) or when a
+	// "firebase" resolver is explicitly listed. OIDC-only deployments
+	// skip this entirely — no GCP ADC required.
+	needsFirebase := len(cfg.Auth.Resolvers) == 0 // legacy path always uses Firebase
+	for _, r := range cfg.Auth.Resolvers {
+		if r.Type == "firebase" {
+			needsFirebase = true
+			break
+		}
+	}
 	var tokenVerifier auth.TokenVerifier
-	if !devMode {
+	if !devMode && needsFirebase {
 		fbApp, err := firebase.NewApp(context.Background(), nil)
 		if err != nil {
 			slog.Error("failed to initialize Firebase Admin SDK", "error", err)

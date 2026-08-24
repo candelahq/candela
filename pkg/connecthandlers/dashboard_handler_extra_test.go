@@ -20,7 +20,7 @@ func TestGetUsageSummary_Success(t *testing.T) {
 	}
 	client := startDashboardServer(t, store)
 
-	resp, err := client.GetUsageSummary(context.Background(), connect.NewRequest(&v1.GetUsageSummaryRequest{
+	resp, err := client.GetUsageSummary(context.Background(), connect.NewRequest(&v1.GetUsageSummaryRequest{ //nolint:staticcheck // testing deprecated endpoint until removal
 		ProjectId: "proj1",
 	}))
 	if err != nil {
@@ -43,7 +43,7 @@ func TestGetModelBreakdown_Success(t *testing.T) {
 	}
 	client := startDashboardServer(t, store)
 
-	resp, err := client.GetModelBreakdown(context.Background(), connect.NewRequest(&v1.GetModelBreakdownRequest{
+	resp, err := client.GetModelBreakdown(context.Background(), connect.NewRequest(&v1.GetModelBreakdownRequest{ //nolint:staticcheck // testing deprecated endpoint until removal
 		ProjectId: "proj1",
 	}))
 	if err != nil {

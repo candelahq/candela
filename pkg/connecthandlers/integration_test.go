@@ -245,6 +245,9 @@ func (s *integrationStore) GetModelLimits(context.Context, string) ([]*storage.M
 	return nil, nil
 }
 func (s *integrationStore) DeleteModelLimit(context.Context, string, string) error { return nil }
+func (s *integrationStore) GetSpendHistory(context.Context, string, int) ([]storage.DailySpendRecord, error) {
+	return nil, nil
+}
 
 // ──────────────────────────────────────────
 // Test server helpers

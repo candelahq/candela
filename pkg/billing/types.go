@@ -89,3 +89,11 @@ type ModelLimitRecord struct {
 	CreatedAt   time.Time `json:"created_at" firestore:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at" firestore:"updated_at"`
 }
+
+// DailySpendRecord represents a single day's spend total for a user (#719).
+// Used for budget forecasting and trend analysis.
+type DailySpendRecord struct {
+	Date       string  `json:"date"` // "2026-08-23"
+	SpendUSD   float64 `json:"spend_usd"`
+	TokenCount int64   `json:"token_count"` // total tokens used (not request count)
+}

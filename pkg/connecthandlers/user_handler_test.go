@@ -264,6 +264,9 @@ func (m *mockUserStore) GetModelLimits(context.Context, string) ([]*storage.Mode
 	return nil, nil
 }
 func (m *mockUserStore) DeleteModelLimit(context.Context, string, string) error { return nil }
+func (m *mockUserStore) GetSpendHistory(context.Context, string, int) ([]storage.DailySpendRecord, error) {
+	return nil, nil
+}
 
 // ──────────────────────────────────────────
 // Tests

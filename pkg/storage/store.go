@@ -559,6 +559,9 @@ type BudgetCheckResult = billing.BudgetCheckResult
 // ModelLimitRecord is a type alias for billing.ModelLimitRecord.
 type ModelLimitRecord = billing.ModelLimitRecord
 
+// DailySpendRecord is a type alias for billing.DailySpendRecord.
+type DailySpendRecord = billing.DailySpendRecord
+
 // UserStore manages users, budgets, grants, audit, and rate limits.
 // Implemented by firestoredb for production.
 type UserStore interface {
@@ -601,6 +604,10 @@ type UserStore interface {
 
 	// ResetSpend zeroes a user's current-period spend (emergency override).
 	ResetSpend(ctx context.Context, userID string) error
+
+	// GetSpendHistory returns daily spend totals for the last N days (#719).
+	// Used for budget forecasting. Days with no spend may be omitted.
+	GetSpendHistory(ctx context.Context, userID string, days int) ([]DailySpendRecord, error)
 
 	// ── Grants ──
 

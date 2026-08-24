@@ -30,9 +30,11 @@ import (
 	"time"
 
 	"golang.org/x/oauth2"
+	"golang.org/x/sync/singleflight"
 
 	"github.com/candelahq/candela/pkg/attribution"
 	"github.com/candelahq/candela/pkg/auth"
+	"github.com/candelahq/candela/pkg/billing"
 	"github.com/candelahq/candela/pkg/catalog"
 	"github.com/candelahq/candela/pkg/cloudauth"
 	"github.com/candelahq/candela/pkg/costcalc"
@@ -283,8 +285,13 @@ type Proxy struct {
 	saSpendMicroUSD atomic.Int64
 
 	// Per-service-account in-process rate limiter.
-	// SAs bypass user budget/rate-limit checks, so this is their only throttle.
 	saRL *saRateLimiter
+
+	// #608: Default daily budget for SAs without an explicit budget.
+	// When > 0, SAs hitting ReasonNoBudget are auto-provisioned with this limit.
+	saDefaultBudgetUSD float64
+	saProvisionFlight  singleflight.Group // coalesces concurrent first-request provisions
+	saProvisioned      sync.Map           // tracks which SA IDs have been successfully provisioned
 
 	// TOCTOU mitigation: tracks in-flight spend between CheckBudget and
 	// DeductSpend. Without this, concurrent requests all pass CheckBudget
@@ -494,6 +501,13 @@ func (p *Proxy) SetCatalog(c catalog.ModelCatalogStore) {
 // SetSpendOutbox sets the optional spend outbox for durable DeductSpend retries (CRIT-3).
 func (p *Proxy) SetSpendOutbox(o *spendoutbox.Outbox) {
 	p.spendOutbox = o
+}
+
+// SetSADefaultBudget sets the default daily budget for service accounts
+// that don't have an explicit budget. When > 0, SAs hitting the budget gate
+// with no budget will be auto-provisioned with this daily limit (#608).
+func (p *Proxy) SetSADefaultBudget(usd float64) {
+	p.saDefaultBudgetUSD = usd
 }
 
 // effectiveLimits returns the merged per-model daily spend limits for a user.
@@ -1140,9 +1154,9 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 	// ── Budget pre-flight with conservative reservation ──
 	// Only applies in team mode (UserStore configured).
 	// Service accounts are included (#736) — SAs without a budget/grant
-	// record are blocked (fail-closed). Admins opt SAs in via CreateBudget.
+	// record are auto-provisioned with a default daily limit (#608).
 	var budgetReserved float64 // track reservation for Release in deductBudget
-	if p.users != nil && effectiveUserID != "" && !isAdmin {
+	if p.users != nil && effectiveUserID != "" && (!isAdmin || isServiceAccount) {
 		// Check whether the user can afford this request. Use the estimated
 		// cost when available; fall back to a minimal floor for requests
 		// where the model/cost is unknown ($0.001 is below any cloud model).
@@ -1162,7 +1176,56 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 				"user_id", effectiveUserID)
 			ProxyErrorResponse(w, http.StatusServiceUnavailable, "budget check failed — try again shortly", "service_error")
 			return
-		} else if !check.Allowed {
+		}
+
+		// #608: Auto-provision default budget for SAs with no budget.
+		// Uses singleflight to coalesce concurrent first requests into one
+		// SetBudget call. Fail-open: if provision fails, allow the request.
+		if !check.Allowed && check.Reason == billing.ReasonNoBudget &&
+			isServiceAccount && p.saDefaultBudgetUSD > 0 {
+			if _, ok := p.saProvisioned.Load(effectiveUserID); !ok {
+				// singleflight.Do coalesces concurrent calls — only the
+				// first goroutine executes SetBudget; others block and
+				// receive the same result.
+				_, provErr, _ := p.saProvisionFlight.Do(effectiveUserID, func() (interface{}, error) {
+					// Double-check: another request may have succeeded
+					// between our CheckBudget and this Do call.
+					if _, done := p.saProvisioned.Load(effectiveUserID); done {
+						return nil, nil
+					}
+					err := p.users.SetBudget(r.Context(), &billing.BudgetRecord{
+						UserID:     effectiveUserID,
+						LimitUSD:   p.saDefaultBudgetUSD,
+						PeriodType: "daily",
+					})
+					if err != nil {
+						return nil, err
+					}
+					p.saProvisioned.Store(effectiveUserID, true)
+					slog.Info("sa_budget: auto-provisioned default daily budget",
+						"sa_id", effectiveUserID,
+						"daily_limit_usd", p.saDefaultBudgetUSD)
+					return nil, nil
+				})
+				if provErr != nil {
+					// Fail-open: allow this request, log the error.
+					slog.Error("sa_budget: auto-provision failed, allowing request",
+						"sa_id", effectiveUserID,
+						"default_daily_usd", p.saDefaultBudgetUSD,
+						"error", provErr)
+					goto skipBudget
+				}
+			}
+			// Re-check budget now that it's provisioned.
+			check, err = p.users.CheckBudget(r.Context(), effectiveUserID, checkAmount)
+			if err != nil || check == nil {
+				slog.Error("sa_budget: re-check failed after provision, allowing request",
+					"sa_id", effectiveUserID, "error", err)
+				goto skipBudget
+			}
+		}
+
+		if !check.Allowed {
 			msg := "budget exhausted — contact your admin for a grant or budget increase"
 			if checkAmount > budgetCheckFloor && check.RemainingUSD > 0 {
 				msg = fmt.Sprintf("estimated cost $%.4f exceeds remaining budget $%.4f — contact your admin", checkAmount, check.RemainingUSD)
@@ -1200,7 +1263,7 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 			}
 		}()
 	}
-
+skipBudget:
 	// ── Per-request cost cap (#277) ──
 	// Estimates the request cost from body size and rejects if it exceeds
 	// the configured maximum. Runs for all users (solo + team mode).

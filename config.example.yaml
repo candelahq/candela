@@ -153,6 +153,19 @@ worker:
 
 auth:
   dev_mode: false
+
+  # Config-driven resolver chain (#764). When set, replaces the default
+  # Firebase-only chain. Resolvers are tried in order — first match wins.
+  # Omit this section entirely to use the legacy Firebase chain.
+  #
+  # resolvers:
+  #   - type: oidc                    # Generic OIDC — works with any provider
+  #     issuer: https://zitadel.example.com
+  #     audience: candela-server
+  #     claim_mapping:                # Optional — defaults work for most providers
+  #       tenants: "urn:zitadel:iam:org:project:roles"
+  #   - type: firebase                # Firebase Auth (browser sessions)
+  #   - type: google_oauth            # Google OAuth2 (CLI: candela auth login)
   # Service accounts allowed to use the proxy via Google ID token or OAuth2.
   # Deny-by-default: if this list is empty (or omitted), ALL service accounts
   # are rejected with 403.

@@ -419,3 +419,111 @@ func TestPing_ReturnsError(t *testing.T) {
 		t.Errorf("error = %v, want to contain 'connection refused'", err)
 	}
 }
+
+// ── Regression: duplicate parameter names (#799) ─────────────────────
+
+// assertNoDuplicateParams fails if any parameter name appears more than once.
+// BQ rejects duplicate named params with "Error 400: Duplicate query parameters".
+func assertNoDuplicateParams(t *testing.T, params []bq.QueryParameter) {
+	t.Helper()
+	seen := make(map[string]int)
+	for _, p := range params {
+		seen[p.Name]++
+	}
+	for name, count := range seen {
+		if count > 1 {
+			t.Errorf("duplicate query parameter %q (appears %d times)", name, count)
+		}
+	}
+}
+
+func TestQueryTraces_NoDuplicateParams(t *testing.T) {
+	client := newMockBQClient()
+
+	capturedQuery := &mockBQQuery{
+		iter: &mockBQRowIterator{
+			nextFunc: func(dst interface{}) error {
+				return iterator.Done
+			},
+		},
+	}
+	client.enqueueQuery(capturedQuery)
+
+	s := testStore(client)
+	_, _ = s.QueryTraces(context.Background(), storage.TraceQuery{
+		ProjectID:   "proj",
+		StartTime:   time.Now().Add(-1 * time.Hour),
+		EndTime:     time.Now(),
+		PageSize:    50,
+		Environment: "prod",
+		Model:       "gpt-4",
+		Provider:    "openai",
+		Search:      "hello",
+		JobID:       "job-1",
+		TraceGroup:  "group-1",
+		TenantID:    "tenant-1",
+	})
+
+	assertNoDuplicateParams(t, capturedQuery.params)
+}
+
+func TestSearchSpans_NoDuplicateParams(t *testing.T) {
+	client := newMockBQClient()
+
+	capturedQuery := &mockBQQuery{
+		iter: &mockBQRowIterator{
+			nextFunc: func(dst interface{}) error {
+				return iterator.Done
+			},
+		},
+	}
+	client.enqueueQuery(capturedQuery)
+
+	s := testStore(client)
+	_, _ = s.SearchSpans(context.Background(), storage.SpanQuery{
+		ProjectID: "proj",
+		StartTime: time.Now().Add(-1 * time.Hour),
+		EndTime:   time.Now(),
+		PageSize:  50,
+		UserID:    "user@test.com",
+		TenantID:  "tenant-1",
+	})
+
+	assertNoDuplicateParams(t, capturedQuery.params)
+}
+
+// ── Regression: correlated subquery in job leaderboard (#799) ────────
+
+func TestGetJobLeaderboard_UsesCTENotCorrelatedSubquery(t *testing.T) {
+	client := newMockBQClient()
+
+	capturedQuery := &mockBQQuery{
+		iter: &mockBQRowIterator{
+			nextFunc: func(dst interface{}) error {
+				return iterator.Done
+			},
+		},
+	}
+	client.enqueueQuery(capturedQuery)
+
+	s := testStore(client)
+	_, _ = s.GetJobLeaderboard(context.Background(), storage.UsageQuery{
+		ProjectID: "proj",
+		StartTime: time.Now().Add(-1 * time.Hour),
+		EndTime:   time.Now(),
+	}, 10)
+
+	sql := capturedQuery.sql
+
+	// Must use CTE pattern, not correlated subquery.
+	assertContains(t, sql, "WITH top_models AS")
+	assertContains(t, sql, "LEFT JOIN top_models")
+	assertContains(t, sql, "ROW_NUMBER()")
+
+	// Must NOT contain correlated subquery pattern.
+	if strings.Contains(sql, "s2.job_id = spans.job_id") {
+		t.Error("SQL still contains correlated subquery pattern 's2.job_id = spans.job_id'")
+	}
+
+	assertNoDuplicateParams(t, capturedQuery.params)
+}

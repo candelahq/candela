@@ -500,7 +500,6 @@ func (s *Store) QueryTraces(ctx context.Context, tq storage.TraceQuery) (*storag
 		{Name: "startTime", Value: tq.StartTime},
 		{Name: "endTime", Value: tq.EndTime},
 		{Name: "userID", Value: tq.UserID},
-		{Name: "pageSize", Value: tq.PageSize},
 	}
 	if tq.Environment != "" {
 		extraWhere += "\n\t\t  AND environment = @environment"
@@ -1192,31 +1191,34 @@ func (s *Store) GetTenantLeaderboard(ctx context.Context, uq storage.UsageQuery,
 }
 
 func (s *Store) GetJobLeaderboard(ctx context.Context, uq storage.UsageQuery, limit int) ([]storage.JobUsageSummary, error) {
-	query := fmt.Sprintf(`SELECT job_id, COUNT(DISTINCT trace_id) AS call_count,
-		COALESCE(SUM(gen_ai_total_tokens),0) AS total_tokens,
-		COALESCE(SUM(gen_ai_cost_usd),0) AS total_cost_usd,
+	query := fmt.Sprintf(`WITH top_models AS (
+		SELECT job_id, gen_ai_model,
+			SUM(gen_ai_cost_usd) AS model_cost,
+			ROW_NUMBER() OVER (PARTITION BY job_id ORDER BY SUM(gen_ai_cost_usd) DESC) AS rn
+		FROM %s
+		WHERE (@projectID = '' OR project_id = @projectID)
+			AND start_time >= @startTime
+			AND start_time <= @endTime
+			AND gen_ai_model IS NOT NULL AND gen_ai_model != ''
+			AND job_id IS NOT NULL AND job_id != ''
+		GROUP BY job_id, gen_ai_model
+	)
+	SELECT spans.job_id, COUNT(DISTINCT spans.trace_id) AS call_count,
+		COALESCE(SUM(spans.gen_ai_total_tokens),0) AS total_tokens,
+		COALESCE(SUM(spans.gen_ai_cost_usd),0) AS total_cost_usd,
 		COALESCE(
-			AVG(CASE WHEN parent_span_id = '' THEN duration_ns ELSE NULL END),
-			AVG(CASE WHEN kind = @llmKind THEN duration_ns ELSE NULL END),
+			AVG(CASE WHEN spans.parent_span_id = '' THEN spans.duration_ns ELSE NULL END),
+			AVG(CASE WHEN spans.kind = @llmKind THEN spans.duration_ns ELSE NULL END),
 			0
 		) AS avg_duration_ns,
-		COALESCE((
-			SELECT s2.gen_ai_model FROM %s s2
-			WHERE s2.job_id = spans.job_id
-				AND (@projectID = '' OR s2.project_id = @projectID)
-				AND s2.start_time >= @startTime
-				AND s2.start_time <= @endTime
-				AND s2.gen_ai_model IS NOT NULL AND s2.gen_ai_model != ''
-			GROUP BY s2.gen_ai_model
-			ORDER BY SUM(s2.gen_ai_cost_usd) DESC
-			LIMIT 1
-		), '') AS top_model
+		COALESCE(tm.gen_ai_model, '') AS top_model
 	FROM %s spans
-	WHERE (@projectID = '' OR project_id = @projectID)
-		AND start_time >= @startTime
-		AND start_time <= @endTime
-		AND job_id IS NOT NULL AND job_id != ''
-	GROUP BY job_id
+	LEFT JOIN top_models tm ON tm.job_id = spans.job_id AND tm.rn = 1
+	WHERE (@projectID = '' OR spans.project_id = @projectID)
+		AND spans.start_time >= @startTime
+		AND spans.start_time <= @endTime
+		AND spans.job_id IS NOT NULL AND spans.job_id != ''
+	GROUP BY spans.job_id, tm.gen_ai_model
 	ORDER BY total_cost_usd DESC
 	LIMIT @limit`, quoteTable(s.tableID), quoteTable(s.tableID))
 	q := s.client.Query(query)

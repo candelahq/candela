@@ -181,13 +181,13 @@ func TestQueryTraces_DefaultPageSize(t *testing.T) {
 		PageSize:  0, // should default to 20
 	})
 
-	// Check that pageSize parameter was set to 20.
+	// Check that pageSize parameter was set to 21 (default 20 + 1 for has-more-pages detection).
 	for _, p := range capturedQuery.params {
 		if p.Name == "pageSize" {
-			if v, ok := p.Value.(int); ok && v == 20 {
-				return // correct default
+			if v, ok := p.Value.(int); ok && v == 21 {
+				return // correct: default 20 + 1
 			}
-			t.Errorf("pageSize = %v, want 20", p.Value)
+			t.Errorf("pageSize = %v, want 21", p.Value)
 			return
 		}
 	}

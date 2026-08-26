@@ -6,6 +6,7 @@
 /candela-local
 /candela-sidecar
 /backfill-budget-config
+/mock
 
 # Build artifacts
 /dist/

@@ -1,0 +1,17 @@
+# 2026/08/26 20:28:00.273886 [TestProperty_CacheNormalization] [rapid] draw provider: "anthropic"
+# 2026/08/26 20:28:00.273889 [TestProperty_CacheNormalization] [rapid] draw model: "gpt-4o"
+# 2026/08/26 20:28:00.273890 [TestProperty_CacheNormalization] [rapid] draw raw_input: 100
+# 2026/08/26 20:28:00.273890 [TestProperty_CacheNormalization] [rapid] draw cache_read: 5
+# 2026/08/26 20:28:00.274178 [TestProperty_CacheNormalization] normalized (101) > rawInput (100) for anthropic/gpt-4o with 5 cache reads
+# 
+v0.4.8#6701271841861662009
+0x0
+0x1
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x6b74f03291620
+0x5

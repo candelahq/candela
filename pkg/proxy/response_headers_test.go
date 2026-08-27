@@ -82,7 +82,7 @@ func TestResponseHeaderAllowlist_Integration(t *testing.T) {
 		"Strict-Transport-Security":      {"max-age=31536000"},
 	}
 
-	var forwarded http.Header = make(http.Header)
+	forwarded := make(http.Header)
 	for k, vv := range upstreamHeaders {
 		if !isAllowedResponseHeader(k) {
 			continue

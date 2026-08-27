@@ -132,6 +132,12 @@
     "output_per_million": 7.5
   },
   {
+    "model": "gemini-3.7-flash",
+    "provider": "google",
+    "input_per_million": 1.5,
+    "output_per_million": 7.5
+  },
+  {
     "model": "llama-4-maverick-17b-128e-instruct-maas",
     "provider": "meta",
     "input_per_million": 0.2,

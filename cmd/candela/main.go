@@ -18,12 +18,14 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"embed"
 	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"io/fs"
 	"log/slog"
 	"net/http"
@@ -132,6 +134,35 @@ func configWarnings(cfg Config) []string {
 		warnings = append(warnings, "vertex_ai.prompt_caching has been removed — use vertex_ai.anthropic.caching_mode instead")
 	}
 	return warnings
+}
+
+// thoughtCaptureWriter captures response body while forwarding to client for thought_signature extraction.
+type thoughtCaptureWriter struct {
+	http.ResponseWriter
+	buf        *bytes.Buffer
+	statusCode int
+}
+
+func (c *thoughtCaptureWriter) WriteHeader(code int) {
+	c.statusCode = code
+	c.ResponseWriter.WriteHeader(code)
+}
+
+func (c *thoughtCaptureWriter) Write(b []byte) (int, error) {
+	if c.buf != nil {
+		c.buf.Write(b)
+	}
+	return c.ResponseWriter.Write(b)
+}
+
+func (c *thoughtCaptureWriter) Flush() {
+	if f, ok := c.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
+func (c *thoughtCaptureWriter) Header() http.Header {
+	return c.ResponseWriter.Header()
 }
 
 // injectCacheHeaders sets Team Mode caching headers on the outbound request.
@@ -1011,8 +1042,60 @@ func runForeground() {
 	mux.HandleFunc("GET /_local/api/config", configAPI.handleGetConfig)
 	mux.HandleFunc("POST /_local/api/config/caching", configAPI.handleSetCaching)
 
+	// Gemini thought_signature local intercept for remote mode (makes opencode testable locally without server deploy)
+	// The remote server also has this logic, but local intercept allows immediate validation when using OpenAI-compat gemini-oai with thinking+tools.
+	thoughtStore := proxy.NewThoughtSignatureStore(15 * time.Minute)
+	geminiThoughtMiddleware := func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// Only intercept gemini-oai (and google) with tools
+			if !strings.HasPrefix(r.URL.Path, "/proxy/gemini-oai/") && !strings.HasPrefix(r.URL.Path, "/proxy/google/") && !strings.HasPrefix(r.URL.Path, "/proxy/gemini-vertex/") {
+				next.ServeHTTP(w, r)
+				return
+			}
+			// Read request body (capped)
+			body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 10<<20))
+			if err != nil {
+				slog.Warn("thought_middleware: failed to read request", "error", err)
+				next.ServeHTTP(w, r)
+				return
+			}
+			_ = r.Body.Close()
+			provider := "gemini-oai"
+			if strings.HasPrefix(r.URL.Path, "/proxy/google/") {
+				provider = "google"
+			} else if strings.HasPrefix(r.URL.Path, "/proxy/gemini-vertex/") {
+				provider = "gemini-vertex"
+			}
+			injected := thoughtStore.InjectIntoRequest(body, provider)
+			if !bytes.Equal(injected, body) {
+				slog.Info("thought_signature: injected in main middleware", "provider", provider)
+				body = injected
+			}
+			r.Body = io.NopCloser(bytes.NewReader(body))
+			r.ContentLength = int64(len(body))
+			// Capture response while forwarding
+			capWriter := &thoughtCaptureWriter{ResponseWriter: w, buf: &bytes.Buffer{}}
+			next.ServeHTTP(capWriter, r)
+			// Extract and store signatures from response
+			if capWriter.statusCode == 0 || capWriter.statusCode == 200 {
+				ct := capWriter.Header().Get("Content-Type")
+				data := capWriter.buf.Bytes()
+				if len(data) > 0 {
+					if strings.Contains(ct, "text/event-stream") {
+						thoughtStore.ExtractAndStoreFromStream(data, provider)
+					} else {
+						thoughtStore.ExtractAndStoreFromResponse(data, provider)
+					}
+				}
+			}
+		})
+	}
+	// Capture writer for thought_signature middleware
 	// Everything else → remote Candela server (if configured).
 	if remoteProxy != nil {
+		mux.Handle("/proxy/gemini-oai/", geminiThoughtMiddleware(remoteProxy))
+		mux.Handle("/proxy/google/", geminiThoughtMiddleware(remoteProxy))
+		mux.Handle("/proxy/gemini-vertex/", geminiThoughtMiddleware(remoteProxy))
 		mux.Handle("/", remoteProxy)
 	} else {
 		mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {

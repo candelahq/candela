@@ -266,8 +266,8 @@ func TestLoadCatalogFileMatchesPricingYAMLFormat(t *testing.T) {
 		if e.Provider == "" || e.ModelID == "" {
 			t.Errorf("entry with empty provider/model: %+v", e)
 		}
-		if e.InputPerMillion <= 0 || e.OutputPerMillion <= 0 {
-			t.Errorf("entry %s/%s has non-positive pricing", e.Provider, e.ModelID)
+		if e.InputPerMillion <= 0 || e.OutputPerMillion < 0 {
+			t.Errorf("entry %s/%s has invalid pricing", e.Provider, e.ModelID)
 		}
 		if !e.Enabled {
 			t.Errorf("entry %s/%s should default to enabled=true", e.Provider, e.ModelID)

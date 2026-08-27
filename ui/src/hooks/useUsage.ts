@@ -92,8 +92,8 @@ export function useUsage() {
       .then((res) => {
         if (signal.aborted) return;
 
-        const limit = res.budget?.limitUsd || 0;
-        const spent = res.budget?.spentUsd || 0;
+        const limit = res.budget?.limitUsd ?? 0;
+        const spent = res.budget?.spentUsd ?? 0;
 
         dispatch({
           type: "success",

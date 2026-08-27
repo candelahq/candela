@@ -1826,8 +1826,13 @@ func (p *Proxy) handleStandardResponse(
 		}
 	}
 
-	// Forward response headers.
+	// Forward only allowlisted response headers to prevent leaking upstream
+	// provider internals (rate limit metadata, server versions, Set-Cookie, etc.).
+	// See security audit HIGH-5 / #599.
 	for k, vv := range resp.Header {
+		if !isAllowedResponseHeader(k) {
+			continue
+		}
 		for _, v := range vv {
 			w.Header().Add(k, v)
 		}
@@ -1940,8 +1945,12 @@ func (p *Proxy) handleStreamingResponse(
 		return
 	}
 
-	// Forward response headers for SSE.
+	// Forward only allowlisted response headers for SSE.
+	// See security audit HIGH-5 / #599.
 	for k, vv := range resp.Header {
+		if !isAllowedResponseHeader(k) {
+			continue
+		}
 		for _, v := range vv {
 			w.Header().Add(k, v)
 		}
@@ -2519,6 +2528,34 @@ func (p *Proxy) createStreamingSpan(
 			"llm.ttft_ms":     fmt.Sprintf("%d", ttft.Milliseconds()),
 		},
 	})
+}
+
+// --- Response header allowlist (#599) ---
+
+// allowedResponseHeaders is the set of upstream response headers that are safe
+// to forward to the client. All others are stripped to prevent leaking provider
+// internals (rate-limit metadata, server versions, Set-Cookie, request IDs).
+var allowedResponseHeaders = map[string]bool{
+	"Content-Type":                     true,
+	"Content-Length":                   true,
+	"Content-Encoding":                 true,
+	"Cache-Control":                    true,
+	"Retry-After":                      true,
+	"Vary":                             true,
+	"Date":                             true,
+	"Transfer-Encoding":                true,
+	"Connection":                       true,
+	"Access-Control-Allow-Origin":      true,
+	"Access-Control-Expose-Headers":    true,
+	"Access-Control-Allow-Credentials": true,
+	// OpenAI-specific usage headers that clients rely on.
+	"Openai-Organization":  true,
+	"Openai-Processing-Ms": true,
+	"X-Request-Id":         true,
+}
+
+func isAllowedResponseHeader(name string) bool {
+	return allowedResponseHeaders[http.CanonicalHeaderKey(name)]
 }
 
 // --- Header forwarding ---

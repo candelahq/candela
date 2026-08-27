@@ -8,8 +8,8 @@ Candela is an **open-source LLM observability and cost management proxy**. This 
 
 | Capability | Candela | Helicone | LangSmith | Portkey | LiteLLM |
 |:---|:---:|:---:|:---:|:---:|:---:|
-| **Open source** | ✅ AGPL-3.0 | Partial | ❌ | Partial | ✅ Apache-2.0 |
-| **Self-hosted** | ✅ | ✅ | ❌ | ✅ | ✅ |
+| **Open source** | ✅ AGPL-3.0 | ✅ Apache-2.0 | ❌ | ✅ Apache-2.0 (gateway) | ✅ Apache-2.0 |
+| **Self-hosted** | ✅ | ✅ | Enterprise only | ✅ | ✅ |
 | **Transparent proxy** | ✅ | ✅ | ❌ (SDK) | ✅ | ✅ |
 | **Per-user budgets** | ✅ Real-time | ❌ | ❌ | ✅ | ❌ |
 | **Multi-tenant** | ✅ Native | ❌ | ✅ | ✅ | ❌ |
@@ -20,7 +20,7 @@ Candela is an **open-source LLM observability and cost management proxy**. This 
 | **Provider fallback** | ✅ | ❌ | N/A | ✅ | ✅ |
 | **Format translation** | ✅ OpenAI ↔ Anthropic ↔ Gemini | ❌ | N/A | ✅ | ✅ |
 | **OIDC / SSO auth** | ✅ Generic chain | ❌ | ✅ | ✅ | ❌ |
-| **Deploy complexity** | Single binary + BQ | Docker + ClickHouse | SaaS only | Docker + Postgres | Docker + Postgres |
+| **Deploy complexity** | Single binary + BQ | Docker + ClickHouse | SaaS or K8s (Enterprise) | Docker or K8s | Docker + Postgres |
 
 ## When to choose Candela
 
@@ -37,10 +37,10 @@ Candela is an **open-source LLM observability and cost management proxy**. This 
 **We're honest about where others excel:**
 
 ### Helicone
-Choose Helicone if you want a **polished SaaS experience** with minimal setup. Their dashboard UX is more mature, and they offer features like prompt caching analytics and A/B testing that Candela doesn't have yet.
+Choose Helicone if you want a **polished SaaS experience** with minimal setup. Their dashboard UX is more mature, and they offer features like prompt caching analytics and A/B testing that Candela doesn't have yet. **Note:** Helicone was acquired by Mintlify in early 2026 and is currently in maintenance mode (security patches only, no new features).
 
 ### LangSmith
-Choose LangSmith if you're **deep in the LangChain ecosystem** and need tight integration with LangGraph, evaluations, and datasets. LangSmith's eval framework and annotation queue are best-in-class. Trade-off: vendor lock-in, no self-hosting, SDK-only integration.
+Choose LangSmith if you're **deep in the LangChain ecosystem** and need tight integration with LangGraph, evaluations, and datasets. LangSmith's eval framework and annotation queue are best-in-class. Trade-off: self-hosting requires an Enterprise license, and integration is SDK-only (no proxy mode).
 
 ### Portkey
 Choose Portkey if you need a **managed AI gateway** with enterprise support, semantic caching, and guardrails. Portkey's gateway features (load balancing, caching, guardrails) are more mature than Candela's proxy.
@@ -82,8 +82,8 @@ Candela stores traces in **your BigQuery dataset** in your GCP project. No data 
 |:---|:---|
 | Candela | Your GCP project (BigQuery) |
 | Helicone | Helicone's cloud (or self-hosted ClickHouse) |
-| LangSmith | LangChain's US cloud |
-| Portkey | Portkey's cloud (or self-hosted) |
+| LangSmith | LangChain's cloud (US/EU/APAC) or self-hosted (Enterprise) |
+| Portkey | Portkey's cloud (or self-hosted K8s) |
 | LiteLLM | Your Postgres (self-hosted only) |
 
 ## Getting started

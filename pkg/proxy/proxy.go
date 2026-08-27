@@ -2554,6 +2554,8 @@ var allowedResponseHeaders = map[string]bool{
 	"X-Request-Id":         true,
 }
 
+// isAllowedResponseHeader reports whether the given header name is safe to
+// forward from an upstream LLM provider response to the client.
 func isAllowedResponseHeader(name string) bool {
 	return allowedResponseHeaders[http.CanonicalHeaderKey(name)]
 }

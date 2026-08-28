@@ -405,7 +405,16 @@ func main() {
 				return
 			}
 			record, err := userStore.GetUser(r.Context(), caller.ID)
-			if err != nil || record == nil || record.Role != storage.RoleAdmin {
+			if err != nil {
+				if !errors.Is(err, storage.ErrNotFound) {
+					slog.Error("metrics authorization lookup failed", "error", err)
+					http.Error(w, "authorization lookup failed", http.StatusInternalServerError)
+					return
+				}
+				http.Error(w, "admin access required", http.StatusForbidden)
+				return
+			}
+			if record == nil || record.Role != storage.RoleAdmin {
 				http.Error(w, "admin access required", http.StatusForbidden)
 				return
 			}

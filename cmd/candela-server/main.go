@@ -392,9 +392,33 @@ func main() {
 
 	var spendOB *spendoutbox.Outbox
 	var llmProxy *proxy.Proxy
+	var userStore storage.UserStore
 
 	// HIGH-5: Debug metrics endpoint (JSON, no Prometheus dependency).
+	// Requires admin role — exposes dropped span counts and spend data (#706).
 	mux.HandleFunc("/debug/metrics", func(w http.ResponseWriter, r *http.Request) {
+		// Admin-only guard: look up caller role from userStore.
+		if userStore != nil {
+			caller := auth.FromContext(r.Context())
+			if caller == nil {
+				http.Error(w, "authentication required", http.StatusUnauthorized)
+				return
+			}
+			record, err := userStore.GetUser(r.Context(), caller.ID)
+			if err != nil {
+				if !errors.Is(err, storage.ErrNotFound) {
+					slog.Error("metrics authorization lookup failed", "error", err)
+					http.Error(w, "authorization lookup failed", http.StatusInternalServerError)
+					return
+				}
+				http.Error(w, "admin access required", http.StatusForbidden)
+				return
+			}
+			if record == nil || record.Role != storage.RoleAdmin {
+				http.Error(w, "admin access required", http.StatusForbidden)
+				return
+			}
+		}
 		type sinkMetric struct {
 			Name          string `json:"name"`
 			State         string `json:"state"`
@@ -442,7 +466,6 @@ func main() {
 	// Initialize Firestore-backed UserStore (if enabled).
 	// Needed by trace/dashboard handlers for user-scoped access control,
 	// and by UserService for user management.
-	var userStore storage.UserStore
 	if cfg.Firestore.Enabled {
 		fStore, err := firestorestore.New(context.Background(),
 			cfg.Firestore.ProjectID, cfg.Firestore.DatabaseID)

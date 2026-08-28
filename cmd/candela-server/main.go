@@ -226,10 +226,28 @@ func buildCustomProviders(cfgs []ProviderConfig, envLookup func(string) string) 
 
 func main() {
 	// Set up structured logging to stderr.
+	// LOG_LEVEL env var: DEBUG, INFO (default), WARN, ERROR (#704).
+	logLevel := slog.LevelInfo
+	if lvl := os.Getenv("LOG_LEVEL"); lvl != "" {
+		switch strings.ToUpper(lvl) {
+		case "DEBUG":
+			logLevel = slog.LevelDebug
+		case "INFO":
+			logLevel = slog.LevelInfo
+		case "WARN", "WARNING":
+			logLevel = slog.LevelWarn
+		case "ERROR":
+			logLevel = slog.LevelError
+		default:
+			// Don't fail on unknown level — fall back to INFO and warn later.
+			fmt.Fprintf(os.Stderr, "WARNING: unknown LOG_LEVEL %q, using INFO\n", lvl)
+		}
+	}
 	logger := slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{
-		Level: slog.LevelInfo,
+		Level: logLevel,
 	}))
 	slog.SetDefault(logger)
+	slog.Log(context.Background(), logLevel, "log level configured", "level", logLevel.String())
 
 	cfg, err := loadConfig()
 	if err != nil {
@@ -249,11 +267,35 @@ func main() {
 		}
 	}
 
-	// Initialize storage backend.
-	reader, writers, closeFn, err := initStorage(cfg)
-	if err != nil {
-		slog.Error("failed to initialize storage", "error", err)
-		os.Exit(1)
+	// Initialize storage backend with exponential backoff (#707).
+	// Transient failures (e.g. BQ cold start, network blip) should not
+	// crash the process — retry up to 3 times (delays: 1s, 2s) before giving up.
+	var reader storage.SpanReader
+	var writers []storage.SpanWriter
+	var closeFn func()
+	{
+		const maxAttempts = 3
+		backoff := 1 * time.Second
+		for attempt := 1; attempt <= maxAttempts; attempt++ {
+			var err error
+			reader, writers, closeFn, err = initStorage(cfg)
+			if err == nil {
+				break
+			}
+			// Clean up any partially initialized resources before retrying.
+			if closeFn != nil {
+				closeFn()
+				closeFn = nil
+			}
+			if attempt == maxAttempts {
+				slog.Error("failed to initialize storage after retries", "error", err, "attempts", maxAttempts)
+				os.Exit(1)
+			}
+			slog.Warn("storage initialization failed, retrying",
+				"error", err, "attempt", attempt, "next_backoff", backoff)
+			time.Sleep(backoff)
+			backoff *= 2
+		}
 	}
 	defer closeFn()
 	slog.Info("storage initialized", "backend", cfg.Storage.Backend, "sinks", len(writers))
@@ -339,6 +381,9 @@ func main() {
 	// Build the HTTP mux for ConnectRPC handlers.
 	mux := http.NewServeMux()
 
+	// Forward-declared variables populated later but captured by handler closures.
+	var userStore storage.UserStore
+
 	// Liveness probe: returns 200 if the process is alive.
 	// No external dependency checks — a failing DB should not cause restarts.
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
@@ -363,6 +408,15 @@ func main() {
 			w.WriteHeader(http.StatusServiceUnavailable)
 			_, _ = fmt.Fprintln(w, `{"status": "not_ready", "reason": "storage_unavailable"}`)
 			return
+		}
+		// Firestore health check: verify user store is reachable (#698).
+		if p, ok := userStore.(interface{ Ping(context.Context) error }); ok {
+			if err := p.Ping(r.Context()); err != nil {
+				slog.Error("readyz: firestore ping failed", "error", err)
+				w.WriteHeader(http.StatusServiceUnavailable)
+				_, _ = fmt.Fprintln(w, `{"status": "not_ready", "reason": "firestore_unavailable"}`)
+				return
+			}
 		}
 		w.WriteHeader(http.StatusOK)
 		_, _ = fmt.Fprintln(w, `{"status": "ready"}`)
@@ -392,7 +446,6 @@ func main() {
 
 	var spendOB *spendoutbox.Outbox
 	var llmProxy *proxy.Proxy
-	var userStore storage.UserStore
 
 	// HIGH-5: Debug metrics endpoint (JSON, no Prometheus dependency).
 	// Requires admin role — exposes dropped span counts and spend data (#706).

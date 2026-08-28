@@ -26,6 +26,15 @@ services:
       CANDELA_PROXY_ENABLED: "true"
     volumes:
       - candela_data:/data
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 2G
+        reservations:
+          cpus: "0.5"
+          memory: 512M
     healthcheck:
       test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://localhost:8181/readyz"]
       interval: 10s

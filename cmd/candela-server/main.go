@@ -247,7 +247,7 @@ func main() {
 		Level: logLevel,
 	}))
 	slog.SetDefault(logger)
-	slog.Info("log level configured", "level", logLevel.String())
+	slog.Log(context.Background(), logLevel, "log level configured", "level", logLevel.String())
 
 	cfg, err := loadConfig()
 	if err != nil {

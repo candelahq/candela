@@ -247,6 +247,7 @@ func main() {
 		Level: logLevel,
 	}))
 	slog.SetDefault(logger)
+	slog.Info("log level configured", "level", logLevel.String())
 
 	cfg, err := loadConfig()
 	if err != nil {
@@ -268,7 +269,7 @@ func main() {
 
 	// Initialize storage backend with exponential backoff (#707).
 	// Transient failures (e.g. BQ cold start, network blip) should not
-	// crash the process — retry up to 3 times before giving up.
+	// crash the process — retry up to 3 times (delays: 1s, 2s) before giving up.
 	var reader storage.SpanReader
 	var writers []storage.SpanWriter
 	var closeFn func()
@@ -280,6 +281,11 @@ func main() {
 			reader, writers, closeFn, err = initStorage(cfg)
 			if err == nil {
 				break
+			}
+			// Clean up any partially initialized resources before retrying.
+			if closeFn != nil {
+				closeFn()
+				closeFn = nil
 			}
 			if attempt == maxAttempts {
 				slog.Error("failed to initialize storage after retries", "error", err, "attempts", maxAttempts)

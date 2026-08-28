@@ -150,7 +150,9 @@ func (s *Store) Close() error {
 // Ping verifies that the Firestore backend is reachable by running a
 // lightweight aggregation query. Used by /readyz health checks (#698).
 func (s *Store) Ping(ctx context.Context) error {
-	_, err := s.client.Collection("users").Limit(1).Documents(ctx).Next()
+	iter := s.client.Collection("users").Limit(1).Documents(ctx)
+	defer iter.Stop()
+	_, err := iter.Next()
 	if err == iterator.Done {
 		return nil // empty collection is healthy
 	}

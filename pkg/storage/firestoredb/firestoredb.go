@@ -147,6 +147,16 @@ func (s *Store) Close() error {
 	return s.client.Close()
 }
 
+// Ping verifies that the Firestore backend is reachable by running a
+// lightweight aggregation query. Used by /readyz health checks (#698).
+func (s *Store) Ping(ctx context.Context) error {
+	_, err := s.client.Collection("users").Limit(1).Documents(ctx).Next()
+	if err == iterator.Done {
+		return nil // empty collection is healthy
+	}
+	return err
+}
+
 // firestoreUser is the Firestore-internal representation of a user document.
 // It owns the firestore:" struct tags so storage.UserRecord remains
 // database-agnostic (no Firestore-specific annotations on the shared type).

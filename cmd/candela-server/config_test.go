@@ -316,7 +316,7 @@ func TestProductionExampleConfig_HasMistralOverride(t *testing.T) {
 proxy:
   enabled: true
   vertex_ai:
-    project_id: "austin-azra-sandbox-project"
+    project_id: "my-gcp-project"
     region: "global"
     provider_overrides:
       mistral:

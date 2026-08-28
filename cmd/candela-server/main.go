@@ -398,7 +398,14 @@ func main() {
 	// Requires admin role — exposes dropped span counts and spend data (#706).
 	mux.HandleFunc("/debug/metrics", func(w http.ResponseWriter, r *http.Request) {
 		// Admin-only guard: look up caller role from userStore.
-		if userStore != nil {
+		// Fail closed: if userStore is nil (Firestore disabled) and not in
+		// dev mode, deny access entirely (#706, CWE-862).
+		if userStore == nil {
+			if !cfg.Auth.DevMode {
+				http.Error(w, "admin access required (user store not configured)", http.StatusForbidden)
+				return
+			}
+		} else {
 			caller := auth.FromContext(r.Context())
 			if caller == nil {
 				http.Error(w, "authentication required", http.StatusUnauthorized)

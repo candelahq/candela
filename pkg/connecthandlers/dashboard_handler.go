@@ -85,6 +85,14 @@ func (h *DashboardHandler) GetModelBreakdown(
 			q.EndTime = msg.TimeRange.End.AsTime()
 		}
 	}
+	// Default to last 24 hours if no time range specified (#655).
+	// Prevents full-table scans on BigQuery and empty results on DuckDB/SQLite.
+	if q.StartTime.IsZero() {
+		q.StartTime = time.Now().Add(-24 * time.Hour)
+	}
+	if q.EndTime.IsZero() {
+		q.EndTime = time.Now()
+	}
 
 	models, err := h.store.GetModelBreakdown(ctx, q)
 	if err != nil {

@@ -1316,7 +1316,12 @@ func buildTrace(traceID string, spans []storage.Span) *storage.Trace {
 }
 
 // quoteTable wraps a fully-qualified table ID in backticks for BigQuery SQL.
-// Escapes any embedded backticks to prevent SQL injection via config values.
+// Strips any embedded backticks to prevent SQL injection via config values —
+// BigQuery does not support escaping backticks within quoted identifiers.
 func quoteTable(tableID string) string {
-	return "`" + strings.ReplaceAll(tableID, "`", "\\`") + "`"
+	cleaned := strings.ReplaceAll(tableID, "`", "")
+	if cleaned == "" {
+		return "``" // will produce a clear SQL error rather than silent injection
+	}
+	return "`" + cleaned + "`"
 }

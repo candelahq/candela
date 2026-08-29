@@ -87,8 +87,15 @@ func TestSidecar_CORSHeaders(t *testing.T) {
 	}
 
 	allowOrigin := resp.Header.Get("Access-Control-Allow-Origin")
-	if allowOrigin != "*" {
-		t.Errorf("Access-Control-Allow-Origin = %q, want *", allowOrigin)
+	// When wildcard is configured and Origin is present, we reflect the origin
+	// instead of "*" to comply with the CORS spec for credentialed requests (#659).
+	if allowOrigin != "http://example.com" {
+		t.Errorf("Access-Control-Allow-Origin = %q, want %q", allowOrigin, "http://example.com")
+	}
+
+	// Reflected origins must include Vary: Origin for correct cache behavior.
+	if vary := resp.Header.Get("Vary"); !strings.Contains(vary, "Origin") {
+		t.Errorf("Vary header = %q, want it to contain 'Origin'", vary)
 	}
 }
 

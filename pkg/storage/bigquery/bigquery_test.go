@@ -15,7 +15,7 @@ func TestQuoteTable(t *testing.T) {
 	}{
 		{"simple", "project.dataset.table", "`project.dataset.table`"},
 		{"already safe", "my_project.spans.traces", "`my_project.spans.traces`"},
-		{"embedded backtick", "proj`.evil", "`proj\\`.evil`"},
+		{"embedded backtick stripped", "proj`.evil", "`proj.evil`"},
 		{"empty", "", "``"},
 	}
 	for _, tt := range tests {

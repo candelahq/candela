@@ -107,3 +107,10 @@ jobs:
           name: hurl-test-results
           path: test-results/
           retention-days: 7
+
+      - name: Cleanup background processes
+        if: ${{ always() }}
+        run: |
+          # Kill background servers to prevent zombie processes (#696).
+          pkill -f 'upstream.go' || true
+          pkill -f 'candela-server' || true

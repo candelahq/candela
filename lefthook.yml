@@ -44,6 +44,9 @@ pre-commit:
     go-test:
       glob: "*.go"
       run: go test ./... -count=1 -timeout 30s
+    govulncheck:
+      glob: "*.{go,mod,sum}"
+      run: govulncheck ./...
     # ── Rust ──
     cargo-fmt:
       glob: "*.rs"

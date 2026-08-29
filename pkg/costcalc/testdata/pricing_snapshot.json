@@ -132,6 +132,24 @@
     "output_per_million": 7.5
   },
   {
+    "model": "imagen-3.0-generate-002",
+    "provider": "google",
+    "input_per_million": 25,
+    "output_per_million": 25
+  },
+  {
+    "model": "text-embedding-004",
+    "provider": "google",
+    "input_per_million": 0.025,
+    "output_per_million": 0.025
+  },
+  {
+    "model": "text-embedding-005",
+    "provider": "google",
+    "input_per_million": 0.025,
+    "output_per_million": 0.025
+  },
+  {
     "model": "llama-4-maverick-17b-128e-instruct-maas",
     "provider": "meta",
     "input_per_million": 0.2,
@@ -160,6 +178,18 @@
     "provider": "mistral",
     "input_per_million": 0.1,
     "output_per_million": 0.3
+  },
+  {
+    "model": "dall-e-2",
+    "provider": "openai",
+    "input_per_million": 20,
+    "output_per_million": 20
+  },
+  {
+    "model": "dall-e-3",
+    "provider": "openai",
+    "input_per_million": 40,
+    "output_per_million": 40
   },
   {
     "model": "gpt-4.1",
@@ -202,6 +232,24 @@
     "provider": "openai",
     "input_per_million": 1.1,
     "output_per_million": 4.4
+  },
+  {
+    "model": "text-embedding-3-large",
+    "provider": "openai",
+    "input_per_million": 0.13,
+    "output_per_million": 0.13
+  },
+  {
+    "model": "text-embedding-3-small",
+    "provider": "openai",
+    "input_per_million": 0.02,
+    "output_per_million": 0.02
+  },
+  {
+    "model": "text-embedding-ada-002",
+    "provider": "openai",
+    "input_per_million": 0.1,
+    "output_per_million": 0.1
   },
   {
     "model": "qwen3-235b-a22b-instruct-2507-maas",

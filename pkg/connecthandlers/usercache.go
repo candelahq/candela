@@ -31,6 +31,7 @@ import (
 type userIDCache struct {
 	mu      sync.RWMutex
 	entries map[string]userIDEntry
+	stop    chan struct{}
 }
 
 type userIDEntry struct {
@@ -48,18 +49,35 @@ const (
 var globalUserIDCache = func() *userIDCache {
 	c := &userIDCache{
 		entries: make(map[string]userIDEntry),
+		stop:    make(chan struct{}),
 	}
 	// Background goroutine: sweep expired entries every 30 seconds.
 	// This keeps write-path critical sections O(1) — no per-write map scan.
 	go func() {
 		ticker := time.NewTicker(userIDCacheSweepPeriod)
 		defer ticker.Stop()
-		for range ticker.C {
-			c.evictExpired()
+		for {
+			select {
+			case <-ticker.C:
+				c.evictExpired()
+			case <-c.stop:
+				return
+			}
 		}
 	}()
 	return c
 }()
+
+// Close stops the background eviction goroutine (#657).
+// Safe to call multiple times.
+func (c *userIDCache) Close() {
+	select {
+	case <-c.stop:
+		// Already closed.
+	default:
+		close(c.stop)
+	}
+}
 
 // evictExpired removes all entries whose TTL has elapsed. Called by the
 // background sweep goroutine; must not be called while already holding the lock.

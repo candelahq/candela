@@ -1428,7 +1428,12 @@ func corsMiddleware(next http.Handler, origins []string) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		origin := r.Header.Get("Origin")
 
-		if allowAll {
+		if allowAll && origin != "" {
+			// Reflect the request origin instead of "*" because the CORS spec
+			// forbids wildcard when credentials (Authorization) are in play (#659).
+			w.Header().Set("Access-Control-Allow-Origin", origin)
+			w.Header().Add("Vary", "Origin")
+		} else if allowAll {
 			w.Header().Set("Access-Control-Allow-Origin", "*")
 		} else if allowed[origin] {
 			w.Header().Set("Access-Control-Allow-Origin", origin)

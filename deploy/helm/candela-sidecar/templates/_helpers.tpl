@@ -50,3 +50,24 @@ Build comma-separated provider names for PROVIDERS env var.
 {{- end }}
 {{- join "," $names }}
 {{- end }}
+
+{{/*
+Sidecar container spec snippet for injection into user pod specs (#703).
+Includes liveness and readiness probes for Kubernetes health management.
+Usage: {{ include "candela-sidecar.container" . | nindent 8 }}
+*/}}
+{{- define "candela-sidecar.container" -}}
+- name: candela-sidecar
+  image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+  imagePullPolicy: {{ .Values.image.pullPolicy }}
+  ports:
+    - containerPort: 8080
+      name: http-proxy
+      protocol: TCP
+  livenessProbe:
+    {{- toYaml .Values.probes.liveness | nindent 4 }}
+  readinessProbe:
+    {{- toYaml .Values.probes.readiness | nindent 4 }}
+  resources:
+    {{- toYaml .Values.resources | nindent 4 }}
+{{- end }}

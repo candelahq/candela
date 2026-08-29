@@ -182,6 +182,15 @@ jobs:
       - name: Fix git ownership for Nix flake
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
+      - name: Cache Go modules
+        uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4
+        with:
+          path: |
+            /root/go/pkg/mod
+            /root/.cache/go-build
+          key: go-mod-${{ hashFiles('go.sum') }}
+          restore-keys: go-mod-
+
       - name: Start Firestore emulator
         run: |
           nix develop . --command bash -c "
@@ -251,6 +260,15 @@ jobs:
 
       - name: Fix git ownership for Nix flake
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+      - name: Cache Go modules
+        uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4
+        with:
+          path: |
+            /root/go/pkg/mod
+            /root/.cache/go-build
+          key: go-mod-${{ hashFiles('go.sum') }}
+          restore-keys: go-mod-
 
       - name: Download coverage artifacts
         uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
@@ -324,7 +342,7 @@ jobs:
 
       - name: Test Windows-relevant packages
         shell: pwsh
-        run: go test -v ./cmd/candela/... ./pkg/runtime/... -count=1
+        run: go test -v -race -timeout 120s ./cmd/candela/... ./pkg/runtime/... -count=1
 
       - name: Build candela.exe (windows/amd64)
         shell: pwsh

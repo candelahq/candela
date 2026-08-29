@@ -129,7 +129,7 @@ func (h *CatalogHandler) UpdateModelCatalogEntry(
 	if mask := req.Msg.UpdateMask; mask != nil && len(mask.Paths) > 0 {
 		existing, err := h.store.Get(ctx, entry.Provider, entry.ModelID)
 		if err != nil {
-			if err == catalog.ErrNotFound {
+			if errors.Is(err, catalog.ErrNotFound) {
 				return nil, connect.NewError(connect.CodeNotFound,
 					fmt.Errorf("model %s/%s not found", entry.Provider, entry.ModelID))
 			}
@@ -179,7 +179,7 @@ func (h *CatalogHandler) DeleteModelCatalogEntry(
 	modelID := req.Msg.ModelId
 
 	if err := h.store.Delete(ctx, provider, modelID); err != nil {
-		if err == catalog.ErrNotFound {
+		if errors.Is(err, catalog.ErrNotFound) {
 			return nil, connect.NewError(connect.CodeNotFound,
 				fmt.Errorf("model %s/%s not found", provider, modelID))
 		}

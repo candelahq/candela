@@ -8,7 +8,7 @@ func TestValidateAuthConfig(t *testing.T) {
 	tests := []struct {
 		name        string
 		devMode     bool
-		kService    string
+		kService    string // set as K_SERVICE env var for the test
 		cloudRunURL string
 		wantErr     bool
 	}{
@@ -21,6 +21,8 @@ func TestValidateAuthConfig(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			// Set K_SERVICE so validateAuthConfig can detect Cloud Run (#648).
+			t.Setenv("K_SERVICE", tt.kService)
 			err := validateAuthConfig(tt.devMode, tt.kService, tt.cloudRunURL)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("validateAuthConfig(devMode=%v, kService=%q, cloudRunURL=%q) error = %v, wantErr %v",

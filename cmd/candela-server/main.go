@@ -1458,8 +1458,27 @@ func corsMiddleware(next http.Handler, origins []string) http.Handler {
 // validateAuthConfig checks that the auth configuration is safe for the runtime environment.
 // Returns an error if the configuration would be insecure.
 func validateAuthConfig(devMode bool, kService, cloudRunURL string) error {
-	if devMode && kService != "" {
-		return fmt.Errorf("auth.dev_mode=true is not allowed on Cloud Run (K_SERVICE=%s)", kService)
+	if devMode {
+		// Detect production environments beyond Cloud Run (#648).
+		// Any of these env vars indicate the server is running in a managed
+		// production environment where dev_mode must not be enabled.
+		prodIndicators := []struct {
+			env  string
+			desc string
+		}{
+			{"K_SERVICE", "Cloud Run"},
+			{"K_REVISION", "Cloud Run / Knative"},
+			{"KUBERNETES_SERVICE_HOST", "Kubernetes"},
+			{"ECS_CONTAINER_METADATA_URI", "AWS ECS"},
+			{"AWS_LAMBDA_FUNCTION_NAME", "AWS Lambda"},
+			{"CONTAINER_APP_NAME", "Azure Container Apps"},
+			{"GAE_ENV", "App Engine"},
+		}
+		for _, p := range prodIndicators {
+			if v := os.Getenv(p.env); v != "" {
+				return fmt.Errorf("auth.dev_mode=true is not allowed in %s (%s=%s)", p.desc, p.env, v)
+			}
+		}
 	}
 	if kService != "" && cloudRunURL == "" {
 		slog.Warn("CLOUD_RUN_URL not set on Cloud Run — Google ID token validation (Strategy 2) will be skipped; tokens will fall through to OAuth2 userinfo (slower)")

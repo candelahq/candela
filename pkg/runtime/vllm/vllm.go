@@ -113,6 +113,7 @@ func (r *Runtime) Stop(ctx context.Context) error {
 	}
 
 	// Wait for the process to exit, with a grace period.
+	// Also honor caller context cancellation.
 	done := make(chan error, 1)
 	go func() { done <- r.cmd.Wait() }()
 
@@ -120,6 +121,10 @@ func (r *Runtime) Stop(ctx context.Context) error {
 	select {
 	case <-done:
 		// Exited cleanly.
+	case <-ctx.Done():
+		// Caller cancelled — force kill immediately.
+		_ = r.cmd.Process.Kill()
+		<-done
 	case <-time.After(gracePeriod):
 		// Grace period expired — force kill.
 		_ = r.cmd.Process.Kill()

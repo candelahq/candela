@@ -92,6 +92,11 @@ func TestSidecar_CORSHeaders(t *testing.T) {
 	if allowOrigin != "http://example.com" {
 		t.Errorf("Access-Control-Allow-Origin = %q, want %q", allowOrigin, "http://example.com")
 	}
+
+	// Reflected origins must include Vary: Origin for correct cache behavior.
+	if vary := resp.Header.Get("Vary"); !strings.Contains(vary, "Origin") {
+		t.Errorf("Vary header = %q, want it to contain 'Origin'", vary)
+	}
 }
 
 // TestSidecar_ProviderFiltering verifies that the parseHeaders and envOr

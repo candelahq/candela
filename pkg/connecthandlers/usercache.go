@@ -29,9 +29,10 @@ import (
 // #B: Negative entries (user not found) are cached with a 5-second TTL to
 // prevent a thundering herd of Firestore reads when a user is not yet provisioned.
 type userIDCache struct {
-	mu      sync.RWMutex
-	entries map[string]userIDEntry
-	stop    chan struct{}
+	mu        sync.RWMutex
+	entries   map[string]userIDEntry
+	stop      chan struct{}
+	closeOnce sync.Once
 }
 
 type userIDEntry struct {
@@ -69,14 +70,9 @@ var globalUserIDCache = func() *userIDCache {
 }()
 
 // Close stops the background eviction goroutine (#657).
-// Safe to call multiple times.
+// Safe to call multiple times and concurrently.
 func (c *userIDCache) Close() {
-	select {
-	case <-c.stop:
-		// Already closed.
-	default:
-		close(c.stop)
-	}
+	c.closeOnce.Do(func() { close(c.stop) })
 }
 
 // evictExpired removes all entries whose TTL has elapsed. Called by the

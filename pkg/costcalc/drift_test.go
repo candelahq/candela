@@ -120,8 +120,8 @@ func TestPricingYAMLValid(t *testing.T) {
 		if m.InputPerMillion <= 0 {
 			t.Errorf("entry %d (%s/%s): input_per_million must be > 0", i, m.Provider, m.Model)
 		}
-		if m.OutputPerMillion <= 0 {
-			t.Errorf("entry %d (%s/%s): output_per_million must be > 0", i, m.Provider, m.Model)
+		if m.OutputPerMillion < 0 {
+			t.Errorf("entry %d (%s/%s): output_per_million must be >= 0", i, m.Provider, m.Model)
 		}
 	}
 }

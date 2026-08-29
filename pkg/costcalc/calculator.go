@@ -816,8 +816,8 @@ func (c *Calculator) loadDefaults() {
 		if m.Provider == "" || m.Model == "" {
 			panic(fmt.Sprintf("costcalc: pricing.yaml entry %d: provider and model are required", i))
 		}
-		if m.InputPerMillion <= 0 || m.OutputPerMillion <= 0 {
-			panic(fmt.Sprintf("costcalc: pricing.yaml entry %d (%s/%s): prices must be > 0", i, m.Provider, m.Model))
+		if m.InputPerMillion <= 0 || m.OutputPerMillion < 0 {
+			panic(fmt.Sprintf("costcalc: pricing.yaml entry %d (%s/%s): input price must be > 0, output price must be >= 0", i, m.Provider, m.Model))
 		}
 	}
 	for _, m := range pf.Models {

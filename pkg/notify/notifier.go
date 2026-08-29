@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 
@@ -41,9 +42,16 @@ type DeductResult struct {
 }
 
 // Ratio returns the spend-to-limit ratio (0.0–1.0+).
+// Returns 0 when LimitUSD is zero (unlimited / not set).
+// Returns > 1.0 when LimitUSD is negative (data error) to ensure alerts fire (#652).
 func (d DeductResult) Ratio() float64 {
-	if d.LimitUSD <= 0 {
-		return 0
+	if d.LimitUSD == 0 {
+		return 0 // unlimited — no alerts
+	}
+	if d.LimitUSD < 0 {
+		slog.Warn("negative budget limit detected — treating as over budget",
+			"spent_usd", d.SpentUSD, "limit_usd", d.LimitUSD)
+		return 2.0 // data integrity error — treat as over budget
 	}
 	return d.SpentUSD / d.LimitUSD
 }
@@ -84,8 +92,17 @@ func (c *BudgetChecker) CheckAndNotify(ctx context.Context, userID, email, perio
 	var alerts []storage.BudgetAlert
 
 	c.mu.Lock()
+	// Evict stale period entries to prevent unbounded growth.
 	if c.currentPeriod != periodKey {
-		c.sent = make(map[string]bool)
+		// Only evict entries from the OLD period — don't wipe all users (#651).
+		old := c.currentPeriod
+		if old != "" {
+			for k := range c.sent {
+				if strings.HasPrefix(k, old+":") {
+					delete(c.sent, k)
+				}
+			}
+		}
 		c.currentPeriod = periodKey
 	}
 
@@ -94,7 +111,8 @@ func (c *BudgetChecker) CheckAndNotify(ctx context.Context, userID, email, perio
 			continue
 		}
 
-		key := fmt.Sprintf("%s:%.2f", userID, threshold)
+		// Include periodKey so users in different periods don't collide.
+		key := fmt.Sprintf("%s:%s:%.2f", periodKey, userID, threshold)
 		if c.sent[key] {
 			continue
 		}

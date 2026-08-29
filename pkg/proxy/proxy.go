@@ -258,6 +258,10 @@ type Proxy struct {
 	fallbackResolver *FallbackResolver
 
 	// Optional dependencies for team-mode features.
+	// Protected by setupMu for safe concurrent writes during startup (#650).
+	// Reads are safe without RLock because setters are called before
+	// ListenAndServe — the HTTP server's Start acts as a happens-before barrier.
+	setupMu  sync.RWMutex
 	users    storage.UserStore         // Budget deduction (nil = no budget tracking)
 	budgetCk *notify.BudgetChecker     // Budget threshold notifications (nil = no alerts)
 	catalog  catalog.ModelCatalogStore // Access gate lookups (nil = gates skipped)
@@ -477,6 +481,8 @@ func New(cfg Config, submitter SpanSubmitter, calc *costcalc.Calculator) (*Proxy
 // Also initializes the per-user model limit cache (#721) so the proxy
 // can merge Firestore limits with YAML defaults in the pre-flight gate.
 func (p *Proxy) SetUserStore(users storage.UserStore) {
+	p.setupMu.Lock()
+	defer p.setupMu.Unlock()
 	p.users = users
 	if users != nil {
 		p.modelLimits = newModelLimitCache(users, 60*time.Second)
@@ -490,11 +496,15 @@ func (p *Proxy) SetUserStore(users storage.UserStore) {
 
 // SetBudgetChecker sets the optional BudgetChecker for threshold notifications.
 func (p *Proxy) SetBudgetChecker(ck *notify.BudgetChecker) {
+	p.setupMu.Lock()
+	defer p.setupMu.Unlock()
 	p.budgetCk = ck
 }
 
 // SetCatalog sets the optional catalog store for access gate lookups.
 func (p *Proxy) SetCatalog(c catalog.ModelCatalogStore) {
+	p.setupMu.Lock()
+	defer p.setupMu.Unlock()
 	p.catalog = c
 }
 

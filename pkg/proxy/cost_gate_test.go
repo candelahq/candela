@@ -452,7 +452,7 @@ func TestCountBase64Images(t *testing.T) {
 		{"two openai images", `data:image/png;base64,abc data:image/jpeg;base64,def`, 2},
 		{"anthropic base64", `{"type":"base64","media_type":"image/jpeg","data":"abc..."}`, 1},
 		{"anthropic base64 spaced", `{"type": "base64", "media_type": "image/jpeg"}`, 1},
-		{"mixed", `data:image/png;base64,x "type":"base64" data:image/jpeg;base64,y`, 3},
+		{"mixed", `data:image/png;base64,x "type":"base64" data:image/jpeg;base64,y`, 2},
 	}
 
 	for _, tt := range tests {

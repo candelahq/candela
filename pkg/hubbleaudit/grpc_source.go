@@ -75,6 +75,7 @@ type GRPCFlowSource struct {
 	mu        sync.Mutex
 	connected bool
 	lastFlow  time.Time
+	lastErr   error // set by readLoop on non-EOF stream error (#668)
 }
 
 // NewGRPCFlowSource creates a new Hubble gRPC flow source.
@@ -211,6 +212,10 @@ func (s *GRPCFlowSource) readLoop(ctx context.Context, stream grpc.ClientStream,
 		if err := stream.RecvMsg(&raw); err != nil {
 			if err != io.EOF {
 				slog.Warn("hubbleaudit: gRPC recv error", "error", err)
+				// Store error for callers to inspect via Err() (#668).
+				s.mu.Lock()
+				s.lastErr = err
+				s.mu.Unlock()
 			}
 			return
 		}
@@ -231,6 +236,15 @@ func (s *GRPCFlowSource) readLoop(ctx context.Context, stream grpc.ClientStream,
 			return
 		}
 	}
+}
+
+// Err returns the last non-EOF error from the stream, or nil if the stream
+// closed cleanly. Safe to call after the flow channel returned by Observe
+// has been closed. Follows the Scanner.Err() pattern (#668).
+func (s *GRPCFlowSource) Err() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.lastErr
 }
 
 // ── Retry / Health ──

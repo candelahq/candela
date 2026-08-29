@@ -1047,25 +1047,38 @@ func (s *Store) GetUserLeaderboard(ctx context.Context, uq storage.UsageQuery, l
 	}
 
 	query := fmt.Sprintf(`
+		WITH top_models AS (
+			SELECT user_id, gen_ai_model,
+				ROW_NUMBER() OVER (PARTITION BY user_id ORDER BY SUM(gen_ai_cost_usd) DESC) AS rn
+			FROM %s
+			WHERE (@projectID = '' OR project_id = @projectID)
+			  AND start_time >= @startTime
+			  AND start_time <= @endTime
+			  AND user_id != ''
+			  AND gen_ai_model != ''
+			GROUP BY user_id, gen_ai_model
+		)
 		SELECT
-			user_id,
-			COUNT(DISTINCT trace_id) AS call_count,
-			COALESCE(SUM(gen_ai_total_tokens), 0) AS total_tokens,
-			COALESCE(SUM(gen_ai_cost_usd), 0) AS total_cost_usd,
+			spans.user_id,
+			COUNT(DISTINCT spans.trace_id) AS call_count,
+			COALESCE(SUM(spans.gen_ai_total_tokens), 0) AS total_tokens,
+			COALESCE(SUM(spans.gen_ai_cost_usd), 0) AS total_cost_usd,
 			COALESCE(
-				AVG(CASE WHEN parent_span_id = '' THEN duration_ns ELSE NULL END),
-				AVG(CASE WHEN kind = @llmKind THEN duration_ns ELSE NULL END),
+				AVG(CASE WHEN spans.parent_span_id = '' THEN spans.duration_ns ELSE NULL END),
+				AVG(CASE WHEN spans.kind = @llmKind THEN spans.duration_ns ELSE NULL END),
 				0
-			) AS avg_duration_ns
-		FROM %s
-		WHERE (@projectID = '' OR project_id = @projectID)
-		  AND start_time >= @startTime
-		  AND start_time <= @endTime
-		  AND user_id != ''
-		GROUP BY user_id
+			) AS avg_duration_ns,
+			COALESCE(tm.gen_ai_model, '') AS top_model
+		FROM %s AS spans
+		LEFT JOIN top_models tm ON tm.user_id = spans.user_id AND tm.rn = 1
+		WHERE (@projectID = '' OR spans.project_id = @projectID)
+		  AND spans.start_time >= @startTime
+		  AND spans.start_time <= @endTime
+		  AND spans.user_id != ''
+		GROUP BY spans.user_id, tm.gen_ai_model
 		ORDER BY total_cost_usd DESC
 		LIMIT @limit
-	`, quoteTable(s.tableID))
+	`, quoteTable(s.tableID), quoteTable(s.tableID))
 
 	q := s.client.Query(query)
 	q.SetParameters([]bigquery.QueryParameter{
@@ -1089,6 +1102,7 @@ func (s *Store) GetUserLeaderboard(ctx context.Context, uq storage.UsageQuery, l
 			TotalTokens   int64   `bigquery:"total_tokens"`
 			TotalCostUSD  float64 `bigquery:"total_cost_usd"`
 			AvgDurationNs float64 `bigquery:"avg_duration_ns"`
+			TopModel      string  `bigquery:"top_model"`
 		}
 		err := it.Next(&row)
 		if err == iterator.Done {
@@ -1103,6 +1117,7 @@ func (s *Store) GetUserLeaderboard(ctx context.Context, uq storage.UsageQuery, l
 			TotalTokens:  row.TotalTokens,
 			CostUSD:      row.TotalCostUSD,
 			AvgLatencyMs: float64(row.AvgDurationNs) / 1e6,
+			TopModel:     row.TopModel,
 		})
 	}
 

@@ -225,6 +225,11 @@ func (a *AWSProvider) ssoLogin(ctx context.Context) error {
 		args = append(args, "--profile", a.profile)
 	}
 
+	// Check if aws CLI is installed before attempting SSO login (#670).
+	if _, err := exec.LookPath("aws"); err != nil {
+		return fmt.Errorf("aws CLI not found in PATH — install it from https://aws.amazon.com/cli/ and try again")
+	}
+
 	cmd := exec.CommandContext(ctx, "aws", args...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr

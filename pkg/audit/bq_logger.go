@@ -2,6 +2,7 @@ package audit
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"time"
@@ -139,7 +140,8 @@ func EnsureTable(ctx context.Context, cfg BQConfig) error {
 
 	if err := table.Create(ctx, md); err != nil {
 		// Idempotent: if table already exists, that's fine.
-		if apiErr, ok := err.(*googleapi.Error); ok && apiErr.Code == 409 {
+		var apiErr *googleapi.Error
+		if errors.As(err, &apiErr) && apiErr.Code == 409 {
 			slog.Info("audit: BigQuery table already exists", "table", bqTableName)
 			return nil
 		}

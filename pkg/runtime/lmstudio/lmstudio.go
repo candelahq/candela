@@ -76,17 +76,20 @@ func (r *Runtime) Stop(ctx context.Context) error {
 	if err := stopCmd.Run(); err != nil {
 		slog.Warn("lmstudio: graceful stop failed, killing process", "error", err)
 		r.mu.Lock()
+		defer r.mu.Unlock()
 		if r.cmd != nil && r.cmd.Process != nil {
-			_ = r.cmd.Process.Kill()
+			if killErr := r.cmd.Process.Kill(); killErr != nil {
+				r.cmd = nil
+				return fmt.Errorf("lmstudio: kill failed: %w", killErr)
+			}
 			_ = r.cmd.Wait()
 		}
 		r.cmd = nil
-		r.mu.Unlock()
-	} else {
-		r.mu.Lock()
-		r.cmd = nil
-		r.mu.Unlock()
+		return nil
 	}
+	r.mu.Lock()
+	r.cmd = nil
+	r.mu.Unlock()
 	return nil
 }
 

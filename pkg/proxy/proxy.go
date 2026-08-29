@@ -258,7 +258,9 @@ type Proxy struct {
 	fallbackResolver *FallbackResolver
 
 	// Optional dependencies for team-mode features.
-	// Protected by setupMu for safe concurrent access (#650).
+	// Protected by setupMu for safe concurrent writes during startup (#650).
+	// Reads are safe without RLock because setters are called before
+	// ListenAndServe — the HTTP server's Start acts as a happens-before barrier.
 	setupMu  sync.RWMutex
 	users    storage.UserStore         // Budget deduction (nil = no budget tracking)
 	budgetCk *notify.BudgetChecker     // Budget threshold notifications (nil = no alerts)

@@ -194,6 +194,9 @@ func (c *Calculator) Calculate(provider, model string, inputTokens, outputTokens
 	if !ok {
 		key := c.key(provider, model)
 		c.unknownMu.Lock()
+		if c.loggedUnknown == nil {
+			c.loggedUnknown = make(map[string]bool)
+		}
 		if !c.loggedUnknown[key] && len(c.loggedUnknown) < maxLoggedUnknown {
 			c.loggedUnknown[key] = true
 			c.unknownMu.Unlock()

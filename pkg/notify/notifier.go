@@ -49,6 +49,8 @@ func (d DeductResult) Ratio() float64 {
 		return 0 // unlimited — no alerts
 	}
 	if d.LimitUSD < 0 {
+		slog.Warn("negative budget limit detected — treating as over budget",
+			"spent_usd", d.SpentUSD, "limit_usd", d.LimitUSD)
 		return 2.0 // data integrity error — treat as over budget
 	}
 	return d.SpentUSD / d.LimitUSD

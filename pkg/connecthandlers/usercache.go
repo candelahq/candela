@@ -29,8 +29,10 @@ import (
 // #B: Negative entries (user not found) are cached with a 5-second TTL to
 // prevent a thundering herd of Firestore reads when a user is not yet provisioned.
 type userIDCache struct {
-	mu      sync.RWMutex
-	entries map[string]userIDEntry
+	mu        sync.RWMutex
+	entries   map[string]userIDEntry
+	stop      chan struct{}
+	closeOnce sync.Once
 }
 
 type userIDEntry struct {
@@ -48,18 +50,30 @@ const (
 var globalUserIDCache = func() *userIDCache {
 	c := &userIDCache{
 		entries: make(map[string]userIDEntry),
+		stop:    make(chan struct{}),
 	}
 	// Background goroutine: sweep expired entries every 30 seconds.
 	// This keeps write-path critical sections O(1) — no per-write map scan.
 	go func() {
 		ticker := time.NewTicker(userIDCacheSweepPeriod)
 		defer ticker.Stop()
-		for range ticker.C {
-			c.evictExpired()
+		for {
+			select {
+			case <-ticker.C:
+				c.evictExpired()
+			case <-c.stop:
+				return
+			}
 		}
 	}()
 	return c
 }()
+
+// Close stops the background eviction goroutine (#657).
+// Safe to call multiple times and concurrently.
+func (c *userIDCache) Close() {
+	c.closeOnce.Do(func() { close(c.stop) })
+}
 
 // evictExpired removes all entries whose TTL has elapsed. Called by the
 // background sweep goroutine; must not be called while already holding the lock.

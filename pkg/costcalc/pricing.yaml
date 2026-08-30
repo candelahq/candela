@@ -239,3 +239,48 @@ models:
     model: grok-4.20-non-reasoning
     input_per_million: 1.25
     output_per_million: 2.50
+
+  # ── Embedding Models (#716) ───────────────────────────────
+  # Embedding models produce vectors, not tokens — output price is 0.
+  - provider: openai
+    model: text-embedding-3-small
+    input_per_million: 0.02
+    output_per_million: 0
+
+  - provider: openai
+    model: text-embedding-3-large
+    input_per_million: 0.13
+    output_per_million: 0
+
+  - provider: openai
+    model: text-embedding-ada-002
+    input_per_million: 0.10
+    output_per_million: 0
+
+  - provider: google
+    model: text-embedding-004
+    input_per_million: 0.025
+    output_per_million: 0
+
+  - provider: google
+    model: text-embedding-005
+    input_per_million: 0.025
+    output_per_million: 0
+
+  # ── Image Generation Models (#716) ────────────────────────
+  # Image models are priced per-image, but we track via input tokens.
+  # These prices approximate the per-1K-token equivalent of per-image pricing.
+  - provider: openai
+    model: dall-e-3
+    input_per_million: 40.00
+    output_per_million: 40.00
+
+  - provider: openai
+    model: dall-e-2
+    input_per_million: 20.00
+    output_per_million: 20.00
+
+  - provider: google
+    model: imagen-3.0-generate-002
+    input_per_million: 25.00
+    output_per_million: 25.00

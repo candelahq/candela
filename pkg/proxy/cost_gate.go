@@ -193,13 +193,23 @@ func estimateRequestCost(calc *costcalc.Calculator, provider, model string, reqB
 
 // countBase64Images counts approximate number of base64-encoded images in a
 // request body by looking for common patterns across OpenAI, Anthropic, and
-// Google vision API formats.
+// Google vision API formats. Avoids double-counting when both patterns match (#649).
 func countBase64Images(body []byte) int {
-	count := 0
 	// OpenAI/Gemini: "data:image/..."
-	count += bytes.Count(body, []byte("data:image/"))
+	dataImageCount := bytes.Count(body, []byte("data:image/"))
+
 	// Anthropic: "type": "image" + "source": {"type": "base64", ...}
-	count += bytes.Count(body, []byte(`"type":"base64"`))
-	count += bytes.Count(body, []byte(`"type": "base64"`))
-	return count
+	// Only count these if we didn't already find data:image/ patterns,
+	// since Anthropic base64 images can also contain data:image/ URIs.
+	anthropicCount := bytes.Count(body, []byte(`"type":"base64"`)) +
+		bytes.Count(body, []byte(`"type": "base64"`))
+
+	if dataImageCount > 0 && anthropicCount > 0 {
+		// Both patterns present — use the larger count to avoid double-counting.
+		if anthropicCount > dataImageCount {
+			return anthropicCount
+		}
+		return dataImageCount
+	}
+	return dataImageCount + anthropicCount
 }

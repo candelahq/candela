@@ -222,7 +222,7 @@ func main() {
 	case "status":
 		cmdStatus()
 	case "doctor":
-		cmdDoctor()
+		cmdDoctorExpanded()
 	case "watch":
 		var watchArgs []string
 		if len(os.Args) > 2 {
@@ -236,6 +236,8 @@ func main() {
 			authArgs = os.Args[2:]
 		}
 		handleAuth(authArgs)
+	case "forecast":
+		cmdForecast()
 	case "version":
 		fmt.Printf("candela %s\n", version)
 	default:
@@ -247,14 +249,17 @@ Usage:
   candela stop           Stop the background proxy
   candela restart        Restart the background proxy
   candela status         Show proxy status
-  candela doctor         Check for port conflicts
-  candela doctor --fix   Kill conflicting processes
+  candela doctor         Run diagnostic checks
+  candela doctor --json  Output diagnostics as JSON
+  candela doctor --fix   Fix port conflicts
   candela watch [flags]  Stream live traces
   candela run [flags]    Run in foreground
   candela auth login --provider gcp   Login to GCP via browser
   candela auth login --provider aws   Login to AWS
   candela auth status                 Show credential status
   candela auth token --provider gcp   Print a fresh access token
+  candela forecast                    Show budget forecast
+  candela forecast --json             Output forecast as JSON
   candela version                     Print version
 
 Run flags:
@@ -546,10 +551,8 @@ func cmdStatus() {
 	fmt.Printf("  UI:    http://127.0.0.1:%d/_local/\n", port)
 }
 
-// cmdDoctor checks for port conflicts and optionally kills conflicting processes.
-func cmdDoctor() {
-	fix := len(os.Args) > 2 && os.Args[2] == "--fix"
-
+// cmdDoctorPortConflicts checks for port conflicts and optionally kills conflicting processes.
+func cmdDoctorPortConflicts(fix bool) {
 	port := resolvePort(os.Args[2:])
 	lmPort := 1234 // default LM Studio compat port
 	if cfg := loadConfig(""); cfg.LMStudioPort != 0 {

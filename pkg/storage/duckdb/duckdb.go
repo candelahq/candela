@@ -516,9 +516,10 @@ func (s *Store) GetModelBreakdown(ctx context.Context, q storage.UsageQuery) ([]
 		WHERE (? = '' OR project_id = ?) AND start_time >= ? AND start_time <= ?
 			AND gen_ai_model != ''
 			AND (? = '' OR user_id = ?)
+			AND (? = '' OR tenant_id = ?)
 		GROUP BY gen_ai_model, gen_ai_provider
 		ORDER BY SUM(gen_ai_cost_usd) DESC
-	`, q.ProjectID, q.ProjectID, q.StartTime, q.EndTime, q.UserID, q.UserID)
+	`, q.ProjectID, q.ProjectID, q.StartTime, q.EndTime, q.UserID, q.UserID, q.TenantID, q.TenantID)
 	if err != nil {
 		return nil, fmt.Errorf("querying model breakdown: %w", err)
 	}
@@ -568,11 +569,13 @@ func (s *Store) GetUserLeaderboard(ctx context.Context, q storage.UsageQuery, li
 		FROM spans
 		WHERE (? = '' OR project_id = ?) AND start_time >= ? AND start_time <= ?
 			AND user_id != ''
+			AND (? = '' OR tenant_id = ?)
 		GROUP BY user_id
 		ORDER BY SUM(gen_ai_cost_usd) DESC
 		LIMIT ?
 	`, int(storage.SpanKindLLM), q.ProjectID, q.ProjectID, q.StartTime, q.EndTime,
-		q.ProjectID, q.ProjectID, q.StartTime, q.EndTime, limit)
+		q.ProjectID, q.ProjectID, q.StartTime, q.EndTime,
+		q.TenantID, q.TenantID, limit)
 	if err != nil {
 		return nil, fmt.Errorf("querying user leaderboard: %w", err)
 	}

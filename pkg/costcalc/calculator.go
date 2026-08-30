@@ -98,8 +98,13 @@ type Calculator struct {
 	aliases        map[string]string              // provider name aliases (e.g. "anthropic-direct" → "anthropic")
 	cacheDiscounts map[string]CacheDiscountConfig // key: canonical provider name
 	globalDiscount float64                        // 0.0–1.0
-	loggedUnknown  sync.Map                       // key: "provider/model" — track logged warnings
+	unknownMu      sync.Mutex                     // guards loggedUnknown
+	loggedUnknown  map[string]bool                // key: "provider/model" — bounded to maxLoggedUnknown (#654)
 }
+
+// maxLoggedUnknown caps the number of unique unknown model keys tracked
+// to prevent unbounded memory growth under enumeration attacks (#654).
+const maxLoggedUnknown = 1000
 
 //go:embed pricing.yaml
 var defaultPricingYAML []byte
@@ -165,6 +170,7 @@ func newBase() *Calculator {
 		fallback:       make(map[string]ModelPricing),
 		aliases:        providerAliases,
 		cacheDiscounts: make(map[string]CacheDiscountConfig),
+		loggedUnknown:  make(map[string]bool),
 	}
 	// Copy default cache discounts.
 	for k, v := range defaultCacheDiscounts {
@@ -187,13 +193,21 @@ func (c *Calculator) Calculate(provider, model string, inputTokens, outputTokens
 	p, ok := c.resolve(provider, model)
 	if !ok {
 		key := c.key(provider, model)
-		if _, alreadyLogged := c.loggedUnknown.LoadOrStore(key, true); !alreadyLogged {
+		c.unknownMu.Lock()
+		if c.loggedUnknown == nil {
+			c.loggedUnknown = make(map[string]bool)
+		}
+		if !c.loggedUnknown[key] && len(c.loggedUnknown) < maxLoggedUnknown {
+			c.loggedUnknown[key] = true
+			c.unknownMu.Unlock()
 			slog.Warn("⚠️ missing pricing for cloud model — cost will be $0.00 (inaccurate)",
 				"provider", provider,
 				"model", model,
 				"input_tokens", inputTokens,
 				"output_tokens", outputTokens,
 			)
+		} else {
+			c.unknownMu.Unlock()
 		}
 		return 0 // Unknown model — this is a gap, not a feature
 	}
@@ -816,8 +830,8 @@ func (c *Calculator) loadDefaults() {
 		if m.Provider == "" || m.Model == "" {
 			panic(fmt.Sprintf("costcalc: pricing.yaml entry %d: provider and model are required", i))
 		}
-		if m.InputPerMillion <= 0 || m.OutputPerMillion <= 0 {
-			panic(fmt.Sprintf("costcalc: pricing.yaml entry %d (%s/%s): prices must be > 0", i, m.Provider, m.Model))
+		if m.InputPerMillion <= 0 || m.OutputPerMillion < 0 {
+			panic(fmt.Sprintf("costcalc: pricing.yaml entry %d (%s/%s): input price must be > 0, output price must be >= 0", i, m.Provider, m.Model))
 		}
 	}
 	for _, m := range pf.Models {

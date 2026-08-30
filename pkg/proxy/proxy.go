@@ -258,6 +258,10 @@ type Proxy struct {
 	fallbackResolver *FallbackResolver
 
 	// Optional dependencies for team-mode features.
+	// Protected by setupMu for safe concurrent writes during startup (#650).
+	// Reads are safe without RLock because setters are called before
+	// ListenAndServe — the HTTP server's Start acts as a happens-before barrier.
+	setupMu  sync.RWMutex
 	users    storage.UserStore         // Budget deduction (nil = no budget tracking)
 	budgetCk *notify.BudgetChecker     // Budget threshold notifications (nil = no alerts)
 	catalog  catalog.ModelCatalogStore // Access gate lookups (nil = gates skipped)
@@ -481,6 +485,8 @@ func New(cfg Config, submitter SpanSubmitter, calc *costcalc.Calculator) (*Proxy
 // Also initializes the per-user model limit cache (#721) so the proxy
 // can merge Firestore limits with YAML defaults in the pre-flight gate.
 func (p *Proxy) SetUserStore(users storage.UserStore) {
+	p.setupMu.Lock()
+	defer p.setupMu.Unlock()
 	p.users = users
 	if users != nil {
 		p.modelLimits = newModelLimitCache(users, 60*time.Second)
@@ -494,11 +500,15 @@ func (p *Proxy) SetUserStore(users storage.UserStore) {
 
 // SetBudgetChecker sets the optional BudgetChecker for threshold notifications.
 func (p *Proxy) SetBudgetChecker(ck *notify.BudgetChecker) {
+	p.setupMu.Lock()
+	defer p.setupMu.Unlock()
 	p.budgetCk = ck
 }
 
 // SetCatalog sets the optional catalog store for access gate lookups.
 func (p *Proxy) SetCatalog(c catalog.ModelCatalogStore) {
+	p.setupMu.Lock()
+	defer p.setupMu.Unlock()
 	p.catalog = c
 }
 
@@ -1851,8 +1861,13 @@ func (p *Proxy) handleStandardResponse(
 		}
 	}
 
-	// Forward response headers.
+	// Forward only allowlisted response headers to prevent leaking upstream
+	// provider internals (rate limit metadata, server versions, Set-Cookie, etc.).
+	// See security audit HIGH-5 / #599.
 	for k, vv := range resp.Header {
+		if !isAllowedResponseHeader(k) {
+			continue
+		}
 		for _, v := range vv {
 			w.Header().Add(k, v)
 		}
@@ -1965,8 +1980,12 @@ func (p *Proxy) handleStreamingResponse(
 		return
 	}
 
-	// Forward response headers for SSE.
+	// Forward only allowlisted response headers for SSE.
+	// See security audit HIGH-5 / #599.
 	for k, vv := range resp.Header {
+		if !isAllowedResponseHeader(k) {
+			continue
+		}
 		for _, v := range vv {
 			w.Header().Add(k, v)
 		}
@@ -2549,6 +2568,36 @@ func (p *Proxy) createStreamingSpan(
 			"llm.ttft_ms":     fmt.Sprintf("%d", ttft.Milliseconds()),
 		},
 	})
+}
+
+// --- Response header allowlist (#599) ---
+
+// allowedResponseHeaders is the set of upstream response headers that are safe
+// to forward to the client. All others are stripped to prevent leaking provider
+// internals (rate-limit metadata, server versions, Set-Cookie, request IDs).
+var allowedResponseHeaders = map[string]bool{
+	"Content-Type":                     true,
+	"Content-Length":                   true,
+	"Content-Encoding":                 true,
+	"Cache-Control":                    true,
+	"Retry-After":                      true,
+	"Vary":                             true,
+	"Date":                             true,
+	"Transfer-Encoding":                true,
+	"Connection":                       true,
+	"Access-Control-Allow-Origin":      true,
+	"Access-Control-Expose-Headers":    true,
+	"Access-Control-Allow-Credentials": true,
+	// OpenAI-specific usage headers that clients rely on.
+	"Openai-Organization":  true,
+	"Openai-Processing-Ms": true,
+	"X-Request-Id":         true,
+}
+
+// isAllowedResponseHeader reports whether the given header name is safe to
+// forward from an upstream LLM provider response to the client.
+func isAllowedResponseHeader(name string) bool {
+	return allowedResponseHeaders[http.CanonicalHeaderKey(name)]
 }
 
 // --- Header forwarding ---

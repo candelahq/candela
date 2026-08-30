@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useCallback, memo } from "react";
 
 import { useParams, useRouter } from "next/navigation";
 import { useTrace, kindLabel, kindColor } from "@/hooks/useTrace";
@@ -56,20 +56,20 @@ function ExpandablePre({ content, label }: { content: string; label: string }) {
 // Components
 // ──────────────────────────────────────────
 
-function SpanRow({
+const SpanRow = memo(function SpanRow({
   node,
   totalDurationMs,
   selected,
   collapsed,
-  onClick,
-  onToggleCollapse,
+  onSelect,
+  onToggle,
 }: {
   node: SpanNode;
   totalDurationMs: number;
   selected: boolean;
   collapsed: boolean;
-  onClick: () => void;
-  onToggleCollapse: () => void;
+  onSelect: (id: string) => void;
+  onToggle: (id: string) => void;
 }) {
   const leftPct = totalDurationMs > 0 ? (node.offsetMs / totalDurationMs) * 100 : 0;
   const widthPct = totalDurationMs > 0 ? Math.max((node.durationMs / totalDurationMs) * 100, 0.5) : 100;
@@ -77,11 +77,15 @@ function SpanRow({
   const isError = node.span.status === SpanStatus.ERROR;
   const costUsd = node.subtreeCostUsd;
   const tokens = node.subtreeTokens;
+  const spanId = node.span.spanId;
+
+  const handleClick = useCallback(() => onSelect(spanId), [onSelect, spanId]);
+  const handleToggle = useCallback(() => onToggle(spanId), [onToggle, spanId]);
 
   return (
     <div
       className={`waterfall-row ${selected ? "waterfall-row-selected" : ""}`}
-      onClick={onClick}
+      onClick={handleClick}
       role="button"
       tabIndex={0}
     >
@@ -90,7 +94,7 @@ function SpanRow({
         {node.hasChildren ? (
           <button
             className="tree-toggle"
-            onClick={(e) => { e.stopPropagation(); onToggleCollapse(); }}
+            onClick={(e) => { e.stopPropagation(); handleToggle(); }}
             title={collapsed ? `Expand (${node.childCount} children)` : "Collapse"}
           >
             <span className={`tree-chevron ${collapsed ? "" : "tree-chevron-open"}`}>▶</span>
@@ -142,7 +146,7 @@ function SpanRow({
       </div>
     </div>
   );
-}
+});
 
 function SpanDetail({ node }: { node: SpanNode }) {
   const { span } = node;
@@ -443,8 +447,8 @@ export default function TraceDetailPage() {
                           totalDurationMs={trace.totalDurationMs}
                           selected={node.span.spanId === selectedSpanId}
                           collapsed={collapsedIds.has(node.span.spanId)}
-                          onClick={() => toggleSpan(node.span.spanId)}
-                          onToggleCollapse={() => toggleCollapse(node.span.spanId)}
+                          onSelect={toggleSpan}
+                          onToggle={toggleCollapse}
                         />
                       ))}
                     </div>

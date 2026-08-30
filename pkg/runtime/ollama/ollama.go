@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"os/exec"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/candelahq/candela/pkg/runtime"
@@ -69,16 +70,42 @@ func (r *Runtime) Start(ctx context.Context) error {
 	return runtime.WaitHealthy(ctx, r.baseURL(), 500*time.Millisecond, 30*time.Second)
 }
 
-// Stop terminates the Ollama process.
+// Stop terminates the Ollama process gracefully (#661).
+// Sends SIGTERM first, waits up to 5 seconds for clean shutdown
+// (GPU memory release, inference drain), then falls back to SIGKILL.
 func (r *Runtime) Stop(ctx context.Context) error {
 	if r.cmd == nil || r.cmd.Process == nil {
 		return nil
 	}
-	if err := r.cmd.Process.Kill(); err != nil {
-		return fmt.Errorf("ollama: stop: %w", err)
+
+	// Try graceful shutdown first.
+	if err := r.cmd.Process.Signal(syscall.SIGTERM); err != nil {
+		// Process may already be dead — try Kill as fallback.
+		_ = r.cmd.Process.Kill()
+		_ = r.cmd.Wait()
+		r.cmd = nil
+		return nil
 	}
-	// Wait to avoid zombie processes.
-	_ = r.cmd.Wait()
+
+	// Wait for the process to exit, with a grace period.
+	// Also honor caller context cancellation.
+	done := make(chan error, 1)
+	go func() { done <- r.cmd.Wait() }()
+
+	const gracePeriod = 5 * time.Second
+	select {
+	case <-done:
+		// Exited cleanly.
+	case <-ctx.Done():
+		// Caller cancelled — force kill immediately.
+		_ = r.cmd.Process.Kill()
+		<-done
+	case <-time.After(gracePeriod):
+		// Grace period expired — force kill.
+		_ = r.cmd.Process.Kill()
+		<-done
+	}
+
 	r.cmd = nil
 	return nil
 }

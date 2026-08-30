@@ -941,6 +941,7 @@ Then restart OpenCode. This clears cached state and forces a fresh sync.
 ### Getting Help
 - **GitHub Issues**: [Report bugs](https://github.com/candelahq/candela/issues)
 - **Documentation**: Check `docs/` directory for detailed guides
+- **Why Candela?**: See [docs/comparison.md](docs/comparison.md) for an honest comparison with Helicone, LangSmith, Portkey, and LiteLLM
 - **Logs**: Run with `CANDELA_LOG_LEVEL=debug` for verbose output
 
 ---

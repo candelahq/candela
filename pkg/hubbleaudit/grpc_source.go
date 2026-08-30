@@ -103,6 +103,11 @@ func (s *GRPCFlowSource) Observe(ctx context.Context, filter FlowFilter) (<-chan
 		return nil, err
 	}
 
+	// Reset error from any prior stream (#668).
+	s.mu.Lock()
+	s.lastErr = nil
+	s.mu.Unlock()
+
 	ch := make(chan Flow, 64)
 	go s.readLoop(ctx, stream, ch)
 	return ch, nil

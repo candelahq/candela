@@ -9,9 +9,11 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
+	"os"
 	"os/exec"
 	"sync"
 	"time"
@@ -79,7 +81,13 @@ func (r *Runtime) Stop(ctx context.Context) error {
 		defer r.mu.Unlock()
 		if r.cmd != nil && r.cmd.Process != nil {
 			if killErr := r.cmd.Process.Kill(); killErr != nil {
-				r.cmd = nil
+				if errors.Is(killErr, os.ErrProcessDone) {
+					// Process already exited — clean up normally.
+					_ = r.cmd.Wait()
+					r.cmd = nil
+					return nil
+				}
+				// Retain r.cmd so cleanup can be retried.
 				return fmt.Errorf("lmstudio: kill failed: %w", killErr)
 			}
 			_ = r.cmd.Wait()

@@ -72,10 +72,11 @@ type GRPCFlowSource struct {
 	cfg  GRPCFlowSourceConfig
 	conn *grpc.ClientConn
 
-	mu        sync.Mutex
-	connected bool
-	lastFlow  time.Time
-	lastErr   error // set by readLoop on non-EOF stream error (#668)
+	mu         sync.Mutex
+	connected  bool
+	lastFlow   time.Time
+	lastErr    error  // set by readLoop on non-EOF stream error (#668)
+	observeGen uint64 // incremented per Observe call; readLoop writes lastErr only for its gen
 }
 
 // NewGRPCFlowSource creates a new Hubble gRPC flow source.
@@ -103,13 +104,15 @@ func (s *GRPCFlowSource) Observe(ctx context.Context, filter FlowFilter) (<-chan
 		return nil, err
 	}
 
-	// Reset error from any prior stream (#668).
+	// Bump generation and reset error from any prior stream (#668).
 	s.mu.Lock()
+	s.observeGen++
+	gen := s.observeGen
 	s.lastErr = nil
 	s.mu.Unlock()
 
 	ch := make(chan Flow, 64)
-	go s.readLoop(ctx, stream, ch)
+	go s.readLoop(ctx, stream, ch, gen)
 	return ch, nil
 }
 
@@ -203,7 +206,7 @@ func (s *GRPCFlowSource) newStream(ctx context.Context, filter FlowFilter) (grpc
 }
 
 // readLoop reads flows from the gRPC stream and sends them to the channel.
-func (s *GRPCFlowSource) readLoop(ctx context.Context, stream grpc.ClientStream, ch chan<- Flow) {
+func (s *GRPCFlowSource) readLoop(ctx context.Context, stream grpc.ClientStream, ch chan<- Flow, gen uint64) {
 	defer close(ch)
 
 	for {
@@ -218,8 +221,12 @@ func (s *GRPCFlowSource) readLoop(ctx context.Context, stream grpc.ClientStream,
 			if err != io.EOF {
 				slog.Warn("hubbleaudit: gRPC recv error", "error", err)
 				// Store error for callers to inspect via Err() (#668).
+				// Only write if this loop's generation is still current —
+				// a newer Observe may have started a new readLoop.
 				s.mu.Lock()
-				s.lastErr = err
+				if s.observeGen == gen {
+					s.lastErr = err
+				}
 				s.mu.Unlock()
 			}
 			return

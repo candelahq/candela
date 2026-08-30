@@ -135,9 +135,14 @@ func parseClientHelloBody(data []byte) (string, error) {
 	// Parse extensions looking for SNI (type 0x0000).
 	// SECURITY: cap allocation to actual available data to prevent OOM from
 	// a malicious ClientHello with an inflated extensionsLen field.
+	// Hard cap at 16KB — legitimate ClientHello extensions never exceed this (#669).
+	const maxExtensionsAlloc = 16 * 1024
 	allocLen := int(extensionsLen)
 	if allocLen > r.Len() {
 		allocLen = r.Len()
+	}
+	if allocLen > maxExtensionsAlloc {
+		allocLen = maxExtensionsAlloc
 	}
 	extensionData := make([]byte, allocLen)
 	if _, err := r.Read(extensionData); err != nil {

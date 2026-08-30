@@ -57,9 +57,18 @@ func (r *DoctorReport) add(name, status, msg, detail string) {
 func cmdDoctorExpanded() {
 	jsonOutput := false
 	fixMode := false
-	for _, arg := range os.Args[2:] {
-		switch arg {
-		case "--json", "--output=json":
+	args := os.Args[2:]
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--json":
+			jsonOutput = true
+		case "--output":
+			// Support --output json (split form).
+			if i+1 < len(args) && args[i+1] == "json" {
+				jsonOutput = true
+				i++
+			}
+		case "--output=json":
 			jsonOutput = true
 		case "--fix":
 			fixMode = true
@@ -71,24 +80,32 @@ func cmdDoctorExpanded() {
 	// 1. CLI Version
 	checkVersion(report)
 
-	// 2. Config
-	checkConfig(report)
+	// 2. Config — resolve path once and use it everywhere.
+	configPath := findConfigPath()
+	cfg := loadConfigFromPath(configPath)
+	checkConfig(report, configPath, cfg)
 
 	// 3. Cloud Auth
 	checkAuth(report)
 
-	// 4. Proxy status
-	checkProxy(report)
+	// 4. Proxy status — use doctor args for port resolution.
+	port := resolvePort(args)
+	checkProxy(report, port)
 
 	// 5. Remote server connectivity
-	cfg := loadConfig("")
 	checkServer(report, cfg)
 
-	// 6. Local runtime (Ollama / LM Studio)
+	// 6. Budget
+	checkBudget(report, cfg)
+
+	// 7. Local runtime (Ollama / LM Studio)
 	checkRuntime(report, cfg)
 
-	// 7. State DB
+	// 8. State DB
 	checkStateDB(report, cfg)
+
+	// 9. Port conflicts — always included in report.
+	checkPortConflicts(report, port, cfg)
 
 	// JSON output
 	if jsonOutput {
@@ -119,10 +136,10 @@ func cmdDoctorExpanded() {
 	fmt.Printf("  %d passed, %d warnings, %d failed, %d skipped\n",
 		report.Summary.Pass, report.Summary.Warn, report.Summary.Fail, report.Summary.Skip)
 
-	// Port conflicts (existing logic)
-	if !jsonOutput {
+	// --fix: kill conflicting processes (existing behavior).
+	if fixMode {
 		fmt.Println()
-		cmdDoctorPortConflicts(fixMode)
+		cmdDoctorPortConflicts(true)
 	}
 
 	if report.Summary.Fail > 0 {
@@ -156,12 +173,7 @@ func checkVersion(r *DoctorReport) {
 	}
 }
 
-func checkConfig(r *DoctorReport) {
-	cfg := loadConfig("")
-
-	// Find which config file is being used.
-	configPath := findConfigPath()
-
+func checkConfig(r *DoctorReport, configPath string, cfg *Config) {
 	if configPath == "" {
 		r.add("Config file", "warn", "no config file found",
 			"Create ~/.config/candela/config.yaml or set CANDELA_CONFIG")
@@ -220,9 +232,7 @@ func checkAuth(r *DoctorReport) {
 	}
 }
 
-func checkProxy(r *DoctorReport) {
-	port := resolvePort(nil)
-
+func checkProxy(r *DoctorReport, port int) {
 	// Check PID file.
 	pidPath := pidFilePath()
 	if pidPath == "" {
@@ -292,14 +302,32 @@ func checkServer(r *DoctorReport, cfg *Config) {
 	}
 }
 
+func checkBudget(r *DoctorReport, cfg *Config) {
+	if cfg.MaxRequestCost <= 0 && len(cfg.DailyLimits) == 0 {
+		r.add("Budget", "warn", "no spend limits configured",
+			"Set max_request_cost or daily_limits in config to prevent runaway spend")
+		return
+	}
+
+	details := []string{}
+	if cfg.MaxRequestCost > 0 {
+		details = append(details, fmt.Sprintf("max_request_cost: $%.2f", cfg.MaxRequestCost))
+	}
+	if len(cfg.DailyLimits) > 0 {
+		details = append(details, fmt.Sprintf("%d daily limit rule(s)", len(cfg.DailyLimits)))
+	}
+	r.add("Budget", "pass", strings.Join(details, ", "), "")
+}
+
 func checkRuntime(r *DoctorReport, cfg *Config) {
+	client := &http.Client{Timeout: 3 * time.Second}
+
 	// Check Ollama.
 	ollamaURL := "http://127.0.0.1:11434/api/version"
 	if cfg.LocalUpstream != "" {
 		ollamaURL = strings.TrimRight(cfg.LocalUpstream, "/") + "/api/version"
 	}
 
-	client := &http.Client{Timeout: 3 * time.Second}
 	resp, err := client.Get(ollamaURL)
 	if err == nil {
 		_ = resp.Body.Close()
@@ -310,7 +338,6 @@ func checkRuntime(r *DoctorReport, cfg *Config) {
 				fmt.Sprintf("responding but HTTP %d", resp.StatusCode), "")
 		}
 	} else {
-		// Check if ollama binary exists.
 		if _, lookErr := exec.LookPath("ollama"); lookErr != nil {
 			r.add("Ollama", "skip", "not installed", "Install: https://ollama.com")
 		} else {
@@ -328,7 +355,12 @@ func checkRuntime(r *DoctorReport, cfg *Config) {
 	resp, err = client.Get(lmURL)
 	if err == nil {
 		_ = resp.Body.Close()
-		r.add("LM Studio", "pass", fmt.Sprintf("running on port %d", lmPort), "")
+		if resp.StatusCode == 200 {
+			r.add("LM Studio", "pass", fmt.Sprintf("running on port %d", lmPort), "")
+		} else {
+			r.add("LM Studio", "warn",
+				fmt.Sprintf("port %d responded with HTTP %d (may not be LM Studio)", lmPort, resp.StatusCode), "")
+		}
 	} else {
 		if _, lookErr := exec.LookPath("lms"); lookErr == nil {
 			r.add("LM Studio", "warn", "CLI installed but server not running",
@@ -363,12 +395,56 @@ func checkStateDB(r *DoctorReport, cfg *Config) {
 		fmt.Sprintf("Path: %s", dbPath))
 }
 
+func checkPortConflicts(r *DoctorReport, port int, cfg *Config) {
+	lmPort := 1234
+	if cfg.LMStudioPort != 0 {
+		lmPort = cfg.LMStudioPort
+	}
+
+	// Read our own PID file so we can exclude our own process.
+	ownPID := 0
+	if pidPath := pidFilePath(); pidPath != "" {
+		if data, err := os.ReadFile(pidPath); err == nil {
+			ownPID, _ = strconv.Atoi(strings.TrimSpace(string(data)))
+		}
+	}
+
+	ports := []struct {
+		port int
+		name string
+	}{
+		{port, "proxy"},
+		{lmPort, "LM Studio compat"},
+	}
+
+	hasConflict := false
+	for _, p := range ports {
+		procs := findProcessesOnPort(p.port)
+		for _, proc := range procs {
+			if proc.pid == ownPID {
+				continue
+			}
+			hasConflict = true
+			r.add("Port conflict",
+				"warn",
+				fmt.Sprintf("PID %d (%s) is using port %d (%s)", proc.pid, proc.command, p.port, p.name),
+				"Run: candela doctor --fix")
+		}
+	}
+
+	if !hasConflict {
+		r.add("Port conflicts", "pass", "no conflicts detected", "")
+	}
+}
+
 // findConfigPath returns the path to the config file that loadConfig would use.
 func findConfigPath() string {
 	if path := os.Getenv("CANDELA_CONFIG"); path != "" {
 		if _, err := os.Stat(path); err == nil {
 			return path
 		}
+		// Explicit CANDELA_CONFIG is set but file doesn't exist — return empty.
+		return ""
 	}
 	if home, err := os.UserHomeDir(); err == nil {
 		dotConfigPath := home + "/.config/candela/config.yaml"
@@ -389,4 +465,12 @@ func findConfigPath() string {
 		}
 	}
 	return ""
+}
+
+// loadConfigFromPath loads config from a specific path, or returns defaults if empty.
+func loadConfigFromPath(path string) *Config {
+	if path == "" {
+		return &Config{}
+	}
+	return loadConfig(path)
 }

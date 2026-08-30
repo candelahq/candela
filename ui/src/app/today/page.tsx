@@ -1,16 +1,19 @@
 "use client";
 
 import { useTodayBudget } from "@/hooks/useTodayBudget";
+import { useForecast } from "@/hooks/useForecast";
 import { ErrorBanner } from "@/components/ErrorBanner";
 import { useEffect, useMemo, useState } from "react";
 import { BudgetRing } from "@/components/today/BudgetRing";
 import { TokenBar } from "@/components/today/TokenBar";
 import { GrantCard } from "@/components/today/GrantCard";
+import { ForecastBar } from "@/components/today/ForecastBar";
 import { fmtTokens } from "@/components/today/utils";
 import "./today.css";
 
 export default function TodayPage() {
   const { data, loading, error, refresh } = useTodayBudget();
+  const { forecast } = useForecast();
 
   const totalTokens = data
     ? (data.totalInputTokens + data.totalOutputTokens)
@@ -122,6 +125,9 @@ export default function TodayPage() {
             </div>
           </div>
         ) : null}
+
+        {/* Forecast: burn rate, EOD projection, exhaustion warning, sparkline */}
+        {forecast && <ForecastBar forecast={forecast} />}
 
         {/* Quick Stats */}
         <div className="stats-grid animate-in" style={{ animationDelay: "0.08s", marginTop: 24 }}>

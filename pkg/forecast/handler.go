@@ -93,6 +93,11 @@ func Handler(store BudgetStore, users UserLookup) http.HandlerFunc {
 			return
 		}
 
+		// Resolve "me" alias to the caller's own user ID.
+		if targetUserID == "me" {
+			targetUserID = caller.ID
+		}
+
 		// Auth: self-service or admin.
 		if caller.ID != targetUserID {
 			if !isAdmin(r.Context(), users, caller.ID) {

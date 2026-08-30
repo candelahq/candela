@@ -205,6 +205,8 @@ func main() {
 			authArgs = os.Args[2:]
 		}
 		handleAuth(authArgs)
+	case "forecast":
+		cmdForecast()
 	case "version":
 		fmt.Printf("candela %s\n", version)
 	default:
@@ -225,6 +227,8 @@ Usage:
   candela auth login --provider aws   Login to AWS
   candela auth status                 Show credential status
   candela auth token --provider gcp   Print a fresh access token
+  candela forecast                    Show budget forecast
+  candela forecast --json             Output forecast as JSON
   candela version                     Print version
 
 Run flags:

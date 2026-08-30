@@ -54,7 +54,7 @@ func cmdForecast() {
 		fmt.Fprintf(os.Stderr, "Error: cannot reach proxy at %s\n  %v\n\nIs the proxy running? Try: candela start\n", baseURL, err)
 		os.Exit(1)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	body, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != 200 {

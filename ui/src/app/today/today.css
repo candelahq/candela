@@ -354,3 +354,132 @@
   background: var(--bg-tertiary);
   border-radius: 4px;
 }
+
+/* ──────────────────────────────────────────
+   Forecast Bar
+   ────────────────────────────────────────── */
+
+.forecast-bar {
+  margin-top: 16px;
+  padding: 16px 20px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+}
+
+.forecast-metrics {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 14px;
+}
+
+.forecast-metric {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.forecast-metric-icon {
+  font-size: 16px;
+}
+
+.forecast-metric-value {
+  font-weight: 600;
+  color: var(--text);
+}
+
+.forecast-metric-label {
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.forecast-divider {
+  color: var(--text-muted);
+  margin: 0 4px;
+}
+
+.forecast-danger {
+  color: var(--color-danger, #ef4444);
+}
+
+.forecast-exceed-badge {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-danger, #ef4444);
+  margin-left: 4px;
+}
+
+.forecast-exhaustion {
+  margin-top: 12px;
+  padding: 10px 14px;
+  border-radius: var(--radius-md);
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.forecast-exhaustion-warn {
+  background: rgba(234, 179, 8, 0.1);
+  border: 1px solid rgba(234, 179, 8, 0.3);
+  color: #eab308;
+}
+
+.forecast-exhaustion-critical {
+  background: rgba(239, 68, 68, 0.1);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  color: #ef4444;
+}
+
+.forecast-sparkline {
+  margin-top: 16px;
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+}
+
+.forecast-sparkline-label {
+  font-size: 11px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  align-self: center;
+}
+
+.forecast-sparkline-bars {
+  display: flex;
+  align-items: flex-end;
+  gap: 4px;
+  height: 48px;
+  flex: 1;
+}
+
+.forecast-sparkline-bar-wrapper {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  flex: 1;
+  height: 100%;
+  justify-content: flex-end;
+}
+
+.forecast-sparkline-bar {
+  width: 100%;
+  max-width: 24px;
+  background: var(--color-primary, #6366f1);
+  border-radius: 3px 3px 0 0;
+  min-height: 2px;
+  transition: height 0.3s ease;
+}
+
+.forecast-sparkline-day {
+  font-size: 9px;
+  color: var(--text-muted);
+  margin-top: 4px;
+}
+
+.forecast-avg-label {
+  font-size: 11px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  align-self: center;
+}

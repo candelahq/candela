@@ -1028,7 +1028,7 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 	// The client (e.g. @ai-sdk/openai-compatible) may strip thought_signature on the
 	// next turn. Re-inject from store if missing so Gemini 3.x doesn't return 400.
 	if p.thoughtSigs != nil && (providerName == "gemini-oai" || providerName == "google" || providerName == "gemini-vertex") {
-		if injected := p.thoughtSigs.InjectIntoRequest(reqBody, providerName); len(injected) != 0 && string(injected) != string(reqBody) {
+		if injected := p.thoughtSigs.InjectIntoRequest(reqBody, providerName); len(injected) != 0 && !bytes.Equal(injected, reqBody) {
 			reqBody = injected
 		}
 	}
@@ -1451,7 +1451,7 @@ skipBudget:
 
 			// Re-inject thought_signature per attempt (handles fallback provider switch)
 			if p.thoughtSigs != nil && (activeProvName == "gemini-oai" || activeProvName == "google" || activeProvName == "gemini-vertex") {
-				if injected := p.thoughtSigs.InjectIntoRequest(upstreamBody, activeProvName); len(injected) != 0 && string(injected) != string(upstreamBody) {
+				if injected := p.thoughtSigs.InjectIntoRequest(upstreamBody, activeProvName); len(injected) != 0 && !bytes.Equal(injected, upstreamBody) {
 					upstreamBody = injected
 				}
 			}

@@ -1056,7 +1056,12 @@ func runForeground() {
 			body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 10<<20))
 			if err != nil {
 				slog.Warn("thought_middleware: failed to read request", "error", err)
-				next.ServeHTTP(w, r)
+				var maxErr *http.MaxBytesError
+				if errors.As(err, &maxErr) {
+					http.Error(w, `{"error":"request body too large"}`, http.StatusRequestEntityTooLarge)
+				} else {
+					http.Error(w, `{"error":"failed to read request body"}`, http.StatusBadRequest)
+				}
 				return
 			}
 			_ = r.Body.Close()
@@ -1072,6 +1077,9 @@ func runForeground() {
 				body = injected
 			}
 			r.Body = io.NopCloser(bytes.NewReader(body))
+			r.GetBody = func() (io.ReadCloser, error) {
+				return io.NopCloser(bytes.NewReader(body)), nil
+			}
 			r.ContentLength = int64(len(body))
 			// Capture response while forwarding
 			capWriter := &thoughtCaptureWriter{ResponseWriter: w, buf: &bytes.Buffer{}}

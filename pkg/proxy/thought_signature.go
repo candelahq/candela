@@ -170,13 +170,18 @@ func (s *ThoughtSignatureStore) extractFromGoogleCandidates(raw map[string]inter
 				continue
 			}
 			sig := getThoughtSignatureFromMap(fc)
+			if sig == "" {
+				sig = getThoughtSignatureFromMap(pm)
+			}
+			if sig == "" {
+				sig = getThoughtSignatureFromExtraContent(fc)
+			}
+			if sig == "" {
+				sig = getThoughtSignatureFromExtraContent(pm)
+			}
 			id, _ := fc["id"].(string)
-			// Google native may not have id; try function name as key? But we need id for lookup.
-			// If no id, use name as fallback key (less precise but better than nothing)
 			if id == "" {
-				if name, ok := fc["name"].(string); ok && name != "" {
-					id = name
-				}
+				id, _ = pm["id"].(string)
 			}
 			if sig != "" && id != "" {
 				s.Store(id, sig)
@@ -224,9 +229,6 @@ func getThoughtSignatureFromMap(m map[string]interface{}) string {
 	if v, ok := m["thoughtSignature"].(string); ok && v != "" {
 		return v
 	}
-	if v, ok := m["thought_signature"].(string); ok && v != "" {
-		return v
-	}
 	return ""
 }
 
@@ -253,12 +255,8 @@ func (s *ThoughtSignatureStore) ExtractAndStoreFromStream(data []byte, provider 
 			}
 			// Reuse OpenAI extraction on a fake wrapper with choices
 			s.extractFromOpenAIChoices(chunk)
-			// Also handle if chunk itself is a tool_calls at top level
-			if choices, ok := chunk["choices"].([]interface{}); ok && len(choices) > 0 {
-				// already handled
-				_ = choices
-			}
 		}
+		return
 	}
 	// Try as Google JSON array (streamGenerateContent)
 	var arr []map[string]interface{}
@@ -309,64 +307,60 @@ func (s *ThoughtSignatureStore) InjectIntoRequest(body []byte, provider string) 
 	if err := json.Unmarshal(body, &raw); err != nil {
 		return body
 	}
-	msgs, ok := raw["messages"].([]interface{})
-	if !ok {
-		return body
-	}
 	modified := false
-	for _, m := range msgs {
-		mm, ok := m.(map[string]interface{})
-		if !ok {
-			continue
-		}
-		// Check for tool_calls in assistant messages
-		tcs, ok := mm["tool_calls"].([]interface{})
-		if !ok {
-			// also check camelCase?
-			tcs, _ = mm["toolCalls"].([]interface{})
-			if tcs == nil {
-				continue
-			}
-		}
-		for _, tcRaw := range tcs {
-			tcm, ok := tcRaw.(map[string]interface{})
+	if msgs, ok := raw["messages"].([]interface{}); ok {
+		for _, m := range msgs {
+			mm, ok := m.(map[string]interface{})
 			if !ok {
 				continue
 			}
-			id, _ := tcm["id"].(string)
-			if id == "" {
-				continue
-			}
-			// Skip if already has signature
-			if hasThoughtSignature(tcm) {
-				continue
-			}
-			// Check nested function object too
-			hasNested := false
-			if fn, ok := tcm["function"].(map[string]interface{}); ok {
-				if hasThoughtSignature(fn) {
-					hasNested = true
+			// Check for tool_calls in assistant messages
+			tcs, ok := mm["tool_calls"].([]interface{})
+			if !ok {
+				// also check camelCase?
+				tcs, _ = mm["toolCalls"].([]interface{})
+				if tcs == nil {
+					continue
 				}
 			}
-			if hasNested {
-				continue
-			}
-			if sig, ok := s.Load(id); ok {
-				// Inject at top level, inside function, and extra_content.google for compatibility
-				tcm["thought_signature"] = sig
-				tcm["thoughtSignature"] = sig
+			for _, tcRaw := range tcs {
+				tcm, ok := tcRaw.(map[string]interface{})
+				if !ok {
+					continue
+				}
+				id, _ := tcm["id"].(string)
+				if id == "" {
+					continue
+				}
+				// Skip if already has signature
+				if hasThoughtSignature(tcm) {
+					continue
+				}
+				// Check nested function object too
+				hasNested := false
 				if fn, ok := tcm["function"].(map[string]interface{}); ok {
-					fn["thought_signature"] = sig
-					fn["thoughtSignature"] = sig
+					if hasThoughtSignature(fn) {
+						hasNested = true
+					}
 				}
-				// Gemini 3.x via OpenAI compat expects extra_content.google.thought_signature
-				injectIntoExtraContent(tcm, sig)
-				modified = true
-				slog.Debug("thought_signature: injected", "tool_call_id", id, "provider", provider)
+				if hasNested {
+					continue
+				}
+				if sig, ok := s.Load(id); ok {
+					// Inject at top level, inside function, and extra_content.google for compatibility
+					tcm["thought_signature"] = sig
+					tcm["thoughtSignature"] = sig
+					if fn, ok := tcm["function"].(map[string]interface{}); ok {
+						fn["thought_signature"] = sig
+						fn["thoughtSignature"] = sig
+					}
+					// Gemini 3.x via OpenAI compat expects extra_content.google.thought_signature
+					injectIntoExtraContent(tcm, sig)
+					modified = true
+					slog.Debug("thought_signature: injected", "tool_call_id", id, "provider", provider)
+				}
 			}
 		}
-		// Google native history may be in contents/parts? But for gemini-oai we only use OpenAI format.
-		// Also handle if message has content as string containing tool calls? No.
 	}
 	// Also handle Google native "contents" format if present (for gemini-vertex passthrough)
 	if contents, ok := raw["contents"].([]interface{}); ok {
@@ -383,20 +377,26 @@ func (s *ThoughtSignatureStore) InjectIntoRequest(body []byte, provider string) 
 				}
 				fc, _ := pm["functionCall"].(map[string]interface{})
 				if fc == nil {
+					fc, _ = pm["function_call"].(map[string]interface{})
+				}
+				if fc == nil {
 					continue
 				}
 				id, _ := fc["id"].(string)
 				if id == "" {
-					if name, ok := fc["name"].(string); ok {
-						id = name
-					}
+					id, _ = pm["id"].(string)
 				}
-				if hasThoughtSignature(fc) {
+				if id == "" {
+					continue
+				}
+				if hasThoughtSignature(fc) || hasThoughtSignature(pm) {
 					continue
 				}
 				if sig, ok := s.Load(id); ok {
 					fc["thought_signature"] = sig
 					fc["thoughtSignature"] = sig
+					pm["thought_signature"] = sig
+					pm["thoughtSignature"] = sig
 					modified = true
 				}
 			}

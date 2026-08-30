@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestThoughtSignature_StoreAndLoad(t *testing.T) {
@@ -14,6 +15,18 @@ func TestThoughtSignature_StoreAndLoad(t *testing.T) {
 	}
 	if _, ok := s.Load("missing"); ok {
 		t.Fatalf("should not find missing")
+	}
+}
+
+func TestThoughtSignature_Expiry(t *testing.T) {
+	s := NewThoughtSignatureStore(10 * time.Millisecond)
+	s.Store("call_exp", "SIGEXP")
+	if v, ok := s.Load("call_exp"); !ok || v != "SIGEXP" {
+		t.Fatalf("expected to load immediately, got %q %v", v, ok)
+	}
+	time.Sleep(20 * time.Millisecond)
+	if _, ok := s.Load("call_exp"); ok {
+		t.Fatalf("expected expired entry to not be returned")
 	}
 }
 
@@ -36,14 +49,34 @@ func TestThoughtSignature_ExtractAndStore_OpenAI(t *testing.T) {
 	if sig, ok := s.Load("call_ghi"); !ok || sig != "SIG_GHI" {
 		t.Fatalf("failed nested, got %q %v", sig, ok)
 	}
+	// Also test extra_content.google.thought_signature
+	body4 := []byte(`{"choices":[{"message":{"role":"assistant","tool_calls":[{"id":"call_extra","type":"function","function":{"name":"read","arguments":"{}"},"extra_content":{"google":{"thought_signature":"SIG_EXTRA"}}}]}}]}`)
+	s.ExtractAndStoreFromResponse(body4, "gemini-oai")
+	if sig, ok := s.Load("call_extra"); !ok || sig != "SIG_EXTRA" {
+		t.Fatalf("failed extra_content, got %q %v", sig, ok)
+	}
 }
 
 func TestThoughtSignature_Extract_GoogleNative(t *testing.T) {
 	s := NewThoughtSignatureStore(0)
-	body := []byte(`{"candidates":[{"content":{"parts":[{"functionCall":{"name":"bash","args":{},"thoughtSignature":"GSIG","thought_signature":"GSIG2","id":"call_google"}}]}}]}`)
+	body := []byte(`{"candidates":[{"content":{"parts":[{"functionCall":{"name":"bash","args":{},"thoughtSignature":"GSIG","id":"call_google"}}]}}]}`)
 	s.ExtractAndStoreFromResponse(body, "gemini-vertex")
-	if sig, ok := s.Load("call_google"); !ok || sig == "" {
+	if sig, ok := s.Load("call_google"); !ok || sig != "GSIG" {
 		t.Fatalf("failed google native, got %q %v", sig, ok)
+	}
+
+	// Part-level signature and ID
+	bodyPart := []byte(`{"candidates":[{"content":{"parts":[{"id":"call_part_level","functionCall":{"name":"bash","args":{}},"thought_signature":"GSIG_PART"}]}}]}`)
+	s.ExtractAndStoreFromResponse(bodyPart, "google")
+	if sig, ok := s.Load("call_part_level"); !ok || sig != "GSIG_PART" {
+		t.Fatalf("failed part-level google native, got %q %v", sig, ok)
+	}
+
+	// Function without ID should NOT store under function name
+	bodyNoID := []byte(`{"candidates":[{"content":{"parts":[{"functionCall":{"name":"bash","args":{},"thoughtSignature":"GSIG_NO_ID"}}]}}]}`)
+	s.ExtractAndStoreFromResponse(bodyNoID, "google")
+	if _, ok := s.Load("bash"); ok {
+		t.Fatalf("should not store under function name fallback")
 	}
 }
 
@@ -70,6 +103,16 @@ func TestThoughtSignature_InjectIntoRequest(t *testing.T) {
 	}
 	if strings.Contains(string(out2), "SIG123") {
 		t.Fatalf("should not overwrite existing")
+	}
+}
+
+func TestThoughtSignature_InjectIntoGoogleContents(t *testing.T) {
+	s := NewThoughtSignatureStore(0)
+	s.Store("call_google_inj", "GSIG_INJECT")
+	req := []byte(`{"contents":[{"role":"model","parts":[{"functionCall":{"id":"call_google_inj","name":"bash","args":{}}}]}]}`)
+	out := s.InjectIntoRequest(req, "gemini-vertex")
+	if !strings.Contains(string(out), "GSIG_INJECT") {
+		t.Fatalf("failed to inject into Google contents format: %s", string(out))
 	}
 }
 

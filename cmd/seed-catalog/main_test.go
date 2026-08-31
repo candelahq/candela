@@ -71,8 +71,8 @@ func TestDefaultsAllHaveValidPricing(t *testing.T) {
 			t.Errorf("%s/%s has non-positive InputPerMillion: %f",
 				p.Provider, p.Model, p.InputPerMillion)
 		}
-		if p.OutputPerMillion <= 0 {
-			t.Errorf("%s/%s has non-positive OutputPerMillion: %f",
+		if p.OutputPerMillion < 0 {
+			t.Errorf("%s/%s has negative OutputPerMillion: %f",
 				p.Provider, p.Model, p.OutputPerMillion)
 		}
 		if p.DiscountPercent < 0 || p.DiscountPercent > 1 {

@@ -132,6 +132,12 @@
     "output_per_million": 7.5
   },
   {
+    "model": "gemini-3.7-flash",
+    "provider": "google",
+    "input_per_million": 1.5,
+    "output_per_million": 7.5
+  },
+  {
     "model": "imagen-3.0-generate-002",
     "provider": "google",
     "input_per_million": 25,

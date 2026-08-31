@@ -15,6 +15,11 @@ models:
     output_per_million: 9.00
 
   - provider: google
+    model: gemini-3.7-flash
+    input_per_million: 1.50
+    output_per_million: 7.50
+
+  - provider: google
     model: gemini-3.6-flash
     input_per_million: 1.50
     output_per_million: 7.50

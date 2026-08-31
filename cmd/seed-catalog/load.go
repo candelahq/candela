@@ -70,8 +70,8 @@ func loadCatalogFile(path string) ([]catalog.Entry, error) {
 		if m.Provider == "" || m.Model == "" {
 			return nil, fmt.Errorf("catalog file entry %d: provider and model are required", i)
 		}
-		if m.InputPerMillion <= 0 || m.OutputPerMillion <= 0 {
-			return nil, fmt.Errorf("catalog file entry %d (%s/%s): prices must be > 0", i, m.Provider, m.Model)
+		if m.InputPerMillion <= 0 || m.OutputPerMillion < 0 {
+			return nil, fmt.Errorf("catalog file entry %d (%s/%s): input price must be > 0 and output price must be >= 0", i, m.Provider, m.Model)
 		}
 
 		key := m.Provider + "/" + m.Model

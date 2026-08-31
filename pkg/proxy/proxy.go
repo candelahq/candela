@@ -312,6 +312,9 @@ type Proxy struct {
 
 	// #333: Best-effort async ops dropped when asyncSem is full.
 	droppedAsync atomic.Int64
+
+	// Gemini thought_signature cache for gemini-oai thinking+tools
+	thoughtSigs *ThoughtSignatureStore
 }
 
 // Config holds proxy configuration.
@@ -445,6 +448,7 @@ func New(cfg Config, submitter SpanSubmitter, calc *costcalc.Calculator) (*Proxy
 		saRL:             newSARateLimiter(0),      // default 120 RPM per SA
 		pendingSpend:     newPendingSpendTracker(),
 		taskPendingSpend: newPendingSpendTracker(),
+		thoughtSigs:      NewThoughtSignatureStore(15 * time.Minute),
 		client:           newUpstreamHTTPClient(cfg),
 	}
 
@@ -1030,6 +1034,15 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 	}
 	_ = r.Body.Close()
 
+	// Gemini thought_signature injection for gemini-oai (thinking+tools)
+	// The client (e.g. @ai-sdk/openai-compatible) may strip thought_signature on the
+	// next turn. Re-inject from store if missing so Gemini 3.x doesn't return 400.
+	if p.thoughtSigs != nil && (providerName == "gemini-oai" || providerName == "google" || providerName == "gemini-vertex") {
+		if injected := p.thoughtSigs.InjectIntoRequest(reqBody, providerName); len(injected) != 0 && !bytes.Equal(injected, reqBody) {
+			reqBody = injected
+		}
+	}
+
 	// Check if this is a streaming request (check BEFORE translation).
 	isStreaming := isStreamingRequest(providerName, reqBody)
 
@@ -1446,6 +1459,13 @@ skipBudget:
 			upstreamBody = reqBody
 			upstreamPath2 = upstreamPath
 
+			// Re-inject thought_signature per attempt (handles fallback provider switch)
+			if p.thoughtSigs != nil && (activeProvName == "gemini-oai" || activeProvName == "google" || activeProvName == "gemini-vertex") {
+				if injected := p.thoughtSigs.InjectIntoRequest(upstreamBody, activeProvName); len(injected) != 0 && !bytes.Equal(injected, upstreamBody) {
+					upstreamBody = injected
+				}
+			}
+
 			if attemptProvider.FormatTranslator != nil {
 				if ft, ok := attemptProvider.FormatTranslator.(*AnthropicFormatTranslator); ok && (cachingOverride != "" || ttlOverride != "") {
 					mode := ft.GetCachingMode()
@@ -1822,6 +1842,11 @@ func (p *Proxy) handleStandardResponse(
 
 	endTime := time.Now()
 
+	// Gemini thought_signature capture for gemini-oai (store for next turn injection)
+	if p.thoughtSigs != nil && resp.StatusCode == http.StatusOK && (provider.Name == "gemini-oai" || provider.Name == "google" || provider.Name == "gemini-vertex") {
+		p.thoughtSigs.ExtractAndStoreFromResponse(respBody, provider.Name)
+	}
+
 	// --- Response translation ---
 	// Translate response back to client format if provider has a FormatTranslator.
 	clientBody := respBody
@@ -2038,6 +2063,11 @@ func (p *Proxy) handleStreamingResponse(
 	endTime := time.Now()
 
 	parseData := streamBuffer.Bytes()
+
+	// Gemini thought_signature capture for streaming (gemini-oai)
+	if p.thoughtSigs != nil && (provider.Name == "gemini-oai" || provider.Name == "google" || provider.Name == "gemini-vertex") {
+		p.thoughtSigs.ExtractAndStoreFromStream(parseData, provider.Name)
+	}
 
 	// Parse the accumulated stream to extract usage data.
 	// Use bounded timeout to prevent goroutine leaks.

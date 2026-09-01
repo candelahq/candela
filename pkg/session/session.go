@@ -94,21 +94,34 @@ type UserMsgResolver struct {
 	ttl        time.Duration
 	maxEntries int              // safety cap; 0 means 1000
 	nowFunc    func() time.Time // for testing
+	stop       chan struct{}
+	once       sync.Once
 }
 
 // NewUserMsgResolver creates a resolver with the given in-memory TTL.
-// Entries not accessed within the TTL are evicted lazily on next lookup.
-// The cache is capped at 1000 entries to prevent unbounded growth.
+// Entries not accessed within the TTL are evicted lazily on next lookup
+// and periodically by a background sweep goroutine.
+// The cache is capped at maxEntries (default 1000) to prevent unbounded growth.
+// Call Stop() to terminate the background goroutine on shutdown.
 func NewUserMsgResolver(ttl time.Duration) *UserMsgResolver {
 	if ttl <= 0 {
 		ttl = 30 * time.Minute
 	}
-	return &UserMsgResolver{
+	u := &UserMsgResolver{
 		cache:      make(map[string]*sessionEntry),
 		ttl:        ttl,
 		maxEntries: 1000,
 		nowFunc:    time.Now,
+		stop:       make(chan struct{}),
 	}
+	go u.sweepLoop()
+	return u
+}
+
+// Stop terminates the background eviction goroutine.
+// Safe to call multiple times.
+func (u *UserMsgResolver) Stop() {
+	u.once.Do(func() { close(u.stop) })
 }
 
 func (u *UserMsgResolver) Resolve(info SessionInfo) string {
@@ -183,6 +196,28 @@ func (u *UserMsgResolver) evictLocked(now time.Time) {
 	target := max * 3 / 4
 	for i := 0; i < len(entries) && len(u.cache) > target; i++ {
 		delete(u.cache, entries[i].fp)
+	}
+}
+
+// sweepLoop periodically evicts expired entries in the background.
+// Runs every TTL/2 to ensure expired entries don't linger beyond ~1.5× TTL.
+func (u *UserMsgResolver) sweepLoop() {
+	interval := u.ttl / 2
+	if interval < time.Second {
+		interval = time.Second
+	}
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-u.stop:
+			return
+		case <-ticker.C:
+			u.mu.Lock()
+			u.evictLocked(u.nowFunc())
+			u.mu.Unlock()
+		}
 	}
 }
 

@@ -57,6 +57,7 @@ func TestHeaderResolver_CustomName(t *testing.T) {
 
 func TestUserMsgResolver_SameConversationGrows(t *testing.T) {
 	r := NewUserMsgResolver(30 * time.Minute)
+	defer r.Stop()
 
 	// Turn 1: system + user
 	msgs1 := makeMessages(
@@ -83,6 +84,7 @@ func TestUserMsgResolver_ModelSwitchDifferentSession(t *testing.T) {
 	// After hardening v4, model is part of the fingerprint to prevent
 	// merging unrelated conversations across different models.
 	r := NewUserMsgResolver(30 * time.Minute)
+	defer r.Stop()
 
 	msgs := makeMessages(
 		msg("system", "You are a helpful assistant."),
@@ -99,6 +101,7 @@ func TestUserMsgResolver_ModelSwitchDifferentSession(t *testing.T) {
 
 func TestUserMsgResolver_DifferentConversations(t *testing.T) {
 	r := NewUserMsgResolver(30 * time.Minute)
+	defer r.Stop()
 
 	msgs1 := makeMessages(
 		msg("system", "You are a helpful assistant."),
@@ -119,6 +122,7 @@ func TestUserMsgResolver_DifferentConversations(t *testing.T) {
 
 func TestUserMsgResolver_DifferentUsers(t *testing.T) {
 	r := NewUserMsgResolver(30 * time.Minute)
+	defer r.Stop()
 
 	msgs := makeMessages(
 		msg("system", "You are a helpful assistant."),
@@ -137,6 +141,7 @@ func TestUserMsgResolver_DynamicSystemPrompt(t *testing.T) {
 	// Cline rebuilds messages[0] every turn — fingerprint should still match
 	// because we only hash the first USER message, not the system prompt.
 	r := NewUserMsgResolver(30 * time.Minute)
+	defer r.Stop()
 
 	msgs1 := makeMessages(
 		msg("system", "You are Cline v1. CWD: /home/alice/project. OS: macOS."),
@@ -160,6 +165,7 @@ func TestUserMsgResolver_DynamicSystemPrompt(t *testing.T) {
 func TestUserMsgResolver_Timeout(t *testing.T) {
 	now := time.Now()
 	r := NewUserMsgResolver(30 * time.Minute)
+	defer r.Stop()
 	r.nowFunc = func() time.Time { return now }
 
 	msgs := makeMessages(
@@ -179,6 +185,7 @@ func TestUserMsgResolver_Timeout(t *testing.T) {
 
 func TestUserMsgResolver_Compaction(t *testing.T) {
 	r := NewUserMsgResolver(30 * time.Minute)
+	defer r.Stop()
 
 	// Long conversation: 6 messages
 	msgs1 := makeMessages(
@@ -208,6 +215,7 @@ func TestUserMsgResolver_Compaction(t *testing.T) {
 
 func TestUserMsgResolver_EmptyMessages(t *testing.T) {
 	r := NewUserMsgResolver(30 * time.Minute)
+	defer r.Stop()
 	got := r.Resolve(SessionInfo{UserID: "alice", Messages: nil})
 	if got != "" {
 		t.Errorf("nil messages should return empty, got %q", got)
@@ -216,6 +224,7 @@ func TestUserMsgResolver_EmptyMessages(t *testing.T) {
 
 func TestUserMsgResolver_NoUserMessage(t *testing.T) {
 	r := NewUserMsgResolver(30 * time.Minute)
+	defer r.Stop()
 	msgs := makeMessages(msg("system", "You are a helpful assistant."))
 	got := r.Resolve(SessionInfo{UserID: "alice", Messages: msgs})
 	if got != "" {
@@ -283,6 +292,7 @@ func TestChainResolver_FallbackUUID(t *testing.T) {
 
 func TestCacheSize(t *testing.T) {
 	r := NewUserMsgResolver(30 * time.Minute)
+	defer r.Stop()
 	if r.CacheSize() != 0 {
 		t.Errorf("initial cache size should be 0")
 	}
@@ -297,6 +307,7 @@ func TestCacheSize(t *testing.T) {
 
 func TestUserMsgResolver_MultiModalContent(t *testing.T) {
 	r := NewUserMsgResolver(30 * time.Minute)
+	defer r.Stop()
 
 	// Multi-modal message: content is an array of objects (e.g., vision API).
 	msgs := json.RawMessage(`[
@@ -321,6 +332,7 @@ func TestUserMsgResolver_MultiModalContent(t *testing.T) {
 
 func TestUserMsgResolver_MultiModalVsString(t *testing.T) {
 	r := NewUserMsgResolver(30 * time.Minute)
+	defer r.Stop()
 
 	// String content.
 	stringMsgs := makeMessages(
@@ -348,6 +360,7 @@ func TestUserMsgResolver_MultiModalVsString(t *testing.T) {
 
 func TestUserMsgResolver_CacheEviction(t *testing.T) {
 	r := NewUserMsgResolver(30 * time.Minute)
+	defer r.Stop()
 	r.maxEntries = 5 // small cap for testing
 
 	// Fill cache with 5 unique sessions.
@@ -382,6 +395,7 @@ func TestUserMsgResolver_CacheEviction(t *testing.T) {
 func TestUserMsgResolver_CacheEvictionPrefersTTL(t *testing.T) {
 	now := time.Now()
 	r := NewUserMsgResolver(30 * time.Minute)
+	defer r.Stop()
 	r.maxEntries = 5
 	r.nowFunc = func() time.Time { return now }
 
@@ -409,4 +423,43 @@ func TestUserMsgResolver_CacheEvictionPrefersTTL(t *testing.T) {
 	if r.CacheSize() != 1 {
 		t.Errorf("expired entries should be evicted, cache should be 1, got %d", r.CacheSize())
 	}
+}
+
+func TestUserMsgResolver_BackgroundSweep(t *testing.T) {
+	// Use a short TTL. Sweep interval = max(TTL/2, 1s) = 1s.
+	// So entries expire at 200ms but sweep runs at 1s.
+	r := NewUserMsgResolver(200 * time.Millisecond)
+	defer r.Stop()
+
+	// Populate some entries.
+	r.Resolve(SessionInfo{
+		UserID:   "user1",
+		Model:    "gpt-4",
+		Messages: []byte(`[{"role":"user","content":"hello"}]`),
+	})
+	r.Resolve(SessionInfo{
+		UserID:   "user2",
+		Model:    "gpt-4",
+		Messages: []byte(`[{"role":"user","content":"world"}]`),
+	})
+
+	if r.CacheSize() != 2 {
+		t.Fatalf("expected 2 entries, got %d", r.CacheSize())
+	}
+
+	// Wait for TTL expiry + sweep interval + buffer.
+	// TTL=200ms, sweep=1s, so wait 1.5s total.
+	time.Sleep(1500 * time.Millisecond)
+
+	if got := r.CacheSize(); got != 0 {
+		t.Errorf("background sweep should have evicted all entries, got %d", got)
+	}
+}
+
+func TestUserMsgResolver_StopIdempotent(t *testing.T) {
+	r := NewUserMsgResolver(time.Minute)
+	// Calling Stop multiple times should not panic.
+	r.Stop()
+	r.Stop()
+	r.Stop()
 }

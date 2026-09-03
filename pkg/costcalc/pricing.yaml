@@ -8,7 +8,13 @@
 
 models:
   # ── Google Gemini ─────────────────────────────────────────
-  # Gemini 3.5 (latest, May 2026)
+  # Gemini 3.8 (latest, Sep 2026)
+  - provider: google
+    model: gemini-3.8-flash
+    input_per_million: 0.75
+    output_per_million: 3.75
+
+  # Gemini 3.5 (May 2026)
   - provider: google
     model: gemini-3.5-flash
     input_per_million: 1.50

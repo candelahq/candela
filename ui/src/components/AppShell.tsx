@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { usePathname } from "next/navigation";
 import { Sidebar } from "@/components/sidebar";
 import { BudgetAlert } from "@/components/BudgetAlert";
@@ -10,11 +10,13 @@ import { BudgetAlert } from "@/components/BudgetAlert";
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [prevPathname, setPrevPathname] = useState(pathname);
 
-  // Auto-close sidebar on route change
-  useEffect(() => {
+  // Auto-close sidebar on route change without triggering cascading renders in effect
+  if (pathname !== prevPathname) {
+    setPrevPathname(pathname);
     setSidebarOpen(false);
-  }, [pathname]);
+  }
 
   if (pathname === "/login") {
     return <>{children}</>;

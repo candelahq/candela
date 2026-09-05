@@ -1420,7 +1420,11 @@ tr:hover .model-bar {
     height: 100%;
     z-index: 1000;
     transform: translateX(-100%);
-    transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+    visibility: hidden;
+    pointer-events: none;
+    transition:
+      transform 0.25s cubic-bezier(0.4, 0, 0.2, 1),
+      visibility 0s linear 0.25s;
     box-shadow: none;
     background: var(--bg-secondary);
     border-right: 1px solid var(--border-subtle);
@@ -1428,6 +1432,9 @@ tr:hover .model-bar {
 
   .sidebar.open {
     transform: translateX(0);
+    visibility: visible;
+    pointer-events: auto;
+    transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);
     box-shadow: 0 0 32px rgba(0, 0, 0, 0.6);
   }
 

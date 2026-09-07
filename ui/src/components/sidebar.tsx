@@ -51,7 +51,7 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
   const sections = isAdmin ? [...navItems, adminItems] : navItems;
 
   return (
-    <aside className={`sidebar ${isOpen ? "open" : ""}`}>
+    <aside id="app-sidebar" className={`sidebar ${isOpen ? "open" : ""}`}>
       <div className="sidebar-header">
         <div className="sidebar-brand">
           <div className="sidebar-logo-icon">🕯</div>

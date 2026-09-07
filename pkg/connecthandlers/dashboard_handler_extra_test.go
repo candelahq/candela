@@ -6,10 +6,12 @@ import (
 	"time"
 
 	"connectrpc.com/connect"
+	typespb "github.com/candelahq/candela/gen/go/candela/types"
 	v1 "github.com/candelahq/candela/gen/go/candela/v1"
 	"github.com/candelahq/candela/pkg/auth"
 	"github.com/candelahq/candela/pkg/connecthandlers"
 	"github.com/candelahq/candela/pkg/storage"
+	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 func TestGetUsageSummary_Success(t *testing.T) {
@@ -107,6 +109,44 @@ func TestGetLatencyPercentiles_WithSpans(t *testing.T) {
 	}
 	if resp.Msg.P99Ms != 99.0 {
 		t.Errorf("P99Ms = %f, want 99.0", resp.Msg.P99Ms)
+	}
+}
+
+type queryRecordingStore struct {
+	fallbackStore
+	lastQuery storage.SpanQuery
+}
+
+func (s *queryRecordingStore) SearchSpans(_ context.Context, sq storage.SpanQuery) (*storage.SpanResult, error) {
+	s.lastQuery = sq
+	return &storage.SpanResult{Spans: nil, TotalCount: 0}, nil
+}
+
+func TestGetLatencyPercentiles_EndOnlyTimeRange(t *testing.T) {
+	historicalEnd := time.Now().Add(-48 * time.Hour)
+	store := &queryRecordingStore{}
+	client := startDashboardServer(t, store)
+
+	req := &v1.GetLatencyPercentilesRequest{
+		TimeRange: &typespb.TimeRange{
+			End: timestamppb.New(historicalEnd),
+		},
+	}
+	_, err := client.GetLatencyPercentiles(context.Background(), connect.NewRequest(req))
+	if err != nil {
+		t.Fatalf("GetLatencyPercentiles failed: %v", err)
+	}
+
+	if store.lastQuery.StartTime.After(store.lastQuery.EndTime) {
+		t.Fatalf("StartTime (%v) is after EndTime (%v)", store.lastQuery.StartTime, store.lastQuery.EndTime)
+	}
+	expectedStart := historicalEnd.Add(-24 * time.Hour)
+	diff := store.lastQuery.StartTime.Sub(expectedStart)
+	if diff < 0 {
+		diff = -diff
+	}
+	if diff > time.Second {
+		t.Errorf("StartTime = %v, want ~%v", store.lastQuery.StartTime, expectedStart)
 	}
 }
 

@@ -136,11 +136,11 @@ func (h *DashboardHandler) GetLatencyPercentiles(
 			endTime = msg.TimeRange.End.AsTime()
 		}
 	}
-	if startTime.IsZero() {
-		startTime = time.Now().Add(-24 * time.Hour)
-	}
 	if endTime.IsZero() {
 		endTime = time.Now()
+	}
+	if startTime.IsZero() {
+		startTime = endTime.Add(-24 * time.Hour)
 	}
 
 	sq := storage.SpanQuery{

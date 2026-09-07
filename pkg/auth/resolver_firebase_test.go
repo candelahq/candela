@@ -31,18 +31,38 @@ func TestFirebaseResolver_Success(t *testing.T) {
 }
 
 func TestFirebaseResolver_UnverifiedEmail(t *testing.T) {
-	v := &mockTokenVerifier{
-		verifyFunc: func(ctx context.Context, idToken string) (*fbauth.Token, error) {
-			return &fbauth.Token{UID: "uid", Claims: map[string]interface{}{
+	tests := []struct {
+		name   string
+		claims map[string]interface{}
+	}{
+		{
+			name: "explicitly false",
+			claims: map[string]interface{}{
 				"email":          "user@example.com",
 				"email_verified": false,
-			}}, nil
+			},
+		},
+		{
+			name: "missing email_verified claim",
+			claims: map[string]interface{}{
+				"email": "user@example.com",
+			},
 		},
 	}
-	resolver := NewFirebaseResolver(v)
-	_, err := resolver.Resolve(context.Background(), "token")
-	if err == nil || err.Error() != "firebase email not verified" {
-		t.Fatalf("expected unverified email error, got %v", err)
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			v := &mockTokenVerifier{
+				verifyFunc: func(ctx context.Context, idToken string) (*fbauth.Token, error) {
+					return &fbauth.Token{UID: "uid", Claims: tt.claims}, nil
+				},
+			}
+			resolver := NewFirebaseResolver(v)
+			_, err := resolver.Resolve(context.Background(), "token")
+			if err == nil || err.Error() != "firebase email not verified" {
+				t.Fatalf("expected 'firebase email not verified' error, got %v", err)
+			}
+		})
 	}
 }
 

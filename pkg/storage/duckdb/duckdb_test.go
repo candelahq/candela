@@ -191,6 +191,20 @@ func TestGetTrace_UserScoping(t *testing.T) {
 	if !errors.Is(err, storage.ErrNotFound) {
 		t.Fatalf("expected ErrNotFound, got %v", err)
 	}
+
+	// 4. Legacy trace with empty UserID is retrievable by scoped caller
+	legacySpan := testSpan("span-legacy", "trace-legacy", storage.SpanKindLLM, "gpt-4o")
+	legacySpan.UserID = ""
+	if err := store.IngestSpans(ctx, []storage.Span{legacySpan}); err != nil {
+		t.Fatalf("ingest legacy: %v", err)
+	}
+	traceLegacy, err := store.GetTrace(aliceCtx, "trace-legacy")
+	if err != nil {
+		t.Fatalf("expected legacy trace to be retrievable by scoped caller, got error: %v", err)
+	}
+	if len(traceLegacy.Spans) != 1 {
+		t.Fatalf("expected 1 span in legacy trace, got %d", len(traceLegacy.Spans))
+	}
 }
 
 func TestIngestSpans_NilGenAI(t *testing.T) {

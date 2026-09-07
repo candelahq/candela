@@ -552,3 +552,18 @@ func TestSyncWorker_PruneRespectsWorkerContext(t *testing.T) {
 	assert.Equal(t, 1, mockStore.PruneLocalSpansCalls)
 	assert.Equal(t, 100000, mockStore.PrunedKeepCount)
 }
+
+func TestSyncWorker_StopIdempotent(t *testing.T) {
+	t.Parallel()
+
+	mockStore := &MockSyncStore{}
+	mockUpstream := &MockSpanWriter{}
+
+	worker := NewSyncWorker(mockStore, mockUpstream, 100*time.Millisecond)
+	worker.Start()
+
+	// Calling Stop multiple times must not panic.
+	worker.Stop()
+	worker.Stop()
+	worker.Stop()
+}

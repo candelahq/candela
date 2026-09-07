@@ -19,6 +19,7 @@ type SyncWorker struct {
 	interval  time.Duration
 	keepCount int
 	done      chan struct{}
+	stopOnce  sync.Once
 	wg        sync.WaitGroup
 	ctx       context.Context
 	cancel    context.CancelFunc
@@ -49,12 +50,14 @@ func (w *SyncWorker) Start() {
 	slog.Info("SyncWorker started", "interval", w.interval)
 }
 
-// Stop gracefully shuts down the worker.
+// Stop gracefully shuts down the worker. Safe to call multiple times.
 func (w *SyncWorker) Stop() {
-	w.cancel() // abort in-flight requests immediately
-	close(w.done)
-	w.wg.Wait()
-	slog.Info("SyncWorker stopped")
+	w.stopOnce.Do(func() {
+		w.cancel() // abort in-flight requests immediately
+		close(w.done)
+		w.wg.Wait()
+		slog.Info("SyncWorker stopped")
+	})
 }
 
 func (w *SyncWorker) syncLoop() {

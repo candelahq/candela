@@ -124,6 +124,8 @@ func (h *CatalogHandler) UpdateModelCatalogEntry(
 
 	var entry catalog.Entry
 	entry.FromProto(pbEntry)
+	entry.Provider = strings.TrimSpace(entry.Provider)
+	entry.ModelID = strings.TrimSpace(entry.ModelID)
 
 	// Apply field mask: if the caller specified which fields to update,
 	// merge only those fields onto the existing entry to avoid data loss.

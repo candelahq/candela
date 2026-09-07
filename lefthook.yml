@@ -47,14 +47,21 @@ pre-commit:
     govulncheck:
       glob: "*.{go,mod,sum}"
       run: |
-        out=$(govulncheck ./... 2>&1) || {
-          echo "$out"
-          if echo "$out" | grep -q "from the Go standard library" && ! echo "$out" | grep -E "Your code is affected by [0-9]+ vulnerabilit(y|ies) from [0-9]+ (module|package)s?"; then
-            echo "::notice:: Go standard library CVEs will be resolved when nixpkgs updates to go 1.26.6"
-            exit 0
-          fi
-          exit 1
-        }
+        out=$(govulncheck ./... 2>&1)
+        rc=$?
+        if [ $rc -eq 0 ]; then
+          exit 0
+        fi
+        echo "$out"
+        if [ $rc -ne 3 ]; then
+          echo "govulncheck failed with unexpected exit code $rc"
+          exit $rc
+        fi
+        if echo "$out" | grep -q "from the Go standard library" && ! echo "$out" | grep -E "Your code is affected by [0-9]+ vulnerabilit(y|ies) from [0-9]+ (module|package)s?"; then
+          echo "::notice:: Go standard library CVEs will be resolved when nixpkgs updates to go 1.26.6"
+          exit 0
+        fi
+        exit 1
     # ── Rust ──
     cargo-fmt:
       glob: "*.rs"

@@ -149,24 +149,29 @@ func (h *DashboardHandler) GetLatencyPercentiles(
 		Kind:      storage.SpanKindLLM,
 		StartTime: startTime,
 		EndTime:   endTime,
+		UserID:    scopeUserID(ctx, h.users),
 		PageSize:  1000,
 	}
 
-	res, err := h.store.SearchSpans(ctx, sq)
-	if err != nil {
-		return nil, internalError("failed to get latency percentiles", err)
-	}
-
-	if res == nil || len(res.Spans) == 0 {
-		return connect.NewResponse(&v1.GetLatencyPercentilesResponse{}), nil
-	}
-
-	latencies := make([]float64, 0, len(res.Spans))
-	for _, s := range res.Spans {
-		ms := float64(s.Duration) / float64(time.Millisecond)
-		if ms > 0 {
-			latencies = append(latencies, ms)
+	var latencies []float64
+	for {
+		res, err := h.store.SearchSpans(ctx, sq)
+		if err != nil {
+			return nil, internalError("failed to get latency percentiles", err)
 		}
+		if res == nil || len(res.Spans) == 0 {
+			break
+		}
+		for _, s := range res.Spans {
+			ms := float64(s.Duration) / float64(time.Millisecond)
+			if ms > 0 {
+				latencies = append(latencies, ms)
+			}
+		}
+		if res.NextPageToken == "" {
+			break
+		}
+		sq.PageToken = res.NextPageToken
 	}
 
 	if len(latencies) == 0 {

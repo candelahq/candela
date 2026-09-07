@@ -153,6 +153,11 @@ func (h *ProjectHandler) ListAPIKeys(
 	ctx context.Context,
 	req *connect.Request[v1.ListAPIKeysRequest],
 ) (*connect.Response[v1.ListAPIKeysResponse], error) {
+	if uid := scopeUserID(ctx, h.users); uid != "" {
+		return nil, connect.NewError(connect.CodePermissionDenied,
+			fmt.Errorf("admin access required"))
+	}
+
 	keys, err := h.store.ListAPIKeys(ctx, req.Msg.ProjectId)
 	if err != nil {
 		return nil, internalError("failed to list API keys", err)

@@ -2,6 +2,7 @@ package connecthandlers
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"sync"
 	"time"
@@ -89,7 +90,7 @@ func (c *userIDCache) evictExpired() {
 }
 
 // resolveUserID returns the Firestore user ID for the given email, using a
-// 60-second in-process cache. Returns ("", nil) if the user doesn't exist yet.
+// 60-second in-process cache. Returns ("", storage.ErrNotFound) if the user doesn't exist yet.
 func resolveUserID(ctx context.Context, users storage.UserStore, email string) (string, error) {
 	if users == nil {
 		return "", nil
@@ -102,13 +103,23 @@ func resolveUserID(ctx context.Context, users storage.UserStore, email string) (
 	globalUserIDCache.mu.RLock()
 	if e, ok := globalUserIDCache.entries[key]; ok && time.Now().Before(e.expiresAt) {
 		globalUserIDCache.mu.RUnlock()
-		return e.userID, nil // empty string on negative cache — caller treats "" as "skip"
+		if !e.found {
+			return "", storage.ErrNotFound
+		}
+		return e.userID, nil
 	}
 	globalUserIDCache.mu.RUnlock()
 
 	// Slow path: Firestore lookup.
 	user, err := users.GetUserByEmail(ctx, email)
 	if err != nil {
+		if errors.Is(err, storage.ErrNotFound) {
+			now := time.Now()
+			globalUserIDCache.mu.Lock()
+			globalUserIDCache.entries[key] = userIDEntry{userID: "", found: false, expiresAt: now.Add(userIDCacheNegativeTTL)}
+			globalUserIDCache.mu.Unlock()
+			return "", storage.ErrNotFound
+		}
 		// Don't cache errors — they may be transient (network, Firestore blip).
 		return "", err
 	}
@@ -120,6 +131,10 @@ func resolveUserID(ctx context.Context, users storage.UserStore, email string) (
 		// #B: Negative cache — user not found yet (still provisioning).
 		// Short TTL so the cache clears quickly once the user is created.
 		entry = userIDEntry{userID: "", found: false, expiresAt: now.Add(userIDCacheNegativeTTL)}
+		globalUserIDCache.mu.Lock()
+		globalUserIDCache.entries[key] = entry
+		globalUserIDCache.mu.Unlock()
+		return "", storage.ErrNotFound
 	} else {
 		entry = userIDEntry{userID: user.ID, found: true, expiresAt: now.Add(userIDCacheTTL)}
 	}

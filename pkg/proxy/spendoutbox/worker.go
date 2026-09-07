@@ -22,6 +22,7 @@ type SpendSyncWorker struct {
 	interval time.Duration
 	maxAge   time.Duration
 	done     chan struct{}
+	stopOnce sync.Once
 	wg       sync.WaitGroup
 	ctx      context.Context
 	cancel   context.CancelFunc
@@ -52,12 +53,14 @@ func (w *SpendSyncWorker) Start() {
 	slog.Info("SpendSyncWorker started", "interval", w.interval)
 }
 
-// Stop gracefully shuts down the worker.
+// Stop gracefully shuts down the worker. Safe to call multiple times.
 func (w *SpendSyncWorker) Stop() {
-	w.cancel()
-	close(w.done)
-	w.wg.Wait()
-	slog.Info("SpendSyncWorker stopped")
+	w.stopOnce.Do(func() {
+		w.cancel()
+		close(w.done)
+		w.wg.Wait()
+		slog.Info("SpendSyncWorker stopped")
+	})
 }
 
 func (w *SpendSyncWorker) syncLoop() {

@@ -2,6 +2,7 @@ package connecthandlers
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -120,25 +121,46 @@ func TestResolveUserID_EvictsExpiredOnWrite(t *testing.T) {
 }
 
 // U8: when GetUserByEmail returns nil (user not yet provisioned), the result is
-// negatively cached and Firestore is NOT hammered on subsequent calls.
+// negatively cached and returns storage.ErrNotFound without hammering Firestore on subsequent calls.
 func TestResolveUserID_NilUser_NegativeCaches(t *testing.T) {
 	resetUserIDCache()
 	stub := &stubUserStore{result: nil, err: nil} // user not found
 
 	id1, err := resolveUserID(context.Background(), stub, "new@example.com")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	if !errors.Is(err, storage.ErrNotFound) {
+		t.Fatalf("expected ErrNotFound on first call, got (%q, %v)", id1, err)
 	}
 	if id1 != "" {
 		t.Errorf("expected empty ID for not-found user, got %q", id1)
 	}
 
 	// Second call must hit the negative cache — no additional Firestore read.
-	id2, _ := resolveUserID(context.Background(), stub, "new@example.com")
+	id2, err2 := resolveUserID(context.Background(), stub, "new@example.com")
+	if !errors.Is(err2, storage.ErrNotFound) {
+		t.Fatalf("expected ErrNotFound on cached call, got (%q, %v)", id2, err2)
+	}
 	if id2 != "" {
 		t.Errorf("negative cache returned non-empty ID: %q", id2)
 	}
 	if stub.calls != 1 {
 		t.Errorf("Firestore called %d times on not-found user, want 1 (negative cache)", stub.calls)
+	}
+}
+
+func TestResolveUserID_ErrNotFound_NegativeCaches(t *testing.T) {
+	resetUserIDCache()
+	stub := &stubUserStore{result: nil, err: storage.ErrNotFound}
+
+	id1, err := resolveUserID(context.Background(), stub, "missing@example.com")
+	if !errors.Is(err, storage.ErrNotFound) {
+		t.Fatalf("expected ErrNotFound, got (%q, %v)", id1, err)
+	}
+
+	id2, err2 := resolveUserID(context.Background(), stub, "missing@example.com")
+	if !errors.Is(err2, storage.ErrNotFound) {
+		t.Fatalf("expected ErrNotFound from cache, got (%q, %v)", id2, err2)
+	}
+	if stub.calls != 1 {
+		t.Errorf("Firestore called %d times on ErrNotFound, want 1", stub.calls)
 	}
 }

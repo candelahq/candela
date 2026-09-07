@@ -180,3 +180,16 @@ func TestSpendSyncWorker_RetryLaterUsed(t *testing.T) {
 		t.Errorf("Peek returned %d records, want 0 (next_retry_at should be in the future)", len(records))
 	}
 }
+
+func TestSpendSyncWorker_StopIdempotent(t *testing.T) {
+	ob := newTestOutbox(t)
+	mock := &mockUserStore{}
+
+	w := NewSpendSyncWorker(ob, mock, 100*time.Millisecond)
+	w.Start()
+
+	// Calling Stop multiple times must not panic.
+	w.Stop()
+	w.Stop()
+	w.Stop()
+}

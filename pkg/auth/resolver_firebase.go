@@ -27,5 +27,9 @@ func (r *FirebaseResolver) Resolve(ctx context.Context, token string) (*Identity
 	if email == "" {
 		return nil, fmt.Errorf("firebase token missing email claim")
 	}
+	emailVerified, _ := decoded.Claims["email_verified"].(bool)
+	if !emailVerified {
+		return nil, fmt.Errorf("firebase email not verified")
+	}
 	return &Identity{ID: decoded.UID, Email: strings.ToLower(email), Provider: "firebase", Claims: decoded.Claims}, nil
 }

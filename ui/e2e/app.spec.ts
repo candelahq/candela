@@ -713,20 +713,24 @@ test.describe("Trace detail interactions", () => {
 // ──────────────────────────────────────────
 
 test.describe("Responsive sidebar", () => {
-  test("sidebar collapses on narrow viewport", async ({ page }) => {
+  test("sidebar collapses into drawer on narrow viewport", async ({ page }) => {
     await page.setViewportSize({ width: 600, height: 800 });
     await page.goto("/");
 
-    // Sidebar text should be hidden
+    // Mobile header with menu button should be visible
+    const menuBtn = page.locator(".mobile-menu-btn");
+    await expect(menuBtn).toBeVisible();
+
+    // Sidebar drawer is hidden initially
     const sidebar = page.locator(".sidebar");
+    await expect(sidebar).not.toBeVisible();
+
+    // Opening drawer makes sidebar visible
+    await menuBtn.click();
     await expect(sidebar).toBeVisible();
 
-    // Logo text should be hidden at narrow widths
-    const logoText = page.locator(".sidebar-logo");
-    await expect(logoText).not.toBeVisible();
-
-    // Nav items should still be clickable
-    await page.locator(".nav-item").filter({ hasText: "" }).first().click();
+    // Nav items should be clickable when drawer is open
+    await page.locator(".nav-item").first().click();
   });
 });
 

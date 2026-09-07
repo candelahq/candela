@@ -483,3 +483,82 @@
   white-space: nowrap;
   align-self: center;
 }
+
+/* ──────────────────────────────────────────
+   Responsive — Today Page
+   ────────────────────────────────────────── */
+
+@media (max-width: 768px) {
+  .today-hero {
+    padding: 24px 16px;
+  }
+
+  .today-ring-meta {
+    gap: 16px;
+  }
+
+  .today-ring-stat-value {
+    font-size: 20px;
+  }
+
+  .today-model-metrics {
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+
+  .forecast-bar {
+    padding: 14px 16px;
+  }
+}
+
+@media (max-width: 480px) {
+  .today-hero {
+    padding: 20px 12px;
+  }
+
+  .today-ring-svg {
+    width: 150px;
+    height: 150px;
+  }
+
+  .today-ring-meta {
+    gap: 12px;
+  }
+
+  .today-ring-stat-label {
+    font-size: 9px;
+  }
+
+  .today-ring-stat-value {
+    font-size: 17px;
+  }
+
+  .today-ring-divider {
+    height: 24px;
+  }
+
+  .forecast-metrics {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 6px;
+  }
+
+  .forecast-divider {
+    display: none;
+  }
+
+  .forecast-sparkline {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+  }
+
+  .forecast-sparkline-bars {
+    width: 100%;
+    height: 40px;
+  }
+
+  .forecast-avg-label {
+    align-self: flex-start;
+  }
+}

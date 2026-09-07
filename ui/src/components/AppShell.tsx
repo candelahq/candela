@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { usePathname } from "next/navigation";
 import { Sidebar } from "@/components/sidebar";
 import { BudgetAlert } from "@/components/BudgetAlert";
@@ -8,6 +9,14 @@ import { BudgetAlert } from "@/components/BudgetAlert";
  *  or just the children for the login page. */
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [prevPathname, setPrevPathname] = useState(pathname);
+
+  // Auto-close sidebar on route change without triggering cascading renders in effect
+  if (pathname !== prevPathname) {
+    setPrevPathname(pathname);
+    setSidebarOpen(false);
+  }
 
   if (pathname === "/login") {
     return <>{children}</>;
@@ -16,8 +25,30 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   return (
     <div className="app-layout">
       <BudgetAlert />
-      <Sidebar />
-      <main className="main-content">{children}</main>
+      <div
+        className={`sidebar-backdrop ${sidebarOpen ? "open" : ""}`}
+        onClick={() => setSidebarOpen(false)}
+        aria-hidden={!sidebarOpen}
+      />
+      <Sidebar isOpen={sidebarOpen} onClose={() => setSidebarOpen(false)} />
+      <main className="main-content">
+        <div className="mobile-header">
+          <button
+            type="button"
+            className="mobile-menu-btn"
+            onClick={() => setSidebarOpen(true)}
+            aria-label="Open navigation menu"
+          >
+            ☰
+          </button>
+          <div className="mobile-brand">
+            <span className="mobile-brand-icon">🕯</span>
+            <span className="mobile-brand-name">Candela</span>
+          </div>
+          <div className="mobile-header-spacer" />
+        </div>
+        {children}
+      </main>
     </div>
   );
 }

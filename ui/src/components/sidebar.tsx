@@ -38,7 +38,12 @@ const adminItems = {
   ],
 };
 
-export function Sidebar() {
+interface SidebarProps {
+  isOpen?: boolean;
+  onClose?: () => void;
+}
+
+export function Sidebar({ isOpen, onClose }: SidebarProps) {
   const pathname = usePathname();
   const { user, isAdmin, isLoading } = useCurrentUser();
   const { user: authUser, signOut } = useAuth();
@@ -46,10 +51,22 @@ export function Sidebar() {
   const sections = isAdmin ? [...navItems, adminItems] : navItems;
 
   return (
-    <aside className="sidebar">
+    <aside className={`sidebar ${isOpen ? "open" : ""}`}>
       <div className="sidebar-header">
-        <div className="sidebar-logo-icon">🕯</div>
-        <span className="sidebar-logo">Candela</span>
+        <div className="sidebar-brand">
+          <div className="sidebar-logo-icon">🕯</div>
+          <span className="sidebar-logo">Candela</span>
+        </div>
+        {onClose && (
+          <button
+            type="button"
+            className="sidebar-close-btn"
+            onClick={onClose}
+            aria-label="Close sidebar"
+          >
+            ✕
+          </button>
+        )}
       </div>
 
       <nav className="sidebar-nav">
@@ -60,6 +77,7 @@ export function Sidebar() {
               <Link
                 key={item.href}
                 href={item.href}
+                onClick={() => onClose?.()}
                 className={`nav-item ${
                   pathname === item.href ||
                   (item.href !== "/" && pathname.startsWith(item.href))

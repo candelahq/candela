@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { usePathname } from "next/navigation";
 import { Sidebar } from "@/components/sidebar";
 import { BudgetAlert } from "@/components/BudgetAlert";
@@ -11,12 +11,26 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [prevPathname, setPrevPathname] = useState(pathname);
+  const menuButtonRef = useRef<HTMLButtonElement>(null);
 
   // Auto-close sidebar on route change without triggering cascading renders in effect
   if (pathname !== prevPathname) {
     setPrevPathname(pathname);
     setSidebarOpen(false);
   }
+
+  // Handle escape key to close drawer and restore focus
+  useEffect(() => {
+    if (!sidebarOpen) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setSidebarOpen(false);
+        menuButtonRef.current?.focus();
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [sidebarOpen]);
 
   if (pathname === "/login") {
     return <>{children}</>;
@@ -27,17 +41,29 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       <BudgetAlert />
       <div
         className={`sidebar-backdrop ${sidebarOpen ? "open" : ""}`}
-        onClick={() => setSidebarOpen(false)}
+        onClick={() => {
+          setSidebarOpen(false);
+          menuButtonRef.current?.focus();
+        }}
         aria-hidden={!sidebarOpen}
       />
-      <Sidebar isOpen={sidebarOpen} onClose={() => setSidebarOpen(false)} />
+      <Sidebar
+        isOpen={sidebarOpen}
+        onClose={() => {
+          setSidebarOpen(false);
+          menuButtonRef.current?.focus();
+        }}
+      />
       <main className="main-content">
         <div className="mobile-header">
           <button
+            ref={menuButtonRef}
             type="button"
             className="mobile-menu-btn"
             onClick={() => setSidebarOpen(true)}
             aria-label="Open navigation menu"
+            aria-expanded={sidebarOpen}
+            aria-controls="app-sidebar"
           >
             ☰
           </button>

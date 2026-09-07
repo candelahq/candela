@@ -157,8 +157,12 @@ func (p *SpanProcessor) Run(ctx context.Context) {
 		// Run anomaly detection after cost enrichment, before writing to sinks.
 		// Flagged spans get candela.anomaly=true stamped into their Attributes so
 		// the dashboard and audit trail can surface them without schema changes.
+		// A bounded timeout is applied so slow baseline reader queries fail open
+		// without blocking ingestion or overflowing spanCh.
 		if p.detector != nil {
-			results, err := p.detector.Detect(ctx, batch)
+			detectCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+			results, err := p.detector.Detect(detectCtx, batch)
+			cancel()
 			if err != nil {
 				slog.Warn("anomaly detection error", "err", err)
 			} else if len(results) > 0 {

@@ -1,7 +1,7 @@
 # ── candela-proxy ──
 # Standalone LLM observability proxy — single static binary on distroless.
 #
-# Build:  docker build -f Dockerfile.proxy -t candela-proxy ./rust
+# Build:  docker build -f Dockerfile.proxy -t candela-proxy .
 # Run:    docker run -p 8080:8080 -e PROVIDERS=openai,anthropic candela-proxy
 
 FROM rust:1.87-alpine AS builder
@@ -16,16 +16,32 @@ COPY rust/crates/candela-core/Cargo.toml crates/candela-core/Cargo.toml
 COPY rust/crates/candela-proxy/Cargo.toml crates/candela-proxy/Cargo.toml
 COPY rust/crates/candela-processor/Cargo.toml crates/candela-processor/Cargo.toml
 COPY rust/crates/candela-storage/Cargo.toml crates/candela-storage/Cargo.toml
+COPY rust/crates/candela-transparent/Cargo.toml crates/candela-transparent/Cargo.toml
+COPY rust/crates/candela-types/Cargo.toml crates/candela-types/Cargo.toml
+COPY rust/crates/candela-harness-storage/Cargo.toml crates/candela-harness-storage/Cargo.toml
+COPY rust/crates/candela-harness-chat/Cargo.toml crates/candela-harness-chat/Cargo.toml
+COPY rust/crates/candela-harness-mcp/Cargo.toml crates/candela-harness-mcp/Cargo.toml
+COPY rust/crates/candela-harness-rpc/Cargo.toml crates/candela-harness-rpc/Cargo.toml
+COPY rust/crates/candela-harness-connect/Cargo.toml crates/candela-harness-connect/Cargo.toml
 COPY rust/bins/candela-proxy/Cargo.toml bins/candela-proxy/Cargo.toml
 COPY rust/bins/candela-sidecar/Cargo.toml bins/candela-sidecar/Cargo.toml
+COPY rust/bins/candela-harness/Cargo.toml bins/candela-harness/Cargo.toml
 
-# Create stub lib.rs files for dependency caching.
+# Create stub lib.rs / main.rs files for dependency caching.
 RUN mkdir -p crates/candela-core/src && echo "" > crates/candela-core/src/lib.rs && \
     mkdir -p crates/candela-proxy/src && echo "" > crates/candela-proxy/src/lib.rs && \
     mkdir -p crates/candela-processor/src && echo "" > crates/candela-processor/src/lib.rs && \
     mkdir -p crates/candela-storage/src && echo "" > crates/candela-storage/src/lib.rs && \
+    mkdir -p crates/candela-transparent/src && echo "" > crates/candela-transparent/src/lib.rs && \
+    mkdir -p crates/candela-types/src && echo "" > crates/candela-types/src/lib.rs && \
+    mkdir -p crates/candela-harness-storage/src && echo "" > crates/candela-harness-storage/src/lib.rs && \
+    mkdir -p crates/candela-harness-chat/src && echo "" > crates/candela-harness-chat/src/lib.rs && \
+    mkdir -p crates/candela-harness-mcp/src && echo "" > crates/candela-harness-mcp/src/lib.rs && \
+    mkdir -p crates/candela-harness-rpc/src && echo "" > crates/candela-harness-rpc/src/lib.rs && \
+    mkdir -p crates/candela-harness-connect/src && echo "" > crates/candela-harness-connect/src/lib.rs && \
     mkdir -p bins/candela-proxy/src && echo "fn main() {}" > bins/candela-proxy/src/main.rs && \
-    mkdir -p bins/candela-sidecar/src && echo "fn main() {}" > bins/candela-sidecar/src/main.rs
+    mkdir -p bins/candela-sidecar/src && echo "fn main() {}" > bins/candela-sidecar/src/main.rs && \
+    mkdir -p bins/candela-harness/src && echo "fn main() {}" > bins/candela-harness/src/main.rs
 
 RUN cargo build --release --bin candela-proxy 2>/dev/null || true
 

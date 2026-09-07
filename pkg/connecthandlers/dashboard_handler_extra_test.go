@@ -3,6 +3,7 @@ package connecthandlers_test
 import (
 	"context"
 	"testing"
+	"time"
 
 	"connectrpc.com/connect"
 	v1 "github.com/candelahq/candela/gen/go/candela/v1"
@@ -62,13 +63,50 @@ func TestGetLatencyPercentiles_Success(t *testing.T) {
 	store := &fallbackStore{}
 	client := startDashboardServer(t, store)
 
-	// Currently a stub returning empty
+	// Fallback store returns nil spans → empty response
 	resp, err := client.GetLatencyPercentiles(context.Background(), connect.NewRequest(&v1.GetLatencyPercentilesRequest{}))
 	if err != nil {
 		t.Fatalf("GetLatencyPercentiles failed: %v", err)
 	}
 	if resp.Msg == nil {
 		t.Fatal("Expected non-nil response")
+	}
+}
+
+type spanMockStore struct {
+	fallbackStore
+	spans []storage.Span
+}
+
+func (s *spanMockStore) SearchSpans(context.Context, storage.SpanQuery) (*storage.SpanResult, error) {
+	return &storage.SpanResult{Spans: s.spans, TotalCount: len(s.spans)}, nil
+}
+
+func TestGetLatencyPercentiles_WithSpans(t *testing.T) {
+	spans := make([]storage.Span, 100)
+	for i := 0; i < 100; i++ {
+		spans[i] = storage.Span{
+			Duration: time.Duration(i+1) * time.Millisecond,
+		}
+	}
+	store := &spanMockStore{spans: spans}
+	client := startDashboardServer(t, store)
+
+	resp, err := client.GetLatencyPercentiles(context.Background(), connect.NewRequest(&v1.GetLatencyPercentilesRequest{}))
+	if err != nil {
+		t.Fatalf("GetLatencyPercentiles failed: %v", err)
+	}
+	if resp.Msg.P50Ms != 50.0 {
+		t.Errorf("P50Ms = %f, want 50.0", resp.Msg.P50Ms)
+	}
+	if resp.Msg.P90Ms != 90.0 {
+		t.Errorf("P90Ms = %f, want 90.0", resp.Msg.P90Ms)
+	}
+	if resp.Msg.P95Ms != 95.0 {
+		t.Errorf("P95Ms = %f, want 95.0", resp.Msg.P95Ms)
+	}
+	if resp.Msg.P99Ms != 99.0 {
+		t.Errorf("P99Ms = %f, want 99.0", resp.Msg.P99Ms)
 	}
 }
 

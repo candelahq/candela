@@ -46,8 +46,8 @@ auth:
 
 # ── Model catalog ──
 catalog:
-  # Options: "embedded", "bigquery"
-  backend: embedded
+  # Options: "config" (default), "firestore"
+  backend: config
 
 # ── Budget ──
 budget:

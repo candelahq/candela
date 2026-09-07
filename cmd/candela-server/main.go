@@ -30,6 +30,7 @@ import (
 	connect "connectrpc.com/connect"
 	"connectrpc.com/validate"
 	"github.com/candelahq/candela/gen/go/candela/v1/candelav1connect"
+	"github.com/candelahq/candela/pkg/anomaly"
 	"github.com/candelahq/candela/pkg/audit"
 	"github.com/candelahq/candela/pkg/auth"
 	"github.com/candelahq/candela/pkg/catalog"
@@ -375,6 +376,11 @@ func main() {
 
 	// Start the in-process span processor (fan-out to all writers).
 	proc := processor.New(writers, calc, cfg.Worker.BatchSize)
+	if reader != nil {
+		detector := anomaly.New(reader, anomaly.DefaultConfig())
+		proc.WithAnomalyDetector(detector)
+		slog.Info("anomaly detector initialized", "window_days", 7, "sigma", 2.0)
+	}
 	go proc.Run(context.Background())
 	defer proc.Stop()
 

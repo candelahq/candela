@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math"
+	"sort"
 	"time"
 
 	connect "connectrpc.com/connect"
@@ -123,8 +125,74 @@ func (h *DashboardHandler) GetLatencyPercentiles(
 	ctx context.Context,
 	req *connect.Request[v1.GetLatencyPercentilesRequest],
 ) (*connect.Response[v1.GetLatencyPercentilesResponse], error) {
-	// TODO: implement ClickHouse quantile queries
-	return connect.NewResponse(&v1.GetLatencyPercentilesResponse{}), nil
+	msg := req.Msg
+
+	var startTime, endTime time.Time
+	if msg.TimeRange != nil {
+		if msg.TimeRange.Start != nil {
+			startTime = msg.TimeRange.Start.AsTime()
+		}
+		if msg.TimeRange.End != nil {
+			endTime = msg.TimeRange.End.AsTime()
+		}
+	}
+	if startTime.IsZero() {
+		startTime = time.Now().Add(-24 * time.Hour)
+	}
+	if endTime.IsZero() {
+		endTime = time.Now()
+	}
+
+	sq := storage.SpanQuery{
+		ProjectID: msg.ProjectId,
+		Model:     msg.Model,
+		Kind:      storage.SpanKindLLM,
+		StartTime: startTime,
+		EndTime:   endTime,
+		PageSize:  1000,
+	}
+
+	res, err := h.store.SearchSpans(ctx, sq)
+	if err != nil {
+		return nil, internalError("failed to get latency percentiles", err)
+	}
+
+	if res == nil || len(res.Spans) == 0 {
+		return connect.NewResponse(&v1.GetLatencyPercentilesResponse{}), nil
+	}
+
+	latencies := make([]float64, 0, len(res.Spans))
+	for _, s := range res.Spans {
+		ms := float64(s.Duration) / float64(time.Millisecond)
+		if ms > 0 {
+			latencies = append(latencies, ms)
+		}
+	}
+
+	if len(latencies) == 0 {
+		return connect.NewResponse(&v1.GetLatencyPercentilesResponse{}), nil
+	}
+
+	sort.Float64s(latencies)
+	n := float64(len(latencies))
+
+	percentile := func(p float64) float64 {
+		idx := int(math.Ceil((p/100.0)*n)) - 1
+		if idx < 0 {
+			idx = 0
+		}
+		if idx >= len(latencies) {
+			idx = len(latencies) - 1
+		}
+		return latencies[idx]
+	}
+
+	return connect.NewResponse(&v1.GetLatencyPercentilesResponse{
+		P50Ms: percentile(50),
+		P90Ms: percentile(90),
+		P95Ms: percentile(95),
+		P99Ms: percentile(99),
+	}), nil
 }
 
 // GetMyUsage returns the calling user's personal usage summary (BigQuery).

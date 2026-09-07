@@ -2,6 +2,7 @@ package sqlite
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -89,6 +90,72 @@ func TestGetTraceNotFound(t *testing.T) {
 	_, err := s.GetTrace(context.Background(), "nonexistent")
 	if err == nil {
 		t.Fatal("expected error for nonexistent trace")
+	}
+}
+
+func TestGetTrace_UserScoping(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	span := storage.Span{
+		SpanID: "span-scoped", TraceID: "trace-scoped", Name: "test.span",
+		Kind: storage.SpanKindLLM, Status: storage.SpanStatusOK,
+		StartTime: now, EndTime: now.Add(100 * time.Millisecond),
+		Duration: 100 * time.Millisecond, ProjectID: "proj-1",
+		UserID: "alice",
+	}
+
+	if err := s.IngestSpans(ctx, []storage.Span{span}); err != nil {
+		t.Fatalf("ingest: %v", err)
+	}
+
+	// 1. Matching user scope succeeds
+	aliceCtx := storage.WithUserScope(ctx, "alice")
+	trace, err := s.GetTrace(aliceCtx, "trace-scoped")
+	if err != nil {
+		t.Fatalf("expected trace for alice, got error: %v", err)
+	}
+	if len(trace.Spans) != 1 {
+		t.Fatalf("expected 1 span, got %d", len(trace.Spans))
+	}
+
+	// 2. Unscoped context succeeds (admin / backend query)
+	traceUnscoped, err := s.GetTrace(ctx, "trace-scoped")
+	if err != nil {
+		t.Fatalf("expected trace for unscoped query, got error: %v", err)
+	}
+	if len(traceUnscoped.Spans) != 1 {
+		t.Fatalf("expected 1 span, got %d", len(traceUnscoped.Spans))
+	}
+
+	// 3. Different user scope returns ErrNotFound (cross-user data isolation)
+	bobCtx := storage.WithUserScope(ctx, "bob")
+	_, err = s.GetTrace(bobCtx, "trace-scoped")
+	if err == nil {
+		t.Fatal("expected error for bob accessing alice's trace")
+	}
+	if !errors.Is(err, storage.ErrNotFound) {
+		t.Fatalf("expected ErrNotFound, got %v", err)
+	}
+
+	// 4. Legacy trace with empty UserID is retrievable by scoped caller
+	legacySpan := storage.Span{
+		SpanID: "span-legacy", TraceID: "trace-legacy", Name: "test.legacy",
+		Kind: storage.SpanKindLLM, Status: storage.SpanStatusOK,
+		StartTime: now, EndTime: now.Add(100 * time.Millisecond),
+		Duration: 100 * time.Millisecond, ProjectID: "proj-1",
+		UserID: "",
+	}
+	if err := s.IngestSpans(ctx, []storage.Span{legacySpan}); err != nil {
+		t.Fatalf("ingest legacy: %v", err)
+	}
+	traceLegacy, err := s.GetTrace(aliceCtx, "trace-legacy")
+	if err != nil {
+		t.Fatalf("expected legacy trace to be retrievable by scoped caller, got error: %v", err)
+	}
+	if len(traceLegacy.Spans) != 1 {
+		t.Fatalf("expected 1 span in legacy trace, got %d", len(traceLegacy.Spans))
 	}
 }
 

@@ -1165,3 +1165,53 @@ func TestUserHandler_DeleteUser_GlobalAudit(t *testing.T) {
 		t.Errorf("expected user audit entries to be deleted, got %d", len(userEntries))
 	}
 }
+
+type failingGetUserStore struct {
+	*mockUserStore
+	getUserErr error
+}
+
+func (f *failingGetUserStore) GetUser(ctx context.Context, id string) (*storage.UserRecord, error) {
+	if f.getUserErr != nil {
+		return nil, f.getUserErr
+	}
+	return f.mockUserStore.GetUser(ctx, id)
+}
+
+func TestUserHandler_DeactivateReactivate_ErrorHandling(t *testing.T) {
+	ctx := authedCtx("admin@example.com")
+
+	// Case 1: storage.ErrNotFound maps to connect.CodeNotFound
+	notFoundStore := &failingGetUserStore{
+		mockUserStore: newMockUserStore(),
+		getUserErr:    fmt.Errorf("user not found: %w", storage.ErrNotFound),
+	}
+	handlerNotFound := NewUserHandler(notFoundStore, 0)
+
+	_, err := handlerNotFound.DeactivateUser(ctx, connect.NewRequest(&v1.DeactivateUserRequest{Id: "missing"}))
+	if connect.CodeOf(err) != connect.CodeNotFound {
+		t.Errorf("DeactivateUser with ErrNotFound: got code %v, want CodeNotFound", connect.CodeOf(err))
+	}
+
+	_, err = handlerNotFound.ReactivateUser(ctx, connect.NewRequest(&v1.ReactivateUserRequest{Id: "missing"}))
+	if connect.CodeOf(err) != connect.CodeNotFound {
+		t.Errorf("ReactivateUser with ErrNotFound: got code %v, want CodeNotFound", connect.CodeOf(err))
+	}
+
+	// Case 2: transient error maps to connect.CodeInternal (not CodeNotFound)
+	transientStore := &failingGetUserStore{
+		mockUserStore: newMockUserStore(),
+		getUserErr:    fmt.Errorf("firestore unavailable / timeout"),
+	}
+	handlerTransient := NewUserHandler(transientStore, 0)
+
+	_, err = handlerTransient.DeactivateUser(ctx, connect.NewRequest(&v1.DeactivateUserRequest{Id: "user1"}))
+	if connect.CodeOf(err) != connect.CodeInternal {
+		t.Errorf("DeactivateUser with transient error: got code %v, want CodeInternal", connect.CodeOf(err))
+	}
+
+	_, err = handlerTransient.ReactivateUser(ctx, connect.NewRequest(&v1.ReactivateUserRequest{Id: "user1"}))
+	if connect.CodeOf(err) != connect.CodeInternal {
+		t.Errorf("ReactivateUser with transient error: got code %v, want CodeInternal", connect.CodeOf(err))
+	}
+}

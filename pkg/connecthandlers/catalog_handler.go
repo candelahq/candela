@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 
 	connect "connectrpc.com/connect"
 	types "github.com/candelahq/candela/gen/go/candela/types"
@@ -123,6 +124,8 @@ func (h *CatalogHandler) UpdateModelCatalogEntry(
 
 	var entry catalog.Entry
 	entry.FromProto(pbEntry)
+	entry.Provider = strings.TrimSpace(entry.Provider)
+	entry.ModelID = strings.TrimSpace(entry.ModelID)
 
 	// Apply field mask: if the caller specified which fields to update,
 	// merge only those fields onto the existing entry to avoid data loss.
@@ -175,8 +178,12 @@ func (h *CatalogHandler) DeleteModelCatalogEntry(
 			fmt.Errorf("admin access required"))
 	}
 
-	provider := req.Msg.Provider
-	modelID := req.Msg.ModelId
+	provider := strings.TrimSpace(req.Msg.Provider)
+	modelID := strings.TrimSpace(req.Msg.ModelId)
+	if provider == "" || modelID == "" {
+		return nil, connect.NewError(connect.CodeInvalidArgument,
+			fmt.Errorf("provider and model_id are required"))
+	}
 
 	if err := h.store.Delete(ctx, provider, modelID); err != nil {
 		if errors.Is(err, catalog.ErrNotFound) {

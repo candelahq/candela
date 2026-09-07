@@ -277,7 +277,10 @@ func (h *UserHandler) DeactivateUser(
 ) (*connect.Response[v1.DeactivateUserResponse], error) {
 	user, err := h.store.GetUser(ctx, req.Msg.Id)
 	if err != nil {
-		return nil, connect.NewError(connect.CodeNotFound, fmt.Errorf("user not found"))
+		if errors.Is(err, storage.ErrNotFound) {
+			return nil, connect.NewError(connect.CodeNotFound, fmt.Errorf("user not found"))
+		}
+		return nil, internalError("failed to get user", err)
 	}
 	user.Status = storage.StatusInactive
 	if err := h.store.UpdateUser(ctx, user); err != nil {
@@ -299,7 +302,10 @@ func (h *UserHandler) ReactivateUser(
 ) (*connect.Response[v1.ReactivateUserResponse], error) {
 	user, err := h.store.GetUser(ctx, req.Msg.Id)
 	if err != nil {
-		return nil, connect.NewError(connect.CodeNotFound, fmt.Errorf("user not found"))
+		if errors.Is(err, storage.ErrNotFound) {
+			return nil, connect.NewError(connect.CodeNotFound, fmt.Errorf("user not found"))
+		}
+		return nil, internalError("failed to get user", err)
 	}
 	user.Status = storage.StatusActive
 	if err := h.store.UpdateUser(ctx, user); err != nil {

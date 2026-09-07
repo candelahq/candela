@@ -8,6 +8,7 @@ import (
 	connect "connectrpc.com/connect"
 	typespb "github.com/candelahq/candela/gen/go/candela/types"
 	v1 "github.com/candelahq/candela/gen/go/candela/v1"
+	"github.com/candelahq/candela/pkg/auth"
 	"github.com/candelahq/candela/pkg/storage"
 )
 
@@ -315,5 +316,36 @@ func TestProjectHandler_FullLifecycle(t *testing.T) {
 		connect.NewRequest(&v1.GetProjectRequest{Id: projectID}))
 	if err == nil {
 		t.Error("expected error after delete")
+	}
+}
+
+func TestProjectHandler_ListAPIKeys_PermissionDenied(t *testing.T) {
+	store := newMockProjectStore()
+	users := &mockUserStoreForCatalog{
+		users: map[string]*storage.UserRecord{
+			"member@example.com": {
+				ID:    "member@example.com",
+				Email: "member@example.com",
+				Role:  storage.RoleDeveloper,
+			},
+		},
+	}
+	handler := NewProjectHandler(store, users)
+
+	ctx := auth.NewContext(context.Background(), &auth.User{
+		ID:    "member@example.com",
+		Email: "member@example.com",
+	})
+
+	_, err := handler.ListAPIKeys(ctx, connect.NewRequest(&v1.ListAPIKeysRequest{ProjectId: "p1"}))
+	if err == nil {
+		t.Fatal("expected error for non-admin user listing API keys")
+	}
+	connectErr, ok := err.(*connect.Error)
+	if !ok {
+		t.Fatalf("expected *connect.Error, got %T", err)
+	}
+	if connectErr.Code() != connect.CodePermissionDenied {
+		t.Errorf("expected CodePermissionDenied, got %v", connectErr.Code())
 	}
 }

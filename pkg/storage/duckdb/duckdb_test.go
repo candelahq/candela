@@ -3,6 +3,7 @@ package duckdb
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"testing"
 	"time"
 
@@ -19,6 +20,7 @@ func newTestStore(t *testing.T) *Store {
 	if err != nil {
 		t.Fatalf("opening duckdb: %v", err)
 	}
+	db.SetMaxOpenConns(1)
 	s := &Store{db: db}
 	if err := s.migrate(); err != nil {
 		t.Fatalf("migrating: %v", err)
@@ -61,6 +63,19 @@ func TestNew_InMemory(t *testing.T) {
 	store := newTestStore(t)
 	if err := store.Ping(context.Background()); err != nil {
 		t.Fatalf("ping failed: %v", err)
+	}
+}
+
+func TestNew_MaxOpenConns(t *testing.T) {
+	store, err := New(Config{Path: t.TempDir() + "/candela.duckdb"})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	defer func() { _ = store.Close() }()
+
+	stats := store.db.Stats()
+	if stats.MaxOpenConnections != 1 {
+		t.Errorf("expected MaxOpenConnections 1, got %d", stats.MaxOpenConnections)
 	}
 }
 
@@ -134,6 +149,61 @@ func TestIngestSpans_Attributes(t *testing.T) {
 	}
 	if got.Attributes["user.tier"] != "premium" {
 		t.Errorf("Attributes[user.tier] = %q, want %q", got.Attributes["user.tier"], "premium")
+	}
+}
+
+func TestGetTrace_UserScoping(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+
+	span := testSpan("span-scoped", "trace-scoped", storage.SpanKindLLM, "gpt-4o")
+	span.UserID = "alice"
+
+	if err := store.IngestSpans(ctx, []storage.Span{span}); err != nil {
+		t.Fatalf("ingest: %v", err)
+	}
+
+	// 1. Matching user scope succeeds
+	aliceCtx := storage.WithUserScope(ctx, "alice")
+	trace, err := store.GetTrace(aliceCtx, "trace-scoped")
+	if err != nil {
+		t.Fatalf("expected trace for alice, got error: %v", err)
+	}
+	if len(trace.Spans) != 1 {
+		t.Fatalf("expected 1 span, got %d", len(trace.Spans))
+	}
+
+	// 2. Unscoped context succeeds (admin / backend query)
+	traceUnscoped, err := store.GetTrace(ctx, "trace-scoped")
+	if err != nil {
+		t.Fatalf("expected trace for unscoped query, got error: %v", err)
+	}
+	if len(traceUnscoped.Spans) != 1 {
+		t.Fatalf("expected 1 span, got %d", len(traceUnscoped.Spans))
+	}
+
+	// 3. Different user scope returns ErrNotFound (cross-user data isolation)
+	bobCtx := storage.WithUserScope(ctx, "bob")
+	_, err = store.GetTrace(bobCtx, "trace-scoped")
+	if err == nil {
+		t.Fatal("expected error for bob accessing alice's trace")
+	}
+	if !errors.Is(err, storage.ErrNotFound) {
+		t.Fatalf("expected ErrNotFound, got %v", err)
+	}
+
+	// 4. Legacy trace with empty UserID is retrievable by scoped caller
+	legacySpan := testSpan("span-legacy", "trace-legacy", storage.SpanKindLLM, "gpt-4o")
+	legacySpan.UserID = ""
+	if err := store.IngestSpans(ctx, []storage.Span{legacySpan}); err != nil {
+		t.Fatalf("ingest legacy: %v", err)
+	}
+	traceLegacy, err := store.GetTrace(aliceCtx, "trace-legacy")
+	if err != nil {
+		t.Fatalf("expected legacy trace to be retrievable by scoped caller, got error: %v", err)
+	}
+	if len(traceLegacy.Spans) != 1 {
+		t.Fatalf("expected 1 span in legacy trace, got %d", len(traceLegacy.Spans))
 	}
 }
 

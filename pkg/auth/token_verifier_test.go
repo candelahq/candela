@@ -81,8 +81,11 @@ func TestTokenVerifier_ValidFirebaseToken(t *testing.T) {
 		verifyFunc: func(_ context.Context, token string) (*fbauth.Token, error) {
 			if token == "valid-firebase-token" {
 				return &fbauth.Token{
-					UID:    "firebase-uid-123",
-					Claims: map[string]interface{}{"email": "user@example.com"},
+					UID: "firebase-uid-123",
+					Claims: map[string]interface{}{
+						"email":          "user@example.com",
+						"email_verified": true,
+					},
 				}, nil
 			}
 			return nil, fmt.Errorf("invalid token")
@@ -159,8 +162,11 @@ func TestTokenVerifier_ValidToken_UnregisteredUser_Returns403(t *testing.T) {
 	verifier := &mockTokenVerifier{
 		verifyFunc: func(_ context.Context, _ string) (*fbauth.Token, error) {
 			return &fbauth.Token{
-				UID:    "uid-unknown",
-				Claims: map[string]interface{}{"email": "unknown@example.com"},
+				UID: "uid-unknown",
+				Claims: map[string]interface{}{
+					"email":          "unknown@example.com",
+					"email_verified": true,
+				},
 			}, nil
 		},
 	}
@@ -182,8 +188,11 @@ func TestTokenVerifier_ValidToken_RegisteredUser_Returns200(t *testing.T) {
 	verifier := &mockTokenVerifier{
 		verifyFunc: func(_ context.Context, _ string) (*fbauth.Token, error) {
 			return &fbauth.Token{
-				UID:    "uid-registered",
-				Claims: map[string]interface{}{"email": "registered@example.com"},
+				UID: "uid-registered",
+				Claims: map[string]interface{}{
+					"email":          "registered@example.com",
+					"email_verified": true,
+				},
 			}, nil
 		},
 	}
@@ -208,8 +217,11 @@ func TestTokenVerifier_SelfServicePath_BypassesRegistration(t *testing.T) {
 	verifier := &mockTokenVerifier{
 		verifyFunc: func(_ context.Context, _ string) (*fbauth.Token, error) {
 			return &fbauth.Token{
-				UID:    "uid-new",
-				Claims: map[string]interface{}{"email": "newuser@example.com"},
+				UID: "uid-new",
+				Claims: map[string]interface{}{
+					"email":          "newuser@example.com",
+					"email_verified": true,
+				},
 			}, nil
 		},
 	}
@@ -327,8 +339,11 @@ func TestTokenVerifier_EmailNormalization(t *testing.T) {
 	verifier := &mockTokenVerifier{
 		verifyFunc: func(_ context.Context, _ string) (*fbauth.Token, error) {
 			return &fbauth.Token{
-				UID:    "uid-mixed",
-				Claims: map[string]interface{}{"email": "Admin@Example.COM"},
+				UID: "uid-mixed",
+				Claims: map[string]interface{}{
+					"email":          "Admin@Example.COM",
+					"email_verified": true,
+				},
 			}, nil
 		},
 	}
@@ -342,5 +357,27 @@ func TestTokenVerifier_EmailNormalization(t *testing.T) {
 	}
 	if !strings.Contains(body, `"email":"admin@example.com"`) {
 		t.Errorf("email not normalized to lowercase: %s", body)
+	}
+}
+
+func TestTokenVerifier_UnverifiedEmail_Returns401(t *testing.T) {
+	verifier := &mockTokenVerifier{
+		verifyFunc: func(_ context.Context, _ string) (*fbauth.Token, error) {
+			return &fbauth.Token{
+				UID: "uid-unverified",
+				Claims: map[string]interface{}{
+					"email":          "unverified@example.com",
+					"email_verified": false,
+				},
+			}, nil
+		},
+	}
+
+	srv := newTestMiddleware(t, verifier, nil, nil)
+	defer srv.Close()
+
+	status, _ := doRequest(t, srv.URL, "token-unverified")
+	if status != 401 {
+		t.Fatalf("status = %d, want 401 (unverified email)", status)
 	}
 }

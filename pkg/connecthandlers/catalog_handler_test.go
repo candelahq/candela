@@ -529,6 +529,38 @@ func TestCatalogHandler_DeleteNonExistent(t *testing.T) {
 	}
 }
 
+// TestCatalogHandler_Delete_Validation verifies that empty provider or model ID returns CodeInvalidArgument.
+func TestCatalogHandler_Delete_Validation(t *testing.T) {
+	store := newMockWritableCatalogStore(testCatalogEntries)
+	handler := NewCatalogHandler(store, nil)
+
+	tests := []struct {
+		name     string
+		provider string
+		modelID  string
+	}{
+		{"empty provider", "", "gemini-2.5-pro"},
+		{"empty model_id", "google", ""},
+		{"whitespace only", "   ", "   "},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := handler.DeleteModelCatalogEntry(context.Background(),
+				connect.NewRequest(&v1.DeleteModelCatalogEntryRequest{
+					Provider: tt.provider,
+					ModelId:  tt.modelID,
+				}))
+			if err == nil {
+				t.Fatal("expected error for empty field")
+			}
+			if connect.CodeOf(err) != connect.CodeInvalidArgument {
+				t.Errorf("got code %v, want CodeInvalidArgument", connect.CodeOf(err))
+			}
+		})
+	}
+}
+
 // TestCatalogHandler_DeleteNonAdmin verifies non-admin callers are denied delete.
 func TestCatalogHandler_DeleteNonAdmin(t *testing.T) {
 	store := newMockWritableCatalogStore(testCatalogEntries)

@@ -226,3 +226,38 @@ func TestSQLite_ConcurrentPruneAndWrite(t *testing.T) {
 		assert.NoError(t, err, "Concurrent operation failed")
 	}
 }
+
+func TestSQLite_Prune_CanceledContextRollback(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	now := time.Now().UTC()
+	spans := []storage.Span{
+		{
+			SpanID:    "span-rb-1",
+			TraceID:   "trace-rb-1",
+			Name:      "test.span1",
+			StartTime: now,
+		},
+		{
+			SpanID:    "span-rb-2",
+			TraceID:   "trace-rb-2",
+			Name:      "test.span2",
+			StartTime: now.Add(time.Second),
+		},
+	}
+	require.NoError(t, s.IngestSpans(ctx, spans))
+
+	// Pre-canceled context must cause transaction to fail and rollback
+	canceledCtx, cancel := context.WithCancel(ctx)
+	cancel()
+
+	err := s.PruneLocalSpans(canceledCtx, 1)
+	assert.Error(t, err)
+
+	// Both traces must still exist due to atomic rollback
+	_, err = s.GetTrace(ctx, "trace-rb-1")
+	assert.NoError(t, err)
+	_, err = s.GetTrace(ctx, "trace-rb-2")
+	assert.NoError(t, err)
+}

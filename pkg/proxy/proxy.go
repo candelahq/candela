@@ -1850,12 +1850,26 @@ func (p *Proxy) handleStandardResponse(
 	// --- Response translation ---
 	// Translate response back to client format if provider has a FormatTranslator.
 	clientBody := respBody
+	var translationFailed bool
 	if provider.FormatTranslator != nil && resp.StatusCode == http.StatusOK {
 		model, _ := extractRequestInfo(provider.Name, reqBody)
 		translated, transErr := provider.FormatTranslator.TranslateResponse(respBody, model)
 		if transErr != nil {
-			slog.Error("response translation failed", "provider", provider.Name, "error", transErr)
-			// Fall through with untranslated body rather than failing.
+			slog.Error("response translation failed",
+				"provider", provider.Name,
+				"model", model,
+				"error", transErr,
+				"raw_response", string(respBody),
+			)
+			translationFailed = true
+			errBytes, _ := json.Marshal(openAIErrorResponse{
+				Error: openAIErrorDetail{
+					Message: fmt.Sprintf("failed to translate upstream response: %v", transErr),
+					Type:    "bad_gateway",
+					Code:    "502",
+				},
+			})
+			clientBody = errBytes
 		} else {
 			clientBody = translated
 		}
@@ -1872,11 +1886,16 @@ func (p *Proxy) handleStandardResponse(
 			w.Header().Add(k, v)
 		}
 	}
-	// Fix content-length if we translated.
+	statusCode := resp.StatusCode
+	if translationFailed {
+		statusCode = http.StatusBadGateway
+		w.Header().Set("Content-Type", "application/json")
+	}
+	// Fix content-length if we translated or errored on translation.
 	if provider.FormatTranslator != nil && resp.StatusCode == http.StatusOK {
 		w.Header().Set("Content-Length", fmt.Sprintf("%d", len(clientBody)))
 	}
-	w.WriteHeader(resp.StatusCode)
+	w.WriteHeader(statusCode)
 	_, _ = w.Write(clientBody)
 
 	// ── Budget deduction (SYNCHRONOUS) ──

@@ -130,6 +130,10 @@ type Config struct {
 		ProjectID  string `yaml:"project_id"`
 		DatabaseID string `yaml:"database_id"` // e.g. "candela" or "(default)"
 	} `yaml:"firestore"`
+	UserStore struct {
+		Backend string `yaml:"backend"` // "firestore", "sqlite", "none" (default: "sqlite" when not firestore)
+		Path    string `yaml:"path"`    // SQLite path (default: "candela-users.db")
+	} `yaml:"user_store"`
 	Pricing costcalc.PricingConfig `yaml:"pricing"`
 	Users   struct {
 		DefaultDailyBudgetUSD float64 `yaml:"default_daily_budget_usd"` // auto-assigned to new users (0 = no default)
@@ -529,7 +533,7 @@ func main() {
 
 	// Register ConnectRPC service handlers.
 
-	// Initialize Firestore-backed UserStore (if enabled).
+	// Initialize UserStore (Firestore or SQLite).
 	// Needed by trace/dashboard handlers for user-scoped access control,
 	// and by UserService for user management.
 	if cfg.Firestore.Enabled {
@@ -553,7 +557,35 @@ func main() {
 
 		defer func() { _ = fStore.Close() }()
 		userStore = fStore
+	} else if cfg.UserStore.Backend == "sqlite" || os.Getenv("CANDELA_USER_BACKEND") == "sqlite" || (cfg.UserStore.Backend != "none" && os.Getenv("CANDELA_USER_BACKEND") != "none") {
+		userDbPath := cfg.UserStore.Path
+		if userDbPath == "" {
+			if cfg.Storage.SQLite.Path != "" {
+				userDbPath = cfg.Storage.SQLite.Path
+			} else {
+				userDbPath = "candela-users.db"
+			}
+		}
+		sqStore, err := sqlitestore.NewUserStore(userDbPath)
+		if err != nil {
+			slog.Error("failed to initialize SQLite user store", "error", err, "path", userDbPath)
+			os.Exit(1)
+		}
+		if cfg.Budget.Timezone != "" {
+			loc, err := time.LoadLocation(cfg.Budget.Timezone)
+			if err != nil {
+				slog.Error("invalid budget timezone", "timezone", cfg.Budget.Timezone, "error", err)
+				os.Exit(1)
+			}
+			sqStore.SetBudgetLocation(loc)
+			slog.Info("budget timezone configured", "timezone", cfg.Budget.Timezone)
+		}
+		defer func() { _ = sqStore.Close() }()
+		userStore = sqStore
+		slog.Info("SQLite UserStore initialized", "path", userDbPath)
+	}
 
+	if userStore != nil {
 		// Create protovalidate interceptor (validates request fields before handler).
 		validateInterceptor := validate.NewInterceptor()
 
@@ -562,14 +594,14 @@ func main() {
 		auditInterceptor := audit.Interceptor(auditLogger, audit.DefaultMutationProcedures)
 
 		userPath, userH := candelav1connect.NewUserServiceHandler(
-			connecthandlers.NewUserHandler(fStore, cfg.Users.DefaultDailyBudgetUSD),
-			connect.WithInterceptors(validateInterceptor, auth.AdminInterceptor(fStore), auditInterceptor))
+			connecthandlers.NewUserHandler(userStore, cfg.Users.DefaultDailyBudgetUSD),
+			connect.WithInterceptors(validateInterceptor, auth.AdminInterceptor(userStore), auditInterceptor))
 		mux.Handle(userPath, userH)
 		slog.Info("UserService registered", "path", userPath,
 			"admin_guard", true, "validation", true, "audit", true,
 			"default_daily_budget", cfg.Users.DefaultDailyBudgetUSD)
 	} else {
-		slog.Info("Firestore disabled — UserService not available, all users see all traces")
+		slog.Info("UserStore disabled — UserService not available, all users see all traces")
 	}
 
 	tracePath, traceH := candelav1connect.NewTraceServiceHandler(

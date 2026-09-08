@@ -163,18 +163,26 @@ describe("useTodayBudget", () => {
   });
 
   it("triggers manual refresh when refresh() is called", async () => {
-    mockGetMyUsage.mockResolvedValue(mockUsageResponse());
-    mockGetMyBudget.mockResolvedValue(mockBudgetResponse());
+    mockGetMyUsage.mockResolvedValueOnce(mockUsageResponse({ totalCostUsd: 1.25 }));
+    mockGetMyBudget.mockResolvedValueOnce(mockBudgetResponse({ budget: { limitUsd: 20, spentUsd: 5.5, periodType: 1 } }));
 
     const { result } = renderHook(() => useTodayBudget());
 
     await waitFor(() => expect(result.current.loading).toBe(false));
     expect(mockGetMyUsage).toHaveBeenCalledTimes(1);
+    expect(mockGetMyBudget).toHaveBeenCalledTimes(1);
+    expect(result.current.data?.budget?.limitUsd).toBe(20);
+
+    mockGetMyUsage.mockResolvedValueOnce(mockUsageResponse({ totalCostUsd: 3.50 }));
+    mockGetMyBudget.mockResolvedValueOnce(mockBudgetResponse({ budget: { limitUsd: 50, spentUsd: 12.0, periodType: 1 } }));
 
     act(() => {
       result.current.refresh();
     });
 
     await waitFor(() => expect(mockGetMyUsage).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(mockGetMyBudget).toHaveBeenCalledTimes(2));
+    expect(result.current.data?.totalCostUsd).toBe(3.50);
+    expect(result.current.data?.budget?.limitUsd).toBe(50);
   });
 });

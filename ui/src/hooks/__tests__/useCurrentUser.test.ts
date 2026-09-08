@@ -20,13 +20,22 @@ describe("useCurrentUser", () => {
     vi.restoreAllMocks();
   });
 
-  it("returns initial loading state", () => {
-    mockGetCurrentUser.mockReturnValue(new Promise(() => {}));
-    const { result } = renderHook(() => useCurrentUser());
+  it("returns initial loading state and aborts pending RPC on unmount", () => {
+    let capturedSignal: AbortSignal | undefined;
+    mockGetCurrentUser.mockImplementation((_req: unknown, options?: { signal?: AbortSignal }) => {
+      capturedSignal = options?.signal;
+      return new Promise(() => {});
+    });
+    const { result, unmount } = renderHook(() => useCurrentUser());
 
     expect(result.current.isLoading).toBe(true);
     expect(result.current.user).toBeNull();
     expect(result.current.error).toBeNull();
+    expect(capturedSignal).toBeDefined();
+    expect(capturedSignal?.aborted).toBe(false);
+
+    unmount();
+    expect(capturedSignal?.aborted).toBe(true);
   });
 
   it("successfully resolves developer user", async () => {

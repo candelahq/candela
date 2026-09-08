@@ -222,7 +222,7 @@ func TestDuckDB_ConcurrentPruneAndWrite(t *testing.T) {
 	}
 }
 
-func TestDuckDB_Prune_CanceledContextRollback(t *testing.T) {
+func TestDuckDB_Prune_AtomicRollback(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
 
@@ -243,14 +243,20 @@ func TestDuckDB_Prune_CanceledContextRollback(t *testing.T) {
 	}
 	require.NoError(t, s.IngestSpans(ctx, spans))
 
-	// Pre-canceled context must cause transaction to fail and rollback
-	canceledCtx, cancel := context.WithCancel(ctx)
-	cancel()
+	// Verify outbox has 2 spans before prune
+	outboxBefore, err := s.GetOutboxSpans(ctx, 10)
+	require.NoError(t, err)
+	require.Len(t, outboxBefore, 2)
 
-	err := s.PruneLocalSpans(canceledCtx, 1)
+	// Deterministic failure: drop outbox_spans so the second statement fails
+	// after the first statement (DELETE FROM spans) has already executed in the tx.
+	_, err = s.db.ExecContext(ctx, "DROP TABLE outbox_spans")
+	require.NoError(t, err)
+
+	err = s.PruneLocalSpans(ctx, 1)
 	assert.Error(t, err)
 
-	// Both traces must still exist due to atomic rollback
+	// Both traces in spans must still exist due to atomic transaction rollback
 	_, err = s.GetTrace(ctx, "trace-rb-1")
 	assert.NoError(t, err)
 	_, err = s.GetTrace(ctx, "trace-rb-2")

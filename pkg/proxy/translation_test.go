@@ -31,9 +31,10 @@ func (m *mockFailingTranslator) TranslateStreamChunk(chunk []byte, model string,
 }
 
 func TestResponseTranslationFailureReturns502(t *testing.T) {
-	// Upstream returns 200 OK with some arbitrary body
+	// Upstream returns 200 OK with content encoding and some arbitrary body
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Content-Encoding", "deflate")
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(`{"unexpected":"format"}`))
 	}))
@@ -92,6 +93,11 @@ func TestResponseTranslationFailureReturns502(t *testing.T) {
 	// Content-Type must be application/json
 	if ct := resp.Header.Get("Content-Type"); ct != "application/json" {
 		t.Errorf("Content-Type = %q, want application/json", ct)
+	}
+
+	// Content-Encoding must be stripped so clients do not fail decompressing plain JSON
+	if ce := resp.Header.Get("Content-Encoding"); ce != "" {
+		t.Errorf("Content-Encoding = %q, want empty (stripped on error)", ce)
 	}
 
 	// Body must be OpenAI-compatible error

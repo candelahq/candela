@@ -1855,11 +1855,19 @@ func (p *Proxy) handleStandardResponse(
 		model, _ := extractRequestInfo(provider.Name, reqBody)
 		translated, transErr := provider.FormatTranslator.TranslateResponse(respBody, model)
 		if transErr != nil {
+			rawLen := len(respBody)
+			var rawPreview string
+			if rawLen > 256 {
+				rawPreview = string(respBody[:256]) + "... [truncated]"
+			} else {
+				rawPreview = string(respBody)
+			}
 			slog.Error("response translation failed",
 				"provider", provider.Name,
 				"model", model,
 				"error", transErr,
-				"raw_response", string(respBody),
+				"raw_len", rawLen,
+				"raw_preview", rawPreview,
 			)
 			translationFailed = true
 			errBytes, _ := json.Marshal(openAIErrorResponse{
@@ -1889,6 +1897,7 @@ func (p *Proxy) handleStandardResponse(
 	statusCode := resp.StatusCode
 	if translationFailed {
 		statusCode = http.StatusBadGateway
+		w.Header().Del("Content-Encoding")
 		w.Header().Set("Content-Type", "application/json")
 	}
 	// Fix content-length if we translated or errored on translation.

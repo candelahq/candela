@@ -3,8 +3,20 @@ run:
   timeout: 5m
   modules-download-mode: readonly
 linters:
+  enable:
+    - depguard
   exclusions:
     paths:
       - scratch
       - ui/node_modules
       - gen
+  settings:
+    depguard:
+      rules:
+        prevent_deprecated_protobuf:
+          list-mode: lax
+          files:
+            - "$all"
+          deny:
+            - pkg: "github.com/golang/protobuf"
+              desc: "use google.golang.org/protobuf instead of deprecated github.com/golang/protobuf"

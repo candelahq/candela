@@ -149,8 +149,10 @@ export type ModelCatalogEntry = Message<"candela.types.ModelCatalogEntry"> & {
   /**
    * Access tags required to use this model.
    * Empty = open to all users (default).
-   * Non-empty = user must have at least one matching tag in their
-   * access_tags field. Examples: ["pro"], ["preview"]
+   * Non-empty = model is restricted; a user must possess at least one matching
+   * tag in their access_tags field to access this model (users with empty
+   * access_tags have default access and can only access models with empty
+   * required_access). Examples: ["pro"], ["preview"].
    * Admin-managed via UpdateModelCatalogEntry.
    *
    * @generated from field: repeated string required_access = 18;

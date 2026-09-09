@@ -1,8 +1,11 @@
 package firestoredb
 
 import (
+	"context"
 	"testing"
 	"time"
+
+	"go.uber.org/goleak"
 )
 
 func TestRateLimitCache_MissReturnsZeroFalse(t *testing.T) {
@@ -91,4 +94,54 @@ func TestRateLimitCache_OverwriteUpdatesExpiry(t *testing.T) {
 		t.Errorf("overwrite: got limit=%d ok=%v, want limit=10 ok=true", limit, ok)
 	}
 	evictRateLimitCache(key)
+}
+
+func TestRateLimitSweeper_Lifecycle(t *testing.T) {
+	defer goleak.VerifyNone(t)
+
+	// Start sweeper with background context
+	StartRateLimitSweeper(context.Background(), 10*time.Millisecond)
+
+	// Stop sweeper and verify clean shutdown
+	StopRateLimitSweeper()
+
+	// Idempotent stop
+	StopRateLimitSweeper()
+	Stop()
+}
+
+func TestRateLimitSweeper_ContextCancellation(t *testing.T) {
+	defer goleak.VerifyNone(t)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	StartRateLimitSweeper(ctx, 10*time.Millisecond)
+
+	// Cancel context to trigger shutdown
+	cancel()
+
+	// Wait for sweeper to terminate
+	StopRateLimitSweeper()
+}
+
+func TestRateLimitSweeper_PeriodicSweep(t *testing.T) {
+	defer goleak.VerifyNone(t)
+
+	expiredKey := "auto-sweep-expired@example.com"
+	rateLimitValueCache.mu.Lock()
+	rateLimitValueCache.entries[expiredKey] = rlCacheEntry{
+		limit:     50,
+		expiresAt: time.Now().Add(-10 * time.Millisecond),
+	}
+	rateLimitValueCache.mu.Unlock()
+
+	// Start with short interval
+	StartRateLimitSweeper(context.Background(), 20*time.Millisecond)
+	defer StopRateLimitSweeper()
+
+	// Allow background sweeper to run at least one tick
+	time.Sleep(60 * time.Millisecond)
+
+	if _, ok := getCachedRateLimit(expiredKey); ok {
+		t.Errorf("expected expired key %q to be swept by background goroutine, but it was found", expiredKey)
+	}
 }

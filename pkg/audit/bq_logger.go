@@ -11,7 +11,10 @@ import (
 	"google.golang.org/api/googleapi"
 )
 
-const bqTableName = "admin_audit_log"
+const (
+	bqTableName         = "admin_audit_log"
+	defaultBQBufferSize = 256
+)
 
 // bqRow is the BigQuery row schema for audit events.
 type bqRow struct {
@@ -38,8 +41,16 @@ type BQLogger struct {
 
 // BQConfig holds BigQuery audit logger configuration.
 type BQConfig struct {
-	ProjectID string
-	Dataset   string
+	ProjectID  string
+	Dataset    string
+	BufferSize int
+}
+
+func bqBufferSize(cfg BQConfig) int {
+	if cfg.BufferSize > 0 {
+		return cfg.BufferSize
+	}
+	return defaultBQBufferSize
 }
 
 // NewBQLogger creates a BigQuery audit logger with an async write loop.
@@ -54,7 +65,7 @@ func NewBQLogger(ctx context.Context, cfg BQConfig) (*BQLogger, error) {
 	l := &BQLogger{
 		client:   client,
 		inserter: table.Inserter(),
-		events:   make(chan bqRow, 256),
+		events:   make(chan bqRow, bqBufferSize(cfg)),
 		done:     make(chan struct{}),
 	}
 	go l.writeLoop()

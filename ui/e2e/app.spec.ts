@@ -760,7 +760,7 @@ test.describe("Trace Pagination", () => {
     });
 
     await page.goto("/traces");
-    await expect(page.getByRole("button", { name: /next/i })).toBeEnabled();
+    await expect(page.getByRole("button", { name: /^next/i })).toBeEnabled();
     await expect(page.getByRole("button", { name: /previous/i })).toBeDisabled();
   });
 

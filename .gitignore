@@ -37,6 +37,7 @@ Thumbs.db
 .env.local
 .env.*.local
 config.yaml
+/users.json
 deploy/config.production.yaml
 deploy/candela.production.yaml
 !config.example.yaml

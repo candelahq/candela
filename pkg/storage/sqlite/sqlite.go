@@ -914,23 +914,36 @@ func (s *Store) IncrementOutboxAttempt(ctx context.Context, spanIDs []string) er
 }
 
 func (s *Store) PruneLocalSpans(ctx context.Context, keepCount int) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("beginning prune transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
 	// Prune main observability table
-	_, err := s.db.ExecContext(ctx, `
+	_, err = tx.ExecContext(ctx, `
 		DELETE FROM spans
 		WHERE span_id NOT IN (
 			SELECT span_id FROM spans ORDER BY start_time DESC LIMIT ?
 		)`, keepCount)
 	if err != nil {
-		return err
+		return fmt.Errorf("pruning spans: %w", err)
 	}
 
 	// Prune offline sync outbox queue
-	_, err = s.db.ExecContext(ctx, `
+	_, err = tx.ExecContext(ctx, `
 		DELETE FROM outbox_spans
 		WHERE span_id NOT IN (
 			SELECT span_id FROM outbox_spans ORDER BY created_at DESC LIMIT ?
 		)`, keepCount)
-	return err
+	if err != nil {
+		return fmt.Errorf("pruning outbox_spans: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("committing prune transaction: %w", err)
+	}
+	return nil
 }
 
 // isDuplicateColumn returns true if the error is a "duplicate column" error

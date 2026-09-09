@@ -226,3 +226,44 @@ func TestSQLite_ConcurrentPruneAndWrite(t *testing.T) {
 		assert.NoError(t, err, "Concurrent operation failed")
 	}
 }
+
+func TestSQLite_Prune_AtomicRollback(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	now := time.Now().UTC()
+	spans := []storage.Span{
+		{
+			SpanID:    "span-rb-1",
+			TraceID:   "trace-rb-1",
+			Name:      "test.span1",
+			StartTime: now,
+		},
+		{
+			SpanID:    "span-rb-2",
+			TraceID:   "trace-rb-2",
+			Name:      "test.span2",
+			StartTime: now.Add(time.Second),
+		},
+	}
+	require.NoError(t, s.IngestSpans(ctx, spans))
+
+	// Verify outbox has 2 spans before prune
+	outboxBefore, err := s.GetOutboxSpans(ctx, 10)
+	require.NoError(t, err)
+	require.Len(t, outboxBefore, 2)
+
+	// Deterministic failure: drop outbox_spans so the second statement fails
+	// after the first statement (DELETE FROM spans) has already executed in the tx.
+	_, err = s.db.ExecContext(ctx, "DROP TABLE outbox_spans")
+	require.NoError(t, err)
+
+	err = s.PruneLocalSpans(ctx, 1)
+	assert.Error(t, err)
+
+	// Both traces in spans must still exist due to atomic transaction rollback
+	_, err = s.GetTrace(ctx, "trace-rb-1")
+	assert.NoError(t, err)
+	_, err = s.GetTrace(ctx, "trace-rb-2")
+	assert.NoError(t, err)
+}

@@ -557,7 +557,7 @@ func main() {
 
 		defer func() { _ = fStore.Close() }()
 		userStore = fStore
-	} else if cfg.UserStore.Backend == "sqlite" || os.Getenv("CANDELA_USER_BACKEND") == "sqlite" || (cfg.UserStore.Backend != "none" && os.Getenv("CANDELA_USER_BACKEND") != "none") {
+	} else if cfg.UserStore.Backend == "sqlite" || os.Getenv("CANDELA_USER_BACKEND") == "sqlite" {
 		userDbPath := cfg.UserStore.Path
 		if userDbPath == "" {
 			if cfg.Storage.SQLite.Path != "" {

@@ -690,8 +690,7 @@ func (s *UserStore) GetBudget(ctx context.Context, userID string) (*storage.Budg
 	var pStart, pEnd sql.NullString
 
 	spendErr := s.db.QueryRowContext(ctx,
-		`SELECT limit_usd, spent_usd, tokens_used, all_tokens_used, period_start, period_end
-		 FROM user_budgets WHERE user_id = ? AND period_key = ?`,
+		`SELECT limit_usd, spent_usd, tokens_used, all_tokens_used, period_start, period_end FROM user_budgets WHERE user_id = ? AND period_key = ?`,
 		userID, periodKey,
 	).Scan(&b.LimitUSD, &spentUSD, &tokensUsed, &allTokensUsed, &pStart, &pEnd)
 
@@ -1131,10 +1130,7 @@ func (s *UserStore) DeductSpend(ctx context.Context, userID string, costUSD floa
 
 	// 2. Read active grants (ordered by earliest expiry)
 	grantsRows, err := tx.QueryContext(txCtx,
-		`SELECT id, amount_usd, spent_usd, starts_at, expires_at
-		 FROM user_grants
-		 WHERE user_id = ? AND expires_at > ? AND spent_usd < amount_usd
-		 ORDER BY expires_at ASC`,
+		`SELECT id, amount_usd, spent_usd, starts_at, expires_at FROM user_grants WHERE user_id = ? AND expires_at > ? AND spent_usd < amount_usd ORDER BY expires_at ASC`,
 		userID, formatTime(now.UTC()),
 	)
 	if err != nil {

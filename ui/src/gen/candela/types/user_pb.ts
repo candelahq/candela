@@ -80,9 +80,9 @@ export type User = Message<"candela.types.User"> & {
    * Access tags controlling which models this user can use.
    * Freeform strings — admin-defined, no predefined set required.
    * Examples: ["pro"], ["preview"], ["pro", "preview"]
-   * Empty = unrestricted (backward-compatible default).
-   * A user can access a model if they have ANY tag listed in the
-   * model's required_access field.
+   * Empty = default access (can access all models with empty required_access).
+   * When a model specifies required_access, a user must have at least one
+   * matching tag in access_tags to access it.
    *
    * @generated from field: repeated string access_tags = 10;
    */

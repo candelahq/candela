@@ -60,17 +60,77 @@ var rateLimitValueCache struct {
 	entries map[string]rlCacheEntry
 }
 
+var (
+	rateLimitSweeperCancel context.CancelFunc
+	rateLimitSweeperDone   chan struct{}
+	rateLimitSweeperMu     sync.Mutex
+)
+
 func init() {
 	rateLimitValueCache.entries = make(map[string]rlCacheEntry)
-	// CRIT-10: sweep expired entries on a background goroutine to prevent
-	// unbounded map growth in environments with high user-ID churn.
+}
+
+// StartRateLimitSweeper starts a background goroutine to periodically sweep
+// expired entries from rateLimitValueCache (#646). If a sweeper is already running,
+// it is stopped before starting a new one.
+// The sweeper stops when ctx is done or when StopRateLimitSweeper / Stop is called.
+func StartRateLimitSweeper(ctx context.Context, interval ...time.Duration) {
+	rateLimitSweeperMu.Lock()
+	defer rateLimitSweeperMu.Unlock()
+
+	if rateLimitSweeperCancel != nil {
+		rateLimitSweeperCancel()
+		if rateLimitSweeperDone != nil {
+			<-rateLimitSweeperDone
+		}
+		rateLimitSweeperCancel = nil
+		rateLimitSweeperDone = nil
+	}
+
+	sweepInterval := rateLimitCacheTTL
+	if len(interval) > 0 && interval[0] > 0 {
+		sweepInterval = interval[0]
+	}
+
+	sweepCtx, cancel := context.WithCancel(ctx)
+	done := make(chan struct{})
+	rateLimitSweeperCancel = cancel
+	rateLimitSweeperDone = done
+
 	go func() {
-		ticker := time.NewTicker(rateLimitCacheTTL)
+		defer close(done)
+		ticker := time.NewTicker(sweepInterval)
 		defer ticker.Stop()
-		for range ticker.C {
-			sweepRateLimitCache()
+		for {
+			select {
+			case <-sweepCtx.Done():
+				return
+			case <-ticker.C:
+				sweepRateLimitCache()
+			}
 		}
 	}()
+}
+
+// StopRateLimitSweeper stops the background rate limit cache sweeper goroutine if running
+// and waits for it to exit (#646).
+func StopRateLimitSweeper() {
+	rateLimitSweeperMu.Lock()
+	defer rateLimitSweeperMu.Unlock()
+
+	if rateLimitSweeperCancel != nil {
+		rateLimitSweeperCancel()
+		if rateLimitSweeperDone != nil {
+			<-rateLimitSweeperDone
+		}
+		rateLimitSweeperCancel = nil
+		rateLimitSweeperDone = nil
+	}
+}
+
+// Stop stops the background sweeper goroutine. Alias for StopRateLimitSweeper (#646).
+func Stop() {
+	StopRateLimitSweeper()
 }
 
 type rlCacheEntry struct {
@@ -125,11 +185,13 @@ func New(ctx context.Context, projectID, databaseID string) (*Store, error) {
 	if err != nil {
 		return nil, fmt.Errorf("firestoredb: creating client: %w", err)
 	}
+	StartRateLimitSweeper(ctx)
 	return &Store{client: client, budgetLocation: time.UTC}, nil
 }
 
 // NewWithClient creates a Store with an existing Firestore client (useful for tests).
 func NewWithClient(client *firestore.Client) *Store {
+	StartRateLimitSweeper(context.Background())
 	return &Store{client: client, budgetLocation: time.UTC}
 }
 
@@ -142,9 +204,15 @@ func (s *Store) SetBudgetLocation(loc *time.Location) {
 	s.budgetLocation = loc
 }
 
-// Close releases Firestore resources.
+// Close releases Firestore resources and stops the rate limit cache sweeper (#646).
 func (s *Store) Close() error {
+	StopRateLimitSweeper()
 	return s.client.Close()
+}
+
+// Stop releases Firestore resources and stops background sweepers (#646).
+func (s *Store) Stop() {
+	_ = s.Close()
 }
 
 // Ping verifies that the Firestore backend is reachable by running a

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/candelahq/candela/pkg/storage"
@@ -17,7 +18,8 @@ import (
 // DuckDB is the default local development backend — zero external dependencies,
 // columnar analytical performance for aggregation queries.
 type Store struct {
-	db *sql.DB
+	db      *sql.DB
+	writeMu sync.Mutex
 }
 
 var _ storage.TraceStore = (*Store)(nil) // satisfies both SpanWriter + SpanReader
@@ -122,6 +124,9 @@ func (s *Store) migrate() error {
 }
 
 func (s *Store) IngestSpans(ctx context.Context, spans []storage.Span) error {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+
 	conn, err := s.db.Conn(ctx)
 	if err != nil {
 		return fmt.Errorf("getting conn for ingest: %w", err)
@@ -882,6 +887,9 @@ func (s *Store) IncrementOutboxAttempt(ctx context.Context, spanIDs []string) er
 }
 
 func (s *Store) PruneLocalSpans(ctx context.Context, keepCount int) error {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("beginning prune transaction: %w", err)

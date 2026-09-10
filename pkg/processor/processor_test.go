@@ -13,14 +13,18 @@ import (
 
 // mockWriter records all spans it receives for assertion.
 type mockWriter struct {
-	mu      sync.Mutex
-	batches [][]storage.Span
-	err     error // if set, IngestSpans returns this error
+	mu                 sync.Mutex
+	batches            [][]storage.Span
+	err                error // if set, IngestSpans returns this error
+	failOnCancelledCtx bool
 }
 
-func (m *mockWriter) IngestSpans(_ context.Context, spans []storage.Span) error {
+func (m *mockWriter) IngestSpans(ctx context.Context, spans []storage.Span) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if m.failOnCancelledCtx && ctx.Err() != nil {
+		return fmt.Errorf("IngestSpans called with cancelled context: %w", ctx.Err())
+	}
 	// Copy the slice to avoid races with batch[:0] reset.
 	cp := make([]storage.Span, len(spans))
 	copy(cp, spans)
@@ -215,7 +219,7 @@ func TestProcessorPreservesUserContext(t *testing.T) {
 }
 
 func TestProcessorShutdown_DrainsWithCancelledContext(t *testing.T) {
-	w := &mockWriter{}
+	w := &mockWriter{failOnCancelledCtx: true}
 
 	calc := costcalc.New()
 	// Large batchSize (100) so Submit won't trigger batch flush.

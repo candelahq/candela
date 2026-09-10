@@ -272,10 +272,24 @@ Run flags:
 	}
 }
 
+// parseConfigFlag extracts the --config path from CLI arguments, if specified.
+func parseConfigFlag(args []string) string {
+	for i, arg := range args {
+		if arg == "--config" && i+1 < len(args) {
+			return args[i+1]
+		}
+		if strings.HasPrefix(arg, "--config=") {
+			return strings.TrimPrefix(arg, "--config=")
+		}
+	}
+	return ""
+}
+
 // cmdStart launches `candela run` as a background process and writes a PID file.
 func cmdStart() {
 	// Validate config file before launching daemon to fail fast on syntax errors.
-	if _, err := loadConfig(""); err != nil {
+	configPath := parseConfigFlag(os.Args[2:])
+	if _, err := loadConfig(configPath); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
 	}
@@ -559,9 +573,15 @@ func cmdStatus() {
 
 // cmdDoctorPortConflicts checks for port conflicts and optionally kills conflicting processes.
 func cmdDoctorPortConflicts(fix bool) {
+	cfg, err := loadConfig("")
+	if err != nil {
+		fmt.Printf("⚠️  Skipping port conflict checks: %v\n", err)
+		return
+	}
+
 	port := resolvePort(os.Args[2:])
 	lmPort := 1234 // default LM Studio compat port
-	if cfg, err := loadConfig(""); err == nil && cfg.LMStudioPort != 0 {
+	if cfg.LMStudioPort != 0 {
 		lmPort = cfg.LMStudioPort
 	}
 
@@ -700,9 +720,15 @@ func resolvePort(args []string) int {
 				return p
 			}
 		}
+		if strings.HasPrefix(arg, "--port=") {
+			if p, err := strconv.Atoi(strings.TrimPrefix(arg, "--port=")); err == nil {
+				return p
+			}
+		}
 	}
 	// Check config file.
-	if cfg, err := loadConfig(""); err == nil && cfg.Port != 0 {
+	configPath := parseConfigFlag(args)
+	if cfg, err := loadConfig(configPath); err == nil && cfg.Port != 0 {
 		return cfg.Port
 	}
 	return 8181

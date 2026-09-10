@@ -849,3 +849,57 @@ func TestQueryTraces_JobIDFilter(t *testing.T) {
 		t.Errorf("trace_id = %q, want trace-job1", result.Traces[0].TraceID)
 	}
 }
+
+func TestQueryTraces_PrimaryModelCumulativeCost(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(time.Microsecond)
+
+	// In a single trace:
+	// Two spans for model-a: 0.06 each = 0.12 total (provider-a)
+	// One span for model-b: 0.10 total (provider-b)
+	// Even though model-b has a single higher-cost span (0.10 > 0.06),
+	// model-a has the highest cumulative cost (0.12 > 0.10) and must win.
+	s1 := testSpan("s1", "trace-cumul", storage.SpanKindLLM, "model-a")
+	s1.GenAI.Provider = "provider-a"
+	s1.GenAI.CostUSD = 0.06
+	s1.StartTime = now.Add(-3 * time.Second)
+	s1.EndTime = now.Add(-2 * time.Second)
+
+	s2 := testSpan("s2", "trace-cumul", storage.SpanKindLLM, "model-a")
+	s2.GenAI.Provider = "provider-a"
+	s2.GenAI.CostUSD = 0.06
+	s2.StartTime = now.Add(-2 * time.Second)
+	s2.EndTime = now.Add(-1 * time.Second)
+
+	s3 := testSpan("s3", "trace-cumul", storage.SpanKindLLM, "model-b")
+	s3.GenAI.Provider = "provider-b"
+	s3.GenAI.CostUSD = 0.10
+	s3.StartTime = now.Add(-1 * time.Second)
+	s3.EndTime = now
+
+	if err := store.IngestSpans(ctx, []storage.Span{s1, s2, s3}); err != nil {
+		t.Fatalf("ingest: %v", err)
+	}
+
+	result, err := store.QueryTraces(ctx, storage.TraceQuery{
+		ProjectID: "proj-test",
+		StartTime: now.Add(-10 * time.Second),
+		EndTime:   now.Add(10 * time.Second),
+		PageSize:  10,
+	})
+	if err != nil {
+		t.Fatalf("query traces: %v", err)
+	}
+
+	if len(result.Traces) != 1 {
+		t.Fatalf("trace count = %d, want 1", len(result.Traces))
+	}
+	tr := result.Traces[0]
+	if tr.PrimaryModel != "model-a" {
+		t.Errorf("primary_model = %q, want model-a (cumulative 0.12 > 0.10)", tr.PrimaryModel)
+	}
+	if tr.PrimaryProvider != "provider-a" {
+		t.Errorf("primary_provider = %q, want provider-a (cumulative 0.12 > 0.10)", tr.PrimaryProvider)
+	}
+}

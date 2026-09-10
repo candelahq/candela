@@ -340,12 +340,18 @@ func (s *Store) QueryTraces(ctx context.Context, q storage.TraceQuery) (*storage
 			COALESCE(SUM(gen_ai_total_tokens), 0)::BIGINT as total_tokens,
 			COALESCE(SUM(gen_ai_cost_usd), 0)::DOUBLE as total_cost,
 			MAX(CASE WHEN parent_span_id = '' THEN name ELSE '' END) as root_name,
-			COALESCE(FIRST(gen_ai_model ORDER BY gen_ai_cost_usd DESC) FILTER (WHERE gen_ai_model != ''), '') as primary_model,
-			COALESCE(FIRST(gen_ai_provider ORDER BY gen_ai_cost_usd DESC) FILTER (WHERE gen_ai_provider != ''), '') as primary_provider,
+			COALESCE(FIRST(gen_ai_model ORDER BY model_cost DESC) FILTER (WHERE gen_ai_model != ''), '') as primary_model,
+			COALESCE(FIRST(gen_ai_provider ORDER BY provider_cost DESC) FILTER (WHERE gen_ai_provider != ''), '') as primary_provider,
 			MAX(CASE WHEN status = 2 THEN 2 ELSE 0 END)::INTEGER as status,
 			MAX(project_id) as project_id
-		FROM spans
-		WHERE `+where+`
+		FROM (
+			SELECT
+				*,
+				SUM(gen_ai_cost_usd) OVER (PARTITION BY trace_id, gen_ai_model) as model_cost,
+				SUM(gen_ai_cost_usd) OVER (PARTITION BY trace_id, gen_ai_provider) as provider_cost
+			FROM spans
+			WHERE `+where+`
+		)
 		GROUP BY trace_id
 		`+having+`
 		ORDER BY `+orderExpr+` `+dir+`, trace_id `+dir+`

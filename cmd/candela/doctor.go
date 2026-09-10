@@ -142,7 +142,11 @@ func cmdDoctorExpanded() {
 	// --fix: kill conflicting processes (existing behavior).
 	if fixMode {
 		fmt.Println()
-		cmdDoctorPortConflicts(true)
+		if _, err := loadConfig(""); err != nil {
+			fmt.Println("⚠️  Cannot fix port conflicts: configuration file has errors.")
+		} else {
+			cmdDoctorPortConflicts(true)
+		}
 	}
 
 	if report.Summary.Fail > 0 {

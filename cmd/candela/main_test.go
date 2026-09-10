@@ -431,3 +431,72 @@ func TestHelperProcess(t *testing.T) {
 		os.Exit(2)
 	}
 }
+
+func TestParseConfigFlag(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{
+			name: "empty args",
+			args: []string{},
+			want: "",
+		},
+		{
+			name: "no config flag",
+			args: []string{"--port", "9090", "--verbose"},
+			want: "",
+		},
+		{
+			name: "space-separated --config",
+			args: []string{"--port", "9090", "--config", "/path/to/candela.yaml"},
+			want: "/path/to/candela.yaml",
+		},
+		{
+			name: "equals-separated --config=",
+			args: []string{"--config=/custom/config.yaml", "--port", "9090"},
+			want: "/custom/config.yaml",
+		},
+		{
+			name: "trailing --config without value",
+			args: []string{"--port", "9090", "--config"},
+			want: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := parseConfigFlag(tt.args)
+			if got != tt.want {
+				t.Errorf("parseConfigFlag(%v) = %q, want %q", tt.args, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestResolvePort_WithConfigFlag(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "custom.yaml")
+	if err := os.WriteFile(cfgPath, []byte("port: 9999\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// 1. Explicit --port wins over --config file.
+	p := resolvePort([]string{"--config", cfgPath, "--port", "7777"})
+	if p != 7777 {
+		t.Errorf("resolvePort = %d, want 7777 (explicit flag wins)", p)
+	}
+
+	// 2. Config port used when --port omitted.
+	p = resolvePort([]string{"--config", cfgPath})
+	if p != 9999 {
+		t.Errorf("resolvePort = %d, want 9999 (from --config)", p)
+	}
+
+	// 3. Config with equals syntax.
+	p = resolvePort([]string{"--config=" + cfgPath})
+	if p != 9999 {
+		t.Errorf("resolvePort = %d, want 9999 (from --config=)", p)
+	}
+}

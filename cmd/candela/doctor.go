@@ -82,8 +82,11 @@ func cmdDoctorExpanded() {
 
 	// 2. Config — resolve path once and use it everywhere.
 	configPath := findConfigPath()
-	cfg := loadConfigFromPath(configPath)
-	checkConfig(report, configPath, cfg)
+	cfg, cfgErr := loadConfigFromPath(configPath)
+	if cfg == nil {
+		cfg = &Config{}
+	}
+	checkConfig(report, configPath, cfg, cfgErr)
 
 	// 3. Cloud Auth
 	checkAuth(report)
@@ -139,7 +142,11 @@ func cmdDoctorExpanded() {
 	// --fix: kill conflicting processes (existing behavior).
 	if fixMode {
 		fmt.Println()
-		cmdDoctorPortConflicts(true)
+		if _, err := loadConfig(""); err != nil {
+			fmt.Println("⚠️  Cannot fix port conflicts: configuration file has errors.")
+		} else {
+			cmdDoctorPortConflicts(true)
+		}
 	}
 
 	if report.Summary.Fail > 0 {
@@ -173,10 +180,14 @@ func checkVersion(r *DoctorReport) {
 	}
 }
 
-func checkConfig(r *DoctorReport, configPath string, cfg *Config) {
+func checkConfig(r *DoctorReport, configPath string, cfg *Config, cfgErr error) {
 	if configPath == "" {
 		r.add("Config file", "warn", "no config file found",
 			"Create ~/.config/candela/config.yaml or set CANDELA_CONFIG")
+		return
+	}
+	if cfgErr != nil {
+		r.add("Config file", "fail", configPath, cfgErr.Error())
 		return
 	}
 
@@ -468,9 +479,9 @@ func findConfigPath() string {
 }
 
 // loadConfigFromPath loads config from a specific path, or returns defaults if empty.
-func loadConfigFromPath(path string) *Config {
+func loadConfigFromPath(path string) (*Config, error) {
 	if path == "" {
-		return &Config{}
+		return &Config{}, nil
 	}
 	return loadConfig(path)
 }

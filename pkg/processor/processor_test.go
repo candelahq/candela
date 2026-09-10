@@ -13,14 +13,18 @@ import (
 
 // mockWriter records all spans it receives for assertion.
 type mockWriter struct {
-	mu      sync.Mutex
-	batches [][]storage.Span
-	err     error // if set, IngestSpans returns this error
+	mu                 sync.Mutex
+	batches            [][]storage.Span
+	err                error // if set, IngestSpans returns this error
+	failOnCancelledCtx bool
 }
 
-func (m *mockWriter) IngestSpans(_ context.Context, spans []storage.Span) error {
+func (m *mockWriter) IngestSpans(ctx context.Context, spans []storage.Span) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if m.failOnCancelledCtx && ctx.Err() != nil {
+		return fmt.Errorf("IngestSpans called with cancelled context: %w", ctx.Err())
+	}
 	// Copy the slice to avoid races with batch[:0] reset.
 	cp := make([]storage.Span, len(spans))
 	copy(cp, spans)
@@ -211,5 +215,40 @@ func TestProcessorPreservesUserContext(t *testing.T) {
 	}
 	if spans[0].SessionID != "session-xyz789" {
 		t.Errorf("SessionID = %q, want session-xyz789", spans[0].SessionID)
+	}
+}
+
+func TestProcessorShutdown_DrainsWithCancelledContext(t *testing.T) {
+	w := &mockWriter{failOnCancelledCtx: true}
+
+	calc := costcalc.New()
+	// Large batchSize (100) so Submit won't trigger batch flush.
+	proc := New([]storage.SpanWriter{w}, calc, 100)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		proc.Run(ctx)
+		close(done)
+	}()
+
+	// Submit 5 spans (sub-batch size, buffered in channel).
+	for i := 0; i < 5; i++ {
+		proc.Submit(testSpan(fmt.Sprintf("drain-%d", i)))
+	}
+
+	// Cancel the context while spans are buffered.
+	cancel()
+
+	// Wait for Run() to return after drain.
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("timed out waiting for Run() to exit after context cancellation")
+	}
+
+	spans := w.allSpans()
+	if len(spans) != 5 {
+		t.Fatalf("expected 5 drained spans on shutdown, got %d", len(spans))
 	}
 }

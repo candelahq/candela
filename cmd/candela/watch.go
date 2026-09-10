@@ -32,7 +32,11 @@ func cmdWatch(args []string) {
 	// Resolve port
 	p := *port
 	if p == 0 {
-		cfg := loadConfig("")
+		cfg, err := loadConfig("")
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "error: %v\n", err)
+			os.Exit(1)
+		}
 		if cfg != nil && cfg.Port != 0 {
 			p = cfg.Port
 		} else {

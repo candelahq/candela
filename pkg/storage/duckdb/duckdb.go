@@ -270,7 +270,7 @@ func (s *Store) QueryTraces(ctx context.Context, q storage.TraceQuery) (*storage
 			AND (? = '' OR user_id = ?)
 			AND (? = '' OR environment = ?)
 			AND (? = '' OR tenant_id = ?)`
-	args := []any{q.ProjectID, q.ProjectID, q.ProjectID, q.ProjectID, q.ProjectID, q.ProjectID, q.StartTime, q.EndTime, q.UserID, q.UserID, q.Environment, q.Environment, q.TenantID, q.TenantID}
+	args := []any{q.ProjectID, q.ProjectID, q.StartTime, q.EndTime, q.UserID, q.UserID, q.Environment, q.Environment, q.TenantID, q.TenantID}
 
 	// Span-level filters: find trace_ids that contain matching spans.
 	var spanFilters []string
@@ -345,22 +345,18 @@ func (s *Store) QueryTraces(ctx context.Context, q storage.TraceQuery) (*storage
 			COALESCE(SUM(gen_ai_total_tokens), 0)::BIGINT as total_tokens,
 			COALESCE(SUM(gen_ai_cost_usd), 0)::DOUBLE as total_cost,
 			MAX(CASE WHEN parent_span_id = '' THEN name ELSE '' END) as root_name,
-			(SELECT s2.gen_ai_model FROM spans s2
-				WHERE s2.trace_id = spans.trace_id AND (? = '' OR s2.project_id = ?)
-					AND s2.gen_ai_model != ''
-				GROUP BY s2.gen_ai_model
-				ORDER BY SUM(s2.gen_ai_cost_usd) DESC
-				LIMIT 1) as primary_model,
-			(SELECT s2.gen_ai_provider FROM spans s2
-				WHERE s2.trace_id = spans.trace_id AND (? = '' OR s2.project_id = ?)
-					AND s2.gen_ai_model != ''
-				GROUP BY s2.gen_ai_model, s2.gen_ai_provider
-				ORDER BY SUM(s2.gen_ai_cost_usd) DESC
-				LIMIT 1) as primary_provider,
+			COALESCE(FIRST(gen_ai_model ORDER BY model_cost DESC) FILTER (WHERE gen_ai_model != ''), '') as primary_model,
+			COALESCE(FIRST(gen_ai_provider ORDER BY provider_cost DESC) FILTER (WHERE gen_ai_provider != ''), '') as primary_provider,
 			MAX(CASE WHEN status = 2 THEN 2 ELSE 0 END)::INTEGER as status,
 			MAX(project_id) as project_id
-		FROM spans
-		WHERE `+where+`
+		FROM (
+			SELECT
+				*,
+				SUM(gen_ai_cost_usd) OVER (PARTITION BY trace_id, gen_ai_model) as model_cost,
+				SUM(gen_ai_cost_usd) OVER (PARTITION BY trace_id, gen_ai_provider) as provider_cost
+			FROM spans
+			WHERE `+where+`
+		)
 		GROUP BY trace_id
 		`+having+`
 		ORDER BY `+orderExpr+` `+dir+`, trace_id `+dir+`

@@ -5,6 +5,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"syscall"
 	"testing"
 	"time"
@@ -22,7 +23,10 @@ port: 9090
 		t.Fatal(err)
 	}
 
-	cfg := loadConfig(cfgPath)
+	cfg, err := loadConfig(cfgPath)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 
 	if cfg.Remote != "https://candela-xxx.run.app" {
 		t.Errorf("Remote = %q, want %q", cfg.Remote, "https://candela-xxx.run.app")
@@ -49,7 +53,10 @@ func TestLoadConfig_IndentedYAML(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	cfg := loadConfig(cfgPath)
+	cfg, err := loadConfig(cfgPath)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 
 	if cfg.Remote != "https://candela-abc.run.app" {
 		t.Errorf("Remote = %q, want %q", cfg.Remote, "https://candela-abc.run.app")
@@ -63,7 +70,10 @@ func TestLoadConfig_IndentedYAML(t *testing.T) {
 }
 
 func TestLoadConfig_MissingFile(t *testing.T) {
-	cfg := loadConfig("/nonexistent/path/candela.yaml")
+	cfg, err := loadConfig("/nonexistent/path/candela.yaml")
+	if err != nil {
+		t.Fatalf("unexpected error for missing file: %v", err)
+	}
 
 	// Should return empty config, not panic.
 	if cfg.Remote != "" {
@@ -80,7 +90,10 @@ func TestLoadConfig_MissingFile(t *testing.T) {
 func TestLoadConfig_EmptyPath(t *testing.T) {
 	// Unset env var to test default path fallback.
 	t.Setenv("CANDELA_CONFIG", "")
-	cfg := loadConfig("")
+	cfg, err := loadConfig("")
+	if err != nil {
+		t.Fatalf("unexpected error for empty path: %v", err)
+	}
 
 	// Should not panic; returns empty or default config.
 	if cfg == nil {
@@ -96,11 +109,18 @@ func TestLoadConfig_InvalidYAML(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	cfg := loadConfig(cfgPath)
-
-	// Should return empty config, not error.
-	if cfg.Remote != "" {
-		t.Errorf("Remote = %q, want empty for invalid YAML", cfg.Remote)
+	cfg, err := loadConfig(cfgPath)
+	if err == nil {
+		t.Fatal("expected error for invalid YAML, got nil")
+	}
+	if cfg != nil {
+		t.Errorf("expected nil config on error, got %+v", cfg)
+	}
+	if !strings.Contains(err.Error(), cfgPath) {
+		t.Errorf("expected error to contain %q, got %q", cfgPath, err.Error())
+	}
+	if !strings.Contains(err.Error(), "failed to parse config file") {
+		t.Errorf("expected error to contain 'failed to parse config file', got %q", err.Error())
 	}
 }
 
@@ -117,7 +137,10 @@ port: 7777
 	}
 
 	t.Setenv("CANDELA_CONFIG", cfgPath)
-	cfg := loadConfig("") // Empty path should fall back to env var.
+	cfg, err := loadConfig("") // Empty path should fall back to env var.
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 
 	if cfg.Remote != "https://env-test.run.app" {
 		t.Errorf("Remote = %q, want %q", cfg.Remote, "https://env-test.run.app")
@@ -134,7 +157,10 @@ remote: https://partial.run.app
 		t.Fatal(err)
 	}
 
-	cfg := loadConfig(cfgPath)
+	cfg, err := loadConfig(cfgPath)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 
 	if cfg.Remote != "https://partial.run.app" {
 		t.Errorf("Remote = %q, want %q", cfg.Remote, "https://partial.run.app")
@@ -159,7 +185,10 @@ local_upstream: "http://127.0.0.1:11434"
 		t.Fatal(err)
 	}
 
-	cfg := loadConfig(cfgPath)
+	cfg, err := loadConfig(cfgPath)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	if cfg.LocalUpstream != "http://127.0.0.1:11434" {
 		t.Errorf("LocalUpstream = %q, want %q", cfg.LocalUpstream, "http://127.0.0.1:11434")
 	}
@@ -219,7 +248,10 @@ runtime_manage:
 		t.Fatal(err)
 	}
 
-	cfg := loadConfig(cfgPath)
+	cfg, err := loadConfig(cfgPath)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 
 	if cfg.RuntimeBackend != "ollama" {
 		t.Errorf("RuntimeBackend = %q, want %q", cfg.RuntimeBackend, "ollama")
@@ -397,5 +429,74 @@ func TestHelperProcess(t *testing.T) {
 		os.Exit(0)
 	default:
 		os.Exit(2)
+	}
+}
+
+func TestParseConfigFlag(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{
+			name: "empty args",
+			args: []string{},
+			want: "",
+		},
+		{
+			name: "no config flag",
+			args: []string{"--port", "9090", "--verbose"},
+			want: "",
+		},
+		{
+			name: "space-separated --config",
+			args: []string{"--port", "9090", "--config", "/path/to/candela.yaml"},
+			want: "/path/to/candela.yaml",
+		},
+		{
+			name: "equals-separated --config=",
+			args: []string{"--config=/custom/config.yaml", "--port", "9090"},
+			want: "/custom/config.yaml",
+		},
+		{
+			name: "trailing --config without value",
+			args: []string{"--port", "9090", "--config"},
+			want: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := parseConfigFlag(tt.args)
+			if got != tt.want {
+				t.Errorf("parseConfigFlag(%v) = %q, want %q", tt.args, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestResolvePort_WithConfigFlag(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "custom.yaml")
+	if err := os.WriteFile(cfgPath, []byte("port: 9999\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// 1. Explicit --port wins over --config file.
+	p := resolvePort([]string{"--config", cfgPath, "--port", "7777"})
+	if p != 7777 {
+		t.Errorf("resolvePort = %d, want 7777 (explicit flag wins)", p)
+	}
+
+	// 2. Config port used when --port omitted.
+	p = resolvePort([]string{"--config", cfgPath})
+	if p != 9999 {
+		t.Errorf("resolvePort = %d, want 9999 (from --config)", p)
+	}
+
+	// 3. Config with equals syntax.
+	p = resolvePort([]string{"--config=" + cfgPath})
+	if p != 9999 {
+		t.Errorf("resolvePort = %d, want 9999 (from --config=)", p)
 	}
 }

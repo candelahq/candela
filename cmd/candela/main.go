@@ -274,6 +274,12 @@ Run flags:
 
 // cmdStart launches `candela run` as a background process and writes a PID file.
 func cmdStart() {
+	// Validate config file before launching daemon to fail fast on syntax errors.
+	if _, err := loadConfig(""); err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		os.Exit(1)
+	}
+
 	pidPath := pidFilePath()
 	if pidPath == "" {
 		slog.Error("cannot determine home directory")
@@ -555,7 +561,7 @@ func cmdStatus() {
 func cmdDoctorPortConflicts(fix bool) {
 	port := resolvePort(os.Args[2:])
 	lmPort := 1234 // default LM Studio compat port
-	if cfg := loadConfig(""); cfg.LMStudioPort != 0 {
+	if cfg, err := loadConfig(""); err == nil && cfg.LMStudioPort != 0 {
 		lmPort = cfg.LMStudioPort
 	}
 
@@ -696,8 +702,7 @@ func resolvePort(args []string) int {
 		}
 	}
 	// Check config file.
-	cfg := loadConfig("")
-	if cfg.Port != 0 {
+	if cfg, err := loadConfig(""); err == nil && cfg.Port != 0 {
 		return cfg.Port
 	}
 	return 8181
@@ -719,7 +724,11 @@ func runForeground() {
 	flag.Parse()
 
 	// ── Load config ──
-	cfg := loadConfig(configPath)
+	cfg, err := loadConfig(configPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		os.Exit(1)
+	}
 
 	// CLI flags override config file.
 	if remote != "" {
@@ -990,7 +999,7 @@ func runForeground() {
 	if statePath == "" {
 		statePath = "~/.candela/state.db"
 	}
-	stateDB, err := openStateDB(statePath)
+	stateDB, err = openStateDB(statePath)
 	if err != nil {
 		slog.Warn("state DB unavailable (running without persistence)", "error", err)
 		stateDB = nil
@@ -1262,7 +1271,7 @@ func runForeground() {
 //  3. ~/.config/candela/config.yaml  (preferred — works on all platforms)
 //  4. os.UserConfigDir()/candela/config.yaml  (~/Library/Application Support on macOS)
 //  5. ~/.candela.yaml  (legacy)
-func loadConfig(configPath string) *Config {
+func loadConfig(configPath string) (*Config, error) {
 	if configPath == "" {
 		configPath = os.Getenv("CANDELA_CONFIG")
 	}
@@ -1296,15 +1305,16 @@ func loadConfig(configPath string) *Config {
 
 	cfg := &Config{}
 	if configPath == "" {
-		return cfg
+		return cfg, nil
 	}
 
 	data, err := os.ReadFile(configPath)
 	if err != nil {
-		if !os.IsNotExist(err) {
-			slog.Warn("failed to read config file", "path", configPath, "error", err)
+		if os.IsNotExist(err) {
+			return cfg, nil
 		}
-		return cfg
+		slog.Error("failed to read config file", "path", configPath, "error", err)
+		return nil, fmt.Errorf("failed to read config file %s: %w", configPath, err)
 	}
 
 	// Strip common leading indent (handles terraform output which indents
@@ -1329,12 +1339,12 @@ func loadConfig(configPath string) *Config {
 	cleaned := strings.Join(lines, "\n")
 
 	if err := yaml.Unmarshal([]byte(cleaned), cfg); err != nil {
-		slog.Warn("failed to parse config file", "path", configPath, "error", err)
-		return &Config{}
+		slog.Error("failed to parse config file", "path", configPath, "error", err)
+		return nil, fmt.Errorf("failed to parse config file %s: %w", configPath, err)
 	}
 
 	slog.Info("loaded config", "path", configPath)
-	return cfg
+	return cfg, nil
 }
 
 // singleJoiningSlash joins two URL path segments with exactly one slash.

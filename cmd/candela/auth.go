@@ -73,7 +73,11 @@ func resolveProvider(providerName string) cloudauth.Provider {
 	}
 
 	// Try to infer from config file.
-	cfg := loadConfig("")
+	cfg, err := loadConfig("")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		os.Exit(1)
+	}
 	inferred := inferAuthProviders(cfg)
 
 	switch len(inferred) {

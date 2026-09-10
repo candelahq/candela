@@ -213,3 +213,38 @@ func TestProcessorPreservesUserContext(t *testing.T) {
 		t.Errorf("SessionID = %q, want session-xyz789", spans[0].SessionID)
 	}
 }
+
+func TestProcessorShutdown_DrainsWithCancelledContext(t *testing.T) {
+	w := &mockWriter{}
+
+	calc := costcalc.New()
+	// Large batchSize (100) so Submit won't trigger batch flush.
+	proc := New([]storage.SpanWriter{w}, calc, 100)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		proc.Run(ctx)
+		close(done)
+	}()
+
+	// Submit 5 spans (sub-batch size, buffered in channel).
+	for i := 0; i < 5; i++ {
+		proc.Submit(testSpan(fmt.Sprintf("drain-%d", i)))
+	}
+
+	// Cancel the context while spans are buffered.
+	cancel()
+
+	// Wait for Run() to return after drain.
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("timed out waiting for Run() to exit after context cancellation")
+	}
+
+	spans := w.allSpans()
+	if len(spans) != 5 {
+		t.Fatalf("expected 5 drained spans on shutdown, got %d", len(spans))
+	}
+}

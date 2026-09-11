@@ -134,7 +134,7 @@ func (p *SpanProcessor) Run(ctx context.Context) {
 
 	var batch []storage.Span
 
-	flush := func() {
+	flush := func(flushCtx context.Context) {
 		if len(batch) == 0 {
 			return
 		}
@@ -160,7 +160,7 @@ func (p *SpanProcessor) Run(ctx context.Context) {
 		// A bounded timeout is applied so slow baseline reader queries fail open
 		// without blocking ingestion or overflowing spanCh.
 		if p.detector != nil {
-			detectCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+			detectCtx, cancel := context.WithTimeout(flushCtx, 2*time.Second)
 			results, err := p.detector.Detect(detectCtx, batch)
 			cancel()
 			if err != nil {
@@ -223,7 +223,7 @@ func (p *SpanProcessor) Run(ctx context.Context) {
 				defer wg.Done()
 				// ResilientWriter applies its own timeout, circuit breaker,
 				// and bulkhead internally — just call IngestSpans.
-				_ = rw.IngestSpans(ctx, batch)
+				_ = rw.IngestSpans(flushCtx, batch)
 			}(rw, sinkBatch)
 		}
 		wg.Wait()
@@ -238,23 +238,26 @@ func (p *SpanProcessor) Run(ctx context.Context) {
 		case span := <-p.spanCh:
 			batch = append(batch, span)
 			if len(batch) >= p.batchSize {
-				flush()
+				flush(ctx)
 			}
 		case <-ticker.C:
-			flush()
+			flush(ctx)
 		case <-p.done:
 			// Drain remaining spans.
 			close(p.spanCh)
 			for span := range p.spanCh {
 				batch = append(batch, span)
 			}
-			flush()
+			drainCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			flush(drainCtx)
+			cancel()
 			return
 		case <-ctx.Done():
 			// Drain remaining buffered spans before exiting so we don't silently
 			// drop data when the context is cancelled. This mirrors the p.done path.
 			// NOTE: we do NOT close p.spanCh here (only Stop() owns that), so we
 			// use a non-blocking drain loop instead of ranging over the channel.
+			// A fresh context is used for flushing so cancelled context does not fail sink writes.
 		drainCtx:
 			for {
 				select {
@@ -264,7 +267,9 @@ func (p *SpanProcessor) Run(ctx context.Context) {
 					break drainCtx
 				}
 			}
-			flush()
+			drainCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			flush(drainCtx)
+			cancel()
 			return
 		}
 	}

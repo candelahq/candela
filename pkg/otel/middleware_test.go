@@ -71,8 +71,8 @@ func TestHTTPMiddleware_CreatesSpanWithAttributes(t *testing.T) {
 	}
 
 	span := spans[0]
-	if span.Name != "HTTP GET /api/v1/models" {
-		t.Errorf("span.Name = %q, want 'HTTP GET /api/v1/models'", span.Name)
+	if span.Name != "GET" {
+		t.Errorf("span.Name = %q, want 'GET'", span.Name)
 	}
 	if span.SpanKind != trace.SpanKindServer {
 		t.Errorf("span.SpanKind = %v, want Server (%v)", span.SpanKind, trace.SpanKindServer)
@@ -101,8 +101,9 @@ func TestHTTPMiddleware_CreatesSpanWithAttributes(t *testing.T) {
 		t.Errorf("http.request.duration_ms = %v, want non-negative int64", attrs["http.request.duration_ms"])
 	}
 
-	if span.Status.Code != codes.Ok {
-		t.Errorf("span.Status.Code = %v, want %v", span.Status.Code, codes.Ok)
+	// 2xx responses leave span status Unset per OTel HTTP server spec
+	if span.Status.Code != codes.Unset {
+		t.Errorf("span.Status.Code = %v, want %v (Unset)", span.Status.Code, codes.Unset)
 	}
 }
 
@@ -187,8 +188,69 @@ func TestHTTPMiddleware_ErrorStatusCode(t *testing.T) {
 	if span.Status.Code != codes.Error {
 		t.Errorf("span.Status.Code = %v, want %v (Error)", span.Status.Code, codes.Error)
 	}
-	if span.Status.Description != "HTTP 500" {
-		t.Errorf("span.Status.Description = %q, want 'HTTP 500'", span.Status.Description)
+	if span.Status.Description != "" {
+		t.Errorf("span.Status.Description = %q, want empty", span.Status.Description)
+	}
+}
+
+func TestHTTPMiddleware_WithMatchedRoute(t *testing.T) {
+	exporter, _ := setupTestTracer(t)
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /api/v1/models/{id}", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+
+	wrapped := candelaotel.HTTPMiddleware(mux)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/models/gpt-4o", nil)
+	rec := httptest.NewRecorder()
+	wrapped.ServeHTTP(rec, req)
+
+	spans := exporter.GetSpans()
+	if len(spans) != 1 {
+		t.Fatalf("expected 1 span, got %d", len(spans))
+	}
+	span := spans[0]
+	if span.Name != "GET /api/v1/models/{id}" {
+		t.Errorf("span.Name = %q, want 'GET /api/v1/models/{id}'", span.Name)
+	}
+
+	attrs := make(map[string]any)
+	for _, attr := range span.Attributes {
+		attrs[string(attr.Key)] = attr.Value.AsInterface()
+	}
+	if attrs["http.route"] != "/api/v1/models/{id}" {
+		t.Errorf("http.route = %v, want '/api/v1/models/{id}'", attrs["http.route"])
+	}
+}
+
+func TestHTTPMiddleware_RecorderEarlyHintsAndFlush(t *testing.T) {
+	exporter, _ := setupTestTracer(t)
+
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Send 103 Early Hints first (should not lock in status)
+		w.WriteHeader(103)
+		// Send 200 OK as final status
+		w.WriteHeader(http.StatusOK)
+	})
+
+	wrapped := candelaotel.HTTPMiddleware(handler)
+
+	req := httptest.NewRequest(http.MethodGet, "/test", nil)
+	rec := httptest.NewRecorder()
+	wrapped.ServeHTTP(rec, req)
+
+	spans := exporter.GetSpans()
+	if len(spans) != 1 {
+		t.Fatalf("expected 1 span, got %d", len(spans))
+	}
+	attrs := make(map[string]any)
+	for _, attr := range spans[0].Attributes {
+		attrs[string(attr.Key)] = attr.Value.AsInterface()
+	}
+	if attrs["http.response.status_code"] != int64(200) {
+		t.Errorf("recorded status code = %v, want 200", attrs["http.response.status_code"])
 	}
 }
 

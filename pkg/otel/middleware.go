@@ -3,6 +3,7 @@ package otel
 import (
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"go.opentelemetry.io/otel"
@@ -53,7 +54,7 @@ func newResponseRecorder(w http.ResponseWriter) *responseRecorder {
 }
 
 func (rec *responseRecorder) WriteHeader(code int) {
-	if !rec.written {
+	if !rec.written && (code == http.StatusSwitchingProtocols || (code >= 200 && code < 600)) {
 		rec.statusCode = code
 		rec.written = true
 	}
@@ -70,6 +71,10 @@ func (rec *responseRecorder) Write(b []byte) (int, error) {
 
 func (rec *responseRecorder) Flush() {
 	if f, ok := rec.ResponseWriter.(http.Flusher); ok {
+		if !rec.written {
+			rec.statusCode = http.StatusOK
+			rec.written = true
+		}
 		f.Flush()
 	}
 }
@@ -102,11 +107,11 @@ func HTTPMiddleware(next http.Handler, opts ...MiddlewareOption) http.Handler {
 		ctx := propagator.Extract(r.Context(), propagation.HeaderCarrier(r.Header))
 
 		// 2. Start server span with standard HTTP attributes.
-		spanName := fmt.Sprintf("HTTP %s %s", r.Method, r.URL.Path)
+		// Avoid high-cardinality span names by using the HTTP method as fallback.
+		spanName := r.Method
 		attrs := []attribute.KeyValue{
 			semconv.HTTPRequestMethodKey.String(r.Method),
 			semconv.URLPathKey.String(r.URL.Path),
-			semconv.HTTPRouteKey.String(r.URL.Path),
 			semconv.NetworkProtocolVersionKey.String(r.Proto),
 		}
 		if ua := r.UserAgent(); ua != "" {
@@ -126,11 +131,22 @@ func HTTPMiddleware(next http.Handler, opts ...MiddlewareOption) http.Handler {
 			w.Header().Set("X-Trace-Id", spanCtx.TraceID().String())
 		}
 
-		// 4. Wrap response writer to capture status code.
 		rec := newResponseRecorder(w)
 		start := time.Now()
 
-		next.ServeHTTP(rec, r.WithContext(ctx))
+		reqWithCtx := r.WithContext(ctx)
+		next.ServeHTTP(rec, reqWithCtx)
+
+		// If a route pattern was matched during handler execution (e.g., Go 1.22+ ServeMux),
+		// update the span name and set http.route attribute to avoid high cardinality.
+		if reqWithCtx.Pattern != "" {
+			route := reqWithCtx.Pattern
+			if strings.HasPrefix(route, r.Method+" ") {
+				route = strings.TrimPrefix(route, r.Method+" ")
+			}
+			span.SetName(fmt.Sprintf("%s %s", r.Method, route))
+			span.SetAttributes(semconv.HTTPRouteKey.String(route))
+		}
 
 		// 5. Measure duration and record status code and duration attributes.
 		duration := time.Since(start)
@@ -140,9 +156,7 @@ func HTTPMiddleware(next http.Handler, opts ...MiddlewareOption) http.Handler {
 		)
 
 		if rec.statusCode >= 500 {
-			span.SetStatus(codes.Error, fmt.Sprintf("HTTP %d", rec.statusCode))
-		} else {
-			span.SetStatus(codes.Ok, "")
+			span.SetStatus(codes.Error, "")
 		}
 	})
 }

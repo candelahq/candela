@@ -29,6 +29,7 @@ type Config struct {
 	ServiceName    string
 	ServiceVersion string
 	Registry       promclient.Registerer // optional; nil uses the default registry
+	SpanExporter   sdktrace.SpanExporter // optional; if set, spans are batched and exported
 }
 
 // Setup initializes the OpenTelemetry SDK with a Prometheus metric exporter
@@ -65,9 +66,13 @@ func Setup(ctx context.Context, cfg Config) (func(context.Context) error, error)
 	)
 	otel.SetMeterProvider(mp)
 
-	tp := sdktrace.NewTracerProvider(
-		sdktrace.WithResource(res),
-	)
+	var tpOpts []sdktrace.TracerProviderOption
+	tpOpts = append(tpOpts, sdktrace.WithResource(res))
+	if cfg.SpanExporter != nil {
+		tpOpts = append(tpOpts, sdktrace.WithBatcher(cfg.SpanExporter))
+	}
+
+	tp := sdktrace.NewTracerProvider(tpOpts...)
 	otel.SetTracerProvider(tp)
 
 	shutdown := func(ctx context.Context) error {

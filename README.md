@@ -14,10 +14,13 @@ Candela is a production-grade observatory for your LLM applications. It captures
 <div align="center">
   <h3>🎬 90-Second Quickstart Demo</h3>
   <p><em>From installation to live waterfall traces and budget controls in 90 seconds</em></p>
-  <a href="docs/demo-video.md">
+  <a href="assets/demo/getting-started.svg">
     <img src="assets/demo/getting-started.svg" alt="Candela 90-Second Walkthrough Demo" width="100%" />
   </a>
-  <p><a href="docs/demo-video.md"><strong>Read full storyboard, transcript &amp; guide →</strong></a></p>
+  <p>
+    <a href="assets/demo/getting-started.svg"><strong>▶ Watch standalone demo animation</strong></a> ·
+    <a href="docs/demo-video.md"><strong>Read full script, storyboard &amp; reproduction guide →</strong></a>
+  </p>
 </div>
 
 ---

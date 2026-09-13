@@ -2,11 +2,13 @@ package otel_test
 
 import (
 	"context"
+	"sync"
 	"testing"
 
 	promclient "github.com/prometheus/client_golang/prometheus"
 	otelprom "go.opentelemetry.io/otel/exporters/prometheus"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 
 	candelaotel "github.com/candelahq/candela/pkg/otel"
 )
@@ -49,6 +51,54 @@ func TestSetup_DefaultRegistry(t *testing.T) {
 		t.Fatalf("Setup with nil registry failed: %v", err)
 	}
 	defer func() { _ = shutdown(context.Background()) }()
+}
+
+type captureExporter struct {
+	mu    sync.Mutex
+	spans []sdktrace.ReadOnlySpan
+}
+
+func (e *captureExporter) ExportSpans(_ context.Context, spans []sdktrace.ReadOnlySpan) error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.spans = append(e.spans, spans...)
+	return nil
+}
+
+func (e *captureExporter) Shutdown(context.Context) error {
+	return nil
+}
+
+func TestSetup_WithSpanExporter(t *testing.T) {
+	spanExporter := &captureExporter{}
+	reg := promclient.NewRegistry()
+	shutdown, err := candelaotel.Setup(context.Background(), candelaotel.Config{
+		ServiceName:    "candela-trace-test",
+		ServiceVersion: "0.0.0-test",
+		Registry:       reg,
+		SpanExporter:   spanExporter,
+	})
+	if err != nil {
+		t.Fatalf("Setup with SpanExporter failed: %v", err)
+	}
+
+	tracer := candelaotel.Tracer("setup-test")
+	_, span := tracer.Start(context.Background(), "test-span")
+	span.End()
+
+	// Shutdown flushes the batcher
+	if err := shutdown(context.Background()); err != nil {
+		t.Fatalf("shutdown failed: %v", err)
+	}
+
+	spanExporter.mu.Lock()
+	defer spanExporter.mu.Unlock()
+	if len(spanExporter.spans) != 1 {
+		t.Fatalf("expected 1 exported span, got %d", len(spanExporter.spans))
+	}
+	if spanExporter.spans[0].Name() != "test-span" {
+		t.Errorf("expected span name 'test-span', got %q", spanExporter.spans[0].Name())
+	}
 }
 
 func TestNewProxyMetrics(t *testing.T) {

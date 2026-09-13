@@ -1496,7 +1496,7 @@ func corsMiddleware(next http.Handler, origins []string) http.Handler {
 
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Accept, Authorization, Content-Type, Connect-Protocol-Version, Connect-Timeout-Ms, Traceparent, Tracestate, X-Request-ID, X-Session-Id, X-Candela-Tenant-Id, X-Candela-Job-Id")
-		w.Header().Set("Access-Control-Expose-Headers", "Connect-Content-Encoding")
+		w.Header().Set("Access-Control-Expose-Headers", "Connect-Content-Encoding, X-Trace-Id")
 		w.Header().Set("Access-Control-Max-Age", "86400")
 
 		// Handle preflight.

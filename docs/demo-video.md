@@ -132,6 +132,10 @@ curl -X POST http://127.0.0.1:8181/proxy/openai/v1/chat/completions \
     "messages": [{"role": "user", "content": "Explain quantum computing in one sentence"}]
   }'
 
-# 3. View the live dashboard
-open http://127.0.0.1:8181/_local/
+# 3. View the live dashboard in your browser
+# URL: http://127.0.0.1:8181/_local/
+# macOS: open http://127.0.0.1:8181/_local/
+# Linux: xdg-open http://127.0.0.1:8181/_local/
+# Windows: start http://127.0.0.1:8181/_local/
+open http://127.0.0.1:8181/_local/ 2>/dev/null || xdg-open http://127.0.0.1:8181/_local/ 2>/dev/null || echo "Open http://127.0.0.1:8181/_local/ in your browser"
 ```

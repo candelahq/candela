@@ -35,6 +35,6 @@ There is intentional overlap in some areas (e.g., deployment). The Astro site is
 | `harness-architecture.md` | Harness architecture decisions |
 | `adk-integration.md` | Google ADK integration guide |
 | `otel-collector.md` | OTel Collector agent-native ingestion |
-| `demo-video.md` | 90-second getting started video script & storyboard |
+| `demo-video.md` | 90-second getting started demo script, storyboard & video walkthrough |
 | `audit-report-batch9.md` | Deep engineering audit — Batch 9 |
 | `adr/` | Architecture Decision Records |

@@ -14,8 +14,26 @@ env:
   IMAGE_NAME: ${{ github.repository_owner }}/candela-proxy
 
 jobs:
+  # ── Run test suite before building release artifacts ──
+  test:
+    name: Test Workspace
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          persist-credentials: false
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+
+      - name: Run cargo test
+        working-directory: rust
+        run: cargo test --workspace
+
   # ── Cross-compile native binaries ──
   build-binaries:
+    needs: test
     strategy:
       matrix:
         include:

@@ -1,0 +1,350 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 540" width="100%" height="100%">
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#090d16" />
+      <stop offset="100%" stop-color="#0f172a" />
+    </linearGradient>
+    <linearGradient id="amberGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#f59e0b" />
+      <stop offset="100%" stop-color="#fbbf24" />
+    </linearGradient>
+    <linearGradient id="cyanGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#06b6d4" />
+      <stop offset="100%" stop-color="#38bdf8" />
+    </linearGradient>
+    <linearGradient id="cardGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#1e293b" stop-opacity="0.85" />
+      <stop offset="100%" stop-color="#0f172a" stop-opacity="0.95" />
+    </linearGradient>
+    <filter id="shadow" x="-5%" y="-5%" width="110%" height="115%" filterUnits="userSpaceOnUse">
+      <feDropShadow dx="0" dy="16" stdDeviation="24" flood-color="#000000" flood-opacity="0.6" />
+    </filter>
+    <filter id="glow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="6" result="blur" />
+      <feComposite in="SourceGraphic" in2="blur" operator="over" />
+    </filter>
+
+    <style>
+      @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&amp;family=Inter:wght@400;500;600;700&amp;display=swap');
+      text { font-family: 'Inter', -apple-system, sans-serif; }
+      .code { font-family: 'JetBrains Mono', monospace; }
+
+      /* Scene Timeline Animations (90-second cycle) */
+      @keyframes playhead {
+        0% { width: 0%; }
+        100% { width: 100%; }
+      }
+      @keyframes timerText {
+        0% { content: "0:00"; }
+        16% { content: "0:15"; }
+        38% { content: "0:35"; }
+        61% { content: "0:55"; }
+        83% { content: "1:15"; }
+        100% { content: "1:30"; }
+      }
+
+      /* Scene Transitions */
+      @keyframes scene1Fade {
+        0%, 20% { opacity: 1; visibility: visible; }
+        22%, 100% { opacity: 0; visibility: hidden; }
+      }
+      @keyframes scene2Fade {
+        0%, 21% { opacity: 0; visibility: hidden; }
+        24%, 43% { opacity: 1; visibility: visible; }
+        45%, 100% { opacity: 0; visibility: hidden; }
+      }
+      @keyframes scene3Fade {
+        0%, 44% { opacity: 0; visibility: hidden; }
+        47%, 66% { opacity: 1; visibility: visible; }
+        68%, 100% { opacity: 0; visibility: hidden; }
+      }
+      @keyframes scene4Fade {
+        0%, 67% { opacity: 0; visibility: hidden; }
+        70%, 89% { opacity: 1; visibility: visible; }
+        91%, 100% { opacity: 0; visibility: hidden; }
+      }
+      @keyframes scene5Fade {
+        0%, 90% { opacity: 0; visibility: hidden; }
+        93%, 100% { opacity: 1; visibility: visible; }
+      }
+
+      .scene1 { animation: scene1Fade 24s infinite; }
+      .scene2 { animation: scene2Fade 24s infinite; }
+      .scene3 { animation: scene3Fade 24s infinite; }
+      .scene4 { animation: scene4Fade 24s infinite; }
+      .scene5 { animation: scene5Fade 24s infinite; }
+      .progressBar { animation: playhead 24s linear infinite; }
+
+      /* Pulsing elements */
+      @keyframes pulseGlow {
+        0%, 100% { opacity: 0.6; }
+        50% { opacity: 1; }
+      }
+      .livePulse { animation: pulseGlow 2s ease-in-out infinite; }
+    </style>
+  </defs>
+
+  <!-- Background Base -->
+  <rect width="960" height="540" fill="url(#bgGrad)" />
+
+  <!-- Ambient Glow Effects -->
+  <circle cx="200" cy="120" r="180" fill="#f59e0b" opacity="0.08" filter="url(#glow)" />
+  <circle cx="800" cy="400" r="220" fill="#38bdf8" opacity="0.07" filter="url(#glow)" />
+
+  <!-- Main Application Window Container -->
+  <g filter="url(#shadow)" transform="translate(60, 40)">
+    <!-- Window Frame -->
+    <rect width="840" height="430" rx="12" fill="#0b1120" stroke="#334155" stroke-width="1.2" />
+
+    <!-- Window Header -->
+    <path d="M 0 12 C 0 5.37 5.37 0 12 0 L 828 0 C 834.63 0 840 5.37 840 12 L 840 42 L 0 42 Z" fill="#111827" />
+    <line x1="0" y1="42" x2="840" y2="42" stroke="#1f2937" stroke-width="1" />
+
+    <!-- macOS Window Controls -->
+    <circle cx="24" cy="21" r="5.5" fill="#ef4444" />
+    <circle cx="42" cy="21" r="5.5" fill="#f59e0b" />
+    <circle cx="60" cy="21" r="5.5" fill="#10b981" />
+
+    <!-- App Title & Live Badge -->
+    <text x="420" y="26" fill="#94a3b8" font-size="12" font-weight="500" text-anchor="middle">
+      🕯️ Candela — 90s Quickstart Walkthrough
+    </text>
+
+    <!-- Interactive Mode Pill -->
+    <rect x="710" y="11" width="106" height="20" rx="10" fill="#1e293b" stroke="#334155" stroke-width="1" />
+    <circle cx="722" cy="21" r="3.5" fill="#10b981" class="livePulse" />
+    <text x="732" y="25" fill="#cbd5e1" font-size="10" font-weight="600">LIVE DEMO</text>
+
+    <!-- ═══════════════════════════════════════════════════════════════════════ -->
+    <!-- SCENE 1: Install & Start (0:00 - 0:15)                                  -->
+    <!-- ═══════════════════════════════════════════════════════════════════════ -->
+    <g class="scene1" transform="translate(30, 65)">
+      <!-- Step Badge -->
+      <rect x="0" y="0" width="140" height="24" rx="6" fill="#f59e0b" fill-opacity="0.15" stroke="#f59e0b" stroke-width="1" />
+      <text x="12" y="16" fill="#fbbf24" font-size="11" font-weight="700">SCENE 1 · 0:00-0:15</text>
+      <text x="155" y="17" fill="#f8fafc" font-size="15" font-weight="700">One-Command Install &amp; Daemon Launch</text>
+
+      <rect x="0" y="38" width="780" height="290" rx="8" fill="#030712" stroke="#1e293b" />
+
+      <!-- Terminal Lines -->
+      <text x="24" y="75" fill="#94a3b8" font-size="13" class="code">$ brew install candelahq/tap/candela</text>
+      <text x="24" y="100" fill="#38bdf8" font-size="12" class="code">==&gt; Fetching candela v0.11.4 ... Done (6.2 MB)</text>
+      <text x="24" y="125" fill="#10b981" font-size="12" class="code">==&gt; Installed /usr/local/bin/candela</text>
+
+      <text x="24" y="165" fill="#94a3b8" font-size="13" class="code">$ candela start</text>
+      <text x="24" y="195" fill="#fbbf24" font-size="13" font-weight="600" class="code">🕯️ candela started (PID 4819)</text>
+      <text x="48" y="222" fill="#cbd5e1" font-size="12" class="code">proxy:  <tspan fill="#38bdf8">http://127.0.0.1:8181</tspan></text>
+      <text x="48" y="246" fill="#cbd5e1" font-size="12" class="code">UI:     <tspan fill="#38bdf8">http://127.0.0.1:8181/_local/</tspan></text>
+      <text x="48" y="270" fill="#cbd5e1" font-size="12" class="code">logs:   ~/.candela/candela.log</text>
+      <text x="24" y="304" fill="#10b981" font-size="12" class="code">✓ background daemon healthy · Zero configuration required</text>
+    </g>
+
+    <!-- ═══════════════════════════════════════════════════════════════════════ -->
+    <!-- SCENE 2: Zero-Code Proxy Call (0:15 - 0:35)                            -->
+    <!-- ═══════════════════════════════════════════════════════════════════════ -->
+    <g class="scene2" transform="translate(30, 65)">
+      <!-- Step Badge -->
+      <rect x="0" y="0" width="140" height="24" rx="6" fill="#06b6d4" fill-opacity="0.15" stroke="#06b6d4" stroke-width="1" />
+      <text x="12" y="16" fill="#38bdf8" font-size="11" font-weight="700">SCENE 2 · 0:15-0:35</text>
+      <text x="155" y="17" fill="#f8fafc" font-size="15" font-weight="700">Zero-Code Proxy: Point Any Client to Localhost</text>
+
+      <rect x="0" y="38" width="780" height="290" rx="8" fill="#030712" stroke="#1e293b" />
+
+      <text x="24" y="70" fill="#64748b" font-size="11" class="code"># Simply switch your base_url — zero SDK rewrites required</text>
+      <text x="24" y="95" fill="#f8fafc" font-size="12" class="code"><tspan fill="#f59e0b">from</tspan> openai <tspan fill="#f59e0b">import</tspan> OpenAI</text>
+      <text x="24" y="118" fill="#f8fafc" font-size="12" class="code">client = OpenAI(base_url=<tspan fill="#34d399">"http://127.0.0.1:8181/proxy/openai/v1"</tspan>)</text>
+      <text x="24" y="145" fill="#f8fafc" font-size="12" class="code">resp = client.chat.completions.create(</text>
+      <text x="48" y="168" fill="#f8fafc" font-size="12" class="code">model=<tspan fill="#34d399">"gpt-4o"</tspan>, messages=[{<tspan fill="#34d399">"role"</tspan>: <tspan fill="#34d399">"user"</tspan>, <tspan fill="#34d399">"content"</tspan>: <tspan fill="#34d399">"Summarize latency report"</tspan>}]</text>
+      <text x="24" y="191" fill="#f8fafc" font-size="12" class="code">)</text>
+
+      <!-- Intercept Card -->
+      <rect x="24" y="215" width="732" height="92" rx="6" fill="#1e293b" stroke="#334155" />
+      <text x="40" y="240" fill="#fbbf24" font-size="12" font-weight="700">⚡ CANDELA INTERCEPT (HTTP 200 OK)</text>
+      <text x="40" y="264" fill="#cbd5e1" font-size="12" class="code">Model: <tspan fill="#f8fafc">gpt-4o</tspan> · Tokens: <tspan fill="#f8fafc">142 in / 68 out</tspan> · Latency: <tspan fill="#f8fafc">142ms</tspan></text>
+      <text x="40" y="288" fill="#34d399" font-size="12" font-weight="600" class="code">Cost: $0.00104 · Span captured &amp; enriched with OTel conventions</text>
+    </g>
+
+    <!-- ═══════════════════════════════════════════════════════════════════════ -->
+    <!-- SCENE 3: Real-Time Dashboard (0:35 - 0:55)                              -->
+    <!-- ═══════════════════════════════════════════════════════════════════════ -->
+    <g class="scene3" transform="translate(30, 65)">
+      <!-- Step Badge -->
+      <rect x="0" y="0" width="140" height="24" rx="6" fill="#10b981" fill-opacity="0.15" stroke="#10b981" stroke-width="1" />
+      <text x="12" y="16" fill="#34d399" font-size="11" font-weight="700">SCENE 3 · 0:35-0:55</text>
+      <text x="155" y="17" fill="#f8fafc" font-size="15" font-weight="700">Live Dashboard: Radial Budget Ring &amp; Velocity</text>
+
+      <!-- Dashboard Layout -->
+      <!-- Left Card: Budget Ring -->
+      <rect x="0" y="38" width="280" height="290" rx="8" fill="#111827" stroke="#1f2937" />
+      <text x="20" y="66" fill="#94a3b8" font-size="12" font-weight="600">TODAY'S BUDGET</text>
+
+      <!-- Radial Gauge Simulation -->
+      <circle cx="140" cy="160" r="70" fill="none" stroke="#1f2937" stroke-width="14" />
+      <circle cx="140" cy="160" r="70" fill="none" stroke="url(#amberGrad)" stroke-width="14"
+              stroke-dasharray="440" stroke-dashoffset="115" stroke-linecap="round"
+              transform="rotate(-90 140 160)" />
+      <text x="140" y="155" fill="#f8fafc" font-size="28" font-weight="800" text-anchor="middle">74%</text>
+      <text x="140" y="176" fill="#94a3b8" font-size="11" font-weight="600" text-anchor="middle">USED</text>
+
+      <text x="40" y="270" fill="#94a3b8" font-size="11">Spent: <tspan fill="#f8fafc" font-weight="700">$14.80</tspan></text>
+      <text x="160" y="270" fill="#94a3b8" font-size="11">Limit: <tspan fill="#f8fafc" font-weight="700">$20.00</tspan></text>
+      <text x="40" y="295" fill="#94a3b8" font-size="11">Left: <tspan fill="#34d399" font-weight="700">$5.20</tspan></text>
+      <text x="160" y="295" fill="#94a3b8" font-size="11">Velocity: <tspan fill="#fbbf24" font-weight="700">~$1.85/hr</tspan></text>
+
+      <!-- Right Area: Live Stats & Hourly Chart -->
+      <rect x="295" y="38" width="485" height="135" rx="8" fill="#111827" stroke="#1f2937" />
+      <text x="315" y="66" fill="#94a3b8" font-size="12" font-weight="600">DAILY METRICS SUMMARY</text>
+
+      <g transform="translate(315, 85)">
+        <rect width="140" height="68" rx="6" fill="#1e293b" />
+        <text x="12" y="25" fill="#94a3b8" font-size="11">Total Calls</text>
+        <text x="12" y="52" fill="#38bdf8" font-size="20" font-weight="700">1,428</text>
+      </g>
+      <g transform="translate(465, 85)">
+        <rect width="140" height="68" rx="6" fill="#1e293b" />
+        <text x="12" y="25" fill="#94a3b8" font-size="11">Total Tokens</text>
+        <text x="12" y="52" fill="#fbbf24" font-size="20" font-weight="700">842.6k</text>
+      </g>
+      <g transform="translate(615, 85)">
+        <rect width="145" height="68" rx="6" fill="#1e293b" />
+        <text x="12" y="25" fill="#94a3b8" font-size="11">Cache Hit Rate</text>
+        <text x="12" y="52" fill="#10b981" font-size="20" font-weight="700">68.4%</text>
+      </g>
+
+      <!-- Spend Timeline Bar Chart -->
+      <rect x="295" y="185" width="485" height="143" rx="8" fill="#111827" stroke="#1f2937" />
+      <text x="315" y="210" fill="#94a3b8" font-size="12" font-weight="600">HOURLY SPEND VELOCITY (LAST 8 HOURS)</text>
+      <g transform="translate(325, 230)">
+        <rect x="0" y="45" width="40" height="35" rx="3" fill="#334155" />
+        <rect x="55" y="30" width="40" height="50" rx="3" fill="#334155" />
+        <rect x="110" y="15" width="40" height="65" rx="3" fill="#334155" />
+        <rect x="165" y="25" width="40" height="55" rx="3" fill="#334155" />
+        <rect x="220" y="10" width="40" height="70" rx="3" fill="#f59e0b" />
+        <rect x="275" y="5" width="40" height="75" rx="3" fill="#f59e0b" />
+        <rect x="330" y="20" width="40" height="60" rx="3" fill="#f59e0b" />
+        <rect x="385" y="35" width="40" height="45" rx="3" fill="#38bdf8" />
+        <text x="10" y="94" fill="#64748b" font-size="10">10a</text>
+        <text x="120" y="94" fill="#64748b" font-size="10">12p</text>
+        <text x="230" y="94" fill="#64748b" font-size="10">2p</text>
+        <text x="340" y="94" fill="#64748b" font-size="10">4p</text>
+      </g>
+    </g>
+
+    <!-- ═══════════════════════════════════════════════════════════════════════ -->
+    <!-- SCENE 4: Trace Waterfall & Span Inspection (0:55 - 1:15)               -->
+    <!-- ═══════════════════════════════════════════════════════════════════════ -->
+    <g class="scene4" transform="translate(30, 65)">
+      <!-- Step Badge -->
+      <rect x="0" y="0" width="140" height="24" rx="6" fill="#8b5cf6" fill-opacity="0.15" stroke="#8b5cf6" stroke-width="1" />
+      <text x="12" y="16" fill="#c084fc" font-size="11" font-weight="700">SCENE 4 · 0:55-1:15</text>
+      <text x="155" y="17" fill="#f8fafc" font-size="15" font-weight="700">Deep Tracing: Waterfall Spans &amp; Micro-Cent Costs</text>
+
+      <rect x="0" y="38" width="780" height="290" rx="8" fill="#111827" stroke="#1f2937" />
+
+      <!-- Trace Row 1 -->
+      <g transform="translate(20, 55)">
+        <rect width="740" height="48" rx="6" fill="#1e293b" />
+        <circle cx="20" cy="24" r="4" fill="#10b981" />
+        <text x="36" y="28" fill="#f8fafc" font-size="13" font-weight="600">POST /v1/chat/completions</text>
+        <text x="300" y="28" fill="#38bdf8" font-size="12" class="code">claude-3-5-sonnet</text>
+        <text x="480" y="28" fill="#94a3b8" font-size="12">1.24s</text>
+        <text x="560" y="28" fill="#94a3b8" font-size="12">842 tokens</text>
+        <text x="660" y="28" fill="#34d399" font-size="13" font-weight="700">$0.00342</text>
+      </g>
+
+      <!-- Waterfall Timeline -->
+      <g transform="translate(20, 115)">
+        <text x="10" y="20" fill="#94a3b8" font-size="11" class="code">agent.execute_plan</text>
+        <rect x="180" y="8" width="520" height="16" rx="4" fill="#6366f1" opacity="0.85" />
+        <text x="710" y="21" fill="#cbd5e1" font-size="10">1,240ms</text>
+
+        <text x="25" y="50" fill="#94a3b8" font-size="11" class="code">├─ vector.similarity_search</text>
+        <rect x="220" y="38" width="110" height="16" rx="4" fill="#06b6d4" opacity="0.85" />
+        <text x="340" y="51" fill="#cbd5e1" font-size="10">180ms</text>
+
+        <text x="25" y="80" fill="#94a3b8" font-size="11" class="code">├─ anthropic.messages.create</text>
+        <rect x="340" y="68" width="340" height="16" rx="4" fill="#f59e0b" opacity="0.9" />
+        <text x="690" y="81" fill="#cbd5e1" font-size="10">920ms</text>
+
+        <text x="40" y="110" fill="#94a3b8" font-size="11" class="code">└─ prompt_caching.read</text>
+        <rect x="350" y="98" width="160" height="14" rx="4" fill="#10b981" opacity="0.9" />
+        <text x="520" y="109" fill="#10b981" font-size="10">SAVED 90% COST</text>
+      </g>
+
+      <!-- Inspection Details Box -->
+      <rect x="20" y="250" width="740" height="64" rx="6" fill="#0b1120" stroke="#334155" />
+      <text x="35" y="274" fill="#cbd5e1" font-size="11" class="code">Trace ID: <tspan fill="#f8fafc">4bf92f3577b34da6a3ce929d0e0e4736</tspan> · Parent: <tspan fill="#f8fafc">00f067aa0ba902b7</tspan></text>
+      <text x="35" y="296" fill="#94a3b8" font-size="11">OTel Spans captured via in-process fanout processor · 100% compliant with GenAI semantic conventions</text>
+    </g>
+
+    <!-- ═══════════════════════════════════════════════════════════════════════ -->
+    <!-- SCENE 5: Governance & Production Controls (1:15 - 1:30)                -->
+    <!-- ═══════════════════════════════════════════════════════════════════════ -->
+    <g class="scene5" transform="translate(30, 65)">
+      <!-- Step Badge -->
+      <rect x="0" y="0" width="140" height="24" rx="6" fill="#ec4899" fill-opacity="0.15" stroke="#ec4899" stroke-width="1" />
+      <text x="12" y="16" fill="#f472b6" font-size="11" font-weight="700">SCENE 5 · 1:15-1:30</text>
+      <text x="155" y="17" fill="#f8fafc" font-size="15" font-weight="700">Team Governance: Budgets, Circuit Breakers &amp; Policies</text>
+
+      <rect x="0" y="38" width="780" height="290" rx="8" fill="#111827" stroke="#1f2937" />
+
+      <!-- Feature Column 1: Hard Budget Enforcers -->
+      <g transform="translate(25, 60)">
+        <rect width="230" height="245" rx="6" fill="#1e293b" stroke="#334155" />
+        <text x="18" y="32" fill="#fbbf24" font-size="14" font-weight="700">💰 Budget Caps</text>
+        <text x="18" y="58" fill="#cbd5e1" font-size="12">• Per-User &amp; Per-SA Limits</text>
+        <text x="18" y="82" fill="#cbd5e1" font-size="12">• Atomic Spend Reservation</text>
+        <text x="18" y="106" fill="#cbd5e1" font-size="12">• HTTP 402 Overdraft Block</text>
+        <text x="18" y="130" fill="#cbd5e1" font-size="12">• Timezone-Aware Rollover</text>
+        <rect x="18" y="175" width="194" height="48" rx="4" fill="#0f172a" />
+        <text x="28" y="196" fill="#10b981" font-size="11" font-weight="600">Zero runaway bills</text>
+        <text x="28" y="212" fill="#64748b" font-size="10">Fail-closed budget protection</text>
+      </g>
+
+      <!-- Feature Column 2: Model Policies -->
+      <g transform="translate(275, 60)">
+        <rect width="230" height="245" rx="6" fill="#1e293b" stroke="#334155" />
+        <text x="18" y="32" fill="#38bdf8" font-size="14" font-weight="700">🛡️ Model Policies</text>
+        <text x="18" y="58" fill="#cbd5e1" font-size="12">• Model Allowlist/Denylist</text>
+        <text x="18" y="82" fill="#cbd5e1" font-size="12">• Cloud IAM &amp; SA Scoping</text>
+        <text x="18" y="106" fill="#cbd5e1" font-size="12">• Automated PII Filtering</text>
+        <text x="18" y="130" fill="#cbd5e1" font-size="12">• Transparent TLS Intercept</text>
+        <rect x="18" y="175" width="194" height="48" rx="4" fill="#0f172a" />
+        <text x="28" y="196" fill="#38bdf8" font-size="11" font-weight="600">Enterprise Compliance</text>
+        <text x="28" y="212" fill="#64748b" font-size="10">Vertex AI, AWS Bedrock, OpenAI</text>
+      </g>
+
+      <!-- Feature Column 3: Ready for Scale -->
+      <g transform="translate(525, 60)">
+        <rect width="230" height="245" rx="6" fill="#1e293b" stroke="#334155" />
+        <text x="18" y="32" fill="#34d399" font-size="14" font-weight="700">🚀 Production Ready</text>
+        <text x="18" y="58" fill="#cbd5e1" font-size="12">• Cloud Run &amp; K8s Sidecar</text>
+        <text x="18" y="82" fill="#cbd5e1" font-size="12">• BigQuery &amp; DuckDB Sinks</text>
+        <text x="18" y="106" fill="#cbd5e1" font-size="12">• Rust Ultra-Low Latency</text>
+        <text x="18" y="130" fill="#cbd5e1" font-size="12">• Single Binary CLI</text>
+        <rect x="18" y="175" width="194" height="48" rx="4" fill="#0f172a" />
+        <text x="28" y="196" fill="#f59e0b" font-size="11" font-weight="600">Get Started in 90s</text>
+        <text x="28" y="212" fill="#64748b" font-size="10">candelahq.com</text>
+      </g>
+    </g>
+
+    <!-- ═══════════════════════════════════════════════════════════════════════ -->
+    <!-- Video Player Progress Bar & Controls                                   -->
+    <!-- ═══════════════════════════════════════════════════════════════════════ -->
+    <g transform="translate(0, 395)">
+      <!-- Scrubber track background -->
+      <rect x="0" y="0" width="840" height="35" rx="0" fill="#090d16" />
+      <line x1="0" y1="0" x2="840" y2="0" stroke="#1f2937" stroke-width="1" />
+
+      <!-- Play / Pause Icon -->
+      <path d="M 22 11 L 32 18 L 22 25 Z" fill="#f59e0b" />
+
+      <!-- Progress Track -->
+      <rect x="46" y="15" width="700" height="6" rx="3" fill="#1e293b" />
+      <rect x="46" y="15" width="700" height="6" rx="3" fill="url(#amberGrad)" class="progressBar" />
+
+      <!-- Time counter -->
+      <text x="760" y="20" fill="#94a3b8" font-size="11" font-weight="600" class="code">90s WALKTHROUGH</text>
+    </g>
+  </g>
+</svg>

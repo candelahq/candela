@@ -8,10 +8,21 @@ import (
 	"go.opentelemetry.io/otel"
 	otelprom "go.opentelemetry.io/otel/exporters/prometheus"
 	"go.opentelemetry.io/otel/metric"
+	"go.opentelemetry.io/otel/propagation"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/resource"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	semconv "go.opentelemetry.io/otel/semconv/v1.26.0"
+	"go.opentelemetry.io/otel/trace"
 )
+
+func init() {
+	// Set default composite propagator so W3C Traceparent and Baggage are extracted.
+	otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator(
+		propagation.TraceContext{},
+		propagation.Baggage{},
+	))
+}
 
 // Config holds OpenTelemetry configuration.
 type Config struct {
@@ -20,8 +31,8 @@ type Config struct {
 	Registry       promclient.Registerer // optional; nil uses the default registry
 }
 
-// Setup initializes the OpenTelemetry SDK with a Prometheus metric exporter.
-// Returns a shutdown function that must be called on exit.
+// Setup initializes the OpenTelemetry SDK with a Prometheus metric exporter
+// and a TracerProvider. Returns a shutdown function that must be called on exit.
 func Setup(ctx context.Context, cfg Config) (func(context.Context) error, error) {
 	res, err := resource.New(ctx,
 		resource.WithAttributes(
@@ -32,6 +43,12 @@ func Setup(ctx context.Context, cfg Config) (func(context.Context) error, error)
 	if err != nil {
 		return nil, fmt.Errorf("otel: creating resource: %w", err)
 	}
+
+	// Register default W3C propagator.
+	otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator(
+		propagation.TraceContext{},
+		propagation.Baggage{},
+	))
 
 	var promOpts []otelprom.Option
 	if cfg.Registry != nil {
@@ -48,8 +65,18 @@ func Setup(ctx context.Context, cfg Config) (func(context.Context) error, error)
 	)
 	otel.SetMeterProvider(mp)
 
+	tp := sdktrace.NewTracerProvider(
+		sdktrace.WithResource(res),
+	)
+	otel.SetTracerProvider(tp)
+
 	shutdown := func(ctx context.Context) error {
-		return mp.Shutdown(ctx)
+		errM := mp.Shutdown(ctx)
+		errT := tp.Shutdown(ctx)
+		if errM != nil {
+			return errM
+		}
+		return errT
 	}
 	return shutdown, nil
 }
@@ -57,4 +84,9 @@ func Setup(ctx context.Context, cfg Config) (func(context.Context) error, error)
 // Meter returns a named meter for creating instruments.
 func Meter(name string) metric.Meter {
 	return otel.Meter(name)
+}
+
+// Tracer returns a named tracer for creating spans.
+func Tracer(name string) trace.Tracer {
+	return otel.Tracer(name)
 }

@@ -39,6 +39,7 @@ import (
 	"github.com/candelahq/candela/pkg/forecast"
 	"github.com/candelahq/candela/pkg/modellimits"
 	"github.com/candelahq/candela/pkg/notify"
+	candelaotel "github.com/candelahq/candela/pkg/otel"
 	"github.com/candelahq/candela/pkg/processor"
 	"github.com/candelahq/candela/pkg/proxy"
 	"github.com/candelahq/candela/pkg/proxy/spendoutbox"
@@ -270,6 +271,21 @@ func main() {
 		if v.DeprecatedPromptCaching != nil {
 			slog.Warn("⚠️  DEPRECATED CONFIG: proxy.vertex_ai.prompt_caching has been removed — use proxy.vertex_ai.anthropic.caching_mode instead")
 		}
+	}
+
+	// Initialize OpenTelemetry SDK (metrics + tracing).
+	otelShutdown, err := candelaotel.Setup(context.Background(), candelaotel.Config{
+		ServiceName:    "candela-server",
+		ServiceVersion: "0.11.4",
+	})
+	if err != nil {
+		slog.Warn("failed to initialize otel", "error", err)
+	} else {
+		defer func() {
+			shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			_ = otelShutdown(shutdownCtx)
+		}()
 	}
 
 	// Initialize storage backend with exponential backoff (#707).
@@ -1245,7 +1261,7 @@ func main() {
 
 	srv := &http.Server{
 		Addr:              addr,
-		Handler:           authedMux,
+		Handler:           candelaotel.HTTPMiddleware(authedMux),
 		Protocols:         &protocols,
 		ReadHeaderTimeout: 10 * time.Second,
 		WriteTimeout:      10 * time.Minute, // generous for streaming LLM responses

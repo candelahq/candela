@@ -606,9 +606,11 @@ func TestResolveEffective_TieredPricing(t *testing.T) {
 			pBase.OutputPerMillion, pHigh.OutputPerMillion)
 	}
 
-	// Verify the exact high-tier rates match what Calculate would use.
-	if pHigh.InputPerMillion != 2.50 {
-		t.Errorf("expected high input rate 2.50, got %f", pHigh.InputPerMillion)
+	// Verify the effective rate matches the weighted marginal rate used by Calculate (#638):
+	// (200K * 1.25 + 300K * 2.50) / 500K = (0.25 + 0.75) / 0.5M = 2.00
+	wantEffInput := 2.00
+	if pHigh.InputPerMillion < wantEffInput-0.001 || pHigh.InputPerMillion > wantEffInput+0.001 {
+		t.Errorf("expected effective input rate %f, got %f", wantEffInput, pHigh.InputPerMillion)
 	}
 	if pHigh.OutputPerMillion != 15.00 {
 		t.Errorf("expected high output rate 15.00, got %f", pHigh.OutputPerMillion)

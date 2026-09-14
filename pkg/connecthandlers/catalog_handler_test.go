@@ -111,12 +111,17 @@ func developerContext() context.Context {
 	})
 }
 
+// devContext returns a context with devMode set to true (simulating local dev mode).
+func devContext() context.Context {
+	return auth.WithDevMode(context.Background(), true)
+}
+
 // TestCatalogHandler_List tests that listing returns enabled entries.
 func TestCatalogHandler_List(t *testing.T) {
 	store := catalog.NewConfigStore(testCatalogEntries)
 	handler := NewCatalogHandler(store, nil) // nil users = dev mode = admin-like
 
-	resp, err := handler.ListModelCatalog(context.Background(),
+	resp, err := handler.ListModelCatalog(devContext(),
 		connect.NewRequest(&v1.ListModelCatalogRequest{}))
 	if err != nil {
 		t.Fatalf("ListModelCatalog: %v", err)
@@ -359,7 +364,7 @@ func TestCatalogHandler_UpdateWithFieldMask(t *testing.T) {
 	handler := NewCatalogHandler(store, nil) // nil users = dev mode = admin
 
 	// Update only "enabled" to false on gemini-2.5-pro.
-	_, err := handler.UpdateModelCatalogEntry(context.Background(),
+	_, err := handler.UpdateModelCatalogEntry(devContext(),
 		connect.NewRequest(&v1.UpdateModelCatalogEntryRequest{
 			Entry: &types.ModelCatalogEntry{
 				ModelId:  "gemini-2.5-pro",
@@ -404,7 +409,7 @@ func TestCatalogHandler_UpdateMultipleFieldMask(t *testing.T) {
 	store := newMockWritableCatalogStore(testCatalogEntries)
 	handler := NewCatalogHandler(store, nil)
 
-	_, err := handler.UpdateModelCatalogEntry(context.Background(),
+	_, err := handler.UpdateModelCatalogEntry(devContext(),
 		connect.NewRequest(&v1.UpdateModelCatalogEntryRequest{
 			Entry: &types.ModelCatalogEntry{
 				ModelId:         "gemini-2.5-pro",
@@ -446,7 +451,7 @@ func TestCatalogHandler_UpdateEmptyMask_FullReplace(t *testing.T) {
 	handler := NewCatalogHandler(store, nil)
 
 	// Full replace: no update_mask.
-	_, err := handler.UpdateModelCatalogEntry(context.Background(),
+	_, err := handler.UpdateModelCatalogEntry(devContext(),
 		connect.NewRequest(&v1.UpdateModelCatalogEntryRequest{
 			Entry: &types.ModelCatalogEntry{
 				ModelId:         "gemini-2.5-pro",
@@ -485,7 +490,7 @@ func TestCatalogHandler_UpdateFieldMask_NotFound(t *testing.T) {
 	store := newMockWritableCatalogStore(nil)
 	handler := NewCatalogHandler(store, nil)
 
-	_, err := handler.UpdateModelCatalogEntry(context.Background(),
+	_, err := handler.UpdateModelCatalogEntry(devContext(),
 		connect.NewRequest(&v1.UpdateModelCatalogEntryRequest{
 			Entry: &types.ModelCatalogEntry{
 				ModelId:  "nonexistent",
@@ -512,7 +517,7 @@ func TestCatalogHandler_DeleteNonExistent(t *testing.T) {
 	store := newMockWritableCatalogStore(testCatalogEntries)
 	handler := NewCatalogHandler(store, nil)
 
-	_, err := handler.DeleteModelCatalogEntry(context.Background(),
+	_, err := handler.DeleteModelCatalogEntry(devContext(),
 		connect.NewRequest(&v1.DeleteModelCatalogEntryRequest{
 			Provider: "google",
 			ModelId:  "nonexistent-model",
@@ -546,7 +551,7 @@ func TestCatalogHandler_Delete_Validation(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := handler.DeleteModelCatalogEntry(context.Background(),
+			_, err := handler.DeleteModelCatalogEntry(devContext(),
 				connect.NewRequest(&v1.DeleteModelCatalogEntryRequest{
 					Provider: tt.provider,
 					ModelId:  tt.modelID,
@@ -589,7 +594,7 @@ func TestCatalogHandler_ListEmpty(t *testing.T) {
 	store := newMockWritableCatalogStore(nil) // empty store
 	handler := NewCatalogHandler(store, nil)
 
-	resp, err := handler.ListModelCatalog(context.Background(),
+	resp, err := handler.ListModelCatalog(devContext(),
 		connect.NewRequest(&v1.ListModelCatalogRequest{}))
 	if err != nil {
 		t.Fatalf("ListModelCatalog on empty store: %v", err)
@@ -605,7 +610,7 @@ func TestCatalogHandler_UpdateNilEntry(t *testing.T) {
 	store := newMockWritableCatalogStore(testCatalogEntries)
 	handler := NewCatalogHandler(store, nil)
 
-	_, err := handler.UpdateModelCatalogEntry(context.Background(),
+	_, err := handler.UpdateModelCatalogEntry(devContext(),
 		connect.NewRequest(&v1.UpdateModelCatalogEntryRequest{
 			Entry: nil,
 		}))
@@ -898,7 +903,7 @@ func TestCatalogHandler_ListNilUsersNoFilter(t *testing.T) {
 	store := catalog.NewConfigStore(testAccessEntries)
 	handler := NewCatalogHandler(store, nil)
 
-	resp, err := handler.ListModelCatalog(context.Background(),
+	resp, err := handler.ListModelCatalog(devContext(),
 		connect.NewRequest(&v1.ListModelCatalogRequest{}))
 	if err != nil {
 		t.Fatalf("ListModelCatalog: %v", err)

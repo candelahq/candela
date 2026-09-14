@@ -29,16 +29,19 @@ import (
 // If no UserStore is available (e.g. local dev without Firestore),
 // returns empty string (admin-like access).
 func scopeUserID(ctx context.Context, users storage.UserStore) (string, error) {
-	if users == nil {
-		return "", nil // no user store = no scoping
-	}
-
 	caller := auth.FromContext(ctx)
 	if caller == nil {
 		if auth.DevModeFromContext(ctx) {
 			return "", nil // unauthenticated allowed in explicit dev mode
 		}
 		return "", connect.NewError(connect.CodeUnauthenticated, errors.New("unauthenticated: missing caller identity"))
+	}
+
+	if users == nil {
+		if auth.DevModeFromContext(ctx) {
+			return "", nil // no user store in dev mode = unscoped access
+		}
+		return "", connect.NewError(connect.CodeFailedPrecondition, errors.New("user store unavailable"))
 	}
 
 	// Look up the caller's role in the user store.

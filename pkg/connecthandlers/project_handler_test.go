@@ -108,7 +108,7 @@ func TestProjectHandler_CreateProject(t *testing.T) {
 	store := newMockProjectStore()
 	handler := NewProjectHandler(store, nil)
 
-	resp, err := handler.CreateProject(context.Background(),
+	resp, err := handler.CreateProject(devContext(),
 		connect.NewRequest(&v1.CreateProjectRequest{
 			Name:        "Test Project",
 			Description: "A test",
@@ -132,7 +132,7 @@ func TestProjectHandler_GetProject_NotFound(t *testing.T) {
 	store := newMockProjectStore()
 	handler := NewProjectHandler(store, nil)
 
-	_, err := handler.GetProject(context.Background(),
+	_, err := handler.GetProject(devContext(),
 		connect.NewRequest(&v1.GetProjectRequest{Id: "nonexistent"}))
 
 	if err == nil {
@@ -159,7 +159,7 @@ func TestProjectHandler_ListProjects_Pagination(t *testing.T) {
 	}
 
 	// List with default pagination.
-	resp, err := handler.ListProjects(context.Background(),
+	resp, err := handler.ListProjects(devContext(),
 		connect.NewRequest(&v1.ListProjectsRequest{}))
 	if err != nil {
 		t.Fatalf("ListProjects: %v", err)
@@ -172,7 +172,7 @@ func TestProjectHandler_ListProjects_Pagination(t *testing.T) {
 	}
 
 	// List with page size.
-	resp, err = handler.ListProjects(context.Background(),
+	resp, err = handler.ListProjects(devContext(),
 		connect.NewRequest(&v1.ListProjectsRequest{
 			Pagination: &typespb.PaginationRequest{PageSize: 2},
 		}))
@@ -188,7 +188,7 @@ func TestProjectHandler_DeleteProject_NotFound(t *testing.T) {
 	store := newMockProjectStore()
 	handler := NewProjectHandler(store, nil)
 
-	_, err := handler.DeleteProject(context.Background(),
+	_, err := handler.DeleteProject(devContext(),
 		connect.NewRequest(&v1.DeleteProjectRequest{Id: "nonexistent"}))
 
 	if err == nil {
@@ -210,7 +210,7 @@ func TestProjectHandler_CreateAPIKey(t *testing.T) {
 	// Create a project first.
 	p, _ := store.CreateProject(context.Background(), storage.Project{Name: "Key Project"})
 
-	resp, err := handler.CreateAPIKey(context.Background(),
+	resp, err := handler.CreateAPIKey(devContext(),
 		connect.NewRequest(&v1.CreateAPIKeyRequest{
 			ProjectId: p.ID,
 			Name:      "dev-key",
@@ -236,7 +236,7 @@ func TestProjectHandler_RevokeAPIKey_NotFound(t *testing.T) {
 	store := newMockProjectStore()
 	handler := NewProjectHandler(store, nil)
 
-	_, err := handler.RevokeAPIKey(context.Background(),
+	_, err := handler.RevokeAPIKey(devContext(),
 		connect.NewRequest(&v1.RevokeAPIKeyRequest{Id: "nonexistent"}))
 
 	if err == nil {
@@ -256,7 +256,7 @@ func TestProjectHandler_FullLifecycle(t *testing.T) {
 	handler := NewProjectHandler(store, nil)
 
 	// Create project.
-	createResp, err := handler.CreateProject(context.Background(),
+	createResp, err := handler.CreateProject(devContext(),
 		connect.NewRequest(&v1.CreateProjectRequest{
 			Name:        "Lifecycle Test",
 			Description: "full lifecycle",
@@ -267,7 +267,7 @@ func TestProjectHandler_FullLifecycle(t *testing.T) {
 	projectID := createResp.Msg.Project.Id
 
 	// Get project.
-	getResp, err := handler.GetProject(context.Background(),
+	getResp, err := handler.GetProject(devContext(),
 		connect.NewRequest(&v1.GetProjectRequest{Id: projectID}))
 	if err != nil {
 		t.Fatalf("GetProject: %v", err)
@@ -277,7 +277,7 @@ func TestProjectHandler_FullLifecycle(t *testing.T) {
 	}
 
 	// Create API key.
-	keyResp, err := handler.CreateAPIKey(context.Background(),
+	keyResp, err := handler.CreateAPIKey(devContext(),
 		connect.NewRequest(&v1.CreateAPIKeyRequest{
 			ProjectId: projectID,
 			Name:      "test-key",
@@ -288,7 +288,7 @@ func TestProjectHandler_FullLifecycle(t *testing.T) {
 	keyID := keyResp.Msg.ApiKey.Id
 
 	// List keys.
-	listKeysResp, err := handler.ListAPIKeys(context.Background(),
+	listKeysResp, err := handler.ListAPIKeys(devContext(),
 		connect.NewRequest(&v1.ListAPIKeysRequest{ProjectId: projectID}))
 	if err != nil {
 		t.Fatalf("ListAPIKeys: %v", err)
@@ -298,21 +298,21 @@ func TestProjectHandler_FullLifecycle(t *testing.T) {
 	}
 
 	// Revoke key.
-	_, err = handler.RevokeAPIKey(context.Background(),
+	_, err = handler.RevokeAPIKey(devContext(),
 		connect.NewRequest(&v1.RevokeAPIKeyRequest{Id: keyID}))
 	if err != nil {
 		t.Fatalf("RevokeAPIKey: %v", err)
 	}
 
 	// Delete project.
-	_, err = handler.DeleteProject(context.Background(),
+	_, err = handler.DeleteProject(devContext(),
 		connect.NewRequest(&v1.DeleteProjectRequest{Id: projectID}))
 	if err != nil {
 		t.Fatalf("DeleteProject: %v", err)
 	}
 
 	// Confirm deleted.
-	_, err = handler.GetProject(context.Background(),
+	_, err = handler.GetProject(devContext(),
 		connect.NewRequest(&v1.GetProjectRequest{Id: projectID}))
 	if err == nil {
 		t.Error("expected error after delete")

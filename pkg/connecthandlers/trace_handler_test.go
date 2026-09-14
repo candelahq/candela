@@ -8,6 +8,7 @@ import (
 	connect "connectrpc.com/connect"
 	typespb "github.com/candelahq/candela/gen/go/candela/types"
 	v1 "github.com/candelahq/candela/gen/go/candela/v1"
+	"github.com/candelahq/candela/pkg/auth"
 	"github.com/candelahq/candela/pkg/storage"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
@@ -168,7 +169,7 @@ func TestSearchSpans_TimeRangeFiltering(t *testing.T) {
 		},
 	})
 
-	res, err := handler.SearchSpans(context.Background(), req)
+	res, err := handler.SearchSpans(auth.WithDevMode(context.Background(), true), req)
 	if err != nil {
 		t.Fatalf("SearchSpans failed: %v", err)
 	}
@@ -198,7 +199,7 @@ func TestSearchSpans_EmptyTimeRange(t *testing.T) {
 		},
 	})
 
-	res, err := handler.SearchSpans(context.Background(), req)
+	res, err := handler.SearchSpans(auth.WithDevMode(context.Background(), true), req)
 	if err != nil {
 		t.Fatalf("SearchSpans failed: %v", err)
 	}
@@ -227,7 +228,7 @@ func TestSearchSpans_PageSizeLimit(t *testing.T) {
 		},
 	})
 
-	res, err := handler.SearchSpans(context.Background(), req)
+	res, err := handler.SearchSpans(auth.WithDevMode(context.Background(), true), req)
 	if err != nil {
 		t.Fatalf("SearchSpans failed: %v", err)
 	}

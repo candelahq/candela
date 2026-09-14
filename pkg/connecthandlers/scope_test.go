@@ -31,14 +31,41 @@ func TestScopeUserID(t *testing.T) {
 		wantCode connect.Code
 	}{
 		{
-			name:    "nil user store (dev/unscoped mode)",
+			name:     "nil user store and nil auth in production fails unauthenticated (#627)",
+			users:    nil,
+			auth:     nil,
+			devMode:  false,
+			want:     "",
+			wantErr:  true,
+			wantCode: connect.CodeUnauthenticated,
+		},
+		{
+			name:    "nil user store and nil auth in dev mode returns empty string",
 			users:   nil,
-			auth:    &auth.User{Email: "dev@example.com"},
+			auth:    nil,
+			devMode: true,
 			want:    "",
 			wantErr: false,
 		},
 		{
-			name:     "no auth user in production mode fails closed",
+			name:     "nil user store with auth in production fails failed precondition (#627)",
+			users:    nil,
+			auth:     &auth.User{Email: "dev@example.com"},
+			devMode:  false,
+			want:     "",
+			wantErr:  true,
+			wantCode: connect.CodeFailedPrecondition,
+		},
+		{
+			name:    "nil user store with auth in dev mode returns empty string",
+			users:   nil,
+			auth:    &auth.User{Email: "dev@example.com"},
+			devMode: true,
+			want:    "",
+			wantErr: false,
+		},
+		{
+			name:     "no auth user in production mode with user store fails closed",
 			users:    &mockScopeUserStore{},
 			auth:     nil,
 			devMode:  false,
@@ -47,7 +74,7 @@ func TestScopeUserID(t *testing.T) {
 			wantCode: connect.CodeUnauthenticated,
 		},
 		{
-			name:    "no auth user in dev mode returns empty string",
+			name:    "no auth user in dev mode with user store returns empty string",
 			users:   &mockScopeUserStore{},
 			auth:    nil,
 			devMode: true,

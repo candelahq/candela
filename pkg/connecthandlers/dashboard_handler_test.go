@@ -72,9 +72,10 @@ func startDashboardServer(t *testing.T, store storage.SpanReader) candelav1conne
 	)
 	mux.Handle(path, handler)
 
-	// Inject an authenticated user into every request so GetMyUsage passes auth.
+	// Inject an authenticated user into every request in dev mode so GetMyUsage passes auth without a backing user store.
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ctx := auth.NewContext(r.Context(), &auth.User{ID: "test-user", Email: "test@test.com"})
+		ctx = auth.WithDevMode(ctx, true)
 		mux.ServeHTTP(w, r.WithContext(ctx))
 	}))
 	t.Cleanup(server.Close)

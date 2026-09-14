@@ -42,3 +42,17 @@ func EmailFromContext(ctx context.Context) string {
 	}
 	return ""
 }
+
+type devModeKey struct{}
+
+// WithDevMode returns a context with the devMode flag attached.
+func WithDevMode(ctx context.Context, devMode bool) context.Context {
+	return context.WithValue(ctx, devModeKey{}, devMode)
+}
+
+// DevModeFromContext returns whether the context is marked as dev mode.
+// Returns false if the key is absent.
+func DevModeFromContext(ctx context.Context) bool {
+	v, _ := ctx.Value(devModeKey{}).(bool)
+	return v
+}

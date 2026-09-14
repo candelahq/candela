@@ -33,10 +33,15 @@ func (h *DashboardHandler) GetUsageSummary(
 ) (*connect.Response[v1.GetUsageSummaryResponse], error) {
 	msg := req.Msg
 
+	scopedUID, err := scopeUserID(ctx, h.users)
+	if err != nil {
+		return nil, err
+	}
+
 	q := storage.UsageQuery{
 		ProjectID:   msg.ProjectId,
 		Environment: msg.Environment,
-		UserID:      scopeUserID(ctx, h.users),
+		UserID:      scopedUID,
 	}
 	if msg.TimeRange != nil {
 		if msg.TimeRange.Start != nil {
@@ -78,7 +83,12 @@ func (h *DashboardHandler) GetModelBreakdown(
 ) (*connect.Response[v1.GetModelBreakdownResponse], error) {
 	msg := req.Msg
 
-	q := storage.UsageQuery{ProjectID: msg.ProjectId, UserID: scopeUserID(ctx, h.users)}
+	scopedUID, err := scopeUserID(ctx, h.users)
+	if err != nil {
+		return nil, err
+	}
+
+	q := storage.UsageQuery{ProjectID: msg.ProjectId, UserID: scopedUID}
 	if msg.TimeRange != nil {
 		if msg.TimeRange.Start != nil {
 			q.StartTime = msg.TimeRange.Start.AsTime()
@@ -143,13 +153,18 @@ func (h *DashboardHandler) GetLatencyPercentiles(
 		startTime = endTime.Add(-24 * time.Hour)
 	}
 
+	scopedUID, err := scopeUserID(ctx, h.users)
+	if err != nil {
+		return nil, err
+	}
+
 	sq := storage.SpanQuery{
 		ProjectID: msg.ProjectId,
 		Model:     msg.Model,
 		Kind:      storage.SpanKindLLM,
 		StartTime: startTime,
 		EndTime:   endTime,
-		UserID:    scopeUserID(ctx, h.users),
+		UserID:    scopedUID,
 		PageSize:  1000,
 	}
 
@@ -335,7 +350,11 @@ func (h *DashboardHandler) GetTeamLeaderboard(
 	req *connect.Request[v1.GetTeamLeaderboardRequest],
 ) (*connect.Response[v1.GetTeamLeaderboardResponse], error) {
 	// Admin-only guard: scopeUserID returns "" for admins.
-	if uid := scopeUserID(ctx, h.users); uid != "" {
+	uid, err := scopeUserID(ctx, h.users)
+	if err != nil {
+		return nil, err
+	}
+	if uid != "" {
 		return nil, connect.NewError(connect.CodePermissionDenied,
 			fmt.Errorf("team leaderboard is admin-only"))
 	}
@@ -430,7 +449,11 @@ func (h *DashboardHandler) GetTenantLeaderboard(
 	req *connect.Request[v1.GetTenantLeaderboardRequest],
 ) (*connect.Response[v1.GetTenantLeaderboardResponse], error) {
 	// Admin-only: non-admin users (non-empty scopeUserID) are denied.
-	if uid := scopeUserID(ctx, h.users); uid != "" {
+	uid, err := scopeUserID(ctx, h.users)
+	if err != nil {
+		return nil, err
+	}
+	if uid != "" {
 		return nil, connect.NewError(connect.CodePermissionDenied,
 			fmt.Errorf("tenant leaderboard is admin-only"))
 	}
@@ -467,7 +490,11 @@ func (h *DashboardHandler) GetTenantLeaderboard(
 
 func (h *DashboardHandler) GetJobLeaderboard(ctx context.Context, req *connect.Request[v1.GetJobLeaderboardRequest]) (*connect.Response[v1.GetJobLeaderboardResponse], error) {
 	// Admin-only: non-admin users (non-empty scopeUserID) are denied.
-	if uid := scopeUserID(ctx, h.users); uid != "" {
+	uid, err := scopeUserID(ctx, h.users)
+	if err != nil {
+		return nil, err
+	}
+	if uid != "" {
 		return nil, connect.NewError(connect.CodePermissionDenied,
 			fmt.Errorf("job leaderboard is admin-only"))
 	}
@@ -494,10 +521,15 @@ func (h *DashboardHandler) GetDashboardData(
 ) (*connect.Response[v1.GetDashboardDataResponse], error) {
 	msg := req.Msg
 
+	scopedUID, err := scopeUserID(ctx, h.users)
+	if err != nil {
+		return nil, err
+	}
+
 	q := storage.UsageQuery{
 		ProjectID:   msg.ProjectId,
 		Environment: msg.Environment,
-		UserID:      scopeUserID(ctx, h.users),
+		UserID:      scopedUID,
 	}
 	if msg.TimeRange != nil {
 		if msg.TimeRange.Start != nil {

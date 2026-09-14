@@ -184,6 +184,9 @@ Non-admin developers can only see their own traces and spans. This is enforced a
 The `scopeUserID()` helper (`pkg/connecthandlers/scope.go`) determines the caller's identity:
 - **Admin** → returns `""` (empty string = no filter, sees all data)
 - **Developer** → returns sanitized email (e.g., `alice@example.com`)
+- **Unauthenticated (Production)** → **Fails closed** with `connect.CodeUnauthenticated` (`401`, #627)
+- **Unauthenticated (Dev Mode)** → returns `""` (local development bypass when explicitly marked via `auth.WithDevMode`)
+- **No UserStore Configured** → returns `""` (unscoped local dev mode without user database)
 
 This value is injected into `TraceQuery.UserID`, `SpanQuery.UserID`, or `UsageQuery.UserID`. All storage backends (BigQuery, DuckDB, SQLite) apply the filter in SQL:
 
@@ -195,11 +198,12 @@ AND (? = '' OR user_id = ?)
 
 `GetTrace` cannot pre-filter because it queries by `trace_id`, not user. Instead, it uses a **post-fetch authorization gate**:
 
-1. Fetch the full trace from storage
-2. Extract the trace owner via `traceUserID()` — checks root span first, then falls back to any span with `user_id`
-3. Compare against `scopeUserID(ctx)`
-4. If mismatch → `PermissionDenied`
-5. If no `user_id` on any span (legacy data) → allow access, log for backfill visibility
+1. Call `scopeUserID(ctx)` — fails closed immediately if unauthenticated in production mode
+2. Fetch the full trace from storage using user-scoped context
+3. Extract the trace owner via `traceUserID()` — checks root span first, then falls back to any span with `user_id`
+4. Compare against `scopeUserID(ctx)` result
+5. If mismatch → `PermissionDenied`
+6. If no `user_id` on any span (legacy data) → allow access, log for backfill visibility
 
 ### Error Sanitization
 
@@ -389,6 +393,7 @@ The following issues were identified and resolved in the v0.7.1 security audit:
 | `GetJobLeaderboard` missing authorization | **HIGH** | The `GetJobLeaderboard` RPC had no authorization check, allowing any authenticated user to query the leaderboard for all users. | Added an in-handler `scopeUserID` guard that returns `PermissionDenied` for non-admin callers (see `dashboard_handler.go`). |
 | `UpdateUser` role escalation bypass | **MEDIUM-HIGH** | A developer-role user could call `UpdateUser` on their own record with `role: ADMIN` to escalate privileges. The admin guard only checked if the caller was admin for *other* users, not for self-updates. | Self-updates now reject `role` field changes; only admins can modify roles. |
 | Catalog `AdminEditable` UI leak | **MEDIUM** | The model catalog API returned `admin_editable: true/false` metadata to all users, leaking which fields are admin-configurable. While not directly exploitable, it reveals internal authorization boundaries. | `admin_editable` field is now stripped from responses for non-admin callers. |
+| `scopeUserID` fail-open on nil context | **MEDIUM** (MED-10) | `scopeUserID` returned `""` when the auth context was nil, granting admin-level access (fail-open). | Added explicit `dev_mode` check; in non-dev mode a nil caller returns `Unauthenticated` (fail closed, #627). |
 
 ---
 

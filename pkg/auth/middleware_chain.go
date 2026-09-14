@@ -18,6 +18,8 @@ import (
 //  5. Injects the Identity into the request context
 func ChainAuthMiddleware(next http.Handler, chain *ResolverChain, userAuth UserAuthorizer, saAllowlist *ServiceAccountAllowlist, devMode bool) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		r = r.WithContext(WithDevMode(r.Context(), devMode))
+
 		// Skip auth for health checks (liveness + readiness).
 		if r.URL.Path == "/healthz" || r.URL.Path == "/readyz" {
 			next.ServeHTTP(w, r)

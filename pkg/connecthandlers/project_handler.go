@@ -28,7 +28,11 @@ func (h *ProjectHandler) CreateProject(
 	ctx context.Context,
 	req *connect.Request[v1.CreateProjectRequest],
 ) (*connect.Response[v1.CreateProjectResponse], error) {
-	if uid := scopeUserID(ctx, h.users); uid != "" {
+	uid, err := scopeUserID(ctx, h.users)
+	if err != nil {
+		return nil, err
+	}
+	if uid != "" {
 		return nil, connect.NewError(connect.CodePermissionDenied,
 			fmt.Errorf("admin access required"))
 	}
@@ -110,7 +114,11 @@ func (h *ProjectHandler) DeleteProject(
 	ctx context.Context,
 	req *connect.Request[v1.DeleteProjectRequest],
 ) (*connect.Response[v1.DeleteProjectResponse], error) {
-	if uid := scopeUserID(ctx, h.users); uid != "" {
+	uid, err := scopeUserID(ctx, h.users)
+	if err != nil {
+		return nil, err
+	}
+	if uid != "" {
 		return nil, connect.NewError(connect.CodePermissionDenied,
 			fmt.Errorf("admin access required"))
 	}
@@ -125,7 +133,11 @@ func (h *ProjectHandler) CreateAPIKey(
 	ctx context.Context,
 	req *connect.Request[v1.CreateAPIKeyRequest],
 ) (*connect.Response[v1.CreateAPIKeyResponse], error) {
-	if uid := scopeUserID(ctx, h.users); uid != "" {
+	uid, err := scopeUserID(ctx, h.users)
+	if err != nil {
+		return nil, err
+	}
+	if uid != "" {
 		return nil, connect.NewError(connect.CodePermissionDenied,
 			fmt.Errorf("admin access required"))
 	}
@@ -153,7 +165,11 @@ func (h *ProjectHandler) ListAPIKeys(
 	ctx context.Context,
 	req *connect.Request[v1.ListAPIKeysRequest],
 ) (*connect.Response[v1.ListAPIKeysResponse], error) {
-	if uid := scopeUserID(ctx, h.users); uid != "" {
+	uid, err := scopeUserID(ctx, h.users)
+	if err != nil {
+		return nil, err
+	}
+	if uid != "" {
 		return nil, connect.NewError(connect.CodePermissionDenied,
 			fmt.Errorf("admin access required"))
 	}
@@ -178,7 +194,11 @@ func (h *ProjectHandler) RevokeAPIKey(
 	ctx context.Context,
 	req *connect.Request[v1.RevokeAPIKeyRequest],
 ) (*connect.Response[v1.RevokeAPIKeyResponse], error) {
-	if uid := scopeUserID(ctx, h.users); uid != "" {
+	uid, err := scopeUserID(ctx, h.users)
+	if err != nil {
+		return nil, err
+	}
+	if uid != "" {
 		return nil, connect.NewError(connect.CodePermissionDenied,
 			fmt.Errorf("admin access required"))
 	}

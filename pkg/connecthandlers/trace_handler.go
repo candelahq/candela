@@ -34,7 +34,10 @@ func (h *TraceHandler) GetTrace(
 	// Thread the user scope into the context so the storage backend can
 	// push the user_id filter to the database query, preventing BigQuery
 	// from fetching another user's prompt/response content before auth check.
-	ownerID := scopeUserID(ctx, h.users)
+	ownerID, err := scopeUserID(ctx, h.users)
+	if err != nil {
+		return nil, err
+	}
 	scopedCtx := storage.WithUserScope(ctx, ownerID)
 
 	trace, err := h.store.GetTrace(scopedCtx, req.Msg.TraceId)
@@ -75,6 +78,11 @@ func (h *TraceHandler) ListTraces(
 ) (*connect.Response[v1.ListTracesResponse], error) {
 	msg := req.Msg
 
+	scopedUID, err := scopeUserID(ctx, h.users)
+	if err != nil {
+		return nil, err
+	}
+
 	q := storage.TraceQuery{
 		ProjectID:   msg.ProjectId,
 		Environment: msg.Environment,
@@ -84,7 +92,7 @@ func (h *TraceHandler) ListTraces(
 		Search:      msg.Search,
 		OrderBy:     msg.OrderBy,
 		Descending:  msg.Descending,
-		UserID:      scopeUserID(ctx, h.users),
+		UserID:      scopedUID,
 		JobID:       getAttribution(req).JobID,
 		TenantID:    getAttribution(req).TenantID,
 		TraceGroup:  msg.TraceGroup,
@@ -144,12 +152,17 @@ func (h *TraceHandler) SearchSpans(
 ) (*connect.Response[v1.SearchSpansResponse], error) {
 	msg := req.Msg
 
+	scopedUID, err := scopeUserID(ctx, h.users)
+	if err != nil {
+		return nil, err
+	}
+
 	q := storage.SpanQuery{
 		ProjectID:    msg.ProjectId,
 		Kind:         storage.SpanKind(msg.Kind),
 		Model:        msg.Model,
 		NameContains: msg.NameContains,
-		UserID:       scopeUserID(ctx, h.users),
+		UserID:       scopedUID,
 		JobID:        getAttribution(req).JobID,
 		TenantID:     getAttribution(req).TenantID,
 	}

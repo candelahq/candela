@@ -88,6 +88,8 @@ func FirebaseAuthMiddleware(next http.Handler, fbAuth TokenVerifier, cloudRunAud
 	chain := NewResolverChain(cache, resolvers...)
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		r = r.WithContext(WithDevMode(r.Context(), devMode))
+
 		// Skip auth for health checks (liveness + readiness).
 		if r.URL.Path == "/healthz" || r.URL.Path == "/readyz" {
 			next.ServeHTTP(w, r)

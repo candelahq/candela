@@ -214,18 +214,22 @@ func (c *Calculator) Calculate(provider, model string, inputTokens, outputTokens
 
 	// Select pricing tier. Models with TierThresholdTokens > 0 charge higher
 	// rates when the prompt exceeds that threshold (e.g. Gemini 2.5 Pro >200K).
-	inputRate := p.InputPerMillion
-	outputRate := p.OutputPerMillion
-	if p.TierThresholdTokens > 0 && inputTokens > p.TierThresholdTokens {
-		if p.InputPerMillionHigh > 0 {
-			inputRate = p.InputPerMillionHigh
-		}
-		if p.OutputPerMillionHigh > 0 {
-			outputRate = p.OutputPerMillionHigh
-		}
+	// The tier 1 rate applies to tokens up to the threshold, and the high-tier
+	// rate applies only to the overflow tokens (#638).
+	var inputCost float64
+	if p.TierThresholdTokens > 0 && inputTokens > p.TierThresholdTokens && p.InputPerMillionHigh > 0 {
+		baseTokens := p.TierThresholdTokens
+		overflowTokens := inputTokens - p.TierThresholdTokens
+		inputCost = (float64(baseTokens) / 1_000_000 * p.InputPerMillion) +
+			(float64(overflowTokens) / 1_000_000 * p.InputPerMillionHigh)
+	} else {
+		inputCost = float64(inputTokens) / 1_000_000 * p.InputPerMillion
 	}
 
-	inputCost := float64(inputTokens) / 1_000_000 * inputRate
+	outputRate := p.OutputPerMillion
+	if p.TierThresholdTokens > 0 && inputTokens > p.TierThresholdTokens && p.OutputPerMillionHigh > 0 {
+		outputRate = p.OutputPerMillionHigh
+	}
 	outputCost := float64(outputTokens) / 1_000_000 * outputRate
 	baseCost := inputCost + outputCost
 

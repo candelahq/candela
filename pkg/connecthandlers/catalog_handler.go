@@ -36,7 +36,10 @@ func (h *CatalogHandler) ListModelCatalog(
 	includeDisabled := req.Msg.IncludeDisabled
 
 	// Resolve caller scope once — empty string means admin (full access).
-	callerScope := scopeUserID(ctx, h.users)
+	callerScope, err := scopeUserID(ctx, h.users)
+	if err != nil {
+		return nil, err
+	}
 
 	// Non-admin callers cannot see disabled models.
 	if callerScope != "" {
@@ -111,7 +114,11 @@ func (h *CatalogHandler) UpdateModelCatalogEntry(
 	}
 
 	// Admin-only guard.
-	if uid := scopeUserID(ctx, h.users); uid != "" {
+	uid, err := scopeUserID(ctx, h.users)
+	if err != nil {
+		return nil, err
+	}
+	if uid != "" {
 		return nil, connect.NewError(connect.CodePermissionDenied,
 			fmt.Errorf("admin access required"))
 	}
@@ -173,7 +180,11 @@ func (h *CatalogHandler) DeleteModelCatalogEntry(
 	}
 
 	// Admin-only guard.
-	if uid := scopeUserID(ctx, h.users); uid != "" {
+	uid, err := scopeUserID(ctx, h.users)
+	if err != nil {
+		return nil, err
+	}
+	if uid != "" {
 		return nil, connect.NewError(connect.CodePermissionDenied,
 			fmt.Errorf("admin access required"))
 	}

@@ -222,13 +222,16 @@ func TestCalculator_TieredPricing_BelowThreshold(t *testing.T) {
 
 func TestCalculator_TieredPricing_AboveThreshold(t *testing.T) {
 	c := New()
-	// Gemini 2.5 Pro above 200K tokens → high tier ($2.50 input, $15.00 output).
+	// Gemini 2.5 Pro above 200K tokens:
+	// Base rate applies up to 200K threshold ($1.25/1M), high rate only to overflow ($2.50/1M).
+	// Output rate is high tier ($15.00/1M).
 	// 300K input + 10K output:
-	//   input:  300_000 / 1M * 2.50  = 0.75
-	//   output: 10_000  / 1M * 15.00 = 0.15
-	//   total: 0.90
+	//   base input:     200_000 / 1M * 1.25  = 0.25
+	//   overflow input: 100_000 / 1M * 2.50  = 0.25
+	//   output:          10_000 / 1M * 15.00 = 0.15
+	//   total: 0.65
 	cost := c.Calculate("google", "gemini-2.5-pro", 300_000, 10_000)
-	want := 0.90
+	want := 0.65
 	if cost < want-0.001 || cost > want+0.001 {
 		t.Errorf("gemini-2.5-pro above threshold cost = %f, want %f", cost, want)
 	}
@@ -287,11 +290,92 @@ func TestCalculator_TieredPricing_ConfigOverride(t *testing.T) {
 		t.Errorf("tiered config below threshold = %f, want %f", costLow, wantLow)
 	}
 
-	// Above threshold: 150K input, 10K output
-	// 150_000/1M * 2.00 + 10_000/1M * 12.00 = 0.30 + 0.12 = 0.42
+	// Above threshold (marginal): 150K input, 10K output
+	// Base: 100_000/1M * 1.00 = 0.10
+	// Overflow: 50_000/1M * 2.00 = 0.10
+	// Output: 10_000/1M * 12.00 = 0.12
+	// Total: 0.10 + 0.10 + 0.12 = 0.32
 	costHigh := c.Calculate("google", "gemini-2.5-pro", 150_000, 10_000)
-	wantHigh := 0.42
+	wantHigh := 0.32
 	if costHigh < wantHigh-0.001 || costHigh > wantHigh+0.001 {
 		t.Errorf("tiered config above threshold = %f, want %f", costHigh, wantHigh)
+	}
+}
+
+func TestCalculator_TieredPricing_Boundaries(t *testing.T) {
+	c := New()
+	c.LoadFromConfig(PricingConfig{
+		Models: []ModelPricing{
+			{
+				Provider:             "custom",
+				Model:                "tiered-model",
+				InputPerMillion:      1.00,
+				OutputPerMillion:     5.00,
+				InputPerMillionHigh:  3.00,
+				OutputPerMillionHigh: 10.00,
+				TierThresholdTokens:  100_000,
+			},
+		},
+	})
+
+	tests := []struct {
+		name         string
+		inputTokens  int64
+		outputTokens int64
+		wantCost     float64
+	}{
+		{
+			name:         "zero tokens",
+			inputTokens:  0,
+			outputTokens: 0,
+			wantCost:     0.0,
+		},
+		{
+			name:         "threshold minus 1 (all tier 1)",
+			inputTokens:  99_999,
+			outputTokens: 0,
+			wantCost:     99_999.0 / 1_000_000.0 * 1.00,
+		},
+		{
+			name:         "exact threshold (all tier 1)",
+			inputTokens:  100_000,
+			outputTokens: 0,
+			wantCost:     100_000.0 / 1_000_000.0 * 1.00, // 0.10
+		},
+		{
+			name:         "threshold plus 1 (1 token overflow at tier 2)",
+			inputTokens:  100_001,
+			outputTokens: 0,
+			wantCost:     (100_000.0 / 1_000_000.0 * 1.00) + (1.0 / 1_000_000.0 * 3.00), // 0.100003
+		},
+		{
+			name:         "2x threshold (50% base, 50% overflow)",
+			inputTokens:  200_000,
+			outputTokens: 0,
+			wantCost:     (100_000.0 / 1_000_000.0 * 1.00) + (100_000.0 / 1_000_000.0 * 3.00), // 0.40
+		},
+		{
+			name:         "exact threshold with output (base output rate)",
+			inputTokens:  100_000,
+			outputTokens: 1_000,
+			wantCost:     (100_000.0 / 1_000_000.0 * 1.00) + (1_000.0 / 1_000_000.0 * 5.00), // 0.105
+		},
+		{
+			name:         "threshold plus 1 with output (high output rate)",
+			inputTokens:  100_001,
+			outputTokens: 1_000,
+			wantCost:     (100_000.0 / 1_000_000.0 * 1.00) + (1.0 / 1_000_000.0 * 3.00) + (1_000.0 / 1_000_000.0 * 10.00), // 0.110003
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := c.Calculate("custom", "tiered-model", tt.inputTokens, tt.outputTokens)
+			diff := got - tt.wantCost
+			if diff < -1e-6 || diff > 1e-6 {
+				t.Errorf("Calculate(custom, tiered-model, %d, %d) = %f, want %f (diff: %e)",
+					tt.inputTokens, tt.outputTokens, got, tt.wantCost, diff)
+			}
+		})
 	}
 }

@@ -881,3 +881,17 @@ func TestHasPricing_TimeBasedModel(t *testing.T) {
 		}
 	})
 }
+
+func TestCalculate_Grok46(t *testing.T) {
+	calc := New() // loads embedded defaults including grok-4.6
+
+	if !calc.HasPricing("xai", "grok-4.6") {
+		t.Fatal("expected xai/grok-4.6 to be present in default pricing")
+	}
+
+	cost := calc.Calculate("xai", "grok-4.6", 1_000_000, 1_000_000)
+	want := 8.00 // $2.00 input + $6.00 output
+	if math.Abs(cost-want) > 1e-6 {
+		t.Errorf("Calculate(xai, grok-4.6) = %f, want %f", cost, want)
+	}
+}

@@ -473,80 +473,6 @@ func main() {
 	var spendOB *spendoutbox.Outbox
 	var llmProxy *proxy.Proxy
 
-	// HIGH-5: Debug metrics endpoint (JSON, no Prometheus dependency).
-	// Requires admin role — exposes dropped span counts and spend data (#706).
-	mux.HandleFunc("/debug/metrics", func(w http.ResponseWriter, r *http.Request) {
-		// Admin-only guard: look up caller role from userStore.
-		// Fail closed: if userStore is nil (Firestore disabled) and not in
-		// dev mode, deny access entirely (#706, CWE-862).
-		if userStore == nil {
-			if !cfg.Auth.DevMode {
-				http.Error(w, "admin access required (user store not configured)", http.StatusForbidden)
-				return
-			}
-		} else {
-			caller := auth.FromContext(r.Context())
-			if caller == nil {
-				http.Error(w, "authentication required", http.StatusUnauthorized)
-				return
-			}
-			record, err := userStore.GetUser(r.Context(), caller.ID)
-			if err != nil {
-				if !errors.Is(err, storage.ErrNotFound) {
-					slog.Error("metrics authorization lookup failed", "error", err)
-					http.Error(w, "authorization lookup failed", http.StatusInternalServerError)
-					return
-				}
-				http.Error(w, "admin access required", http.StatusForbidden)
-				return
-			}
-			if record == nil || record.Role != storage.RoleAdmin {
-				http.Error(w, "admin access required", http.StatusForbidden)
-				return
-			}
-		}
-		type sinkMetric struct {
-			Name          string `json:"name"`
-			State         string `json:"state"`
-			TotalWrites   int64  `json:"total_writes"`
-			TotalFailures int64  `json:"total_failures"`
-			TotalDropped  int64  `json:"total_dropped"`
-		}
-		type metrics struct {
-			Proxy struct {
-				DroppedSpans       int64   `json:"dropped_spans"`
-				SASpendUSD         float64 `json:"sa_spend_usd"`
-				SpendOutboxPending int64   `json:"spend_outbox_pending"`
-			} `json:"proxy"`
-			Processor struct {
-				DroppedSpans int64        `json:"dropped_spans"`
-				Sinks        []sinkMetric `json:"sinks"`
-			} `json:"processor"`
-		}
-		var m metrics
-		if llmProxy != nil {
-			m.Proxy.DroppedSpans = llmProxy.DroppedSpans()
-			m.Proxy.SASpendUSD = float64(llmProxy.SASpendMicroUSD()) / 1_000_000
-		}
-		if spendOB != nil {
-			if pending, err := spendOB.Pending(r.Context()); err == nil {
-				m.Proxy.SpendOutboxPending = pending
-			}
-		}
-		m.Processor.DroppedSpans = proc.DroppedSpans()
-		for _, sh := range proc.SinkHealth() {
-			m.Processor.Sinks = append(m.Processor.Sinks, sinkMetric{
-				Name:          sh.Name,
-				State:         sh.State,
-				TotalWrites:   sh.TotalWrites,
-				TotalFailures: sh.TotalFailures,
-				TotalDropped:  sh.TotalDropped,
-			})
-		}
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(m)
-	})
-
 	// Register ConnectRPC service handlers.
 
 	// Initialize UserStore (Firestore or SQLite).
@@ -1218,6 +1144,16 @@ func main() {
 
 	saAllowlist := auth.NewServiceAccountAllowlist(cfg.Auth.AllowedServiceAccounts)
 
+	// HIGH-5: Debug metrics endpoint (JSON, no Prometheus dependency).
+	// Requires admin role — exposes dropped span counts and spend data (#625, #706).
+	mux.Handle("/debug/metrics", newMetricsHandler(MetricsDeps{
+		UserStore: userStore,
+		DevMode:   cfg.Auth.DevMode,
+		LLMProxy:  llmProxy,
+		SpendOB:   spendOB,
+		Processor: proc,
+	}))
+
 	var authedMux http.Handler
 	if len(cfg.Auth.Resolvers) > 0 {
 		// #764: Config-driven resolver chain — supports OIDC, Firebase, Google, etc.
@@ -1233,7 +1169,7 @@ func main() {
 		}
 		slog.Info("🔐 Config-driven resolver chain active", "resolver_count", len(cfg.Auth.Resolvers))
 		authedMux = auth.ChainAuthMiddleware(
-			corsMiddleware(mux, cfg.CORS.AllowedOrigins),
+			mux,
 			chain,
 			userAuth,
 			saAllowlist,
@@ -1242,7 +1178,7 @@ func main() {
 	} else {
 		// Legacy path: hardcoded Firebase → Google OIDC → Google OAuth chain.
 		authedMux = auth.FirebaseAuthMiddleware(
-			corsMiddleware(mux, cfg.CORS.AllowedOrigins),
+			mux,
 			tokenVerifier,
 			cloudRunURL,
 			userAuth,
@@ -1259,9 +1195,13 @@ func main() {
 	protocols.SetHTTP1(true)
 	protocols.SetUnencryptedHTTP2(true)
 
+	// #640: Wrap authedMux with corsMiddleware on the outside so that
+	// auth error responses (401/403) and preflight OPTIONS retain CORS headers.
+	handler := corsMiddleware(authedMux, cfg.CORS.AllowedOrigins)
+
 	srv := &http.Server{
 		Addr:              addr,
-		Handler:           candelaotel.HTTPMiddleware(authedMux),
+		Handler:           candelaotel.HTTPMiddleware(handler),
 		Protocols:         &protocols,
 		ReadHeaderTimeout: 10 * time.Second,
 		WriteTimeout:      10 * time.Minute, // generous for streaming LLM responses
@@ -1475,6 +1415,7 @@ func corsMiddleware(next http.Handler, origins []string) http.Handler {
 	for _, o := range origins {
 		if o == "*" {
 			allowAll = true
+			slog.Warn("⚠️  CORS configured with wildcard '*' origin — all origins permitted; specify explicit origins in production (cors.allowed_origins)")
 		}
 		allowed[o] = true
 	}
@@ -1506,6 +1447,94 @@ func corsMiddleware(next http.Handler, origins []string) http.Handler {
 		}
 
 		next.ServeHTTP(w, r)
+	})
+}
+
+// MetricsDeps provides the runtime dependencies for /debug/metrics (#625, #706).
+type MetricsDeps struct {
+	UserStore storage.UserStore
+	DevMode   bool
+	LLMProxy  *proxy.Proxy
+	SpendOB   *spendoutbox.Outbox
+	Processor *processor.SpanProcessor
+}
+
+// newMetricsHandler creates the HTTP handler for the /debug/metrics endpoint (#625, #706).
+// Requires admin role — exposes dropped span counts and spend data.
+// Fails closed: if userStore is nil and not in dev mode, denies access entirely.
+func newMetricsHandler(deps MetricsDeps) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Admin-only guard: look up caller role from userStore.
+		// Fail closed: if userStore is nil (Firestore disabled) and not in
+		// dev mode, deny access entirely (#706, CWE-862).
+		if deps.UserStore == nil {
+			if !deps.DevMode {
+				http.Error(w, "admin access required (user store not configured)", http.StatusForbidden)
+				return
+			}
+		} else {
+			caller := auth.FromContext(r.Context())
+			if caller == nil {
+				http.Error(w, "authentication required", http.StatusUnauthorized)
+				return
+			}
+			record, err := deps.UserStore.GetUser(r.Context(), caller.ID)
+			if err != nil {
+				if !errors.Is(err, storage.ErrNotFound) {
+					slog.Error("metrics authorization lookup failed", "error", err)
+					http.Error(w, "authorization lookup failed", http.StatusInternalServerError)
+					return
+				}
+				http.Error(w, "admin access required", http.StatusForbidden)
+				return
+			}
+			if record == nil || record.Role != storage.RoleAdmin {
+				http.Error(w, "admin access required", http.StatusForbidden)
+				return
+			}
+		}
+		type sinkMetric struct {
+			Name          string `json:"name"`
+			State         string `json:"state"`
+			TotalWrites   int64  `json:"total_writes"`
+			TotalFailures int64  `json:"total_failures"`
+			TotalDropped  int64  `json:"total_dropped"`
+		}
+		type metrics struct {
+			Proxy struct {
+				DroppedSpans       int64   `json:"dropped_spans"`
+				SASpendUSD         float64 `json:"sa_spend_usd"`
+				SpendOutboxPending int64   `json:"spend_outbox_pending"`
+			} `json:"proxy"`
+			Processor struct {
+				DroppedSpans int64        `json:"dropped_spans"`
+				Sinks        []sinkMetric `json:"sinks"`
+			} `json:"processor"`
+		}
+		var m metrics
+		if deps.LLMProxy != nil {
+			m.Proxy.DroppedSpans = deps.LLMProxy.DroppedSpans()
+			m.Proxy.SASpendUSD = float64(deps.LLMProxy.SASpendMicroUSD()) / 1_000_000
+		}
+		if deps.SpendOB != nil {
+			if pending, err := deps.SpendOB.Pending(r.Context()); err == nil {
+				m.Proxy.SpendOutboxPending = pending
+			}
+		}
+		if deps.Processor != nil {
+			m.Processor.DroppedSpans = deps.Processor.DroppedSpans()
+			for _, sh := range deps.Processor.SinkHealth() {
+				m.Processor.Sinks = append(m.Processor.Sinks, sinkMetric{
+					Name:          sh.Name,
+					State:         sh.State,
+					TotalWrites:   sh.TotalWrites,
+					TotalFailures: sh.TotalFailures,
+					TotalDropped:  sh.TotalDropped,
+				})
+			}
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(m)
 	})
 }
 

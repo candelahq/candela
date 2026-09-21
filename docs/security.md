@@ -379,14 +379,21 @@ See [docs/user-management.md](user-management.md) for the full validation rule r
 | ADC token auto-refresh | ✅ | `oauth2.TokenSource` handles refresh |
 | API key hashing (bcrypt) | ✅ | `APIKey.KeyHash` never exposed |
 | Proxy does not store upstream API keys | ✅ | Forwarded transparently |
-| CORS origin allowlist | ✅ | Configurable, defaults to localhost |
+| CORS origin allowlist | ✅ | Configurable, defaults to localhost; warns on wildcard (#628) |
 | Firebase authorized domains | ⚠️ | Must be configured in Firebase Console |
 | HTTPS in production | ⚠️ | Handled by Cloud Run / load balancer |
 | Audit logging for admin actions | ✅ | Firestore `audit_log` collection |
 
-### v0.7.1 Security Hardening Notes
+### CORS Security Best Practices (#628, #640)
 
-The following issues were identified and resolved in the v0.7.1 security audit:
+- **Outer Middleware Order**: CORS middleware (`corsMiddleware`) wraps authentication middleware (`authedMux`) on the outside. This guarantees that:
+  - Preflight `OPTIONS` requests receive `204 No Content` and CORS headers without requiring authentication.
+  - Authentication rejections (`401 Unauthorized`, `403 Forbidden`) retain `Access-Control-Allow-Origin` headers, allowing browser client applications to receive and handle the specific auth error instead of masking it as an opaque CORS network violation (#640).
+- **Explicit Origins in Production**: Avoid wildcard `*` origins in production deployments. When `*` is configured with credentialed requests, the server reflects the caller's origin while logging a conspicuous warning (`⚠️ CORS configured with wildcard '*' origin`). Always configure explicit origins under `cors.allowed_origins` matching production frontend domains.
+
+### Security Audit Hardening Notes
+
+The following issues were identified and resolved in the security hardening reviews:
 
 | Issue | Severity | Description | Fix |
 |-------|----------|-------------|-----|
@@ -394,6 +401,10 @@ The following issues were identified and resolved in the v0.7.1 security audit:
 | `UpdateUser` role escalation bypass | **MEDIUM-HIGH** | A developer-role user could call `UpdateUser` on their own record with `role: ADMIN` to escalate privileges. The admin guard only checked if the caller was admin for *other* users, not for self-updates. | Self-updates now reject `role` field changes; only admins can modify roles. |
 | Catalog `AdminEditable` UI leak | **MEDIUM** | The model catalog API returned `admin_editable: true/false` metadata to all users, leaking which fields are admin-configurable. While not directly exploitable, it reveals internal authorization boundaries. | `admin_editable` field is now stripped from responses for non-admin callers. |
 | `scopeUserID` fail-open on nil context | **MEDIUM** (MED-10) | `scopeUserID` returned `""` when the auth context was nil, granting admin-level access (fail-open). | Added explicit `dev_mode` check; in non-dev mode a nil caller returns `Unauthenticated` (fail closed, #627). |
+| `/debug/metrics` admin authorization | **MEDIUM** (MED-9) | Metrics endpoint returned sensitive spend and dropped-span counts to unauthenticated or non-admin users. | Restricted to admin users; fails closed with 403 when UserStore is unconfigured in production (#625). |
+| CORS wildcard origin warning | **MEDIUM** (MED-11) | Wildcard CORS origin `*` allowed arbitrary clients to query APIs. | Emits startup warning when `*` is configured and enforces origin reflection; documented best practices (#628). |
+| PR title-based CI gating bypass | **HIGH** (HIGH-10) | `transparent-proxy-e2e` CI job was triggered based on PR titles (`contains(title, 'proxy')`), allowing untrusted PR authors to control execution. | Replaced PR title matching with `dorny/paths-filter` path-based gating (#626). |
+| CORS headers on auth error responses | **MEDIUM** (#640) | Auth error responses (401/403) omitted CORS headers because auth middleware was outer to CORS, masking auth errors as generic browser CORS errors. | Moved `corsMiddleware` outside `authedMux` so all responses retain CORS headers (#640). |
 
 ---
 

@@ -6,6 +6,18 @@ import (
 	"time"
 )
 
+func TestBQBufferSize(t *testing.T) {
+	if got := bqBufferSize(BQConfig{}); got != defaultBQBufferSize {
+		t.Errorf("default buffer size = %d, want %d", got, defaultBQBufferSize)
+	}
+	if got := bqBufferSize(BQConfig{BufferSize: 1024}); got != 1024 {
+		t.Errorf("configured buffer size = %d, want 1024", got)
+	}
+	if got := bqBufferSize(BQConfig{BufferSize: -1}); got != defaultBQBufferSize {
+		t.Errorf("invalid buffer size = %d, want %d", got, defaultBQBufferSize)
+	}
+}
+
 // newTestBQLogger creates a BQLogger with only the events channel initialized
 // (no BigQuery client). This lets us test buffer behavior without cloud deps.
 func newTestBQLogger(bufSize int) *BQLogger {

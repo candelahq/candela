@@ -405,6 +405,7 @@ The following issues were identified and resolved in the security hardening revi
 | CORS wildcard origin warning | **MEDIUM** (MED-11) | Wildcard CORS origin `*` allowed arbitrary clients to query APIs. | Emits startup warning when `*` is configured and enforces origin reflection; documented best practices (#628). |
 | PR title-based CI gating bypass | **HIGH** (HIGH-10) | `transparent-proxy-e2e` CI job was triggered based on PR titles (`contains(title, 'proxy')`), allowing untrusted PR authors to control execution. | Replaced PR title matching with `dorny/paths-filter` path-based gating (#626). |
 | CORS headers on auth error responses | **MEDIUM** (#640) | Auth error responses (401/403) omitted CORS headers because auth middleware was outer to CORS, masking auth errors as generic browser CORS errors. | Moved `corsMiddleware` outside `authedMux` so all responses retain CORS headers (#640). |
+| BigQuery audit logger burst buffer | **LOW** (#680) | Hardcoded channel buffer (256) could drop audit events under burst traffic. | Made buffer size configurable via `BQConfig.BufferSize` (defaults to 256 if $\le 0$; unkeyed literals must migrate to keyed literals). |
 
 ---
 
@@ -418,6 +419,7 @@ The following issues were identified and resolved in the security hardening revi
 | `pkg/auth/admin.go` | `AdminInterceptor` — ConnectRPC admin guard |
 | `pkg/connecthandlers/scope.go` | `scopeUserID()` — per-user data scoping helper |
 | `pkg/connecthandlers/errors.go` | `internalError()` — sanitized error responses |
+| `pkg/audit/bq_logger.go` | BigQuery async audit logger (`BQLogger`, `BQConfig`, buffer sizing) |
 | `cmd/candela-server/main.go` | Middleware wiring, Firebase init, dev mode |
 | `cmd/candela/main.go` | ADC token injection for Team Mode |
 

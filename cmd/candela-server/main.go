@@ -4,10 +4,12 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"os"
@@ -79,6 +81,7 @@ type Config struct {
 		} `yaml:"duckdb"`
 		SQLite struct {
 			Path string `yaml:"path"` // e.g. "candela.db" or ":memory:"
+			DSN  string `yaml:"dsn"`  // alias for path
 		} `yaml:"sqlite"`
 		BigQuery struct {
 			ProjectID string `yaml:"project_id"`
@@ -88,13 +91,26 @@ type Config struct {
 		} `yaml:"bigquery"`
 	} `yaml:"storage"`
 	Proxy struct {
-		Enabled        bool                     `yaml:"enabled"`
-		ProjectID      string                   `yaml:"project_id"`
-		Providers      []string                 `yaml:"providers"`            // e.g. ["openai", "google", "anthropic", "anthropic-direct", "gemini-oai"]
-		MaxRequestCost float64                  `yaml:"max_request_cost_usd"` // Per-request cost cap (0 = disabled)
-		DailyLimits    []proxy.SpendLimitConfig `yaml:"daily_limits"`         // Per-model daily spend limits
-		Policy         *proxy.PolicyConfig      `yaml:"policy"`               // Model allowlist policy (#207)
-		VertexAI       struct {
+		Enabled             bool                     `yaml:"enabled"`
+		ProjectID           string                   `yaml:"project_id"`
+		Providers           []string                 `yaml:"providers"`               // e.g. ["openai", "google", "anthropic", "anthropic-direct", "gemini-oai"]
+		MaxRequestCost      float64                  `yaml:"max_request_cost_usd"`    // Per-request cost cap (0 = disabled)
+		DailyLimits         []proxy.SpendLimitConfig `yaml:"daily_limits"`            // Per-model daily spend limits
+		Policy              *proxy.PolicyConfig      `yaml:"policy"`                  // Model allowlist policy (#207)
+		MaxIdleConns        int                      `yaml:"max_idle_conns"`          // Total idle connections across all hosts
+		MaxIdleConnsPerHost int                      `yaml:"max_idle_conns_per_host"` // Idle connections per upstream host
+		MaxConnsPerHost     int                      `yaml:"max_conns_per_host"`      // Hard cap per upstream host
+		MaxContentLen       int                      `yaml:"max_content_len"`         // Max body/content len in bytes (#708)
+		LMStudio            struct {
+			Enabled bool                `yaml:"enabled"`
+			Port    int                 `yaml:"port"`
+			Models  []proxy.CompatModel `yaml:"models"`
+		} `yaml:"lmstudio"`
+		AWS struct {
+			Region  string `yaml:"region"`
+			Profile string `yaml:"profile"`
+		} `yaml:"aws"`
+		VertexAI struct {
 			ProjectID string `yaml:"project_id"` // GCP project for Vertex AI
 			Region    string `yaml:"region"`     // default region (e.g. "us-central1")
 			Anthropic struct {
@@ -161,6 +177,10 @@ type Config struct {
 		SlackWebhookURL string               `yaml:"slack_webhook_url"` // Slack incoming webhook URL
 		Webhook         notify.WebhookConfig `yaml:"webhook"`           // Generic webhook notifier
 	} `yaml:"notifications"`
+	AWS struct {
+		Region  string `yaml:"region"`
+		Profile string `yaml:"profile"`
+	} `yaml:"aws"`
 }
 
 // CatalogConfig holds model catalog configuration.
@@ -260,6 +280,7 @@ func main() {
 		slog.Error("failed to load config", "error", err)
 		os.Exit(1)
 	}
+	logEffectiveConfig(cfg)
 	// Check for deprecated config fields and warn the operator.
 	if v := cfg.Proxy.VertexAI; v.DeprecatedCachingMode != "" || v.DeprecatedCacheTTL != "" || v.DeprecatedPromptCaching != nil {
 		if v.DeprecatedCachingMode != "" {
@@ -888,12 +909,15 @@ func main() {
 
 		if len(activeProviders) > 0 {
 			llmProxy, err = proxy.New(proxy.Config{
-				Providers:      activeProviders,
-				ProjectID:      cfg.Proxy.ProjectID,
-				MaxRequestCost: cfg.Proxy.MaxRequestCost,
-				DailyLimits:    cfg.Proxy.DailyLimits,
-				Policy:         cfg.Proxy.Policy,
-				Catalog:        catalogStore,
+				Providers:           activeProviders,
+				ProjectID:           cfg.Proxy.ProjectID,
+				MaxRequestCost:      cfg.Proxy.MaxRequestCost,
+				DailyLimits:         cfg.Proxy.DailyLimits,
+				Policy:              cfg.Proxy.Policy,
+				Catalog:             catalogStore,
+				MaxIdleConns:        cfg.Proxy.MaxIdleConns,
+				MaxIdleConnsPerHost: cfg.Proxy.MaxIdleConnsPerHost,
+				MaxConnsPerHost:     cfg.Proxy.MaxConnsPerHost,
 			}, proc, calc)
 			if err != nil {
 				slog.Error("invalid proxy configuration", "error", err)
@@ -1014,6 +1038,19 @@ func main() {
 						ID:       m.Model,
 						Provider: compatProvider,
 					})
+				}
+
+				// Append models explicitly configured in proxy.lmstudio.models (#708).
+				for _, lm := range cfg.Proxy.LMStudio.Models {
+					if len(activeProviders) > 0 && !activeSet[lm.Provider] {
+						continue
+					}
+					key := lm.Provider + "/" + lm.ID
+					if seen[key] {
+						continue
+					}
+					seen[key] = true
+					models = append(models, lm)
 				}
 
 				// Append custom provider models so they survive catalog refreshes.
@@ -1325,21 +1362,25 @@ func initStorage(cfg *Config) (storage.SpanReader, []storage.SpanWriter, func(),
 	return reader, writers, closeFn, nil
 }
 
-func loadConfig() (*Config, error) {
-	cfgPath := os.Getenv("CANDELA_CONFIG")
-	if cfgPath == "" {
-		cfgPath = "config.yaml"
-	}
-
+// parseConfig parses configuration from raw YAML bytes, rejecting unknown fields (#708),
+// and applies defaults and environment variable overrides.
+func parseConfig(data []byte) (*Config, error) {
 	var cfg Config
 	cfg.ServiceAccounts.DefaultDailyBudgetUSD = 10.0 // #608: default before YAML so explicit 0 disables
 
-	data, err := os.ReadFile(cfgPath)
-	if err != nil {
-		// No config file — use defaults (DuckDB, port 8181).
-		slog.Warn("config file not found, using defaults", "path", cfgPath)
-	} else if err := yaml.Unmarshal(data, &cfg); err != nil {
-		return nil, fmt.Errorf("parsing config: %w", err)
+	if len(data) > 0 {
+		dec := yaml.NewDecoder(bytes.NewReader(data))
+		dec.KnownFields(true)
+		if err := dec.Decode(&cfg); err != nil && !errors.Is(err, io.EOF) {
+			return nil, fmt.Errorf("parsing config: %w", err)
+		}
+		var extra any
+		if err := dec.Decode(&extra); !errors.Is(err, io.EOF) {
+			if err == nil {
+				return nil, fmt.Errorf("parsing config: multiple YAML documents not supported")
+			}
+			return nil, fmt.Errorf("parsing config trailing document: %w", err)
+		}
 	}
 
 	if cfg.Server.Port == 0 {
@@ -1347,6 +1388,9 @@ func loadConfig() (*Config, error) {
 	}
 	if cfg.Storage.Backend == "" {
 		cfg.Storage.Backend = "duckdb"
+	}
+	if cfg.Storage.SQLite.Path == "" && cfg.Storage.SQLite.DSN != "" {
+		cfg.Storage.SQLite.Path = cfg.Storage.SQLite.DSN
 	}
 
 	// Catalog backend: env var override, then default to "config".
@@ -1401,6 +1445,63 @@ func loadConfig() (*Config, error) {
 	}
 
 	return &cfg, nil
+}
+
+func loadConfig() (*Config, error) {
+	cfgPath := os.Getenv("CANDELA_CONFIG")
+	if cfgPath == "" {
+		cfgPath = "config.yaml"
+	}
+
+	data, err := os.ReadFile(cfgPath)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			// No config file — use defaults (DuckDB, port 8181).
+			slog.Warn("config file not found, using defaults", "path", cfgPath)
+			return parseConfig(nil)
+		}
+		return nil, fmt.Errorf("reading config %s: %w", cfgPath, err)
+	}
+
+	return parseConfig(data)
+}
+
+// logEffectiveConfig logs non-sensitive startup configuration parameters,
+// masking secrets and sensitive endpoints to prevent log credential leaks (#708).
+func logEffectiveConfig(cfg *Config) {
+	slackStatus := "[NOT CONFIGURED]"
+	if cfg.Notifications.SlackWebhookURL != "" {
+		slackStatus = "[CONFIGURED]"
+	}
+
+	webhookSecretStatus := "[NOT CONFIGURED]"
+	if cfg.Notifications.Webhook.Secret != "" {
+		webhookSecretStatus = "[REDACTED]"
+	}
+
+	authMode := "production"
+	if cfg.Auth.DevMode {
+		authMode = "dev_mode (unauthenticated)"
+	}
+
+	otlpHeadersConfigured := len(cfg.Sinks.OTLP.Headers) > 0
+
+	slog.Info("⚙️  effective configuration",
+		"server.host", cfg.Server.Host,
+		"server.port", cfg.Server.Port,
+		"storage.backend", cfg.Storage.Backend,
+		"proxy.enabled", cfg.Proxy.Enabled,
+		"proxy.project_id", cfg.Proxy.ProjectID,
+		"catalog.backend", cfg.Catalog.Backend,
+		"auth.mode", authMode,
+		"budget.timezone", cfg.Budget.Timezone,
+		"cors.allowed_origins", cfg.CORS.AllowedOrigins,
+		"notifications.slack", slackStatus,
+		"notifications.webhook_enabled", cfg.Notifications.Webhook.Enabled,
+		"notifications.webhook_secret", webhookSecretStatus,
+		"sinks.otlp_enabled", cfg.Sinks.OTLP.Enabled,
+		"sinks.otlp_headers_configured", otlpHeadersConfigured,
+	)
 }
 
 // corsMiddleware wraps an http.Handler with CORS headers.

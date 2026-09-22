@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -214,6 +215,60 @@ func TestOTelSink_EmitHTTPError(t *testing.T) {
 	err = sink.Emit(context.Background(), AuditRecord{Severity: "INFO"})
 	if err == nil {
 		t.Error("expected error for HTTP 500")
+	}
+	if !strings.Contains(err.Error(), "HTTP 500") {
+		t.Errorf("expected error to mention HTTP 500, got: %v", err)
+	}
+}
+
+func TestOTelSink_EmitHTTPError_WithBodySnippet(t *testing.T) {
+	diagnosticMsg := "collector rate limit exceeded: try again in 5s"
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusTooManyRequests)
+		_, _ = w.Write([]byte(diagnosticMsg))
+	}))
+	defer ts.Close()
+
+	sink, err := NewOTelSink(OTelSinkConfig{Endpoint: ts.URL})
+	if err != nil {
+		t.Fatalf("NewOTelSink: %v", err)
+	}
+
+	err = sink.Emit(context.Background(), AuditRecord{Severity: "INFO"})
+	if err == nil {
+		t.Fatal("expected error for HTTP 429")
+	}
+	if !strings.Contains(err.Error(), diagnosticMsg) {
+		t.Errorf("expected error to contain %q, got: %v", diagnosticMsg, err)
+	}
+	if !strings.Contains(err.Error(), "HTTP 429") {
+		t.Errorf("expected error to contain 'HTTP 429', got: %v", err)
+	}
+}
+
+func TestOTelSink_EmitHTTPError_TruncatedAt256Bytes(t *testing.T) {
+	longBody := strings.Repeat("A", 500)
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(longBody))
+	}))
+	defer ts.Close()
+
+	sink, err := NewOTelSink(OTelSinkConfig{Endpoint: ts.URL})
+	if err != nil {
+		t.Fatalf("NewOTelSink: %v", err)
+	}
+
+	err = sink.Emit(context.Background(), AuditRecord{Severity: "INFO"})
+	if err == nil {
+		t.Fatal("expected error for HTTP 400")
+	}
+	expectedSnippet := strings.Repeat("A", 256)
+	if !strings.Contains(err.Error(), expectedSnippet) {
+		t.Errorf("expected error to contain 256 bytes snippet, got: %v", err)
+	}
+	if strings.Contains(err.Error(), strings.Repeat("A", 257)) {
+		t.Errorf("expected body to be capped at 256 bytes, but got more: %v", err)
 	}
 }
 

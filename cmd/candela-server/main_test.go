@@ -1,8 +1,10 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -274,5 +276,248 @@ func TestMetricsHandler_NilUserStore_Prod(t *testing.T) {
 
 	if rec.Code != http.StatusForbidden {
 		t.Errorf("expected 403 Forbidden when userStore is nil in prod mode, got %d", rec.Code)
+	}
+}
+
+// ─── Config Validation & Redaction Tests (#708) ─────────────────────────────
+
+func TestParseConfig_StrictYAMLUnknownFieldRejected(t *testing.T) {
+	tests := []struct {
+		name string
+		yaml string
+	}{
+		{
+			name: "top-level unknown field",
+			yaml: "unknown_key: true\n",
+		},
+		{
+			name: "typo in server section",
+			yaml: "server:\n  prt: 8080\n",
+		},
+		{
+			name: "typo in proxy section",
+			yaml: "proxy:\n  enabld: true\n",
+		},
+		{
+			name: "typo in storage section",
+			yaml: "storage:\n  bckend: duckdb\n",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := parseConfig([]byte(tt.yaml))
+			if err == nil {
+				t.Fatalf("expected error for unknown YAML field, got nil")
+			}
+			if !strings.Contains(err.Error(), "parsing config") {
+				t.Errorf("expected error message to contain 'parsing config', got: %v", err)
+			}
+		})
+	}
+}
+
+func TestParseConfig_ValidKnownFieldsAccepted(t *testing.T) {
+	validYAML := `
+server:
+  host: "127.0.0.1"
+  port: 9090
+
+storage:
+  backend: "sqlite"
+  sqlite:
+    path: ":memory:"
+
+proxy:
+  enabled: true
+  project_id: "test-proj"
+  max_content_len: 1024
+  max_idle_conns: 100
+  max_idle_conns_per_host: 20
+  max_conns_per_host: 50
+  lmstudio:
+    enabled: true
+    port: 1234
+    models:
+      - id: "gpt-4o"
+        provider: "openai"
+  aws:
+    region: "us-east-1"
+    profile: "default"
+
+cors:
+  allowed_origins:
+    - "http://localhost:3000"
+
+notifications:
+  slack_webhook_url: "https://hooks.slack.com/services/XXX"
+  webhook:
+    enabled: true
+    endpoint: "https://example.com/webhook"
+    secret: "test-secret"
+`
+	cfg, err := parseConfig([]byte(validYAML))
+	if err != nil {
+		t.Fatalf("unexpected error parsing valid config: %v", err)
+	}
+
+	if cfg.Server.Host != "127.0.0.1" || cfg.Server.Port != 9090 {
+		t.Errorf("server config mismatch: %+v", cfg.Server)
+	}
+	if cfg.Storage.Backend != "sqlite" {
+		t.Errorf("storage backend = %q, want 'sqlite'", cfg.Storage.Backend)
+	}
+	if cfg.Proxy.MaxContentLen != 1024 {
+		t.Errorf("max_content_len = %d, want 1024", cfg.Proxy.MaxContentLen)
+	}
+	if !cfg.Proxy.LMStudio.Enabled || cfg.Proxy.LMStudio.Port != 1234 || len(cfg.Proxy.LMStudio.Models) != 1 {
+		t.Errorf("lmstudio config mismatch: %+v", cfg.Proxy.LMStudio)
+	}
+	if cfg.Proxy.AWS.Region != "us-east-1" {
+		t.Errorf("proxy.aws.region = %q, want 'us-east-1'", cfg.Proxy.AWS.Region)
+	}
+}
+
+func TestParseConfig_EmptyDataUsesDefaults(t *testing.T) {
+	cfg, err := parseConfig(nil)
+	if err != nil {
+		t.Fatalf("unexpected error parsing nil data: %v", err)
+	}
+	if cfg.Server.Port != 8181 {
+		t.Errorf("default port = %d, want 8181", cfg.Server.Port)
+	}
+	if cfg.Storage.Backend != "duckdb" {
+		t.Errorf("default backend = %q, want 'duckdb'", cfg.Storage.Backend)
+	}
+	if cfg.Catalog.Backend != "config" {
+		t.Errorf("default catalog backend = %q, want 'config'", cfg.Catalog.Backend)
+	}
+
+	cfg2, err := parseConfig([]byte(""))
+	if err != nil {
+		t.Fatalf("unexpected error parsing empty bytes: %v", err)
+	}
+	if cfg2.Server.Port != 8181 {
+		t.Errorf("default port for empty bytes = %d, want 8181", cfg2.Server.Port)
+	}
+}
+
+func TestLoadConfig_RepoConfigFile(t *testing.T) {
+	// Points to the repository root config.yaml
+	t.Setenv("CANDELA_CONFIG", "../../config.yaml")
+
+	cfg, err := loadConfig()
+	if err != nil {
+		t.Fatalf("failed to load repo config.yaml under KnownFields(true): %v", err)
+	}
+
+	if !cfg.Proxy.Enabled {
+		t.Errorf("expected proxy.enabled to be true in config.yaml")
+	}
+	if !cfg.Proxy.LMStudio.Enabled {
+		t.Errorf("expected proxy.lmstudio.enabled to be true in config.yaml")
+	}
+}
+
+func TestLogEffectiveConfig_RedactsSecrets(t *testing.T) {
+	var buf bytes.Buffer
+	testLogger := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{
+		Level: slog.LevelInfo,
+	}))
+	origLogger := slog.Default()
+	slog.SetDefault(testLogger)
+	defer slog.SetDefault(origLogger)
+
+	cfg := &Config{}
+	cfg.Server.Host = "0.0.0.0"
+	cfg.Server.Port = 8181
+	cfg.Storage.Backend = "duckdb"
+	cfg.Notifications.SlackWebhookURL = "https://hooks.slack.com/services/SECRET/WEBHOOK/12345"
+	cfg.Notifications.Webhook.Enabled = true
+	cfg.Notifications.Webhook.Secret = "super-secret-hmac-signing-key"
+	cfg.Sinks.OTLP.Enabled = true
+	cfg.Sinks.OTLP.Headers = map[string]string{
+		"Authorization": "Bearer super-secret-token",
+	}
+
+	logEffectiveConfig(cfg)
+
+	output := buf.String()
+
+	// Sensitive values must NOT appear in logs:
+	if strings.Contains(output, "https://hooks.slack.com/services/SECRET/WEBHOOK/12345") {
+		t.Error("Slack webhook URL was logged unredacted!")
+	}
+	if strings.Contains(output, "super-secret-hmac-signing-key") {
+		t.Error("Webhook HMAC secret was logged unredacted!")
+	}
+	if strings.Contains(output, "super-secret-token") {
+		t.Error("OTLP authorization header was logged unredacted!")
+	}
+
+	// Redacted indicators must appear:
+	if !strings.Contains(output, "notifications.slack=[CONFIGURED]") {
+		t.Errorf("expected notifications.slack=[CONFIGURED] in log output, got: %s", output)
+	}
+	if !strings.Contains(output, "notifications.webhook_secret=[REDACTED]") {
+		t.Errorf("expected notifications.webhook_secret=[REDACTED] in log output, got: %s", output)
+	}
+	if !strings.Contains(output, "sinks.otlp_headers_configured=true") {
+		t.Errorf("expected sinks.otlp_headers_configured=true in log output, got: %s", output)
+	}
+}
+
+func TestParseConfig_SQLiteDSNAlias(t *testing.T) {
+	yamlData := `
+storage:
+  backend: sqlite
+  sqlite:
+    dsn: ":memory:"
+`
+	cfg, err := parseConfig([]byte(yamlData))
+	if err != nil {
+		t.Fatalf("unexpected error parsing dsn alias: %v", err)
+	}
+	if cfg.Storage.SQLite.Path != ":memory:" {
+		t.Errorf("expected sqlite.path to be ':memory:', got %q", cfg.Storage.SQLite.Path)
+	}
+}
+
+func TestLoadConfig_AllConfigFiles(t *testing.T) {
+	configFiles := []string{
+		"../../config.yaml",
+		"../../test/functional/test_config.yaml",
+		"../../deploy/config.production.yaml",
+		"../../deploy/config.production.example.yaml",
+	}
+
+	for _, path := range configFiles {
+		t.Run(path, func(t *testing.T) {
+			t.Setenv("CANDELA_CONFIG", path)
+			cfg, err := loadConfig()
+			if err != nil {
+				t.Fatalf("failed to load %s: %v", path, err)
+			}
+			if cfg == nil {
+				t.Fatalf("expected non-nil config for %s", path)
+			}
+		})
+	}
+}
+
+func TestParseConfig_MultipleDocumentsRejected(t *testing.T) {
+	yamlData := `
+server:
+  port: 8181
+---
+server:
+  port: 8282
+`
+	_, err := parseConfig([]byte(yamlData))
+	if err == nil {
+		t.Fatal("expected error for multiple YAML documents, got nil")
+	}
+	if !strings.Contains(err.Error(), "multiple YAML documents not supported") {
+		t.Errorf("expected error to mention multiple YAML documents, got: %v", err)
 	}
 }

@@ -2,8 +2,14 @@ package audit
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 	"time"
+
+	"cloud.google.com/go/bigquery"
+	"google.golang.org/api/option"
 )
 
 func TestBQBufferSize(t *testing.T) {
@@ -133,5 +139,138 @@ func TestBQLogger_Log_ZeroTimestamp(t *testing.T) {
 	row := <-l.events
 	if !row.Timestamp.Valid {
 		t.Error("Timestamp.Valid = false, want true (even for zero time)")
+	}
+}
+
+func TestNewBQLogger_WithClient_DoesNotOwnClient(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer ts.Close()
+
+	ctx := context.Background()
+	client, err := bigquery.NewClient(ctx, "test-proj",
+		option.WithoutAuthentication(),
+		option.WithEndpoint(ts.URL),
+	)
+	if err != nil {
+		t.Fatalf("failed to create dummy bigquery client: %v", err)
+	}
+	defer func() { _ = client.Close() }()
+
+	cfg := BQConfig{
+		ProjectID:  "test-proj",
+		Dataset:    "test-dataset",
+		BufferSize: 16,
+		Client:     client,
+	}
+
+	logger, err := NewBQLogger(ctx, cfg)
+	if err != nil {
+		t.Fatalf("NewBQLogger failed: %v", err)
+	}
+
+	if logger.ownsClient {
+		t.Errorf("expected logger.ownsClient to be false, got true")
+	}
+	if logger.client != client {
+		t.Errorf("expected logger.client to match injected client")
+	}
+
+	// Close should drain and return nil without closing the external client.
+	if err := logger.Close(); err != nil {
+		t.Errorf("logger.Close() failed: %v", err)
+	}
+}
+
+func TestEnsureTableWithClient_NilClient(t *testing.T) {
+	err := EnsureTableWithClient(context.Background(), nil, "test-dataset")
+	if err == nil {
+		t.Fatal("expected error for nil client, got nil")
+	}
+}
+
+func TestEnsureTableWithClient_Success(t *testing.T) {
+	var called atomic.Bool
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called.Store(true)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"tableReference": {"projectId": "test-proj", "datasetId": "test-ds", "tableId": "admin_audit_log"}}`))
+	}))
+	defer ts.Close()
+
+	ctx := context.Background()
+	client, err := bigquery.NewClient(ctx, "test-proj",
+		option.WithoutAuthentication(),
+		option.WithEndpoint(ts.URL),
+	)
+	if err != nil {
+		t.Fatalf("failed to create dummy bigquery client: %v", err)
+	}
+	defer func() { _ = client.Close() }()
+
+	if err := EnsureTableWithClient(ctx, client, "test-ds"); err != nil {
+		t.Fatalf("EnsureTableWithClient failed: %v", err)
+	}
+	if !called.Load() {
+		t.Error("expected mock server to be called by EnsureTableWithClient")
+	}
+}
+
+func TestEnsureTableWithClient_AlreadyExists409(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusConflict)
+		_, _ = w.Write([]byte(`{"error": {"code": 409, "message": "Already Exists: Table test-proj:test-ds.admin_audit_log"}}`))
+	}))
+	defer ts.Close()
+
+	ctx := context.Background()
+	client, err := bigquery.NewClient(ctx, "test-proj",
+		option.WithoutAuthentication(),
+		option.WithEndpoint(ts.URL),
+	)
+	if err != nil {
+		t.Fatalf("failed to create dummy bigquery client: %v", err)
+	}
+	defer func() { _ = client.Close() }()
+
+	// Idempotent 409 should return nil error.
+	if err := EnsureTableWithClient(ctx, client, "test-ds"); err != nil {
+		t.Fatalf("EnsureTableWithClient with 409 failed: %v", err)
+	}
+}
+
+func TestEnsureTable_WithInjectedClient(t *testing.T) {
+	var called atomic.Bool
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called.Store(true)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"tableReference": {"projectId": "test-proj", "datasetId": "test-ds", "tableId": "admin_audit_log"}}`))
+	}))
+	defer ts.Close()
+
+	ctx := context.Background()
+	client, err := bigquery.NewClient(ctx, "test-proj",
+		option.WithoutAuthentication(),
+		option.WithEndpoint(ts.URL),
+	)
+	if err != nil {
+		t.Fatalf("failed to create dummy bigquery client: %v", err)
+	}
+	defer func() { _ = client.Close() }()
+
+	cfg := BQConfig{
+		ProjectID: "test-proj",
+		Dataset:   "test-ds",
+		Client:    client,
+	}
+
+	if err := EnsureTable(ctx, cfg); err != nil {
+		t.Fatalf("EnsureTable with Client failed: %v", err)
+	}
+	if !called.Load() {
+		t.Error("expected mock server to be called by EnsureTable")
 	}
 }

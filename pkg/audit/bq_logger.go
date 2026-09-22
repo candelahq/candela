@@ -33,10 +33,11 @@ type bqRow struct {
 // keeping BigQuery latency off the RPC critical path.
 // Create one via NewBQLogger; call Close when done.
 type BQLogger struct {
-	client   *bigquery.Client
-	inserter *bigquery.Inserter
-	events   chan bqRow
-	done     chan struct{}
+	client     *bigquery.Client
+	inserter   *bigquery.Inserter
+	events     chan bqRow
+	done       chan struct{}
+	ownsClient bool
 }
 
 // BQConfig holds BigQuery audit logger configuration.
@@ -51,6 +52,10 @@ type BQConfig struct {
 	// BufferSize sets the channel buffer capacity for asynchronous BigQuery writes.
 	// When zero or negative, a default of 256 is used.
 	BufferSize int
+	// Client is an optional existing BigQuery client to reuse.
+	// When non-nil, NewBQLogger and EnsureTable reuse this client rather than creating a new one.
+	// When NewBQLogger reuses an injected client, Close will not close the client.
+	Client *bigquery.Client
 }
 
 func bqBufferSize(cfg BQConfig) int {
@@ -62,18 +67,31 @@ func bqBufferSize(cfg BQConfig) int {
 
 // NewBQLogger creates a BigQuery audit logger with an async write loop.
 // It does NOT create the table — call EnsureTable separately if needed.
+// If cfg.Client is provided, it is reused and will NOT be closed by Close().
 func NewBQLogger(ctx context.Context, cfg BQConfig) (*BQLogger, error) {
-	client, err := bigquery.NewClient(ctx, cfg.ProjectID)
-	if err != nil {
-		return nil, fmt.Errorf("audit: failed to create BigQuery client: %w", err)
+	var (
+		client     *bigquery.Client
+		ownsClient bool
+	)
+	if cfg.Client != nil {
+		client = cfg.Client
+		ownsClient = false
+	} else {
+		var err error
+		client, err = bigquery.NewClient(ctx, cfg.ProjectID)
+		if err != nil {
+			return nil, fmt.Errorf("audit: failed to create BigQuery client: %w", err)
+		}
+		ownsClient = true
 	}
 
 	table := client.Dataset(cfg.Dataset).Table(bqTableName)
 	l := &BQLogger{
-		client:   client,
-		inserter: table.Inserter(),
-		events:   make(chan bqRow, bqBufferSize(cfg)),
-		done:     make(chan struct{}),
+		client:     client,
+		inserter:   table.Inserter(),
+		events:     make(chan bqRow, bqBufferSize(cfg)),
+		done:       make(chan struct{}),
+		ownsClient: ownsClient,
 	}
 	go l.writeLoop()
 	return l, nil
@@ -118,20 +136,39 @@ func (l *BQLogger) Log(_ context.Context, e Event) {
 	}
 }
 
-// Close drains the event buffer and releases the BigQuery client.
+// Close drains the event buffer and releases the BigQuery client (if owned by BQLogger).
 func (l *BQLogger) Close() error {
 	close(l.events)
 	<-l.done // wait for writeLoop to finish
-	return l.client.Close()
+	if l.ownsClient && l.client != nil {
+		return l.client.Close()
+	}
+	return nil
 }
 
 // EnsureTable creates the admin_audit_log table if it does not already exist.
+// If cfg.Client is non-nil, it is reused directly without creating or closing a client.
+// Otherwise, a new client is created and closed when the operation completes.
 func EnsureTable(ctx context.Context, cfg BQConfig) error {
+	if cfg.Client != nil {
+		return EnsureTableWithClient(ctx, cfg.Client, cfg.Dataset)
+	}
+
 	client, err := bigquery.NewClient(ctx, cfg.ProjectID)
 	if err != nil {
 		return fmt.Errorf("audit: failed to create BigQuery client: %w", err)
 	}
 	defer func() { _ = client.Close() }()
+
+	return EnsureTableWithClient(ctx, client, cfg.Dataset)
+}
+
+// EnsureTableWithClient creates the admin_audit_log table using the provided BigQuery client
+// if it does not already exist. It does not close the client.
+func EnsureTableWithClient(ctx context.Context, client *bigquery.Client, dataset string) error {
+	if client == nil {
+		return errors.New("audit: bigquery client is required")
+	}
 
 	schema := bigquery.Schema{
 		{Name: "timestamp", Type: bigquery.TimestampFieldType, Required: true},
@@ -144,7 +181,7 @@ func EnsureTable(ctx context.Context, cfg BQConfig) error {
 		{Name: "error", Type: bigquery.StringFieldType},
 	}
 
-	table := client.Dataset(cfg.Dataset).Table(bqTableName)
+	table := client.Dataset(dataset).Table(bqTableName)
 	md := &bigquery.TableMetadata{
 		Schema: schema,
 		TimePartitioning: &bigquery.TimePartitioning{
@@ -165,6 +202,6 @@ func EnsureTable(ctx context.Context, cfg BQConfig) error {
 		}
 		return fmt.Errorf("audit: failed to create table %s: %w", bqTableName, err)
 	}
-	slog.Info("audit: BigQuery table created", "table", bqTableName, "dataset", cfg.Dataset)
+	slog.Info("audit: BigQuery table created", "table", bqTableName, "dataset", dataset)
 	return nil
 }

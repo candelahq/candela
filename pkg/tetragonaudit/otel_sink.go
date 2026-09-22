@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -190,6 +191,12 @@ func (s *OTelSink) exportLogs(ctx context.Context, logs plog.Logs) error {
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		bodySnippet, _ := io.ReadAll(io.LimitReader(resp.Body, 256))
+		_, _ = io.Copy(io.Discard, resp.Body)
+		snippet := strings.TrimSpace(string(bodySnippet))
+		if snippet != "" {
+			return fmt.Errorf("tetragonaudit: OTLP export failed: HTTP %d: %s", resp.StatusCode, snippet)
+		}
 		return fmt.Errorf("tetragonaudit: OTLP export failed: HTTP %d", resp.StatusCode)
 	}
 

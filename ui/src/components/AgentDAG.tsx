@@ -136,11 +136,11 @@ function DAGEdge({
 function DAGNode({
   layout,
   selected,
-  onClick,
+  onSelect,
 }: {
   layout: LayoutNode;
   selected: boolean;
-  onClick: () => void;
+  onSelect: (spanId: string) => void;
 }) {
   const { node } = layout;
   const color = kindColor(node.span.kind);
@@ -149,11 +149,15 @@ function DAGNode({
   const costUsd = node.subtreeCostUsd;
   const tokens = node.subtreeTokens;
 
+  const handleClick = useCallback(() => {
+    onSelect(node.span.spanId);
+  }, [node.span.spanId, onSelect]);
+
   return (
     <g
       transform={`translate(${layout.x}, ${layout.y})`}
       className={`dag-node-group ${selected ? "dag-node-selected" : ""}`}
-      onClick={onClick}
+      onClick={handleClick}
       style={{ cursor: "pointer" }}
     >
       {/* Glow effect for selected */}
@@ -302,11 +306,6 @@ export function AgentDAG({
     return { svgW: maxX + 80, svgH: maxY + 80 };
   }, [allNodes]);
 
-  const handleClick = useCallback(
-    (spanId: string) => () => onSelectSpan(spanId),
-    [onSelectSpan]
-  );
-
   if (tree.length === 0) {
     return (
       <div className="empty-state">
@@ -353,7 +352,7 @@ export function AgentDAG({
               key={ln.node.span.spanId}
               layout={ln}
               selected={ln.node.span.spanId === selectedSpanId}
-              onClick={handleClick(ln.node.span.spanId)}
+              onSelect={onSelectSpan}
             />
           ))}
         </g>

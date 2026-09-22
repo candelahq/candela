@@ -4,7 +4,7 @@ import { useCallback, useEffect, useReducer } from "react";
 import { dashboardClient } from "@/lib/api";
 import { DEFAULT_PROJECT_ID } from "@/lib/constants";
 import { timestampFromDate } from "@bufbuild/protobuf/wkt";
-import { TimeRange } from "./useDashboard";
+import { type TimeRange, timeRangeToMs } from "@/lib/timeUtils";
 
 export interface UserRanking {
   userId: string;
@@ -43,15 +43,8 @@ function reducer(state: State, action: Action): State {
     case "refresh":
       return { ...state, fetchCount: state.fetchCount + 1 };
     case "setTimeRange":
-      return { ...state, timeRange: action.range, fetchCount: state.fetchCount + 1 };
-  }
-}
-
-function timeRangeToMs(range: TimeRange): number {
-  switch (range) {
-    case "24h": return 24 * 60 * 60 * 1000;
-    case "7d": return 7 * 24 * 60 * 60 * 1000;
-    case "30d": return 30 * 24 * 60 * 60 * 1000;
+      if (state.timeRange === action.range) return state;
+      return { ...state, timeRange: action.range };
   }
 }
 

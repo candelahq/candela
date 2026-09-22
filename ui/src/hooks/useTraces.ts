@@ -2,7 +2,8 @@
 
 import { useCallback, useEffect, useReducer, useRef } from "react";
 import { traceClient } from "@/lib/api";
-import { DEFAULT_PROJECT_ID } from "@/lib/constants";
+import { DEFAULT_PROJECT_ID, DEFAULT_PAGE_SIZE } from "@/lib/constants";
+import { SpanStatus } from "@/gen/candela/types/trace_pb";
 import type { TraceSummaryRow, TraceFilters } from "@/types/traces";
 import { DEFAULT_FILTERS } from "@/types/traces";
 import { useScope } from "@/components/UserScopeProvider";
@@ -156,11 +157,16 @@ export function useTraces() {
     traceClient
       .listTraces({
         projectId: DEFAULT_PROJECT_ID,
-        pagination: { pageSize: 100, pageToken },
+        pagination: { pageSize: DEFAULT_PAGE_SIZE, pageToken },
         search: f.search,
         model: f.model,
         provider: f.provider,
-        status: f.status === "ok" ? 1 : f.status === "error" ? 2 : 0,
+        status:
+          f.status === "ok"
+            ? SpanStatus.OK
+            : f.status === "error"
+            ? SpanStatus.ERROR
+            : SpanStatus.UNSPECIFIED,
         orderBy: f.orderBy,
         descending: f.descending,
         timeRange: makeTimeRange(f.timeRange),

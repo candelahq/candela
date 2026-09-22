@@ -11,18 +11,9 @@ import { useScope } from "@/components/UserScopeProvider";
 import { ErrorBanner } from "@/components/ErrorBanner";
 import { SkeletonCard } from "@/components/SkeletonCard";
 import { TenantLeaderboard } from "@/components/TenantLeaderboard";
-import { SpanStatus } from "@/gen/candela/types/trace_pb";
+import { statusLabel } from "@/lib/traceUtils";
 
 type DashboardTab = "overview" | "tenants";
-
-// ──────────────────────────────────────────
-// Status helpers
-// ──────────────────────────────────────────
-
-const statusLabel = (s: number) => {
-  if (s === SpanStatus.ERROR) return { text: "error", cls: "badge-error" };
-  return { text: "ok", cls: "badge-success" };
-};
 
 // ──────────────────────────────────────────
 // Page

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useReducer, useState } from "react";
+import { useCallback, useEffect, useMemo, useReducer, useState } from "react";
 import { traceClient } from "@/lib/api";
 import type { Span } from "@/gen/candela/types/trace_pb";
 import { SpanKind } from "@/gen/candela/types/trace_pb";
@@ -233,30 +233,36 @@ export function useTrace(traceId: string) {
     return result;
   }, [state.trace?.flatSpans, collapsedIds]);
 
-  const selectedNode = state.trace?.flatSpans.find(
-    (n) => n.span.spanId === selectedSpanId
+  const selectedNode = useMemo(
+    () => state.trace?.flatSpans.find((n) => n.span.spanId === selectedSpanId),
+    [state.trace?.flatSpans, selectedSpanId]
   );
 
-  const toggleSpan = (spanId: string) =>
-    setSelectedSpanId((prev) => (prev === spanId ? null : spanId));
+  const toggleSpan = useCallback(
+    (spanId: string) => setSelectedSpanId((prev) => (prev === spanId ? null : spanId)),
+    []
+  );
 
-  const toggleCollapse = (spanId: string) =>
-    setCollapsedIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(spanId)) next.delete(spanId);
-      else next.add(spanId);
-      return next;
-    });
+  const toggleCollapse = useCallback(
+    (spanId: string) =>
+      setCollapsedIds((prev) => {
+        const next = new Set(prev);
+        if (next.has(spanId)) next.delete(spanId);
+        else next.add(spanId);
+        return next;
+      }),
+    []
+  );
 
-  const collapseAll = () => {
+  const collapseAll = useCallback(() => {
     const ids = new Set<string>();
     state.trace?.flatSpans.forEach((n) => {
       if (n.hasChildren) ids.add(n.span.spanId);
     });
     setCollapsedIds(ids);
-  };
+  }, [state.trace?.flatSpans]);
 
-  const expandAll = () => setCollapsedIds(new Set());
+  const expandAll = useCallback(() => setCollapsedIds(new Set()), []);
 
   return {
     trace: state.trace,

@@ -38,6 +38,8 @@ const adminItems = {
   ],
 };
 
+const ALL_NAV_SECTIONS = [...navItems, adminItems];
+
 interface SidebarProps {
   isOpen?: boolean;
   onClose?: () => void;
@@ -48,7 +50,7 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
   const { user, isAdmin, isLoading } = useCurrentUser();
   const { user: authUser, signOut } = useAuth();
 
-  const sections = isAdmin ? [...navItems, adminItems] : navItems;
+  const sections = isAdmin ? ALL_NAV_SECTIONS : navItems;
 
   return (
     <aside id="app-sidebar" className={`sidebar ${isOpen ? "open" : ""}`}>

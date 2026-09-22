@@ -65,7 +65,15 @@ export interface RecentTrace {
   startTime: string;
 }
 
-export type TimeRange = "24h" | "7d" | "30d";
+import {
+  type TimeRange,
+  timeRangeToMs,
+  formatTimeLabel,
+  toDataPoints,
+} from "@/lib/timeUtils";
+
+export type { TimeRange };
+export { timeRangeToMs, formatTimeLabel, toDataPoints };
 
 type State = {
   summary: DashboardSummary | null;
@@ -109,7 +117,8 @@ function reducer(state: State, action: Action): State {
     case "refresh":
       return { ...state, fetchCount: state.fetchCount + 1 };
     case "setTimeRange":
-      return { ...state, timeRange: action.range, fetchCount: state.fetchCount + 1 };
+      if (state.timeRange === action.range) return state;
+      return { ...state, timeRange: action.range };
   }
 }
 
@@ -117,30 +126,7 @@ function reducer(state: State, action: Action): State {
 // Helpers
 // ──────────────────────────────────────────
 
-function timeRangeToMs(range: TimeRange): number {
-  switch (range) {
-    case "24h": return 24 * 60 * 60 * 1000;
-    case "7d": return 7 * 24 * 60 * 60 * 1000;
-    case "30d": return 30 * 24 * 60 * 60 * 1000;
-  }
-}
-
-function formatTimeLabel(ts: string, range: TimeRange): string {
-  const d = new Date(ts);
-  if (range === "24h") {
-    return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-  }
-  return d.toLocaleDateString([], { month: "short", day: "numeric" });
-}
-
-function toDataPoints(pts: Array<{ timestamp: string; value: number }> | undefined, range: TimeRange): DataPoint[] {
-  return (pts || []).map((p) => ({
-    label: formatTimeLabel(p.timestamp, range),
-    value: p.value,
-  }));
-}
-
-function mapModelUsage(m: ModelUsage): ModelUsageRow {
+export function mapModelUsage(m: ModelUsage): ModelUsageRow {
   return {
     model: m.model,
     provider: m.provider,

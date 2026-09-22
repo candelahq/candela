@@ -4,7 +4,18 @@ import { useCallback, useEffect, useReducer } from "react";
 import { dashboardClient } from "@/lib/api";
 import { DEFAULT_PROJECT_ID } from "@/lib/constants";
 import { timestampFromDate } from "@bufbuild/protobuf/wkt";
-import { TimeRange } from "./useDashboard";
+import { type TimeRange, timeRangeToMs } from "@/lib/timeUtils";
+import { BudgetPeriod } from "@/gen/candela/types/user_pb";
+
+export function budgetPeriodToLabel(period?: BudgetPeriod | number): string {
+  switch (period) {
+    case BudgetPeriod.UNSPECIFIED:
+      return "unspecified";
+    case BudgetPeriod.DAILY:
+    default:
+      return "daily";
+  }
+}
 
 export interface UserUsageData {
   totalCalls: number;
@@ -53,15 +64,8 @@ function reducer(state: State, action: Action): State {
     case "refresh":
       return { ...state, fetchCount: state.fetchCount + 1 };
     case "setTimeRange":
-      return { ...state, timeRange: action.range, fetchCount: state.fetchCount + 1 };
-  }
-}
-
-function timeRangeToMs(range: TimeRange): number {
-  switch (range) {
-    case "24h": return 24 * 60 * 60 * 1000;
-    case "7d": return 7 * 24 * 60 * 60 * 1000;
-    case "30d": return 30 * 24 * 60 * 60 * 1000;
+      if (state.timeRange === action.range) return state;
+      return { ...state, timeRange: action.range };
   }
 }
 
@@ -114,10 +118,7 @@ export function useUsage() {
               spentUsd: spent,
               remainingUsd: res.totalRemainingUsd,
               percentUsed: limit > 0 ? (spent / limit) * 100 : 0,
-              periodType: {
-                0: "unspecified",
-                1: "daily",
-              }[res.budget.periodType] || "daily",
+              periodType: budgetPeriodToLabel(res.budget.periodType),
             } : null,
           }
         });

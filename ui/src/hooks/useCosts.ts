@@ -5,7 +5,12 @@ import { dashboardClient } from "@/lib/api";
 import { DEFAULT_PROJECT_ID } from "@/lib/constants";
 import { timestampFromDate } from "@bufbuild/protobuf/wkt";
 import type { DataPoint } from "@/components/chart";
-import type { TimeRange } from "@/hooks/useDashboard";
+import {
+  type TimeRange,
+  timeRangeToMs,
+  toDataPoints,
+} from "@/lib/timeUtils";
+import { mapModelUsage, type ModelUsageRow } from "@/hooks/useDashboard";
 
 export interface CostSummary {
   totalCostUsd: number;
@@ -16,15 +21,7 @@ export interface CostSummary {
   tokensOverTime: DataPoint[];
 }
 
-export interface ModelBreakdown {
-  model: string;
-  provider: string;
-  callCount: number;
-  inputTokens: number;
-  outputTokens: number;
-  costUsd: number;
-  avgLatencyMs: number;
-}
+export type ModelBreakdown = ModelUsageRow;
 
 type State = {
   summary: CostSummary | null;
@@ -53,28 +50,20 @@ function reducer(state: State, action: Action): State {
     case "refresh":
       return { ...state, fetchCount: state.fetchCount + 1 };
     case "setTimeRange":
-      return { ...state, timeRange: action.range, fetchCount: state.fetchCount + 1 };
+      if (state.timeRange === action.range) return state;
+      return { ...state, timeRange: action.range };
   }
-}
-
-function timeRangeToMs(range: TimeRange): number {
-  switch (range) {
-    case "24h": return 24 * 60 * 60 * 1000;
-    case "7d": return 7 * 24 * 60 * 60 * 1000;
-    case "30d": return 30 * 24 * 60 * 60 * 1000;
-  }
-}
-
-function formatTimeLabel(ts: string, range: TimeRange): string {
-  const d = new Date(ts);
-  if (range === "24h") {
-    return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-  }
-  return d.toLocaleDateString([], { month: "short", day: "numeric" });
 }
 
 /**
  * Hook for fetching cost data — summary, time series, and model breakdown.
+ *
+ * NOTE on RPC design (#614):
+ * While GetDashboardData returns overlapping summary and model data, useDashboard
+ * also queries ListTraces (5 recent traces) and GetJobLeaderboard.
+ * To keep the /costs page lean and avoid issuing unnecessary trace and job queries,
+ * useCosts issues targeted GetUsageSummary and GetModelBreakdown RPCs in parallel,
+ * while sharing data transformation utilities (toDataPoints, mapModelUsage) with useDashboard.
  */
 export function useCosts() {
   const [state, dispatch] = useReducer(reducer, {
@@ -118,24 +107,10 @@ export function useCosts() {
             totalInputTokens: Number(summaryRes.totalInputTokens),
             totalOutputTokens: Number(summaryRes.totalOutputTokens),
             totalTraces: Number(summaryRes.totalTraces),
-            costOverTime: (summaryRes.costOverTime || []).map((p) => ({
-              label: formatTimeLabel(p.timestamp, state.timeRange),
-              value: p.value,
-            })),
-            tokensOverTime: (summaryRes.tokensOverTime || []).map((p) => ({
-              label: formatTimeLabel(p.timestamp, state.timeRange),
-              value: p.value,
-            })),
+            costOverTime: toDataPoints(summaryRes.costOverTime, state.timeRange),
+            tokensOverTime: toDataPoints(summaryRes.tokensOverTime, state.timeRange),
           },
-          models: (modelsRes.models || []).map((m) => ({
-            model: m.model,
-            provider: m.provider,
-            callCount: Number(m.callCount),
-            inputTokens: Number(m.inputTokens),
-            outputTokens: Number(m.outputTokens),
-            costUsd: m.costUsd,
-            avgLatencyMs: m.avgLatencyMs,
-          })),
+          models: (modelsRes.models || []).map(mapModelUsage),
         });
       })
       .catch((err) => {

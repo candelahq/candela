@@ -3,15 +3,7 @@
 import { useCallback, useEffect, useReducer } from "react";
 import { API_BASE_URL } from "@/lib/constants";
 import { firebaseAuth } from "@/lib/firebase";
-import type { TimeRange } from "./useDashboard";
-
-function timeRangeToMs(range: TimeRange): number {
-  switch (range) {
-    case "24h": return 24 * 60 * 60 * 1000;
-    case "7d": return 7 * 24 * 60 * 60 * 1000;
-    case "30d": return 30 * 24 * 60 * 60 * 1000;
-  }
-}
+import { type TimeRange, timeRangeToMs } from "@/lib/timeUtils";
 
 export interface TenantUsageRow {
   tenantId: string;
@@ -53,7 +45,8 @@ function reducer(state: State, action: Action): State {
     case "refresh":
       return { ...state, fetchCount: state.fetchCount + 1 };
     case "setTimeRange":
-      return { ...state, timeRange: action.range, fetchCount: state.fetchCount + 1 };
+      if (state.timeRange === action.range) return state;
+      return { ...state, timeRange: action.range };
     case "setSort":
       return {
         ...state,

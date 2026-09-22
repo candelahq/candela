@@ -1,0 +1,8 @@
+version: v2
+modules:
+  - path: rust/crates/candela-harness-connect/proto
+lint:
+  use:
+    - STANDARD
+  except:
+    - PACKAGE_VERSION_SUFFIX

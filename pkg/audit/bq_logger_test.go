@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -191,9 +192,9 @@ func TestEnsureTableWithClient_NilClient(t *testing.T) {
 }
 
 func TestEnsureTableWithClient_Success(t *testing.T) {
-	called := false
+	var called atomic.Bool
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		called = true
+		called.Store(true)
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"tableReference": {"projectId": "test-proj", "datasetId": "test-ds", "tableId": "admin_audit_log"}}`))
 	}))
@@ -212,7 +213,7 @@ func TestEnsureTableWithClient_Success(t *testing.T) {
 	if err := EnsureTableWithClient(ctx, client, "test-ds"); err != nil {
 		t.Fatalf("EnsureTableWithClient failed: %v", err)
 	}
-	if !called {
+	if !called.Load() {
 		t.Error("expected mock server to be called by EnsureTableWithClient")
 	}
 }
@@ -242,9 +243,9 @@ func TestEnsureTableWithClient_AlreadyExists409(t *testing.T) {
 }
 
 func TestEnsureTable_WithInjectedClient(t *testing.T) {
-	called := false
+	var called atomic.Bool
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		called = true
+		called.Store(true)
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"tableReference": {"projectId": "test-proj", "datasetId": "test-ds", "tableId": "admin_audit_log"}}`))
 	}))
@@ -269,7 +270,7 @@ func TestEnsureTable_WithInjectedClient(t *testing.T) {
 	if err := EnsureTable(ctx, cfg); err != nil {
 		t.Fatalf("EnsureTable with Client failed: %v", err)
 	}
-	if !called {
+	if !called.Load() {
 		t.Error("expected mock server to be called by EnsureTable")
 	}
 }

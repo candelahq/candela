@@ -1374,6 +1374,13 @@ func parseConfig(data []byte) (*Config, error) {
 		if err := dec.Decode(&cfg); err != nil && !errors.Is(err, io.EOF) {
 			return nil, fmt.Errorf("parsing config: %w", err)
 		}
+		var extra any
+		if err := dec.Decode(&extra); !errors.Is(err, io.EOF) {
+			if err == nil {
+				return nil, fmt.Errorf("parsing config: multiple YAML documents not supported")
+			}
+			return nil, fmt.Errorf("parsing config trailing document: %w", err)
+		}
 	}
 
 	if cfg.Server.Port == 0 {
@@ -1448,9 +1455,12 @@ func loadConfig() (*Config, error) {
 
 	data, err := os.ReadFile(cfgPath)
 	if err != nil {
-		// No config file — use defaults (DuckDB, port 8181).
-		slog.Warn("config file not found, using defaults", "path", cfgPath)
-		return parseConfig(nil)
+		if errors.Is(err, os.ErrNotExist) {
+			// No config file — use defaults (DuckDB, port 8181).
+			slog.Warn("config file not found, using defaults", "path", cfgPath)
+			return parseConfig(nil)
+		}
+		return nil, fmt.Errorf("reading config %s: %w", cfgPath, err)
 	}
 
 	return parseConfig(data)

@@ -504,3 +504,20 @@ func TestLoadConfig_AllConfigFiles(t *testing.T) {
 		})
 	}
 }
+
+func TestParseConfig_MultipleDocumentsRejected(t *testing.T) {
+	yamlData := `
+server:
+  port: 8181
+---
+server:
+  port: 8282
+`
+	_, err := parseConfig([]byte(yamlData))
+	if err == nil {
+		t.Fatal("expected error for multiple YAML documents, got nil")
+	}
+	if !strings.Contains(err.Error(), "multiple YAML documents not supported") {
+		t.Errorf("expected error to mention multiple YAML documents, got: %v", err)
+	}
+}

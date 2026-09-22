@@ -6,6 +6,7 @@ import { useTraces } from "@/hooks/useTraces";
 import { ScopeToggle } from "@/components/ScopeToggle";
 import { ErrorBanner } from "@/components/ErrorBanner";
 import type { TraceFilters } from "@/types/traces";
+import { statusLabel } from "@/lib/traceUtils";
 
 const sortOptions = [
   { value: "start_time", label: "Time" },
@@ -13,11 +14,6 @@ const sortOptions = [
   { value: "total_cost", label: "Cost" },
   { value: "total_tokens", label: "Tokens" },
 ];
-
-const statusLabel = (s: number) => {
-  if (s === 2) return { text: "error", cls: "badge-error" };
-  return { text: "ok", cls: "badge-success" };
-};
 
 export default function TracesPage() {
   const router = useRouter();

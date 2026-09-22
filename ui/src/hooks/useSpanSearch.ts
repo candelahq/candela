@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useReducer, useRef } from "react";
 import { traceClient } from "@/lib/api";
-import { DEFAULT_PROJECT_ID } from "@/lib/constants";
+import { DEFAULT_PROJECT_ID, DEFAULT_PAGE_SIZE } from "@/lib/constants";
 import { SpanKind } from "@/gen/candela/types/trace_pb";
 import type { Span } from "@/gen/candela/types/trace_pb";
 import { useScope } from "@/components/UserScopeProvider";
@@ -128,7 +128,7 @@ export function useSpanSearch() {
     traceClient
       .searchSpans({
         projectId: DEFAULT_PROJECT_ID,
-        pagination: { pageSize: 100, pageToken },
+        pagination: { pageSize: DEFAULT_PAGE_SIZE, pageToken },
         nameContains: f.nameContains,
         kind: f.kind === null ? SpanKind.UNSPECIFIED : f.kind,
         model: f.model,

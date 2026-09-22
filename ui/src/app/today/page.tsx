@@ -51,9 +51,10 @@ export default function TodayPage() {
       })
     : "--:--";
 
+  const models = data?.models;
   const sortedModels = useMemo(
-    () => [...(data?.models ?? [])].sort((a, b) => b.costUsd - a.costUsd),
-    [data?.models],
+    () => (models ? [...models].sort((a, b) => b.costUsd - a.costUsd) : []),
+    [models],
   );
 
   return (

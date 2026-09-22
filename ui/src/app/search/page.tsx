@@ -6,6 +6,7 @@ import { useSpanSearch } from "@/hooks/useSpanSearch";
 import { ScopeToggle } from "@/components/ScopeToggle";
 import { ErrorBanner } from "@/components/ErrorBanner";
 import { SpanKind } from "@/gen/candela/types/trace_pb";
+import { statusLabel } from "@/lib/traceUtils";
 
 const kindLabels: Record<number, string> = {
   [SpanKind.LLM]: "LLM",
@@ -34,11 +35,6 @@ function kindLabelForSearch(kind: SpanKind) {
 function kindColorForSearch(kind: SpanKind) {
   return kindColors[kind] || "var(--text-muted)";
 }
-
-const statusLabel = (s: number) => {
-  if (s === 2) return { text: "error", cls: "badge-error" };
-  return { text: "ok", cls: "badge-success" };
-};
 
 export default function SearchPage() {
   const router = useRouter();

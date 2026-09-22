@@ -4,6 +4,7 @@ import { useCallback, useEffect, useReducer } from "react";
 import { dashboardClient, userClient } from "@/lib/api";
 import { DEFAULT_PROJECT_ID } from "@/lib/constants";
 import { timestampDate, timestampFromDate } from "@bufbuild/protobuf/wkt";
+import { budgetPeriodToLabel } from "@/hooks/useUsage";
 
 export interface TodayModelUsage {
   model: string;
@@ -165,10 +166,7 @@ export function useTodayBudget() {
               spentUsd: spent,
               remainingUsd: budgetRes?.budgetRemainingUsd ?? (limit - spent),
               percentUsed: limit > 0 ? (spent / limit) * 100 : 0,
-              periodType: {
-                0: "unspecified",
-                1: "daily",
-              }[budgetProto.periodType] || "daily",
+              periodType: budgetPeriodToLabel(budgetProto.periodType),
             } : null,
             grants,
             fetchedAt: new Date(),

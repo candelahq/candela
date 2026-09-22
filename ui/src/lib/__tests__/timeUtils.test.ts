@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { timeRangeToMs, formatTimeLabel, toDataPoints } from "../timeUtils";
 
 describe("timeUtils", () => {
@@ -17,23 +17,37 @@ describe("timeUtils", () => {
   });
 
   describe("formatTimeLabel", () => {
-    it("formats 24h with time", () => {
+    it("formats 24h with time options", () => {
+      const spy = vi
+        .spyOn(Date.prototype, "toLocaleTimeString")
+        .mockReturnValue("14:30");
       const ts = "2026-04-15T14:30:00Z";
       const label = formatTimeLabel(ts, "24h");
-      // Should include hours and minutes
-      expect(label).toMatch(/\d{1,2}:\d{2}/);
+      expect(spy).toHaveBeenCalledWith([], { hour: "2-digit", minute: "2-digit" });
+      expect(label).toBe("14:30");
+      spy.mockRestore();
     });
 
-    it("formats 7d with month and day", () => {
+    it("formats 7d with month and day options", () => {
+      const spy = vi
+        .spyOn(Date.prototype, "toLocaleDateString")
+        .mockReturnValue("Apr 15");
       const ts = "2026-04-15T14:30:00Z";
       const label = formatTimeLabel(ts, "7d");
-      expect(label).toMatch(/Apr|15/);
+      expect(spy).toHaveBeenCalledWith([], { month: "short", day: "numeric" });
+      expect(label).toBe("Apr 15");
+      spy.mockRestore();
     });
 
-    it("formats 30d with month and day", () => {
+    it("formats 30d with month and day options", () => {
+      const spy = vi
+        .spyOn(Date.prototype, "toLocaleDateString")
+        .mockReturnValue("Apr 15");
       const ts = "2026-04-15T14:30:00Z";
       const label = formatTimeLabel(ts, "30d");
-      expect(label).toMatch(/Apr|15/);
+      expect(spy).toHaveBeenCalledWith([], { month: "short", day: "numeric" });
+      expect(label).toBe("Apr 15");
+      spy.mockRestore();
     });
   });
 

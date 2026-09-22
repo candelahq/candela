@@ -81,6 +81,7 @@ type Config struct {
 		} `yaml:"duckdb"`
 		SQLite struct {
 			Path string `yaml:"path"` // e.g. "candela.db" or ":memory:"
+			DSN  string `yaml:"dsn"`  // alias for path
 		} `yaml:"sqlite"`
 		BigQuery struct {
 			ProjectID string `yaml:"project_id"`
@@ -1380,6 +1381,9 @@ func parseConfig(data []byte) (*Config, error) {
 	}
 	if cfg.Storage.Backend == "" {
 		cfg.Storage.Backend = "duckdb"
+	}
+	if cfg.Storage.SQLite.Path == "" && cfg.Storage.SQLite.DSN != "" {
+		cfg.Storage.SQLite.Path = cfg.Storage.SQLite.DSN
 	}
 
 	// Catalog backend: env var override, then default to "config".

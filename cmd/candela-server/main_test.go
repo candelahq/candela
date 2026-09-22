@@ -466,3 +466,41 @@ func TestLogEffectiveConfig_RedactsSecrets(t *testing.T) {
 		t.Errorf("expected sinks.otlp_headers_configured=true in log output, got: %s", output)
 	}
 }
+
+func TestParseConfig_SQLiteDSNAlias(t *testing.T) {
+	yamlData := `
+storage:
+  backend: sqlite
+  sqlite:
+    dsn: ":memory:"
+`
+	cfg, err := parseConfig([]byte(yamlData))
+	if err != nil {
+		t.Fatalf("unexpected error parsing dsn alias: %v", err)
+	}
+	if cfg.Storage.SQLite.Path != ":memory:" {
+		t.Errorf("expected sqlite.path to be ':memory:', got %q", cfg.Storage.SQLite.Path)
+	}
+}
+
+func TestLoadConfig_AllConfigFiles(t *testing.T) {
+	configFiles := []string{
+		"../../config.yaml",
+		"../../test/functional/test_config.yaml",
+		"../../deploy/config.production.yaml",
+		"../../deploy/config.production.example.yaml",
+	}
+
+	for _, path := range configFiles {
+		t.Run(path, func(t *testing.T) {
+			t.Setenv("CANDELA_CONFIG", path)
+			cfg, err := loadConfig()
+			if err != nil {
+				t.Fatalf("failed to load %s: %v", path, err)
+			}
+			if cfg == nil {
+				t.Fatalf("expected non-nil config for %s", path)
+			}
+		})
+	}
+}

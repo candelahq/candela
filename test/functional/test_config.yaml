@@ -5,7 +5,7 @@ auth:
 storage:
   backend: sqlite
   sqlite:
-    dsn: ":memory:"
+    path: ":memory:"
 proxy:
   enabled: true
 # Disable all built-in providers (they point at real cloud endpoints).

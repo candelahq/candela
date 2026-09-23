@@ -338,8 +338,8 @@ func (h *captureLogHandler) getRecords() []slog.Record {
 }
 
 func TestFromRequest_RateLimitAndDowngrade(t *testing.T) {
-	ResetRateLimiterForTesting()
-	defer ResetRateLimiterForTesting()
+	resetRateLimiterForTesting()
+	defer resetRateLimiterForTesting()
 
 	handler := &captureLogHandler{}
 	oldLogger := slog.Default()
@@ -384,8 +384,8 @@ func TestFromRequest_RateLimitAndDowngrade(t *testing.T) {
 }
 
 func TestFromRequest_DistinctSourcesWarnSeparately(t *testing.T) {
-	ResetRateLimiterForTesting()
-	defer ResetRateLimiterForTesting()
+	resetRateLimiterForTesting()
+	defer resetRateLimiterForTesting()
 
 	handler := &captureLogHandler{}
 	oldLogger := slog.Default()
@@ -417,54 +417,39 @@ func TestFromRequest_DistinctSourcesWarnSeparately(t *testing.T) {
 }
 
 func TestRateLimiter_CooldownWindow(t *testing.T) {
-	ResetRateLimiterForTesting()
-	defer ResetRateLimiterForTesting()
+	window := 1 * time.Minute
+	rl := newWarnRateLimiter(window)
+	t0 := time.Now()
 
-	handler := &captureLogHandler{}
-	oldLogger := slog.Default()
-	slog.SetDefault(slog.New(handler))
-	defer slog.SetDefault(oldLogger)
-
-	// Set a very short cooldown for testing
-	SetCooldownForTesting(20 * time.Millisecond)
-	defer SetCooldownForTesting(defaultCooldownWindow)
-
-	req := httptest.NewRequest("POST", "/v1/chat/completions", nil)
-	req.RemoteAddr = "192.0.2.55:1234"
-	req.Header.Set("X-Candela-Tenant-Id", "invalid/path")
-
-	// Call 1: Warn
-	_ = FromRequest(req)
-	// Call 2: Debug (within cooldown)
-	_ = FromRequest(req)
-
-	records := handler.getRecords()
-	if len(records) != 2 {
-		t.Fatalf("expected 2 records, got %d", len(records))
-	}
-	if records[0].Level != slog.LevelWarn || records[1].Level != slog.LevelDebug {
-		t.Errorf("expected [Warn, Debug], got [%v, %v]", records[0].Level, records[1].Level)
+	// 1. Initial occurrence: should warn
+	if !rl.shouldWarn("source1", t0) {
+		t.Fatal("expected first occurrence to warn")
 	}
 
-	// Wait for cooldown to expire
-	time.Sleep(30 * time.Millisecond)
-
-	// Call 3: Warn again after cooldown
-	_ = FromRequest(req)
-
-	records = handler.getRecords()
-	if len(records) != 3 {
-		t.Fatalf("expected 3 records, got %d", len(records))
+	// 2. Immediate repeat within window: should NOT warn
+	if rl.shouldWarn("source1", t0.Add(10*time.Second)) {
+		t.Fatal("expected repeat within cooldown window not to warn")
 	}
-	if records[2].Level != slog.LevelWarn {
-		t.Errorf("expected LevelWarn after cooldown window, got %v", records[2].Level)
+
+	// 3. Just before window expiration: should NOT warn
+	if rl.shouldWarn("source1", t0.Add(window-time.Millisecond)) {
+		t.Fatal("expected occurrence just before cooldown expiration not to warn")
+	}
+
+	// 4. Exactly at / after window expiration: should warn again
+	if !rl.shouldWarn("source1", t0.Add(window)) {
+		t.Fatal("expected occurrence after cooldown expiration to re-arm and warn")
+	}
+
+	// 5. Subsequent repeat after re-arming: should NOT warn
+	if rl.shouldWarn("source1", t0.Add(window+10*time.Second)) {
+		t.Fatal("expected repeat after re-arm not to warn")
 	}
 }
 
 func TestRateLimiter_MaxTrackedPruning(t *testing.T) {
 	rl := newWarnRateLimiter(1 * time.Minute)
 
-	// Fill up to maxTrackedSources
 	baseTime := time.Now()
 	for i := range maxTrackedSources {
 		key := "source-" + string(rune(i))
@@ -473,7 +458,7 @@ func TestRateLimiter_MaxTrackedPruning(t *testing.T) {
 		}
 	}
 
-	// Verify capacity is capped
+	// Verify map is at capacity
 	rl.mu.Lock()
 	size := len(rl.lastWarn)
 	rl.mu.Unlock()
@@ -481,10 +466,15 @@ func TestRateLimiter_MaxTrackedPruning(t *testing.T) {
 		t.Errorf("expected map size to be %d, got %d", maxTrackedSources, size)
 	}
 
-	// Add one more after advancing time past cooldown -> triggers pruning
+	// Saturated test: adding a new key within the window must return false (fail-safe, no map wipe)
+	if rl.shouldWarn("overflow-key", baseTime.Add(10*time.Second)) {
+		t.Error("expected new key to return false when rate limiter is saturated")
+	}
+
+	// After cooldown window has elapsed, prune scan frees expired entries
 	futureTime := baseTime.Add(2 * time.Minute)
-	if !rl.shouldWarn("new-source", futureTime) {
-		t.Error("new source should warn")
+	if !rl.shouldWarn("new-source-after-prune", futureTime) {
+		t.Error("new source should warn after expired entries are pruned")
 	}
 
 	rl.mu.Lock()

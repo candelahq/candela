@@ -152,8 +152,11 @@ func TestPipelineConcurrentStats(t *testing.T) {
 	if dropped != 100 {
 		t.Errorf("dropped = %d, want 100", dropped)
 	}
-	if processed == 0 || errors == 0 {
-		t.Errorf("expected non-zero processed (%d) and errors (%d)", processed, errors)
+	if processed != 134 {
+		t.Errorf("processed = %d, want 134", processed)
+	}
+	if errors != 66 {
+		t.Errorf("errors = %d, want 66", errors)
 	}
 }
 

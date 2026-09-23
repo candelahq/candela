@@ -110,14 +110,16 @@ func parseBaggageWithSource(header, source string) (tenantID, jobID string) {
 const (
 	defaultCooldownWindow = 1 * time.Minute
 	maxTrackedSources     = 1024
+	pruneInterval         = 10 * time.Second
 )
 
 var defaultLimiter = newWarnRateLimiter(defaultCooldownWindow)
 
 type warnRateLimiter struct {
-	mu       sync.Mutex
-	window   time.Duration
-	lastWarn map[string]time.Time
+	mu        sync.Mutex
+	window    time.Duration
+	lastPrune time.Time
+	lastWarn  map[string]time.Time
 }
 
 func newWarnRateLimiter(window time.Duration) *warnRateLimiter {
@@ -132,21 +134,33 @@ func (rl *warnRateLimiter) shouldWarn(key string, now time.Time) bool {
 	defer rl.mu.Unlock()
 
 	last, exists := rl.lastWarn[key]
-	if !exists || now.Sub(last) >= rl.window {
-		if len(rl.lastWarn) >= maxTrackedSources {
+	if exists {
+		if now.Sub(last) < rl.window {
+			return false
+		}
+		// Cooldown expired: re-arm warning for this key
+		rl.lastWarn[key] = now
+		return true
+	}
+
+	// New key: if at capacity, prune expired entries (throttled by pruneInterval)
+	if len(rl.lastWarn) >= maxTrackedSources {
+		if now.Sub(rl.lastPrune) >= pruneInterval {
+			rl.lastPrune = now
 			for k, t := range rl.lastWarn {
 				if now.Sub(t) >= rl.window {
 					delete(rl.lastWarn, k)
 				}
 			}
-			if len(rl.lastWarn) >= maxTrackedSources {
-				rl.lastWarn = make(map[string]time.Time, maxTrackedSources/2)
-			}
 		}
-		rl.lastWarn[key] = now
-		return true
+		// If still at or over capacity, do not add new entry and do not warn (fail-safe under flood)
+		if len(rl.lastWarn) >= maxTrackedSources {
+			return false
+		}
 	}
-	return false
+
+	rl.lastWarn[key] = now
+	return true
 }
 
 func logInvalid(source, headerName, msg, value string) {
@@ -170,18 +184,4 @@ func requestSource(r *http.Request) string {
 		return "unknown"
 	}
 	return host
-}
-
-// ResetRateLimiterForTesting resets the rate limiter state.
-func ResetRateLimiterForTesting() {
-	defaultLimiter.mu.Lock()
-	defer defaultLimiter.mu.Unlock()
-	defaultLimiter.lastWarn = make(map[string]time.Time)
-}
-
-// SetCooldownForTesting updates the cooldown window for testing.
-func SetCooldownForTesting(d time.Duration) {
-	defaultLimiter.mu.Lock()
-	defer defaultLimiter.mu.Unlock()
-	defaultLimiter.window = d
 }

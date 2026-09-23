@@ -15,3 +15,15 @@ sdks/
 .github/
 *.tar.gz
 *.tgz
+
+# Sensitive configuration and secrets
+config.yaml
+deploy/*.production.yaml
+!deploy/*.production.example.yaml
+users.json
+*.key
+*.pem
+*service-account*.json
+credentials*.json
+*.secret.yaml
+*.secret.json

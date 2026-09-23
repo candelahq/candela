@@ -22,6 +22,7 @@ import (
 	"log/slog"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -174,19 +175,16 @@ type Pipeline struct {
 // EventFilter returns true if the event should be processed.
 type EventFilter func(Event) bool
 
-// PipelineStats tracks event processing metrics.
+// PipelineStats tracks event processing metrics using lock-free atomic counters.
 type PipelineStats struct {
-	mu        sync.Mutex
-	Processed int64
-	Dropped   int64
-	Errors    int64
+	Processed atomic.Int64
+	Dropped   atomic.Int64
+	Errors    atomic.Int64
 }
 
 // Snapshot returns a copy of the current stats.
 func (s *PipelineStats) Snapshot() (processed, dropped, errors int64) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.Processed, s.Dropped, s.Errors
+	return s.Processed.Load(), s.Dropped.Load(), s.Errors.Load()
 }
 
 // PipelineConfig holds configuration for the audit pipeline.
@@ -306,17 +304,13 @@ func (p *Pipeline) ProcessJSONStream(ctx context.Context, r io.Reader) error {
 		var event Event
 		if err := json.Unmarshal(line, &event); err != nil {
 			slog.Debug("tetragon-audit: failed to decode event", "error", err)
-			p.stats.mu.Lock()
-			p.stats.Errors++
-			p.stats.mu.Unlock()
+			p.stats.Errors.Add(1)
 			continue
 		}
 
 		// Apply filters.
 		if !p.shouldProcess(event) {
-			p.stats.mu.Lock()
-			p.stats.Dropped++
-			p.stats.mu.Unlock()
+			p.stats.Dropped.Add(1)
 			continue
 		}
 
@@ -324,15 +318,11 @@ func (p *Pipeline) ProcessJSONStream(ctx context.Context, r io.Reader) error {
 		record := p.normalize(event)
 		if err := p.sink.Emit(ctx, record); err != nil {
 			slog.Warn("tetragon-audit: sink emit failed", "error", err)
-			p.stats.mu.Lock()
-			p.stats.Errors++
-			p.stats.mu.Unlock()
+			p.stats.Errors.Add(1)
 			continue
 		}
 
-		p.stats.mu.Lock()
-		p.stats.Processed++
-		p.stats.mu.Unlock()
+		p.stats.Processed.Add(1)
 	}
 
 	return scanner.Err()
@@ -341,23 +331,17 @@ func (p *Pipeline) ProcessJSONStream(ctx context.Context, r io.Reader) error {
 // ProcessEvent processes a single pre-parsed Tetragon event.
 func (p *Pipeline) ProcessEvent(ctx context.Context, event Event) error {
 	if !p.shouldProcess(event) {
-		p.stats.mu.Lock()
-		p.stats.Dropped++
-		p.stats.mu.Unlock()
+		p.stats.Dropped.Add(1)
 		return nil
 	}
 
 	record := p.normalize(event)
 	if err := p.sink.Emit(ctx, record); err != nil {
-		p.stats.mu.Lock()
-		p.stats.Errors++
-		p.stats.mu.Unlock()
+		p.stats.Errors.Add(1)
 		return fmt.Errorf("emit audit record: %w", err)
 	}
 
-	p.stats.mu.Lock()
-	p.stats.Processed++
-	p.stats.mu.Unlock()
+	p.stats.Processed.Add(1)
 
 	p.mu.Lock()
 	p.lastEvent = time.Now()

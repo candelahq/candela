@@ -1,9 +1,13 @@
 package attribution
 
 import (
+	"context"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
+	"time"
 )
 
 // ── IDPattern ────────────────────────────────────────────────────────────────
@@ -301,5 +305,182 @@ func TestFromRequest_RealHTTPRequest(t *testing.T) {
 	handler.ServeHTTP(rr, req)
 	if rr.Code != http.StatusOK {
 		t.Errorf("status = %d, want 200", rr.Code)
+	}
+}
+
+// ── Rate Limiting & Downgrade Tests ──────────────────────────────────────────
+
+type captureLogHandler struct {
+	mu      sync.Mutex
+	records []slog.Record
+}
+
+func (h *captureLogHandler) Enabled(_ context.Context, _ slog.Level) bool {
+	return true
+}
+
+func (h *captureLogHandler) Handle(_ context.Context, r slog.Record) error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.records = append(h.records, r.Clone())
+	return nil
+}
+
+func (h *captureLogHandler) WithAttrs(_ []slog.Attr) slog.Handler { return h }
+func (h *captureLogHandler) WithGroup(_ string) slog.Handler      { return h }
+
+func (h *captureLogHandler) getRecords() []slog.Record {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	out := make([]slog.Record, len(h.records))
+	copy(out, h.records)
+	return out
+}
+
+func TestFromRequest_RateLimitAndDowngrade(t *testing.T) {
+	resetRateLimiterForTesting()
+	defer resetRateLimiterForTesting()
+
+	handler := &captureLogHandler{}
+	oldLogger := slog.Default()
+	slog.SetDefault(slog.New(handler))
+	defer slog.SetDefault(oldLogger)
+
+	req1 := httptest.NewRequest("POST", "/v1/chat/completions", nil)
+	req1.RemoteAddr = "203.0.113.10:49152"
+	req1.Header.Set("X-Candela-Tenant-Id", "../traversal")
+
+	// First request: should warn.
+	attr1 := FromRequest(req1)
+	if attr1.TenantID != "" {
+		t.Errorf("invalid tenant should be discarded, got %q", attr1.TenantID)
+	}
+
+	records := handler.getRecords()
+	if len(records) != 1 {
+		t.Fatalf("expected 1 log record, got %d", len(records))
+	}
+	if records[0].Level != slog.LevelWarn {
+		t.Errorf("expected LevelWarn for first occurrence, got %v", records[0].Level)
+	}
+
+	// Second request from same source with invalid header: should downgrade to DEBUG.
+	req2 := httptest.NewRequest("POST", "/v1/chat/completions", nil)
+	req2.RemoteAddr = "203.0.113.10:49153" // different port, same host
+	req2.Header.Set("X-Candela-Tenant-Id", "bad<token>")
+
+	attr2 := FromRequest(req2)
+	if attr2.TenantID != "" {
+		t.Errorf("invalid tenant should be discarded, got %q", attr2.TenantID)
+	}
+
+	records = handler.getRecords()
+	if len(records) != 2 {
+		t.Fatalf("expected 2 log records, got %d", len(records))
+	}
+	if records[1].Level != slog.LevelDebug {
+		t.Errorf("expected LevelDebug for second occurrence from same source, got %v", records[1].Level)
+	}
+}
+
+func TestFromRequest_DistinctSourcesWarnSeparately(t *testing.T) {
+	resetRateLimiterForTesting()
+	defer resetRateLimiterForTesting()
+
+	handler := &captureLogHandler{}
+	oldLogger := slog.Default()
+	slog.SetDefault(slog.New(handler))
+	defer slog.SetDefault(oldLogger)
+
+	// Source A
+	reqA := httptest.NewRequest("POST", "/v1/chat/completions", nil)
+	reqA.RemoteAddr = "198.51.100.1:1234"
+	reqA.Header.Set("X-Candela-Job-Id", "bad job id")
+	_ = FromRequest(reqA)
+
+	// Source B
+	reqB := httptest.NewRequest("POST", "/v1/chat/completions", nil)
+	reqB.RemoteAddr = "198.51.100.2:5678"
+	reqB.Header.Set("X-Candela-Job-Id", "bad job id")
+	_ = FromRequest(reqB)
+
+	records := handler.getRecords()
+	if len(records) != 2 {
+		t.Fatalf("expected 2 log records, got %d", len(records))
+	}
+	if records[0].Level != slog.LevelWarn {
+		t.Errorf("Source A first occurrence should be Warn, got %v", records[0].Level)
+	}
+	if records[1].Level != slog.LevelWarn {
+		t.Errorf("Source B first occurrence should be Warn, got %v", records[1].Level)
+	}
+}
+
+func TestRateLimiter_CooldownWindow(t *testing.T) {
+	window := 1 * time.Minute
+	rl := newWarnRateLimiter(window)
+	t0 := time.Now()
+
+	// 1. Initial occurrence: should warn
+	if !rl.shouldWarn("source1", t0) {
+		t.Fatal("expected first occurrence to warn")
+	}
+
+	// 2. Immediate repeat within window: should NOT warn
+	if rl.shouldWarn("source1", t0.Add(10*time.Second)) {
+		t.Fatal("expected repeat within cooldown window not to warn")
+	}
+
+	// 3. Just before window expiration: should NOT warn
+	if rl.shouldWarn("source1", t0.Add(window-time.Millisecond)) {
+		t.Fatal("expected occurrence just before cooldown expiration not to warn")
+	}
+
+	// 4. Exactly at / after window expiration: should warn again
+	if !rl.shouldWarn("source1", t0.Add(window)) {
+		t.Fatal("expected occurrence after cooldown expiration to re-arm and warn")
+	}
+
+	// 5. Subsequent repeat after re-arming: should NOT warn
+	if rl.shouldWarn("source1", t0.Add(window+10*time.Second)) {
+		t.Fatal("expected repeat after re-arm not to warn")
+	}
+}
+
+func TestRateLimiter_MaxTrackedPruning(t *testing.T) {
+	rl := newWarnRateLimiter(1 * time.Minute)
+
+	baseTime := time.Now()
+	for i := range maxTrackedSources {
+		key := "source-" + string(rune(i))
+		if !rl.shouldWarn(key, baseTime) {
+			t.Fatalf("expected first occurrence of %s to warn", key)
+		}
+	}
+
+	// Verify map is at capacity
+	rl.mu.Lock()
+	size := len(rl.lastWarn)
+	rl.mu.Unlock()
+	if size != maxTrackedSources {
+		t.Errorf("expected map size to be %d, got %d", maxTrackedSources, size)
+	}
+
+	// Saturated test: adding a new key within the window must return false (fail-safe, no map wipe)
+	if rl.shouldWarn("overflow-key", baseTime.Add(10*time.Second)) {
+		t.Error("expected new key to return false when rate limiter is saturated")
+	}
+
+	// After cooldown window has elapsed, prune scan frees expired entries
+	futureTime := baseTime.Add(2 * time.Minute)
+	if !rl.shouldWarn("new-source-after-prune", futureTime) {
+		t.Error("new source should warn after expired entries are pruned")
+	}
+
+	rl.mu.Lock()
+	prunedSize := len(rl.lastWarn)
+	rl.mu.Unlock()
+	if prunedSize >= maxTrackedSources {
+		t.Errorf("expected pruned size < %d, got %d", maxTrackedSources, prunedSize)
 	}
 }

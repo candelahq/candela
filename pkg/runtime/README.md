@@ -56,7 +56,7 @@ Backends self-register via `init()` using a factory function
 ```go
 // In pkg/runtime/ollama/ollama.go
 func init() {
-    runtime.Register("ollama", func(cfg runtime.Config) (runtime.Runtime, error) {
+    runtime.MustRegister("ollama", func(cfg runtime.Config) (runtime.Runtime, error) {
         return New(cfg)
     })
 }
@@ -185,7 +185,7 @@ import (
 )
 
 func init() {
-    runtime.Register("mybackend", func(cfg runtime.Config) (runtime.Runtime, error) {
+    runtime.MustRegister("mybackend", func(cfg runtime.Config) (runtime.Runtime, error) {
         return New(cfg)
     })
 }

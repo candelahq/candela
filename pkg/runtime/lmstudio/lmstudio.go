@@ -22,7 +22,7 @@ import (
 )
 
 func init() {
-	runtime.Register("lmstudio", func(cfg runtime.Config) (runtime.Runtime, error) {
+	runtime.MustRegister("lmstudio", func(cfg runtime.Config) (runtime.Runtime, error) {
 		return New(cfg)
 	})
 }

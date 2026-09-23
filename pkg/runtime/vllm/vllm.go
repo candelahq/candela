@@ -20,7 +20,7 @@ import (
 )
 
 func init() {
-	runtime.Register("vllm", func(cfg runtime.Config) (runtime.Runtime, error) {
+	runtime.MustRegister("vllm", func(cfg runtime.Config) (runtime.Runtime, error) {
 		return New(cfg)
 	})
 }

@@ -8,9 +8,12 @@ package attribution
 
 import (
 	"log/slog"
+	"net"
 	"net/http"
 	"regexp"
 	"strings"
+	"sync"
+	"time"
 )
 
 // IDPattern enforces the allowed character set and length limits for
@@ -29,15 +32,17 @@ type Attribution struct {
 //
 // Baggage keys checked: candela.tenant_id, candela.job_id (case-insensitive per RFC 8941).
 // Header fallbacks: X-Candela-Tenant-Id, X-Candela-Job-Id.
-// Invalid values are logged and discarded.
+// Invalid values are logged and discarded. To prevent log flooding under sustained attack,
+// invalid attribute warnings are rate-limited per source and downgraded to Debug.
 func FromRequest(r *http.Request) Attribution {
-	tenantID, jobID := ParseBaggageHeaders(r.Header.Values("Baggage"))
+	source := requestSource(r)
+	tenantID, jobID := parseBaggageWithSource(strings.Join(r.Header.Values("Baggage"), ","), source)
 	if tenantID == "" {
 		hdr := r.Header.Get("X-Candela-Tenant-Id")
 		if IDPattern.MatchString(hdr) {
 			tenantID = hdr
 		} else if hdr != "" {
-			slog.Warn("discarding invalid X-Candela-Tenant-Id header", "value", hdr)
+			logInvalid(source, "X-Candela-Tenant-Id", "discarding invalid X-Candela-Tenant-Id header", hdr)
 		}
 	}
 	if jobID == "" {
@@ -45,7 +50,7 @@ func FromRequest(r *http.Request) Attribution {
 		if IDPattern.MatchString(hdr) {
 			jobID = hdr
 		} else if hdr != "" {
-			slog.Warn("discarding invalid X-Candela-Job-Id header", "value", hdr)
+			logInvalid(source, "X-Candela-Job-Id", "discarding invalid X-Candela-Job-Id header", hdr)
 		}
 	}
 	return Attribution{TenantID: tenantID, JobID: jobID}
@@ -55,7 +60,7 @@ func FromRequest(r *http.Request) Attribution {
 // Baggage: header instances in a single HTTP request) and delegates to
 // ParseBaggage for extraction.
 func ParseBaggageHeaders(values []string) (tenantID, jobID string) {
-	return ParseBaggage(strings.Join(values, ","))
+	return parseBaggageWithSource(strings.Join(values, ","), "baggage")
 }
 
 // ParseBaggage extracts candela.tenant_id and candela.job_id from a W3C Baggage
@@ -67,6 +72,10 @@ func ParseBaggageHeaders(values []string) (tenantID, jobID string) {
 // If multiple entries for the same key are present (RFC 8941 allows duplicates),
 // the right-most valid one wins (per W3C spec). Invalid values are warned and skipped.
 func ParseBaggage(header string) (tenantID, jobID string) {
+	return parseBaggageWithSource(header, "baggage")
+}
+
+func parseBaggageWithSource(header, source string) (tenantID, jobID string) {
 	if header == "" {
 		return "", ""
 	}
@@ -85,17 +94,94 @@ func ParseBaggage(header string) (tenantID, jobID string) {
 				// W3C spec: the right-most occurrence of a key wins.
 				tenantID = val
 			} else {
-				slog.Warn("skipping invalid candela.tenant_id in Baggage header",
-					"value", val)
+				logInvalid(source, "candela.tenant_id", "skipping invalid candela.tenant_id in Baggage header", val)
 			}
 		} else if strings.EqualFold(key, "candela.job_id") {
 			if IDPattern.MatchString(val) {
 				jobID = val
 			} else {
-				slog.Warn("skipping invalid candela.job_id in Baggage header",
-					"value", val)
+				logInvalid(source, "candela.job_id", "skipping invalid candela.job_id in Baggage header", val)
 			}
 		}
 	}
 	return tenantID, jobID
+}
+
+const (
+	defaultCooldownWindow = 1 * time.Minute
+	maxTrackedSources     = 1024
+)
+
+var defaultLimiter = newWarnRateLimiter(defaultCooldownWindow)
+
+type warnRateLimiter struct {
+	mu       sync.Mutex
+	window   time.Duration
+	lastWarn map[string]time.Time
+}
+
+func newWarnRateLimiter(window time.Duration) *warnRateLimiter {
+	return &warnRateLimiter{
+		window:   window,
+		lastWarn: make(map[string]time.Time),
+	}
+}
+
+func (rl *warnRateLimiter) shouldWarn(key string, now time.Time) bool {
+	rl.mu.Lock()
+	defer rl.mu.Unlock()
+
+	last, exists := rl.lastWarn[key]
+	if !exists || now.Sub(last) >= rl.window {
+		if len(rl.lastWarn) >= maxTrackedSources {
+			for k, t := range rl.lastWarn {
+				if now.Sub(t) >= rl.window {
+					delete(rl.lastWarn, k)
+				}
+			}
+			if len(rl.lastWarn) >= maxTrackedSources {
+				rl.lastWarn = make(map[string]time.Time, maxTrackedSources/2)
+			}
+		}
+		rl.lastWarn[key] = now
+		return true
+	}
+	return false
+}
+
+func logInvalid(source, headerName, msg, value string) {
+	key := source + ":" + headerName
+	if defaultLimiter.shouldWarn(key, time.Now()) {
+		slog.Warn(msg, "value", value, "source", source)
+	} else {
+		slog.Debug(msg+" (rate-limited)", "value", value, "source", source)
+	}
+}
+
+func requestSource(r *http.Request) string {
+	if r == nil {
+		return "unknown"
+	}
+	host := r.RemoteAddr
+	if h, _, err := net.SplitHostPort(host); err == nil {
+		host = h
+	}
+	if host == "" {
+		return "unknown"
+	}
+	return host
+}
+
+// ResetRateLimiterForTesting resets the rate limiter state.
+func ResetRateLimiterForTesting() {
+	defaultLimiter.mu.Lock()
+	defer defaultLimiter.mu.Unlock()
+	defaultLimiter.lastWarn = make(map[string]time.Time)
+}
+
+// SetCooldownForTesting updates the cooldown window for testing.
+func SetCooldownForTesting(d time.Duration) {
+	defaultLimiter.mu.Lock()
+	defer defaultLimiter.mu.Unlock()
+	defaultLimiter.window = d
 }

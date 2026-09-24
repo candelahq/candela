@@ -24,7 +24,7 @@ RUN CGO_ENABLED=1 go build -trimpath -ldflags='-s -w' -o candela-server ./cmd/ca
 # Debian slim for glibc compatibility with DuckDB Go binary.
 FROM debian:bookworm-slim
 
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get upgrade -y && apt-get install -y --no-install-recommends ca-certificates && rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /build/candela-server /usr/local/bin/candela-server
 COPY deploy/entrypoint-server.sh /usr/local/bin/entrypoint.sh

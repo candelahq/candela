@@ -63,7 +63,10 @@
     "model": "claude-sonnet-5",
     "provider": "anthropic",
     "input_per_million": 2,
-    "output_per_million": 10
+    "output_per_million": 10,
+    "valid_until": "2026-08-31T23:59:59Z",
+    "fallback_input_per_million": 3,
+    "fallback_output_per_million": 15
   },
   {
     "model": "deepseek-r1-0528-maas",

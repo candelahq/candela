@@ -25,6 +25,15 @@ type BudgetRecord struct {
 	PeriodEnd     time.Time `json:"period_end,omitempty"`
 }
 
+// Remaining returns how much of the recurring budget is still available.
+// Returns 0 if no limit is set or if the budget is exhausted.
+func (b *BudgetRecord) Remaining() float64 {
+	if b.LimitUSD <= 0 {
+		return 0
+	}
+	return SafeSubUSD(b.LimitUSD, b.SpentUSD)
+}
+
 // GrantRecord is the Go representation of a one-time budget grant.
 type GrantRecord struct {
 	ID        string    `json:"id"`
@@ -42,11 +51,7 @@ type GrantRecord struct {
 // Clamped to 0 to prevent floating-point overdraft from reducing
 // the apparent total budget in CheckBudget (BILL-3).
 func (g *GrantRecord) Remaining() float64 {
-	r := g.AmountUSD - g.SpentUSD
-	if r < 0 {
-		return 0
-	}
-	return r
+	return SafeSubUSD(g.AmountUSD, g.SpentUSD)
 }
 
 // BudgetCheckResult is returned by CheckBudget.

@@ -38,6 +38,131 @@ type ModelPricing struct {
 	// When set, cost = request_duration_seconds × PerSecondUSD.
 	// Used instead of per-token pricing for infrastructure-cost models.
 	PerSecondUSD float64 `yaml:"per_second_usd,omitempty" json:"per_second_usd,omitempty"`
+
+	// Promotional / temporary pricing fields (#639).
+	// When ValidUntil is set and the evaluation time is past ValidUntil,
+	// the fallback rates take effect automatically.
+	ValidUntil                   *time.Time `yaml:"valid_until,omitempty" json:"valid_until,omitempty"`
+	FallbackInputPerMillion      float64    `yaml:"fallback_input_per_million,omitempty" json:"fallback_input_per_million,omitempty"`
+	FallbackOutputPerMillion     float64    `yaml:"fallback_output_per_million,omitempty" json:"fallback_output_per_million,omitempty"`
+	FallbackInputPerMillionHigh  float64    `yaml:"fallback_input_per_million_high,omitempty" json:"fallback_input_per_million_high,omitempty"`
+	FallbackOutputPerMillionHigh float64    `yaml:"fallback_output_per_million_high,omitempty" json:"fallback_output_per_million_high,omitempty"`
+}
+
+// IsExpired reports whether the promotional pricing has expired relative to now.
+func (p ModelPricing) IsExpired(now time.Time) bool {
+	return p.ValidUntil != nil && !p.ValidUntil.IsZero() && now.After(*p.ValidUntil)
+}
+
+// EffectiveRates returns the model pricing with promotional expiration evaluated
+// against now. If ValidUntil is set and now is after ValidUntil, the fallback rates
+// are substituted into InputPerMillion and OutputPerMillion.
+func (p ModelPricing) EffectiveRates(now time.Time) ModelPricing {
+	if !p.IsExpired(now) {
+		return p
+	}
+	effective := p
+	if p.FallbackInputPerMillion > 0 {
+		effective.InputPerMillion = p.FallbackInputPerMillion
+	}
+	if p.FallbackOutputPerMillion > 0 {
+		effective.OutputPerMillion = p.FallbackOutputPerMillion
+	}
+	if p.FallbackInputPerMillionHigh > 0 {
+		effective.InputPerMillionHigh = p.FallbackInputPerMillionHigh
+	}
+	if p.FallbackOutputPerMillionHigh > 0 {
+		effective.OutputPerMillionHigh = p.FallbackOutputPerMillionHigh
+	}
+	return effective
+}
+
+// FlexibleTime supports unmarshaling ISO8601/RFC3339 timestamps and date-only
+// strings ("YYYY-MM-DD") from YAML.
+type FlexibleTime time.Time
+
+// UnmarshalYAML parses YAML nodes into FlexibleTime supporting multiple date/time layouts.
+func (ft *FlexibleTime) UnmarshalYAML(value *yaml.Node) error {
+	var s string
+	if err := value.Decode(&s); err != nil {
+		var t time.Time
+		if err2 := value.Decode(&t); err2 == nil {
+			*ft = FlexibleTime(t)
+			return nil
+		}
+		return err
+	}
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return nil
+	}
+	layouts := []string{
+		time.RFC3339,
+		time.RFC3339Nano,
+		"2006-01-02T15:04:05",
+		"2006-01-02 15:04:05",
+		"2006-01-02",
+	}
+	for _, layout := range layouts {
+		if t, err := time.Parse(layout, s); err == nil {
+			if layout == "2006-01-02" {
+				t = time.Date(t.Year(), t.Month(), t.Day(), 23, 59, 59, 999999999, time.UTC)
+			}
+			*ft = FlexibleTime(t.UTC())
+			return nil
+		}
+	}
+	return fmt.Errorf("costcalc: cannot parse %q as valid_until timestamp", s)
+}
+
+// Time converts FlexibleTime to standard time.Time.
+func (ft FlexibleTime) Time() time.Time {
+	return time.Time(ft)
+}
+
+// UnmarshalYAML implements custom YAML unmarshaling for ModelPricing to support
+// flexible date/time formats in valid_until.
+func (p *ModelPricing) UnmarshalYAML(value *yaml.Node) error {
+	type rawModelPricing struct {
+		Model                        string        `yaml:"model"`
+		Provider                     string        `yaml:"provider"`
+		InputPerMillion              float64       `yaml:"input_per_million"`
+		OutputPerMillion             float64       `yaml:"output_per_million"`
+		DiscountPercent              float64       `yaml:"discount_percent,omitempty"`
+		InputPerMillionHigh          float64       `yaml:"input_per_million_high,omitempty"`
+		OutputPerMillionHigh         float64       `yaml:"output_per_million_high,omitempty"`
+		TierThresholdTokens          int64         `yaml:"tier_threshold_tokens,omitempty"`
+		PerSecondUSD                 float64       `yaml:"per_second_usd,omitempty"`
+		ValidUntil                   *FlexibleTime `yaml:"valid_until,omitempty"`
+		FallbackInputPerMillion      float64       `yaml:"fallback_input_per_million,omitempty"`
+		FallbackOutputPerMillion     float64       `yaml:"fallback_output_per_million,omitempty"`
+		FallbackInputPerMillionHigh  float64       `yaml:"fallback_input_per_million_high,omitempty"`
+		FallbackOutputPerMillionHigh float64       `yaml:"fallback_output_per_million_high,omitempty"`
+	}
+	var raw rawModelPricing
+	if err := value.Decode(&raw); err != nil {
+		return err
+	}
+	p.Model = raw.Model
+	p.Provider = raw.Provider
+	p.InputPerMillion = raw.InputPerMillion
+	p.OutputPerMillion = raw.OutputPerMillion
+	p.DiscountPercent = raw.DiscountPercent
+	p.InputPerMillionHigh = raw.InputPerMillionHigh
+	p.OutputPerMillionHigh = raw.OutputPerMillionHigh
+	p.TierThresholdTokens = raw.TierThresholdTokens
+	p.PerSecondUSD = raw.PerSecondUSD
+	p.FallbackInputPerMillion = raw.FallbackInputPerMillion
+	p.FallbackOutputPerMillion = raw.FallbackOutputPerMillion
+	p.FallbackInputPerMillionHigh = raw.FallbackInputPerMillionHigh
+	p.FallbackOutputPerMillionHigh = raw.FallbackOutputPerMillionHigh
+	if raw.ValidUntil != nil {
+		t := raw.ValidUntil.Time()
+		p.ValidUntil = &t
+	} else {
+		p.ValidUntil = nil
+	}
+	return nil
 }
 
 // PricingConfig holds pricing configuration loaded from config.yaml.
@@ -92,6 +217,7 @@ var defaultCacheDiscounts = map[string]CacheDiscountConfig{
 // Calculator computes costs from token usage and model pricing.
 type Calculator struct {
 	mu             sync.RWMutex
+	clock          func() time.Time               // time provider (defaults to time.Now if nil)
 	defaults       map[string]ModelPricing        // key: "provider/model" — built-in list prices
 	overrides      map[string]ModelPricing        // key: "provider/model" — config overrides
 	fallback       map[string]ModelPricing        // key: "model" — deterministic name-only match
@@ -112,14 +238,19 @@ var defaultPricingYAML []byte
 // pricingFile is the schema for pricing.yaml, used only during YAML unmarshalling.
 type pricingFile struct {
 	Models []struct {
-		Provider             string  `yaml:"provider"`
-		Model                string  `yaml:"model"`
-		InputPerMillion      float64 `yaml:"input_per_million"`
-		OutputPerMillion     float64 `yaml:"output_per_million"`
-		InputPerMillionHigh  float64 `yaml:"input_per_million_high,omitempty"`
-		OutputPerMillionHigh float64 `yaml:"output_per_million_high,omitempty"`
-		TierThresholdTokens  int64   `yaml:"tier_threshold_tokens,omitempty"`
-		DiscountPercent      float64 `yaml:"discount_percent,omitempty"`
+		Provider                     string        `yaml:"provider"`
+		Model                        string        `yaml:"model"`
+		InputPerMillion              float64       `yaml:"input_per_million"`
+		OutputPerMillion             float64       `yaml:"output_per_million"`
+		InputPerMillionHigh          float64       `yaml:"input_per_million_high,omitempty"`
+		OutputPerMillionHigh         float64       `yaml:"output_per_million_high,omitempty"`
+		TierThresholdTokens          int64         `yaml:"tier_threshold_tokens,omitempty"`
+		DiscountPercent              float64       `yaml:"discount_percent,omitempty"`
+		ValidUntil                   *FlexibleTime `yaml:"valid_until,omitempty"`
+		FallbackInputPerMillion      float64       `yaml:"fallback_input_per_million,omitempty"`
+		FallbackOutputPerMillion     float64       `yaml:"fallback_output_per_million,omitempty"`
+		FallbackInputPerMillionHigh  float64       `yaml:"fallback_input_per_million_high,omitempty"`
+		FallbackOutputPerMillionHigh float64       `yaml:"fallback_output_per_million_high,omitempty"`
 	} `yaml:"models"`
 }
 
@@ -281,6 +412,7 @@ func (c *Calculator) LoadFromConfig(cfg PricingConfig) {
 	}
 
 	c.rebuildFallback()
+	c.checkExpirationsLocked(14 * 24 * time.Hour)
 
 	if cfg.DiscountPercent > 0 {
 		slog.Info("💰 global pricing discount applied",
@@ -455,21 +587,131 @@ func (c *Calculator) SetGlobalDiscount(discount float64) {
 	c.globalDiscount = clampDiscount(discount)
 }
 
-// Models returns all known model pricing entries (defaults merged with overrides).
-// Overrides take priority over defaults on key conflicts. The returned slice is
-// sorted by provider, then model name. This is used to populate the /v1/models
-// endpoint so clients can discover available models.
-func (c *Calculator) Models() []ModelPricing {
+// now returns the current reference time from the configured clock, or time.Now().
+func (c *Calculator) now() time.Time {
+	if c.clock != nil {
+		return c.clock()
+	}
+	return time.Now()
+}
+
+// SetClock sets a custom time provider for testing expiration behavior.
+func (c *Calculator) SetClock(clock func() time.Time) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.clock = clock
+}
+
+// PricingAlert represents a notification for an expired or soon-to-expire promotional price.
+type PricingAlert struct {
+	Provider                 string        `json:"provider"`
+	Model                    string        `json:"model"`
+	ValidUntil               time.Time     `json:"valid_until"`
+	Status                   string        `json:"status"`     // "expired" or "expiring_soon"
+	ExpiresIn                time.Duration `json:"expires_in"` // negative if already expired
+	CurrentInputPerMillion   float64       `json:"current_input_per_million"`
+	CurrentOutputPerMillion  float64       `json:"current_output_per_million"`
+	FallbackInputPerMillion  float64       `json:"fallback_input_per_million"`
+	FallbackOutputPerMillion float64       `json:"fallback_output_per_million"`
+}
+
+// CheckExpirations scans all configured models and returns alerts for models
+// that have expired or will expire within warnWithin. It logs structured warnings
+// for each detected promotional expiration.
+func (c *Calculator) CheckExpirations(warnWithin time.Duration) []PricingAlert {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
+	return c.checkExpirationsLocked(warnWithin)
+}
 
-	// Merge defaults and overrides into a single map (overrides win).
+func (c *Calculator) checkExpirationsLocked(warnWithin time.Duration) []PricingAlert {
+	now := c.now()
+	var alerts []PricingAlert
+
+	// Collect unique models (overrides win)
 	merged := make(map[string]ModelPricing, len(c.defaults)+len(c.overrides))
 	for k, v := range c.defaults {
 		merged[k] = v
 	}
 	for k, v := range c.overrides {
 		merged[k] = v
+	}
+
+	keys := make([]string, 0, len(merged))
+	for k := range merged {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+
+	for _, k := range keys {
+		p := merged[k]
+		if p.ValidUntil == nil || p.ValidUntil.IsZero() {
+			continue
+		}
+		expiresIn := p.ValidUntil.Sub(now)
+		if expiresIn <= 0 {
+			alert := PricingAlert{
+				Provider:                 p.Provider,
+				Model:                    p.Model,
+				ValidUntil:               *p.ValidUntil,
+				Status:                   "expired",
+				ExpiresIn:                expiresIn,
+				CurrentInputPerMillion:   p.InputPerMillion,
+				CurrentOutputPerMillion:  p.OutputPerMillion,
+				FallbackInputPerMillion:  p.FallbackInputPerMillion,
+				FallbackOutputPerMillion: p.FallbackOutputPerMillion,
+			}
+			alerts = append(alerts, alert)
+			slog.Warn("⚠️ promotional pricing expired — fallback rates in effect",
+				"provider", p.Provider,
+				"model", p.Model,
+				"valid_until", p.ValidUntil.Format(time.RFC3339),
+				"fallback_input", p.FallbackInputPerMillion,
+				"fallback_output", p.FallbackOutputPerMillion,
+			)
+		} else if warnWithin > 0 && expiresIn <= warnWithin {
+			alert := PricingAlert{
+				Provider:                 p.Provider,
+				Model:                    p.Model,
+				ValidUntil:               *p.ValidUntil,
+				Status:                   "expiring_soon",
+				ExpiresIn:                expiresIn,
+				CurrentInputPerMillion:   p.InputPerMillion,
+				CurrentOutputPerMillion:  p.OutputPerMillion,
+				FallbackInputPerMillion:  p.FallbackInputPerMillion,
+				FallbackOutputPerMillion: p.FallbackOutputPerMillion,
+			}
+			alerts = append(alerts, alert)
+			days := math.Round(expiresIn.Hours() / 24)
+			slog.Warn("⏳ promotional pricing expiring soon",
+				"provider", p.Provider,
+				"model", p.Model,
+				"valid_until", p.ValidUntil.Format(time.RFC3339),
+				"expires_in_days", days,
+			)
+		}
+	}
+
+	return alerts
+}
+
+// Models returns all known model pricing entries (defaults merged with overrides).
+// Overrides take priority over defaults on key conflicts. Any promotional expiration
+// is evaluated against current time. The returned slice is sorted by provider, then
+// model name. This is used to populate the /v1/models endpoint so clients discover
+// currently effective rates.
+func (c *Calculator) Models() []ModelPricing {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	// Merge defaults and overrides into a single map (overrides win).
+	merged := make(map[string]ModelPricing, len(c.defaults)+len(c.overrides))
+	now := c.now()
+	for k, v := range c.defaults {
+		merged[k] = v.EffectiveRates(now)
+	}
+	for k, v := range c.overrides {
+		merged[k] = v.EffectiveRates(now)
 	}
 
 	// Collect into a slice.
@@ -600,12 +842,21 @@ func (c *Calculator) lookupCandidate(provider, candidate string) (ModelPricing, 
 // (hyphen→dot version suffix), then prefix-based fuzzy match.
 // Provider aliases (e.g. "anthropic-direct" → "anthropic") are resolved before
 // lookup so passthrough routes inherit canonical pricing and config overrides.
+// Any promotional expiration is evaluated against the current reference time.
 func (c *Calculator) resolve(provider, model string) (ModelPricing, bool) {
 	// Resolve provider alias (e.g. "anthropic-direct" → "anthropic").
 	if canonical, ok := c.aliases[strings.ToLower(provider)]; ok {
 		provider = canonical
 	}
 
+	p, ok := c.resolveCandidate(provider, model)
+	if !ok {
+		return ModelPricing{}, false
+	}
+	return p.EffectiveRates(c.now()), true
+}
+
+func (c *Calculator) resolveCandidate(provider, model string) (ModelPricing, bool) {
 	// 1-3. Exact match: config override → built-in default → fallback.
 	if p, ok := c.lookupCandidate(provider, model); ok {
 		return p, true
@@ -843,15 +1094,26 @@ func (c *Calculator) loadDefaults() {
 		}
 	}
 	for _, m := range pf.Models {
+		var validUntil *time.Time
+		if m.ValidUntil != nil {
+			t := m.ValidUntil.Time()
+			validUntil = &t
+		}
 		c.defaults[c.key(m.Provider, m.Model)] = ModelPricing{
-			Provider:             m.Provider,
-			Model:                m.Model,
-			InputPerMillion:      m.InputPerMillion,
-			OutputPerMillion:     m.OutputPerMillion,
-			InputPerMillionHigh:  m.InputPerMillionHigh,
-			OutputPerMillionHigh: m.OutputPerMillionHigh,
-			TierThresholdTokens:  m.TierThresholdTokens,
-			DiscountPercent:      m.DiscountPercent,
+			Provider:                     m.Provider,
+			Model:                        m.Model,
+			InputPerMillion:              m.InputPerMillion,
+			OutputPerMillion:             m.OutputPerMillion,
+			InputPerMillionHigh:          m.InputPerMillionHigh,
+			OutputPerMillionHigh:         m.OutputPerMillionHigh,
+			TierThresholdTokens:          m.TierThresholdTokens,
+			DiscountPercent:              m.DiscountPercent,
+			ValidUntil:                   validUntil,
+			FallbackInputPerMillion:      m.FallbackInputPerMillion,
+			FallbackOutputPerMillion:     m.FallbackOutputPerMillion,
+			FallbackInputPerMillionHigh:  m.FallbackInputPerMillionHigh,
+			FallbackOutputPerMillionHigh: m.FallbackOutputPerMillionHigh,
 		}
 	}
+	c.checkExpirationsLocked(14 * 24 * time.Hour)
 }

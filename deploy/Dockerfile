@@ -9,7 +9,8 @@
 
 # ── Stage 1: Build Go backend ──
 # DuckDB requires glibc (not musl/Alpine) for its static bindings.
-FROM golang:1.26-bookworm AS builder
+# golang:1.26-bookworm
+FROM golang:1.26-bookworm@sha256:a688600ca24f8a4d3ca77f95b0dd40704a9fc787c826660eb7ba0b641b8b175d AS builder
 
 RUN apt-get update && apt-get install -y --no-install-recommends build-essential && rm -rf /var/lib/apt/lists/*
 
@@ -22,7 +23,8 @@ RUN CGO_ENABLED=1 go build -trimpath -ldflags='-s -w' -o candela-server ./cmd/ca
 
 # ── Stage 2: Runtime ──
 # Debian slim for glibc compatibility with DuckDB Go binary.
-FROM debian:bookworm-slim
+# debian:bookworm-slim
+FROM debian:bookworm-slim@sha256:3783cc01769c7b2b1b83a5c5ad96c815348e28ed7da68e2e3687004faa906251
 
 RUN apt-get update && apt-get upgrade -y && apt-get install -y --no-install-recommends ca-certificates && rm -rf /var/lib/apt/lists/*
 

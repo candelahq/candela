@@ -22,6 +22,8 @@ resource "google_cloud_run_v2_service" "candela" {
   template {
     service_account = google_service_account.candela.email
 
+    max_instance_request_concurrency = var.max_instance_request_concurrency
+
     scaling {
       min_instance_count = var.min_instances
       max_instance_count = var.max_instances

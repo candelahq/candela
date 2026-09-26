@@ -4,7 +4,8 @@
 # Build:  docker build -f Dockerfile.proxy -t candela-proxy .
 # Run:    docker run -p 8080:8080 -e PROVIDERS=openai,anthropic candela-proxy
 
-FROM rust:1.87-alpine AS builder
+# rust:1.87-alpine
+FROM rust:1.87-alpine@sha256:126df0f2a57e675f9306fe180b833982ffb996e90a92a793bb75253cfeed5475 AS builder
 
 RUN apk add --no-cache musl-dev
 
@@ -54,7 +55,8 @@ RUN find . -name "*.rs" -exec touch {} +
 RUN cargo build --release --bin candela-proxy
 
 # ── Runtime ──
-FROM gcr.io/distroless/static-debian12:nonroot
+# gcr.io/distroless/static-debian12:nonroot
+FROM gcr.io/distroless/static-debian12:nonroot@sha256:afa5c872c891853ca7fcf1f12c3edb23f7eeef36189728842dd51042ff57f7ab
 
 COPY --from=builder /app/target/release/candela-proxy /candela-proxy
 

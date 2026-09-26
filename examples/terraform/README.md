@@ -99,6 +99,7 @@ Two roles defined in proto: `DEVELOPER` (can use proxy, view own data) and `ADMI
 | `domain` | Custom domain for Cloud Run | `""` |
 | `iap_oauth_client_id` | OAuth client ID for IAP | (required for prod) |
 | `iap_oauth_client_secret` | OAuth client secret for IAP | (required for prod) |
+| `max_instance_request_concurrency` | Max concurrent requests per instance (LLM proxy) | `15` |
 
 > [!NOTE]
 > See `terraform.tfvars.example` for a full list of configurable variables.

@@ -11,6 +11,7 @@ invoker_google_group   = "devs@company.com"
 # image_tag          = "latest"
 # min_instances      = 0
 # max_instances      = 10
+# max_instance_request_concurrency = 15
 # cpu                = "1"
 # memory             = "512Mi"
 # bigquery_dataset   = "candela"

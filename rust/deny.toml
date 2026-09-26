@@ -4,6 +4,12 @@
 [advisories]
 # Deny any known vulnerability. Unmaintained crates generate warnings.
 version = 2
+ignore = [
+    # RUSTSEC-2026-0304: connectrpc client-streaming/bidirectional-streaming denial of service.
+    # candela-harness uses unary RPCs exclusively; upgrade to connectrpc 0.8+ requires
+    # updating buffa protoc-gen-buffa stubs.
+    "RUSTSEC-2026-0304",
+]
 
 [licenses]
 # Allow standard open-source licenses used by our dependency tree.

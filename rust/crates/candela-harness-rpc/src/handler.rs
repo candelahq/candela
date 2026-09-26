@@ -527,11 +527,10 @@ mod tests {
 
         // Collect all notifications with bounded recv
         let mut events = Vec::new();
-        loop {
-            match tokio::time::timeout(std::time::Duration::from_secs(2), rx.recv()).await {
-                Ok(Some(notif)) => events.push(notif),
-                _ => break,
-            }
+        while let Ok(Some(notif)) =
+            tokio::time::timeout(std::time::Duration::from_secs(2), rx.recv()).await
+        {
+            events.push(notif);
         }
 
         assert!(!events.is_empty(), "should receive at least one event");
@@ -574,11 +573,10 @@ mod tests {
 
         // Collect events with bounded recv — keeps polling until idle timeout
         let mut events = Vec::new();
-        loop {
-            match tokio::time::timeout(std::time::Duration::from_secs(2), rx.recv()).await {
-                Ok(Some(notif)) => events.push(notif),
-                _ => break, // timeout or channel closed
-            }
+        while let Ok(Some(notif)) =
+            tokio::time::timeout(std::time::Duration::from_secs(2), rx.recv()).await
+        {
+            events.push(notif);
         }
 
         let has_error = events

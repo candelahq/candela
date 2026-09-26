@@ -21,7 +21,7 @@ RUN go build -trimpath -ldflags='-s -w' -o candela-server ./cmd/candela-server
 
 # ── Stage 2: Build Next.js UI ──
 # node:22-alpine
-FROM node:22-alpine@sha256:b6f26b36c8ff49624cfdac716b8ea1138d606df02586a77d364bb5536a634f85 AS ui-builder
+FROM node:26-alpine@sha256:0b36e8c136b94cd4fcf02188228e76c31ad5872eef3fec8cbd2eee500cfd9e80 AS ui-builder
 
 WORKDIR /build/ui
 
@@ -58,7 +58,7 @@ RUN pnpm run build
 # ── Stage 3: Runtime ──
 # Debian slim for glibc compatibility with DuckDB Go binary.
 # node:22-slim
-FROM node:22-slim@sha256:48e4b67d85f87bd551df43704e24d252f56cc5f8e9718841aace50f19948f0f9 AS runtime
+FROM node:26-slim@sha256:ec7758ee051e457b468b32bde57b0879010b325bb9862718e9615225ce4aaae1 AS runtime
 
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates && rm -rf /var/lib/apt/lists/*
 

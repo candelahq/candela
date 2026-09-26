@@ -1,5 +1,6 @@
 # Build the Candela worker
-FROM golang:1.26-alpine AS builder
+# golang:1.26-alpine
+FROM golang:1.26-alpine@sha256:8ac98ca534ac3f51e1f420a1dd2c15e74c75cfa0f23f3ad27eb5d7236c349a0c AS builder
 
 WORKDIR /build
 COPY go.mod go.sum ./
@@ -9,7 +10,8 @@ COPY . .
 RUN CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o candela-worker ./cmd/candela-worker
 
 # Runtime
-FROM alpine:3.20
+# alpine:3.20
+FROM alpine:3.20@sha256:d9e853e87e55526f6b2917df91a2115c36dd7c696a35be12163d44e6e2a4b6bc
 RUN apk add --no-cache ca-certificates
 COPY --from=builder /build/candela-worker /usr/local/bin/candela-worker
 

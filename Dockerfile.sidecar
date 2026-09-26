@@ -5,8 +5,8 @@
 # Build:  docker build -f Dockerfile.sidecar -t candela-sidecar .
 # Run:    docker run -p 8080:8080 -e GCP_PROJECT=my-project candela-sidecar
 
-ARG GO_VERSION=1.26
-FROM golang:${GO_VERSION}-alpine AS builder
+# golang:1.26-alpine
+FROM golang:1.26-alpine@sha256:8ac98ca534ac3f51e1f420a1dd2c15e74c75cfa0f23f3ad27eb5d7236c349a0c AS builder
 
 RUN apk add --no-cache ca-certificates git
 
@@ -27,7 +27,8 @@ RUN CGO_ENABLED=0 GOOS=linux go build \
     ./cmd/candela-sidecar/
 
 # ── Runtime ──
-FROM gcr.io/distroless/static-debian12:nonroot
+# gcr.io/distroless/static-debian12:nonroot
+FROM gcr.io/distroless/static-debian12:nonroot@sha256:afa5c872c891853ca7fcf1f12c3edb23f7eeef36189728842dd51042ff57f7ab
 
 COPY --from=builder /candela-sidecar /candela-sidecar
 

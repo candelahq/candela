@@ -45,6 +45,12 @@ variable "max_instances" {
   default     = 10
 }
 
+variable "max_instance_request_concurrency" {
+  description = "Maximum concurrent requests per Cloud Run instance (default: 15; recommended 10-20 for streaming LLM proxy)"
+  type        = number
+  default     = 15
+}
+
 variable "cpu" {
   description = "CPU allocation per instance"
   type        = string
@@ -84,7 +90,7 @@ variable "bigquery_location" {
 variable "firestore_location" {
   description = "Firestore database location"
   type        = string
-  default     = "nam5"  # US multi-region
+  default     = "nam5" # US multi-region
 }
 
 # ── Vertex AI ──

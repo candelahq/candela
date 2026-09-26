@@ -55,7 +55,7 @@ resource "google_compute_backend_service" "candela" {
   timeout_sec           = 30
 
   backend {
-    group           = google_compute_region_network_endpoint_group.candela[0].id
+    group = google_compute_region_network_endpoint_group.candela[0].id
   }
 
   # Enable IAP when OAuth credentials are provided.

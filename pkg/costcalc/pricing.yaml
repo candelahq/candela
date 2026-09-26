@@ -123,11 +123,14 @@ models:
     output_per_million: 25.00
 
   # Claude Sonnet 5 (June 2026) — launch pricing through Aug 31, 2026.
-  # Standard pricing ($3/$15) takes effect Sep 1, 2026.
+  # Standard pricing ($3/$15) takes effect Sep 1, 2026 (#639).
   - provider: anthropic
     model: claude-sonnet-5
     input_per_million: 2.00
     output_per_million: 10.00
+    valid_until: 2026-08-31T23:59:59Z
+    fallback_input_per_million: 3.00
+    fallback_output_per_million: 15.00
 
   # Claude Opus 5 (July 2026)
   - provider: anthropic

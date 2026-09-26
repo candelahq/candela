@@ -31,11 +31,7 @@ type TaskBudget struct {
 // Remaining returns the unspent portion of the task budget.
 // Returns 0 if the budget is overspent.
 func (b *TaskBudget) Remaining() float64 {
-	r := b.LimitUSD - b.SpentUSD
-	if r < 0 {
-		return 0
-	}
-	return r
+	return SafeSubUSD(b.LimitUSD, b.SpentUSD)
 }
 
 // IsExpired reports whether the task budget has passed its expiry time.

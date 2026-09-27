@@ -154,7 +154,7 @@ export default function SettingsPage() {
                   <div className="settings-row">
                     <span className="settings-label">Role</span>
                     <span className="settings-value">
-                      <span className={`badge ${isAdmin ? "badge-warning" : "badge-info"}`}>
+                      <span className={`badge ${isAdmin ? "badge-warning" : "badge-accent"}`}>
                         {isAdmin ? "Admin" : "Developer"}
                       </span>
                     </span>

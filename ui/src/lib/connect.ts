@@ -4,6 +4,18 @@ import { API_BASE_URL } from "@/lib/constants";
 import { firebaseAuth } from "@/lib/firebase";
 
 /**
+ * Navigation adapter for auth failure redirects.
+ * Allows safe mocking in test environments without mutating window.location.
+ */
+export const authNavigation = {
+  redirect(path: string) {
+    if (typeof window !== "undefined") {
+      window.location.href = path;
+    }
+  },
+};
+
+/**
  * ConnectRPC auth interceptor — automatically injects Firebase ID tokens.
  * Handles token refresh failures gracefully: retries once, and throws a typed
  * Unauthenticated ConnectError instead of unhandled Firebase SDK exceptions.
@@ -29,7 +41,7 @@ export const authInterceptor: Interceptor = (next) => async (req) => {
               err.code === "auth/user-disabled" ||
               err.code === "auth/null-user");
           if (isExpired) {
-            window.location.href = "/login";
+            authNavigation.redirect("/login");
           }
         }
         throw new ConnectError(

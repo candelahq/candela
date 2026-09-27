@@ -15,7 +15,7 @@ vi.mock("@/lib/firebase", () => ({
 }));
 
 // Import after mocking
-import { authInterceptor } from "@/lib/connect";
+import { authInterceptor, authNavigation } from "@/lib/connect";
 
 describe("connect authInterceptor", () => {
   beforeEach(() => {
@@ -114,14 +114,7 @@ describe("connect authInterceptor", () => {
   });
 
   it("redirects to /login when error indicates expired user session in browser", async () => {
-    const originalLocation = window.location;
-    // Mock window.location
-    delete (window as unknown as { location?: unknown }).location;
-    window.location = {
-      ...originalLocation,
-      pathname: "/today",
-      href: "http://localhost:3000/today",
-    } as unknown as Location;
+    const redirectSpy = vi.spyOn(authNavigation, "redirect").mockImplementation(() => {});
 
     const expiredError = Object.assign(new Error("User token expired"), {
       code: "auth/user-token-expired",
@@ -136,8 +129,8 @@ describe("connect authInterceptor", () => {
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     await expect(authInterceptor(next)(req as any)).rejects.toThrow(ConnectError);
-    expect(window.location.href).toBe("/login");
+    expect(redirectSpy).toHaveBeenCalledWith("/login");
 
-    window.location = originalLocation;
+    redirectSpy.mockRestore();
   });
 });

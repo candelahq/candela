@@ -21,11 +21,13 @@ export interface ValidationError {
  */
 export const defaultValidator = createValidator();
 
-function extractFieldName(field: unknown): string {
+export function extractFieldName(field: unknown): string {
   if (Array.isArray(field) && field.length > 0) {
-    const last = field[field.length - 1];
-    if (last && typeof last === "object" && "name" in last && typeof last.name === "string") {
-      return last.name;
+    for (let i = field.length - 1; i >= 0; i--) {
+      const item = field[i];
+      if (item && typeof item === "object" && "name" in item && typeof item.name === "string") {
+        return item.name;
+      }
     }
   }
   const str = String(field || "");

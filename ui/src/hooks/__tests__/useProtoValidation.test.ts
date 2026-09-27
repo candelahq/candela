@@ -3,14 +3,35 @@ import { renderHook, act } from "@testing-library/react";
 import {
   defaultValidator,
   validateMessage,
+  extractFieldName,
   useCreateUserValidation,
   useSetBudgetValidation,
   useCreateGrantValidation,
   useCatalogEntryValidation,
 } from "@/hooks/useProtoValidation";
-import { CreateUserRequestSchema, SetBudgetRequestSchema } from "@/gen/candela/v1/user_service_pb";
+import { CreateUserRequestSchema } from "@/gen/candela/v1/user_service_pb";
 
 describe("useProtoValidation", () => {
+  describe("extractFieldName", () => {
+    it("extracts field name from simple field descriptor", () => {
+      const field = [{ name: "email" }];
+      expect(extractFieldName(field)).toBe("email");
+    });
+
+    it("scans backward to find containing field name when last item is a collection subscript", () => {
+      const fieldWithListSub = [{ name: "access_tags" }, { kind: "list_sub", index: 0 }];
+      expect(extractFieldName(fieldWithListSub)).toBe("access_tags");
+
+      const fieldWithMapSub = [{ name: "attributes" }, { kind: "map_sub", key: "env" }];
+      expect(extractFieldName(fieldWithMapSub)).toBe("attributes");
+    });
+
+    it("falls back to parsing string or unknown", () => {
+      expect(extractFieldName("field candela.v1.CreateUserRequest.email")).toBe("email");
+      expect(extractFieldName(null)).toBe("unknown");
+    });
+  });
+
   describe("defaultValidator singleton", () => {
     it("is defined and reused as a module singleton", () => {
       expect(defaultValidator).toBeDefined();

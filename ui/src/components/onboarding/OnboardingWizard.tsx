@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useAuth } from "@/components/AuthProvider";
 
 export const ONBOARDING_COMPLETED_KEY = "candela:onboarding_completed";
@@ -69,7 +69,21 @@ interface OnboardingWizardProps {
 
 export function OnboardingWizard({ forceOpen, onClose }: OnboardingWizardProps) {
   const { user, configured, signIn } = useAuth();
-  const [isOpen, setIsOpen] = useState(false);
+  const [isOpen, setIsOpen] = useState(() => {
+    if (forceOpen) return true;
+    if (typeof window !== "undefined") {
+      return localStorage.getItem(ONBOARDING_COMPLETED_KEY) !== "true";
+    }
+    return false;
+  });
+  const [prevForceOpen, setPrevForceOpen] = useState(forceOpen);
+  if (forceOpen !== prevForceOpen) {
+    setPrevForceOpen(forceOpen);
+    if (forceOpen) {
+      setIsOpen(true);
+    }
+  }
+
   const [currentStep, setCurrentStep] = useState(0);
   const [activeTab, setActiveTab] = useState(CONFIG_TABS[0].id);
   const [copied, setCopied] = useState(false);
@@ -81,24 +95,12 @@ export function OnboardingWizard({ forceOpen, onClose }: OnboardingWizardProps) 
 
   const proxyUrl = typeof window !== "undefined" ? window.location.origin : "http://localhost:8181";
 
-  // Check first-run status on mount or handle external trigger
+  // Listen for external trigger (e.g. from /setup page)
   useEffect(() => {
-    if (forceOpen) {
-      setIsOpen(true);
-      return;
-    }
-
-    if (typeof window !== "undefined") {
-      const completed = localStorage.getItem(ONBOARDING_COMPLETED_KEY);
-      if (completed !== "true") {
-        setIsOpen(true);
-      }
-
-      const handleOpen = () => setIsOpen(true);
-      window.addEventListener("candela:open-onboarding", handleOpen);
-      return () => window.removeEventListener("candela:open-onboarding", handleOpen);
-    }
-  }, [forceOpen]);
+    const handleOpen = () => setIsOpen(true);
+    window.addEventListener("candela:open-onboarding", handleOpen);
+    return () => window.removeEventListener("candela:open-onboarding", handleOpen);
+  }, []);
 
   const handleClose = useCallback((markCompleted = false) => {
     if (markCompleted && typeof window !== "undefined") {

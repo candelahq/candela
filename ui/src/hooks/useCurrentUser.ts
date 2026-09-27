@@ -18,6 +18,7 @@ export interface CurrentUser {
 type Action =
   | { type: "loading" }
   | { type: "success"; user: User; budget: UserBudget | null; grants: BudgetGrant[]; remaining: number }
+  | { type: "no_user" }
   | { type: "error"; message: string };
 
 function reducer(state: CurrentUser, action: Action): CurrentUser {
@@ -31,6 +32,12 @@ function reducer(state: CurrentUser, action: Action): CurrentUser {
         activeGrants: action.grants,
         totalRemainingUsd: action.remaining,
         isAdmin: action.user.role === UserRole.ADMIN,
+        isLoading: false,
+        error: null,
+      };
+    case "no_user":
+      return {
+        ...initialState,
         isLoading: false,
         error: null,
       };
@@ -65,14 +72,18 @@ export function useCurrentUser(): CurrentUser {
     dispatch({ type: "loading" });
     try {
       const resp = await userClient.getCurrentUser({}, { signal: controller.signal });
-      if (!controller.signal.aborted && resp.user) {
-        dispatch({
-          type: "success",
-          user: resp.user,
-          budget: resp.budget ?? null,
-          grants: resp.activeGrants,
-          remaining: resp.totalRemainingUsd,
-        });
+      if (!controller.signal.aborted) {
+        if (resp.user) {
+          dispatch({
+            type: "success",
+            user: resp.user,
+            budget: resp.budget ?? null,
+            grants: resp.activeGrants,
+            remaining: resp.totalRemainingUsd,
+          });
+        } else {
+          dispatch({ type: "no_user" });
+        }
       }
     } catch (err: unknown) {
       if (!controller.signal.aborted) {

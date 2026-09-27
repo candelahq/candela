@@ -15,6 +15,7 @@ import (
 	v1 "github.com/candelahq/candela/gen/go/candela/v1"
 	"github.com/candelahq/candela/gen/go/candela/v1/candelav1connect"
 	"github.com/candelahq/candela/pkg/auth"
+	"github.com/candelahq/candela/pkg/forecast"
 	"github.com/candelahq/candela/pkg/storage"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
@@ -646,7 +647,7 @@ func (h *UserHandler) GetMyBudget(
 		return nil, connect.NewError(connect.CodeNotFound, fmt.Errorf("user not found"))
 	}
 
-	// Fetch budget and grants concurrently — both are Firestore reads, ~80ms total.
+	// Fetch budget, grants, and spend history concurrently — all are fast storage reads (~80ms).
 	type budgetResult struct {
 		b   *storage.BudgetRecord
 		err error
@@ -655,8 +656,13 @@ func (h *UserHandler) GetMyBudget(
 		gs  []*storage.GrantRecord
 		err error
 	}
+	type historyResult struct {
+		hs  []storage.DailySpendRecord
+		err error
+	}
 	budgetCh := make(chan budgetResult, 1)
 	grantsCh := make(chan grantsResult, 1)
+	historyCh := make(chan historyResult, 1)
 
 	go func() {
 		b, err := h.store.GetBudget(ctx, userID)
@@ -666,15 +672,23 @@ func (h *UserHandler) GetMyBudget(
 		gs, err := h.store.ListGrants(ctx, userID, true)
 		grantsCh <- grantsResult{gs, err}
 	}()
+	go func() {
+		hs, err := h.store.GetSpendHistory(ctx, userID, 7)
+		historyCh <- historyResult{hs, err}
+	}()
 
 	br := <-budgetCh
 	gr := <-grantsCh
+	hr := <-historyCh
 
 	if br.err != nil {
 		return nil, internalError("failed to get budget", br.err)
 	}
 	if gr.err != nil {
 		return nil, internalError("failed to list grants", gr.err)
+	}
+	if hr.err != nil {
+		slog.WarnContext(ctx, "failed to get spend history for forecast", "error", hr.err, "user_id", userID)
 	}
 
 	// ── Compute per-pool remaining ──────────────────────────────────────────
@@ -708,6 +722,30 @@ func (h *UserHandler) GetMyBudget(
 	nextMidnight := now.Truncate(24 * time.Hour).Add(24 * time.Hour)
 	periodResetsAt := nextMidnight.Format(time.RFC3339)
 
+	// ── Budget forecast (#794) ──────────────────────────────────────────────
+	var spendHistory []forecast.DailySpend
+	for _, s := range hr.hs {
+		spendHistory = append(spendHistory, forecast.DailySpend{
+			Date:       s.Date,
+			SpendUSD:   s.SpendUSD,
+			TokenCount: s.TokenCount,
+		})
+	}
+
+	periodStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+	var limitUSD, spentUSD float64
+	if br.b != nil {
+		limitUSD = br.b.LimitUSD
+		spentUSD = br.b.SpentUSD
+	}
+	forecastRes := forecast.Calculate(forecast.Input{
+		LimitUSD:     limitUSD,
+		SpentUSD:     spentUSD,
+		PeriodStart:  periodStart,
+		Now:          now,
+		SpendHistory: spendHistory,
+	})
+
 	return connect.NewResponse(&v1.GetMyBudgetResponse{
 		Budget:             budgetToProto(br.b),
 		ActiveGrants:       pbGrants,
@@ -715,9 +753,30 @@ func (h *UserHandler) GetMyBudget(
 		BudgetRemainingUsd: budgetRemaining,
 		GrantsRemainingUsd: grantsRemaining,
 		TokensUsedToday:    allTokensToday,
+		Forecast:           forecastToProto(forecastRes),
 		PeriodKey:          periodKey,
 		PeriodResetsAt:     periodResetsAt,
 	}), nil
+}
+
+func forecastToProto(r forecast.Result) *v1.BudgetForecast {
+	history := make([]*v1.DailySpend, len(r.SpendHistory))
+	for i, h := range r.SpendHistory {
+		history[i] = &v1.DailySpend{
+			Date:       h.Date,
+			SpendUsd:   h.SpendUSD,
+			TokenCount: h.TokenCount,
+		}
+	}
+	return &v1.BudgetForecast{
+		BurnRateUsdPerHour:      r.BurnRatePerHour,
+		ProjectedEodSpendUsd:    r.ProjectedEODSpend,
+		WillExceedBudget:        r.WillExceedBudget,
+		AvgDailySpendUsd:        r.AvgDailySpend,
+		EstimatedExhaustionDate: r.EstimatedExhaustion,
+		DaysUntilExhaustion:     int32(r.DaysUntilExhaustion),
+		SpendHistory:            history,
+	}
 }
 
 // ──────────────────────────────────────────

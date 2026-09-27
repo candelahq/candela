@@ -34,7 +34,16 @@ export default function TracesPage() {
     currentPage,
   } = useTraces();
 
-  const [filtersOpen, setFiltersOpen] = useState(false);
+  const hasExpandedFilters = Boolean(
+    filters.model ||
+    filters.provider ||
+    filters.status ||
+    filters.jobId ||
+    filters.environment ||
+    filters.traceGroup
+  );
+
+  const [filtersOpen, setFiltersOpen] = useState(hasExpandedFilters);
 
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { fetchInitial(); }, []);

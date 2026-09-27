@@ -9,6 +9,7 @@ import { DEFAULT_FILTERS } from "@/types/traces";
 import { useScope } from "@/components/UserScopeProvider";
 import { create } from "@bufbuild/protobuf";
 import { TimestampSchema } from "@bufbuild/protobuf/wkt";
+import { filtersToQueryString, searchParamsToFilters } from "@/lib/traceFiltersUrl";
 
 function makeTimeRange(range: string) {
   const now = new Date();
@@ -113,6 +114,33 @@ function mapTrace(t: {
   };
 }
 
+function getInitialFilters(opts?: UseTracesOptions): TraceFilters {
+  let urlFilters: Partial<TraceFilters> = {};
+  if (opts?.syncUrl !== false && typeof window !== "undefined") {
+    urlFilters = searchParamsToFilters(window.location.search);
+  }
+  return {
+    ...DEFAULT_FILTERS,
+    ...urlFilters,
+    ...(opts?.initialFilters ?? {}),
+  };
+}
+
+function syncFiltersToUrl(filters: TraceFilters) {
+  if (typeof window === "undefined") return;
+  const qs = filtersToQueryString(filters);
+  const newUrl = qs ? `${window.location.pathname}?${qs}` : window.location.pathname;
+  const currentUrl = `${window.location.pathname}${window.location.search}`;
+  if (currentUrl !== newUrl) {
+    window.history.replaceState(window.history.state, "", newUrl);
+  }
+}
+
+export interface UseTracesOptions {
+  syncUrl?: boolean;
+  initialFilters?: Partial<TraceFilters>;
+}
+
 /**
  * Hook for fetching and filtering traces.
  * Encapsulates the ListTraces RPC, debounced search, and filter state.
@@ -122,18 +150,19 @@ function mapTrace(t: {
  * as a hint header so the backend knows this is a personal-scope request.
  * Re-fetches automatically when the scope mode changes.
  */
-export function useTraces() {
+export function useTraces(options?: UseTracesOptions) {
   const { isPersonalScope, mode } = useScope();
+  const syncUrl = options?.syncUrl ?? true;
 
-  const [state, dispatch] = useReducer(reducer, {
+  const [state, dispatch] = useReducer(reducer, null, () => ({
     traces: [],
     loading: true,
     error: null,
-    filters: DEFAULT_FILTERS,
+    filters: getInitialFilters(options),
     nextPageToken: "",
     currentPageToken: "",
     pageTokenHistory: [],
-  });
+  }));
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Track the previous scope mode so we can detect changes
   const prevModeRef = useRef(mode);
@@ -202,18 +231,37 @@ export function useTraces() {
       if (debounceRef.current) clearTimeout(debounceRef.current);
 
       if (isSearch) {
-        debounceRef.current = setTimeout(() => fetchTraces(next, true), 300);
+        debounceRef.current = setTimeout(() => {
+          if (syncUrl) syncFiltersToUrl(next);
+          fetchTraces(next, true);
+        }, 300);
       } else {
+        if (syncUrl) syncFiltersToUrl(next);
         fetchTraces(next, true);
       }
     },
-    [state.filters, fetchTraces]
+    [state.filters, fetchTraces, syncUrl]
   );
 
   const clearFilters = useCallback(() => {
     dispatch({ type: "clear_filters" });
+    if (syncUrl) syncFiltersToUrl(DEFAULT_FILTERS);
     fetchTraces(DEFAULT_FILTERS, true);
-  }, [fetchTraces]);
+  }, [fetchTraces, syncUrl]);
+
+  // Synchronize state on popstate (browser back/forward)
+  useEffect(() => {
+    if (!syncUrl || typeof window === "undefined") return;
+
+    const handlePopState = () => {
+      const fromUrl = searchParamsToFilters(window.location.search);
+      dispatch({ type: "set_filters", filters: fromUrl });
+      fetchTraces(fromUrl, true);
+    };
+
+    window.addEventListener("popstate", handlePopState);
+    return () => window.removeEventListener("popstate", handlePopState);
+  }, [syncUrl, fetchTraces]);
 
   const hasActiveFilters = !!(
     state.filters.search ||

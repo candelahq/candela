@@ -1576,6 +1576,9 @@ type GetMyBudgetResponse struct {
 	// absorbed by the budget or a grant (all_tokens_used counter).
 	// For the accurate input/output split, call DashboardService.GetMyUsage.
 	TokensUsedToday int64 `protobuf:"varint,10,opt,name=tokens_used_today,json=tokensUsedToday,proto3" json:"tokens_used_today,omitempty"`
+	// ── Forecast (burn rate & exhaustion) ──────────────────────────────────────
+	// Calculated from today's burn rate and 7-day rolling spend history (#794).
+	Forecast *BudgetForecast `protobuf:"bytes,11,opt,name=forecast,proto3" json:"forecast,omitempty"`
 	// ── Period metadata ────────────────────────────────────────────────────────
 	// UTC date key for the current budget period, e.g. "2026-05-09".
 	PeriodKey string `protobuf:"bytes,20,opt,name=period_key,json=periodKey,proto3" json:"period_key,omitempty"`
@@ -1658,6 +1661,13 @@ func (x *GetMyBudgetResponse) GetTokensUsedToday() int64 {
 	return 0
 }
 
+func (x *GetMyBudgetResponse) GetForecast() *BudgetForecast {
+	if x != nil {
+		return x.Forecast
+	}
+	return nil
+}
+
 func (x *GetMyBudgetResponse) GetPeriodKey() string {
 	if x != nil {
 		return x.PeriodKey
@@ -1670,6 +1680,160 @@ func (x *GetMyBudgetResponse) GetPeriodResetsAt() string {
 		return x.PeriodResetsAt
 	}
 	return ""
+}
+
+// DailySpend represents one day's total spend for a user.
+type DailySpend struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Date          string                 `protobuf:"bytes,1,opt,name=date,proto3" json:"date,omitempty"` // "YYYY-MM-DD"
+	SpendUsd      float64                `protobuf:"fixed64,2,opt,name=spend_usd,json=spendUsd,proto3" json:"spend_usd,omitempty"`
+	TokenCount    int64                  `protobuf:"varint,3,opt,name=token_count,json=tokenCount,proto3" json:"token_count,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DailySpend) Reset() {
+	*x = DailySpend{}
+	mi := &file_candela_v1_user_service_proto_msgTypes[32]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DailySpend) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DailySpend) ProtoMessage() {}
+
+func (x *DailySpend) ProtoReflect() protoreflect.Message {
+	mi := &file_candela_v1_user_service_proto_msgTypes[32]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DailySpend.ProtoReflect.Descriptor instead.
+func (*DailySpend) Descriptor() ([]byte, []int) {
+	return file_candela_v1_user_service_proto_rawDescGZIP(), []int{32}
+}
+
+func (x *DailySpend) GetDate() string {
+	if x != nil {
+		return x.Date
+	}
+	return ""
+}
+
+func (x *DailySpend) GetSpendUsd() float64 {
+	if x != nil {
+		return x.SpendUsd
+	}
+	return 0
+}
+
+func (x *DailySpend) GetTokenCount() int64 {
+	if x != nil {
+		return x.TokenCount
+	}
+	return 0
+}
+
+// BudgetForecast contains intraday burn rate projections and multi-day trend analysis.
+type BudgetForecast struct {
+	state                   protoimpl.MessageState `protogen:"open.v1"`
+	BurnRateUsdPerHour      float64                `protobuf:"fixed64,1,opt,name=burn_rate_usd_per_hour,json=burnRateUsdPerHour,proto3" json:"burn_rate_usd_per_hour,omitempty"`
+	ProjectedEodSpendUsd    float64                `protobuf:"fixed64,2,opt,name=projected_eod_spend_usd,json=projectedEodSpendUsd,proto3" json:"projected_eod_spend_usd,omitempty"`
+	WillExceedBudget        bool                   `protobuf:"varint,3,opt,name=will_exceed_budget,json=willExceedBudget,proto3" json:"will_exceed_budget,omitempty"`
+	AvgDailySpendUsd        float64                `protobuf:"fixed64,4,opt,name=avg_daily_spend_usd,json=avgDailySpendUsd,proto3" json:"avg_daily_spend_usd,omitempty"`
+	EstimatedExhaustionDate string                 `protobuf:"bytes,5,opt,name=estimated_exhaustion_date,json=estimatedExhaustionDate,proto3" json:"estimated_exhaustion_date,omitempty"` // "YYYY-MM-DD" or empty
+	DaysUntilExhaustion     int32                  `protobuf:"varint,6,opt,name=days_until_exhaustion,json=daysUntilExhaustion,proto3" json:"days_until_exhaustion,omitempty"`            // -1 if N/A, 0 if already exhausted
+	SpendHistory            []*DailySpend          `protobuf:"bytes,7,rep,name=spend_history,json=spendHistory,proto3" json:"spend_history,omitempty"`
+	unknownFields           protoimpl.UnknownFields
+	sizeCache               protoimpl.SizeCache
+}
+
+func (x *BudgetForecast) Reset() {
+	*x = BudgetForecast{}
+	mi := &file_candela_v1_user_service_proto_msgTypes[33]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *BudgetForecast) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*BudgetForecast) ProtoMessage() {}
+
+func (x *BudgetForecast) ProtoReflect() protoreflect.Message {
+	mi := &file_candela_v1_user_service_proto_msgTypes[33]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use BudgetForecast.ProtoReflect.Descriptor instead.
+func (*BudgetForecast) Descriptor() ([]byte, []int) {
+	return file_candela_v1_user_service_proto_rawDescGZIP(), []int{33}
+}
+
+func (x *BudgetForecast) GetBurnRateUsdPerHour() float64 {
+	if x != nil {
+		return x.BurnRateUsdPerHour
+	}
+	return 0
+}
+
+func (x *BudgetForecast) GetProjectedEodSpendUsd() float64 {
+	if x != nil {
+		return x.ProjectedEodSpendUsd
+	}
+	return 0
+}
+
+func (x *BudgetForecast) GetWillExceedBudget() bool {
+	if x != nil {
+		return x.WillExceedBudget
+	}
+	return false
+}
+
+func (x *BudgetForecast) GetAvgDailySpendUsd() float64 {
+	if x != nil {
+		return x.AvgDailySpendUsd
+	}
+	return 0
+}
+
+func (x *BudgetForecast) GetEstimatedExhaustionDate() string {
+	if x != nil {
+		return x.EstimatedExhaustionDate
+	}
+	return ""
+}
+
+func (x *BudgetForecast) GetDaysUntilExhaustion() int32 {
+	if x != nil {
+		return x.DaysUntilExhaustion
+	}
+	return 0
+}
+
+func (x *BudgetForecast) GetSpendHistory() []*DailySpend {
+	if x != nil {
+		return x.SpendHistory
+	}
+	return nil
 }
 
 var File_candela_v1_user_service_proto protoreflect.FileDescriptor
@@ -1771,7 +1935,7 @@ const file_candela_v1_user_service_proto_rawDesc = "" +
 	"\x06budget\x18\x02 \x01(\v2\x19.candela.types.UserBudgetR\x06budget\x12?\n" +
 	"\ractive_grants\x18\x03 \x03(\v2\x1a.candela.types.BudgetGrantR\factiveGrants\x12.\n" +
 	"\x13total_remaining_usd\x18\x04 \x01(\x01R\x11totalRemainingUsd\"\x14\n" +
-	"\x12GetMyBudgetRequest\"\x92\x03\n" +
+	"\x12GetMyBudgetRequest\"\xca\x03\n" +
 	"\x13GetMyBudgetResponse\x121\n" +
 	"\x06budget\x18\x01 \x01(\v2\x19.candela.types.UserBudgetR\x06budget\x12?\n" +
 	"\ractive_grants\x18\x02 \x03(\v2\x1a.candela.types.BudgetGrantR\factiveGrants\x12.\n" +
@@ -1779,10 +1943,25 @@ const file_candela_v1_user_service_proto_rawDesc = "" +
 	"\x14budget_remaining_usd\x18\x04 \x01(\x01R\x12budgetRemainingUsd\x120\n" +
 	"\x14grants_remaining_usd\x18\x05 \x01(\x01R\x12grantsRemainingUsd\x12*\n" +
 	"\x11tokens_used_today\x18\n" +
-	" \x01(\x03R\x0ftokensUsedToday\x12\x1d\n" +
+	" \x01(\x03R\x0ftokensUsedToday\x126\n" +
+	"\bforecast\x18\v \x01(\v2\x1a.candela.v1.BudgetForecastR\bforecast\x12\x1d\n" +
 	"\n" +
 	"period_key\x18\x14 \x01(\tR\tperiodKey\x12(\n" +
-	"\x10period_resets_at\x18\x15 \x01(\tR\x0eperiodResetsAt2\xfe\t\n" +
+	"\x10period_resets_at\x18\x15 \x01(\tR\x0eperiodResetsAt\"^\n" +
+	"\n" +
+	"DailySpend\x12\x12\n" +
+	"\x04date\x18\x01 \x01(\tR\x04date\x12\x1b\n" +
+	"\tspend_usd\x18\x02 \x01(\x01R\bspendUsd\x12\x1f\n" +
+	"\vtoken_count\x18\x03 \x01(\x03R\n" +
+	"tokenCount\"\x85\x03\n" +
+	"\x0eBudgetForecast\x122\n" +
+	"\x16burn_rate_usd_per_hour\x18\x01 \x01(\x01R\x12burnRateUsdPerHour\x125\n" +
+	"\x17projected_eod_spend_usd\x18\x02 \x01(\x01R\x14projectedEodSpendUsd\x12,\n" +
+	"\x12will_exceed_budget\x18\x03 \x01(\bR\x10willExceedBudget\x12-\n" +
+	"\x13avg_daily_spend_usd\x18\x04 \x01(\x01R\x10avgDailySpendUsd\x12:\n" +
+	"\x19estimated_exhaustion_date\x18\x05 \x01(\tR\x17estimatedExhaustionDate\x122\n" +
+	"\x15days_until_exhaustion\x18\x06 \x01(\x05R\x13daysUntilExhaustion\x12;\n" +
+	"\rspend_history\x18\a \x03(\v2\x16.candela.v1.DailySpendR\fspendHistory2\xfe\t\n" +
 	"\vUserService\x12K\n" +
 	"\n" +
 	"CreateUser\x12\x1d.candela.v1.CreateUserRequest\x1a\x1e.candela.v1.CreateUserResponse\x12H\n" +
@@ -1821,7 +2000,7 @@ func file_candela_v1_user_service_proto_rawDescGZIP() []byte {
 	return file_candela_v1_user_service_proto_rawDescData
 }
 
-var file_candela_v1_user_service_proto_msgTypes = make([]protoimpl.MessageInfo, 32)
+var file_candela_v1_user_service_proto_msgTypes = make([]protoimpl.MessageInfo, 34)
 var file_candela_v1_user_service_proto_goTypes = []any{
 	(*CreateUserRequest)(nil),        // 0: candela.v1.CreateUserRequest
 	(*CreateUserResponse)(nil),       // 1: candela.v1.CreateUserResponse
@@ -1855,84 +2034,88 @@ var file_candela_v1_user_service_proto_goTypes = []any{
 	(*GetCurrentUserResponse)(nil),   // 29: candela.v1.GetCurrentUserResponse
 	(*GetMyBudgetRequest)(nil),       // 30: candela.v1.GetMyBudgetRequest
 	(*GetMyBudgetResponse)(nil),      // 31: candela.v1.GetMyBudgetResponse
-	(types.UserRole)(0),              // 32: candela.types.UserRole
-	(*types.User)(nil),               // 33: candela.types.User
-	(*types.UserBudget)(nil),         // 34: candela.types.UserBudget
-	(*types.PaginationRequest)(nil),  // 35: candela.types.PaginationRequest
-	(types.UserStatus)(0),            // 36: candela.types.UserStatus
-	(*types.PaginationResponse)(nil), // 37: candela.types.PaginationResponse
-	(*types.BudgetGrant)(nil),        // 38: candela.types.BudgetGrant
-	(*fieldmaskpb.FieldMask)(nil),    // 39: google.protobuf.FieldMask
-	(types.BudgetPeriod)(0),          // 40: candela.types.BudgetPeriod
-	(*timestamppb.Timestamp)(nil),    // 41: google.protobuf.Timestamp
-	(*types.AuditEntry)(nil),         // 42: candela.types.AuditEntry
+	(*DailySpend)(nil),               // 32: candela.v1.DailySpend
+	(*BudgetForecast)(nil),           // 33: candela.v1.BudgetForecast
+	(types.UserRole)(0),              // 34: candela.types.UserRole
+	(*types.User)(nil),               // 35: candela.types.User
+	(*types.UserBudget)(nil),         // 36: candela.types.UserBudget
+	(*types.PaginationRequest)(nil),  // 37: candela.types.PaginationRequest
+	(types.UserStatus)(0),            // 38: candela.types.UserStatus
+	(*types.PaginationResponse)(nil), // 39: candela.types.PaginationResponse
+	(*types.BudgetGrant)(nil),        // 40: candela.types.BudgetGrant
+	(*fieldmaskpb.FieldMask)(nil),    // 41: google.protobuf.FieldMask
+	(types.BudgetPeriod)(0),          // 42: candela.types.BudgetPeriod
+	(*timestamppb.Timestamp)(nil),    // 43: google.protobuf.Timestamp
+	(*types.AuditEntry)(nil),         // 44: candela.types.AuditEntry
 }
 var file_candela_v1_user_service_proto_depIdxs = []int32{
-	32, // 0: candela.v1.CreateUserRequest.role:type_name -> candela.types.UserRole
-	33, // 1: candela.v1.CreateUserResponse.user:type_name -> candela.types.User
-	34, // 2: candela.v1.CreateUserResponse.budget:type_name -> candela.types.UserBudget
-	35, // 3: candela.v1.ListUsersRequest.pagination:type_name -> candela.types.PaginationRequest
-	36, // 4: candela.v1.ListUsersRequest.status_filter:type_name -> candela.types.UserStatus
-	33, // 5: candela.v1.ListUsersResponse.users:type_name -> candela.types.User
-	37, // 6: candela.v1.ListUsersResponse.pagination:type_name -> candela.types.PaginationResponse
-	33, // 7: candela.v1.GetUserResponse.user:type_name -> candela.types.User
-	34, // 8: candela.v1.GetUserResponse.budget:type_name -> candela.types.UserBudget
-	38, // 9: candela.v1.GetUserResponse.active_grants:type_name -> candela.types.BudgetGrant
-	32, // 10: candela.v1.UpdateUserRequest.role:type_name -> candela.types.UserRole
-	39, // 11: candela.v1.UpdateUserRequest.update_mask:type_name -> google.protobuf.FieldMask
-	33, // 12: candela.v1.UpdateUserResponse.user:type_name -> candela.types.User
-	33, // 13: candela.v1.ReactivateUserResponse.user:type_name -> candela.types.User
-	40, // 14: candela.v1.SetBudgetRequest.period_type:type_name -> candela.types.BudgetPeriod
-	34, // 15: candela.v1.SetBudgetResponse.budget:type_name -> candela.types.UserBudget
-	34, // 16: candela.v1.GetBudgetResponse.budget:type_name -> candela.types.UserBudget
-	34, // 17: candela.v1.ResetSpendResponse.budget:type_name -> candela.types.UserBudget
-	41, // 18: candela.v1.CreateGrantRequest.starts_at:type_name -> google.protobuf.Timestamp
-	41, // 19: candela.v1.CreateGrantRequest.expires_at:type_name -> google.protobuf.Timestamp
-	38, // 20: candela.v1.CreateGrantResponse.grant:type_name -> candela.types.BudgetGrant
-	38, // 21: candela.v1.ListGrantsResponse.grants:type_name -> candela.types.BudgetGrant
-	42, // 22: candela.v1.ListAuditLogResponse.entries:type_name -> candela.types.AuditEntry
-	33, // 23: candela.v1.GetCurrentUserResponse.user:type_name -> candela.types.User
-	34, // 24: candela.v1.GetCurrentUserResponse.budget:type_name -> candela.types.UserBudget
-	38, // 25: candela.v1.GetCurrentUserResponse.active_grants:type_name -> candela.types.BudgetGrant
-	34, // 26: candela.v1.GetMyBudgetResponse.budget:type_name -> candela.types.UserBudget
-	38, // 27: candela.v1.GetMyBudgetResponse.active_grants:type_name -> candela.types.BudgetGrant
-	0,  // 28: candela.v1.UserService.CreateUser:input_type -> candela.v1.CreateUserRequest
-	2,  // 29: candela.v1.UserService.ListUsers:input_type -> candela.v1.ListUsersRequest
-	4,  // 30: candela.v1.UserService.GetUser:input_type -> candela.v1.GetUserRequest
-	6,  // 31: candela.v1.UserService.UpdateUser:input_type -> candela.v1.UpdateUserRequest
-	8,  // 32: candela.v1.UserService.DeactivateUser:input_type -> candela.v1.DeactivateUserRequest
-	10, // 33: candela.v1.UserService.ReactivateUser:input_type -> candela.v1.ReactivateUserRequest
-	12, // 34: candela.v1.UserService.DeleteUser:input_type -> candela.v1.DeleteUserRequest
-	14, // 35: candela.v1.UserService.SetBudget:input_type -> candela.v1.SetBudgetRequest
-	16, // 36: candela.v1.UserService.GetBudget:input_type -> candela.v1.GetBudgetRequest
-	18, // 37: candela.v1.UserService.ResetSpend:input_type -> candela.v1.ResetSpendRequest
-	20, // 38: candela.v1.UserService.CreateGrant:input_type -> candela.v1.CreateGrantRequest
-	22, // 39: candela.v1.UserService.ListGrants:input_type -> candela.v1.ListGrantsRequest
-	24, // 40: candela.v1.UserService.RevokeGrant:input_type -> candela.v1.RevokeGrantRequest
-	26, // 41: candela.v1.UserService.ListAuditLog:input_type -> candela.v1.ListAuditLogRequest
-	28, // 42: candela.v1.UserService.GetCurrentUser:input_type -> candela.v1.GetCurrentUserRequest
-	30, // 43: candela.v1.UserService.GetMyBudget:input_type -> candela.v1.GetMyBudgetRequest
-	1,  // 44: candela.v1.UserService.CreateUser:output_type -> candela.v1.CreateUserResponse
-	3,  // 45: candela.v1.UserService.ListUsers:output_type -> candela.v1.ListUsersResponse
-	5,  // 46: candela.v1.UserService.GetUser:output_type -> candela.v1.GetUserResponse
-	7,  // 47: candela.v1.UserService.UpdateUser:output_type -> candela.v1.UpdateUserResponse
-	9,  // 48: candela.v1.UserService.DeactivateUser:output_type -> candela.v1.DeactivateUserResponse
-	11, // 49: candela.v1.UserService.ReactivateUser:output_type -> candela.v1.ReactivateUserResponse
-	13, // 50: candela.v1.UserService.DeleteUser:output_type -> candela.v1.DeleteUserResponse
-	15, // 51: candela.v1.UserService.SetBudget:output_type -> candela.v1.SetBudgetResponse
-	17, // 52: candela.v1.UserService.GetBudget:output_type -> candela.v1.GetBudgetResponse
-	19, // 53: candela.v1.UserService.ResetSpend:output_type -> candela.v1.ResetSpendResponse
-	21, // 54: candela.v1.UserService.CreateGrant:output_type -> candela.v1.CreateGrantResponse
-	23, // 55: candela.v1.UserService.ListGrants:output_type -> candela.v1.ListGrantsResponse
-	25, // 56: candela.v1.UserService.RevokeGrant:output_type -> candela.v1.RevokeGrantResponse
-	27, // 57: candela.v1.UserService.ListAuditLog:output_type -> candela.v1.ListAuditLogResponse
-	29, // 58: candela.v1.UserService.GetCurrentUser:output_type -> candela.v1.GetCurrentUserResponse
-	31, // 59: candela.v1.UserService.GetMyBudget:output_type -> candela.v1.GetMyBudgetResponse
-	44, // [44:60] is the sub-list for method output_type
-	28, // [28:44] is the sub-list for method input_type
-	28, // [28:28] is the sub-list for extension type_name
-	28, // [28:28] is the sub-list for extension extendee
-	0,  // [0:28] is the sub-list for field type_name
+	34, // 0: candela.v1.CreateUserRequest.role:type_name -> candela.types.UserRole
+	35, // 1: candela.v1.CreateUserResponse.user:type_name -> candela.types.User
+	36, // 2: candela.v1.CreateUserResponse.budget:type_name -> candela.types.UserBudget
+	37, // 3: candela.v1.ListUsersRequest.pagination:type_name -> candela.types.PaginationRequest
+	38, // 4: candela.v1.ListUsersRequest.status_filter:type_name -> candela.types.UserStatus
+	35, // 5: candela.v1.ListUsersResponse.users:type_name -> candela.types.User
+	39, // 6: candela.v1.ListUsersResponse.pagination:type_name -> candela.types.PaginationResponse
+	35, // 7: candela.v1.GetUserResponse.user:type_name -> candela.types.User
+	36, // 8: candela.v1.GetUserResponse.budget:type_name -> candela.types.UserBudget
+	40, // 9: candela.v1.GetUserResponse.active_grants:type_name -> candela.types.BudgetGrant
+	34, // 10: candela.v1.UpdateUserRequest.role:type_name -> candela.types.UserRole
+	41, // 11: candela.v1.UpdateUserRequest.update_mask:type_name -> google.protobuf.FieldMask
+	35, // 12: candela.v1.UpdateUserResponse.user:type_name -> candela.types.User
+	35, // 13: candela.v1.ReactivateUserResponse.user:type_name -> candela.types.User
+	42, // 14: candela.v1.SetBudgetRequest.period_type:type_name -> candela.types.BudgetPeriod
+	36, // 15: candela.v1.SetBudgetResponse.budget:type_name -> candela.types.UserBudget
+	36, // 16: candela.v1.GetBudgetResponse.budget:type_name -> candela.types.UserBudget
+	36, // 17: candela.v1.ResetSpendResponse.budget:type_name -> candela.types.UserBudget
+	43, // 18: candela.v1.CreateGrantRequest.starts_at:type_name -> google.protobuf.Timestamp
+	43, // 19: candela.v1.CreateGrantRequest.expires_at:type_name -> google.protobuf.Timestamp
+	40, // 20: candela.v1.CreateGrantResponse.grant:type_name -> candela.types.BudgetGrant
+	40, // 21: candela.v1.ListGrantsResponse.grants:type_name -> candela.types.BudgetGrant
+	44, // 22: candela.v1.ListAuditLogResponse.entries:type_name -> candela.types.AuditEntry
+	35, // 23: candela.v1.GetCurrentUserResponse.user:type_name -> candela.types.User
+	36, // 24: candela.v1.GetCurrentUserResponse.budget:type_name -> candela.types.UserBudget
+	40, // 25: candela.v1.GetCurrentUserResponse.active_grants:type_name -> candela.types.BudgetGrant
+	36, // 26: candela.v1.GetMyBudgetResponse.budget:type_name -> candela.types.UserBudget
+	40, // 27: candela.v1.GetMyBudgetResponse.active_grants:type_name -> candela.types.BudgetGrant
+	33, // 28: candela.v1.GetMyBudgetResponse.forecast:type_name -> candela.v1.BudgetForecast
+	32, // 29: candela.v1.BudgetForecast.spend_history:type_name -> candela.v1.DailySpend
+	0,  // 30: candela.v1.UserService.CreateUser:input_type -> candela.v1.CreateUserRequest
+	2,  // 31: candela.v1.UserService.ListUsers:input_type -> candela.v1.ListUsersRequest
+	4,  // 32: candela.v1.UserService.GetUser:input_type -> candela.v1.GetUserRequest
+	6,  // 33: candela.v1.UserService.UpdateUser:input_type -> candela.v1.UpdateUserRequest
+	8,  // 34: candela.v1.UserService.DeactivateUser:input_type -> candela.v1.DeactivateUserRequest
+	10, // 35: candela.v1.UserService.ReactivateUser:input_type -> candela.v1.ReactivateUserRequest
+	12, // 36: candela.v1.UserService.DeleteUser:input_type -> candela.v1.DeleteUserRequest
+	14, // 37: candela.v1.UserService.SetBudget:input_type -> candela.v1.SetBudgetRequest
+	16, // 38: candela.v1.UserService.GetBudget:input_type -> candela.v1.GetBudgetRequest
+	18, // 39: candela.v1.UserService.ResetSpend:input_type -> candela.v1.ResetSpendRequest
+	20, // 40: candela.v1.UserService.CreateGrant:input_type -> candela.v1.CreateGrantRequest
+	22, // 41: candela.v1.UserService.ListGrants:input_type -> candela.v1.ListGrantsRequest
+	24, // 42: candela.v1.UserService.RevokeGrant:input_type -> candela.v1.RevokeGrantRequest
+	26, // 43: candela.v1.UserService.ListAuditLog:input_type -> candela.v1.ListAuditLogRequest
+	28, // 44: candela.v1.UserService.GetCurrentUser:input_type -> candela.v1.GetCurrentUserRequest
+	30, // 45: candela.v1.UserService.GetMyBudget:input_type -> candela.v1.GetMyBudgetRequest
+	1,  // 46: candela.v1.UserService.CreateUser:output_type -> candela.v1.CreateUserResponse
+	3,  // 47: candela.v1.UserService.ListUsers:output_type -> candela.v1.ListUsersResponse
+	5,  // 48: candela.v1.UserService.GetUser:output_type -> candela.v1.GetUserResponse
+	7,  // 49: candela.v1.UserService.UpdateUser:output_type -> candela.v1.UpdateUserResponse
+	9,  // 50: candela.v1.UserService.DeactivateUser:output_type -> candela.v1.DeactivateUserResponse
+	11, // 51: candela.v1.UserService.ReactivateUser:output_type -> candela.v1.ReactivateUserResponse
+	13, // 52: candela.v1.UserService.DeleteUser:output_type -> candela.v1.DeleteUserResponse
+	15, // 53: candela.v1.UserService.SetBudget:output_type -> candela.v1.SetBudgetResponse
+	17, // 54: candela.v1.UserService.GetBudget:output_type -> candela.v1.GetBudgetResponse
+	19, // 55: candela.v1.UserService.ResetSpend:output_type -> candela.v1.ResetSpendResponse
+	21, // 56: candela.v1.UserService.CreateGrant:output_type -> candela.v1.CreateGrantResponse
+	23, // 57: candela.v1.UserService.ListGrants:output_type -> candela.v1.ListGrantsResponse
+	25, // 58: candela.v1.UserService.RevokeGrant:output_type -> candela.v1.RevokeGrantResponse
+	27, // 59: candela.v1.UserService.ListAuditLog:output_type -> candela.v1.ListAuditLogResponse
+	29, // 60: candela.v1.UserService.GetCurrentUser:output_type -> candela.v1.GetCurrentUserResponse
+	31, // 61: candela.v1.UserService.GetMyBudget:output_type -> candela.v1.GetMyBudgetResponse
+	46, // [46:62] is the sub-list for method output_type
+	30, // [30:46] is the sub-list for method input_type
+	30, // [30:30] is the sub-list for extension type_name
+	30, // [30:30] is the sub-list for extension extendee
+	0,  // [0:30] is the sub-list for field type_name
 }
 
 func init() { file_candela_v1_user_service_proto_init() }
@@ -1946,7 +2129,7 @@ func file_candela_v1_user_service_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_candela_v1_user_service_proto_rawDesc), len(file_candela_v1_user_service_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   32,
+			NumMessages:   34,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

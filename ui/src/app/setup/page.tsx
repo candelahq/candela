@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useCallback, useRef, useSyncExternalStore } from "react";
+import { openOnboardingWizard } from "@/components/onboarding/OnboardingWizard";
 
 // ──────────────────────────────────────────
 // Config snippets
@@ -137,6 +138,14 @@ export default function SetupPage() {
     <>
       <header className="main-header">
         <h1>Setup</h1>
+        <button
+          type="button"
+          className="btn btn-sm"
+          onClick={openOnboardingWizard}
+          style={{ display: "flex", alignItems: "center", gap: 6 }}
+        >
+          <span>✨</span> Launch Setup Wizard
+        </button>
       </header>
 
       <div className="main-body">

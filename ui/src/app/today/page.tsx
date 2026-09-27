@@ -13,7 +13,8 @@ import "./today.css";
 
 export default function TodayPage() {
   const { data, loading, error, refresh } = useTodayBudget();
-  const { forecast } = useForecast();
+  const { forecast: restForecast } = useForecast();
+  const forecast = data?.forecast ?? restForecast;
 
   const totalTokens = data
     ? (data.totalInputTokens + data.totalOutputTokens)

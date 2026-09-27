@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { usePathname } from "next/navigation";
 import { Sidebar } from "@/components/sidebar";
 import { BudgetAlert } from "@/components/BudgetAlert";
+import { OnboardingWizard } from "@/components/onboarding/OnboardingWizard";
 
 /** Renders the app layout with sidebar for authenticated pages,
  *  or just the children for the login page. */
@@ -39,6 +40,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   return (
     <div className="app-layout">
       <BudgetAlert />
+      <OnboardingWizard />
       <div
         className={`sidebar-backdrop ${sidebarOpen ? "open" : ""}`}
         onClick={() => {

@@ -20,18 +20,21 @@ import (
 // ──────────────────────────────────────────
 
 type mockUserStore struct {
-	users   map[string]*storage.UserRecord
-	budgets map[string]*storage.BudgetRecord // key: userID
-	grants  map[string][]*storage.GrantRecord
-	audit   map[string][]*storage.AuditRecord
+	users           map[string]*storage.UserRecord
+	budgets         map[string]*storage.BudgetRecord // key: userID
+	grants          map[string][]*storage.GrantRecord
+	audit           map[string][]*storage.AuditRecord
+	spendHistory    map[string][]storage.DailySpendRecord
+	spendHistoryErr error
 }
 
 func newMockUserStore() *mockUserStore {
 	return &mockUserStore{
-		users:   make(map[string]*storage.UserRecord),
-		budgets: make(map[string]*storage.BudgetRecord),
-		grants:  make(map[string][]*storage.GrantRecord),
-		audit:   make(map[string][]*storage.AuditRecord),
+		users:        make(map[string]*storage.UserRecord),
+		budgets:      make(map[string]*storage.BudgetRecord),
+		grants:       make(map[string][]*storage.GrantRecord),
+		audit:        make(map[string][]*storage.AuditRecord),
+		spendHistory: make(map[string][]storage.DailySpendRecord),
 	}
 }
 
@@ -264,8 +267,11 @@ func (m *mockUserStore) GetModelLimits(context.Context, string) ([]*storage.Mode
 	return nil, nil
 }
 func (m *mockUserStore) DeleteModelLimit(context.Context, string, string) error { return nil }
-func (m *mockUserStore) GetSpendHistory(context.Context, string, int) ([]storage.DailySpendRecord, error) {
-	return nil, nil
+func (m *mockUserStore) GetSpendHistory(_ context.Context, userID string, _ int) ([]storage.DailySpendRecord, error) {
+	if m.spendHistoryErr != nil {
+		return nil, m.spendHistoryErr
+	}
+	return m.spendHistory[userID], nil
 }
 
 // ──────────────────────────────────────────
@@ -952,6 +958,146 @@ func TestUserHandler_GetMyBudget_Unauthenticated(t *testing.T) {
 		connect.NewRequest(&v1.GetMyBudgetRequest{}))
 	if err == nil {
 		t.Fatal("expected error for unauthenticated request")
+	}
+}
+
+func TestUserHandler_GetMyBudget_WithForecast(t *testing.T) {
+	store := newMockUserStore()
+	handler := NewUserHandler(store, 0)
+
+	user := &storage.UserRecord{
+		ID:        "user_forecast_1",
+		Email:     "forecast_dev@example.com",
+		Role:      "developer",
+		Status:    "active",
+		CreatedAt: time.Now().UTC(),
+	}
+	_ = store.CreateUser(context.Background(), user)
+
+	_ = store.SetBudget(context.Background(), &storage.BudgetRecord{
+		UserID:     "user_forecast_1",
+		LimitUSD:   50.0,
+		SpentUSD:   10.0,
+		PeriodType: "daily",
+		TokensUsed: 1000,
+	})
+
+	store.spendHistory["user_forecast_1"] = []storage.DailySpendRecord{
+		{Date: "2026-09-25", SpendUSD: 12.0, TokenCount: 1500},
+		{Date: "2026-09-26", SpendUSD: 18.0, TokenCount: 2200},
+		{Date: "2026-09-27", SpendUSD: 10.0, TokenCount: 1000},
+	}
+
+	ctx := auth.NewContext(context.Background(), &auth.User{
+		ID:    "user_forecast_1",
+		Email: "forecast_dev@example.com",
+	})
+
+	res, err := handler.GetMyBudget(ctx, connect.NewRequest(&v1.GetMyBudgetRequest{}))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if res.Msg.Budget == nil {
+		t.Fatal("expected Budget to be non-nil")
+	}
+	if res.Msg.BudgetRemainingUsd != 40.0 {
+		t.Errorf("expected budget remaining 40.0, got %v", res.Msg.BudgetRemainingUsd)
+	}
+
+	fc := res.Msg.Forecast
+	if fc == nil {
+		t.Fatal("expected Forecast to be populated")
+	}
+	if len(fc.SpendHistory) != 3 {
+		t.Fatalf("expected 3 history entries, got %d", len(fc.SpendHistory))
+	}
+	if fc.SpendHistory[0].Date != "2026-09-25" || fc.SpendHistory[0].SpendUsd != 12.0 {
+		t.Errorf("unexpected first history entry: %+v", fc.SpendHistory[0])
+	}
+	if fc.AvgDailySpendUsd <= 0 {
+		t.Errorf("expected positive avg daily spend, got %v", fc.AvgDailySpendUsd)
+	}
+	if fc.ProjectedEodSpendUsd <= 0 {
+		t.Errorf("expected positive projected EOD spend, got %v", fc.ProjectedEodSpendUsd)
+	}
+}
+
+func TestUserHandler_GetMyBudget_EmptySpendHistory(t *testing.T) {
+	store := newMockUserStore()
+	handler := NewUserHandler(store, 0)
+
+	user := &storage.UserRecord{
+		ID:        "user_forecast_2",
+		Email:     "forecast_dev2@example.com",
+		Role:      "developer",
+		Status:    "active",
+		CreatedAt: time.Now().UTC(),
+	}
+	_ = store.CreateUser(context.Background(), user)
+
+	_ = store.SetBudget(context.Background(), &storage.BudgetRecord{
+		UserID:     "user_forecast_2",
+		LimitUSD:   20.0,
+		SpentUSD:   5.0,
+		PeriodType: "daily",
+		TokensUsed: 500,
+	})
+
+	ctx := auth.NewContext(context.Background(), &auth.User{
+		ID:    "user_forecast_2",
+		Email: "forecast_dev2@example.com",
+	})
+
+	res, err := handler.GetMyBudget(ctx, connect.NewRequest(&v1.GetMyBudgetRequest{}))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	fc := res.Msg.Forecast
+	if fc == nil {
+		t.Fatal("expected Forecast to be non-nil even with empty spend history")
+	}
+	if len(fc.SpendHistory) != 0 {
+		t.Errorf("expected 0 spend history items, got %d", len(fc.SpendHistory))
+	}
+}
+
+func TestUserHandler_GetMyBudget_SpendHistoryError(t *testing.T) {
+	store := newMockUserStore()
+	handler := NewUserHandler(store, 0)
+
+	user := &storage.UserRecord{
+		ID:        "user_forecast_3",
+		Email:     "forecast_dev3@example.com",
+		Role:      "developer",
+		Status:    "active",
+		CreatedAt: time.Now().UTC(),
+	}
+	_ = store.CreateUser(context.Background(), user)
+
+	_ = store.SetBudget(context.Background(), &storage.BudgetRecord{
+		UserID:     "user_forecast_3",
+		LimitUSD:   25.0,
+		SpentUSD:   4.0,
+		PeriodType: "daily",
+		TokensUsed: 400,
+	})
+
+	store.spendHistoryErr = errors.New("firestore timeout fetching history")
+
+	ctx := auth.NewContext(context.Background(), &auth.User{
+		ID:    "user_forecast_3",
+		Email: "forecast_dev3@example.com",
+	})
+
+	res, err := handler.GetMyBudget(ctx, connect.NewRequest(&v1.GetMyBudgetRequest{}))
+	if err != nil {
+		t.Fatalf("GetMyBudget should not fail when spend history errors, got: %v", err)
+	}
+
+	if res.Msg.Forecast == nil {
+		t.Fatal("expected Forecast to still be populated on history error")
 	}
 }
 

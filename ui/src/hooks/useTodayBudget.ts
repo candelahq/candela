@@ -5,6 +5,7 @@ import { dashboardClient, userClient } from "@/lib/api";
 import { DEFAULT_PROJECT_ID } from "@/lib/constants";
 import { timestampDate, timestampFromDate } from "@bufbuild/protobuf/wkt";
 import { budgetPeriodToLabel } from "@/hooks/useUsage";
+import type { ForecastData } from "@/hooks/useForecast";
 
 export interface TodayModelUsage {
   model: string;
@@ -42,6 +43,7 @@ export interface TodayBudgetData {
     periodType: string;
   } | null;
   grants: TodayGrant[];
+  forecast: ForecastData | null;
   /** When this data was last fetched */
   fetchedAt: Date;
   /** ISO 8601 timestamp when the budget period resets (midnight UTC). */
@@ -142,6 +144,22 @@ export function useTodayBudget() {
           };
         });
 
+        // Map budget forecast from UserService.GetMyBudget (#794)
+        const forecastProto = budgetRes?.forecast;
+        const forecastData: ForecastData | null = forecastProto ? {
+          burnRatePerHour: forecastProto.burnRateUsdPerHour,
+          projectedEodSpend: forecastProto.projectedEodSpendUsd,
+          willExceedBudget: forecastProto.willExceedBudget,
+          avgDailySpend: forecastProto.avgDailySpendUsd,
+          estimatedExhaustionDate: forecastProto.estimatedExhaustionDate,
+          daysUntilExhaustion: forecastProto.daysUntilExhaustion,
+          spendHistory: (forecastProto.spendHistory ?? []).map((h) => ({
+            date: h.date,
+            spend_usd: h.spendUsd,
+            token_count: Number(h.tokenCount),
+          })),
+        } : null;
+
         dispatch({
           type: "success",
           data: {
@@ -169,6 +187,7 @@ export function useTodayBudget() {
               periodType: budgetPeriodToLabel(budgetProto.periodType),
             } : null,
             grants,
+            forecast: forecastData,
             fetchedAt: new Date(),
             periodResetsAt: budgetRes?.periodResetsAt ?? null,
           },

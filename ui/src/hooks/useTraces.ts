@@ -244,6 +244,10 @@ export function useTraces(options?: UseTracesOptions) {
   );
 
   const clearFilters = useCallback(() => {
+    if (debounceRef.current) {
+      clearTimeout(debounceRef.current);
+      debounceRef.current = null;
+    }
     dispatch({ type: "clear_filters" });
     if (syncUrl) syncFiltersToUrl(DEFAULT_FILTERS);
     fetchTraces(DEFAULT_FILTERS, true);
@@ -254,6 +258,10 @@ export function useTraces(options?: UseTracesOptions) {
     if (!syncUrl || typeof window === "undefined") return;
 
     const handlePopState = () => {
+      if (debounceRef.current) {
+        clearTimeout(debounceRef.current);
+        debounceRef.current = null;
+      }
       const fromUrl = searchParamsToFilters(window.location.search);
       dispatch({ type: "set_filters", filters: fromUrl });
       fetchTraces(fromUrl, true);

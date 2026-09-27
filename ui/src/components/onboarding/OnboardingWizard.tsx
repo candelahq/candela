@@ -72,7 +72,11 @@ export function OnboardingWizard({ forceOpen, onClose }: OnboardingWizardProps) 
   const [isOpen, setIsOpen] = useState(() => {
     if (forceOpen) return true;
     if (typeof window !== "undefined") {
-      return localStorage.getItem(ONBOARDING_COMPLETED_KEY) !== "true";
+      try {
+        return localStorage.getItem(ONBOARDING_COMPLETED_KEY) !== "true";
+      } catch {
+        return false;
+      }
     }
     return false;
   });
@@ -104,7 +108,11 @@ export function OnboardingWizard({ forceOpen, onClose }: OnboardingWizardProps) 
 
   const handleClose = useCallback((markCompleted = false) => {
     if (markCompleted && typeof window !== "undefined") {
-      localStorage.setItem(ONBOARDING_COMPLETED_KEY, "true");
+      try {
+        localStorage.setItem(ONBOARDING_COMPLETED_KEY, "true");
+      } catch (e) {
+        console.warn("Failed to persist onboarding state", e);
+      }
     }
     setIsOpen(false);
     onClose?.();
@@ -117,13 +125,26 @@ export function OnboardingWizard({ forceOpen, onClose }: OnboardingWizardProps) 
     const tab = CONFIG_TABS.find((t) => t.id === activeTab) ?? CONFIG_TABS[0];
     const text = tab.snippet(proxyUrl);
     try {
-      await navigator.clipboard.writeText(text);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(text);
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2000);
+      } else {
+        const textarea = document.createElement("textarea");
+        textarea.value = text;
+        textarea.style.position = "fixed";
+        textarea.style.opacity = "0";
+        document.body.appendChild(textarea);
+        textarea.select();
+        const success = document.execCommand("copy");
+        document.body.removeChild(textarea);
+        if (success) {
+          setCopied(true);
+          setTimeout(() => setCopied(false), 2000);
+        }
+      }
     } catch {
-      // Fallback
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
+      // Do not set copied on error
     }
   };
 
@@ -133,39 +154,44 @@ export function OnboardingWizard({ forceOpen, onClose }: OnboardingWizardProps) 
     setProbeLatency(null);
 
     const start = performance.now();
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 4000);
+
     try {
-      // Try /healthz endpoint or root ping
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 4000);
+      let res: Response;
+      try {
+        res = await fetch(`${proxyUrl}/healthz`, {
+          method: "GET",
+          signal: controller.signal,
+        });
+      } catch {
+        res = await fetch(`${proxyUrl}/`, {
+          method: "HEAD",
+          signal: controller.signal,
+        });
+      }
 
-      const res = await fetch(`${proxyUrl}/healthz`, {
-        method: "GET",
-        signal: controller.signal,
-      }).catch(async () => {
-        // Fallback probe to /
-        return fetch(`${proxyUrl}/`, { method: "HEAD", signal: controller.signal });
-      });
-
-      clearTimeout(timeoutId);
       const elapsed = Math.round(performance.now() - start);
 
-      if (res && (res.ok || res.status < 500)) {
+      if (res.ok) {
         setProbeStatus("connected");
         setProbeLatency(elapsed);
       } else {
-        setProbeStatus("connected"); // Still reachable even if custom status
+        setProbeStatus("error");
+        setProbeError(`Server returned HTTP ${res.status}`);
         setProbeLatency(elapsed);
       }
     } catch (err: unknown) {
       const elapsed = Math.round(performance.now() - start);
-      // If error is just network in sandbox or unit test, report status gracefully
+      setProbeStatus("error");
       if (err instanceof DOMException && err.name === "AbortError") {
-        setProbeStatus("error");
         setProbeError("Connection timed out after 4s");
       } else {
-        setProbeStatus("connected");
-        setProbeLatency(elapsed || 1);
+        setProbeError(err instanceof Error ? err.message : "Failed to connect to proxy endpoint");
       }
+      setProbeLatency(elapsed);
+    } finally {
+      clearTimeout(timeoutId);
     }
   };
 

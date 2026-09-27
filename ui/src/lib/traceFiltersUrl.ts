@@ -10,8 +10,8 @@ const VALID_STATUSES = new Set(["ok", "error"]);
 export function filtersToSearchParams(filters: TraceFilters): URLSearchParams {
   const params = new URLSearchParams();
 
-  if (filters.search && filters.search.trim()) {
-    params.set("search", filters.search.trim());
+  if (filters.search) {
+    params.set("search", filters.search);
   }
   if (filters.model && filters.model.trim()) {
     params.set("model", filters.model.trim());

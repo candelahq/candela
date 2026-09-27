@@ -94,4 +94,15 @@ describe("traceFiltersUrl", () => {
     const restored = searchParamsToFilters(qs);
     expect(restored).toEqual(custom);
   });
+
+  it("preserves exact search query string without unwanted trimming", () => {
+    const filters: TraceFilters = {
+      ...DEFAULT_FILTERS,
+      search: " hello world ",
+    };
+    const params = filtersToSearchParams(filters);
+    expect(params.get("search")).toBe(" hello world ");
+    const restored = searchParamsToFilters(params.toString());
+    expect(restored.search).toBe(" hello world ");
+  });
 });

@@ -40,22 +40,14 @@ function mockListResponse() {
 }
 
 describe("useTraces", () => {
-  const originalLocation = window.location;
-
   beforeEach(() => {
     vi.clearAllMocks();
     mockListTraces.mockImplementation(() => mockListResponse());
-    // Reset window.location
-    delete (window as unknown as { location?: unknown }).location;
-    window.location = {
-      ...originalLocation,
-      pathname: "/traces",
-      search: "",
-    };
+    window.history.replaceState(null, "", "/traces");
   });
 
   afterEach(() => {
-    window.location = originalLocation;
+    window.history.replaceState(null, "", "/traces");
     vi.restoreAllMocks();
   });
 
@@ -66,7 +58,7 @@ describe("useTraces", () => {
   });
 
   it("restores filters from URL query parameters on initialization", async () => {
-    window.location.search = "?model=gpt-4o&timeRange=7d&status=error&search=query";
+    window.history.replaceState(null, "", "/traces?model=gpt-4o&timeRange=7d&status=error&search=query");
 
     const { result } = renderHook(() => useTraces({ syncUrl: true }));
 
@@ -110,7 +102,7 @@ describe("useTraces", () => {
   });
 
   it("clears filters and restores URL to base path", async () => {
-    window.location.search = "?model=gpt-4o";
+    window.history.replaceState(null, "", "/traces?model=gpt-4o");
     const replaceStateSpy = vi.spyOn(window.history, "replaceState");
 
     const { result } = renderHook(() => useTraces({ syncUrl: true }));
@@ -129,7 +121,7 @@ describe("useTraces", () => {
     expect(result.current.filters.model).toBe("");
 
     await act(async () => {
-      window.location.search = "?model=deepseek-r1&timeRange=30d";
+      window.history.replaceState(null, "", "/traces?model=deepseek-r1&timeRange=30d");
       window.dispatchEvent(new PopStateEvent("popstate"));
     });
 

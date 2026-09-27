@@ -157,4 +157,22 @@ describe("OnboardingWizard", () => {
       expect(screen.getByRole("dialog")).toBeInTheDocument();
     });
   });
+
+  it("displays error state when connectivity probe fails", async () => {
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 502,
+    });
+    vi.stubGlobal("fetch", mockFetch);
+
+    render(<OnboardingWizard />);
+    fireEvent.click(screen.getByRole("button", { name: /verify/i }));
+
+    const testButton = screen.getByRole("button", { name: /test connection/i });
+    fireEvent.click(testButton);
+
+    await waitFor(() => {
+      expect(screen.getByText(/server returned http 502/i)).toBeInTheDocument();
+    });
+  });
 });

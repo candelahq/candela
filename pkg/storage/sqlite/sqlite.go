@@ -240,6 +240,36 @@ func (s *Store) GetTrace(ctx context.Context, traceID string) (*storage.Trace, e
 	return buildTrace(traceID, spans), nil
 }
 
+// buildTraceBaseFilters constructs the base SQL filter clauses and their corresponding
+// arguments in strict pairs. Co-locating each clause with its arguments eliminates
+// positional shift vulnerabilities when filters are added, reordered, or embedded in subqueries.
+func buildTraceBaseFilters(q storage.TraceQuery) (string, []any) {
+	var clauses []string
+	var args []any
+
+	// 1. Project ID: (? = '' OR project_id = ?)
+	clauses = append(clauses, "(? = '' OR project_id = ?)")
+	args = append(args, q.ProjectID, q.ProjectID)
+
+	// 2. Time range: start_time >= ? AND start_time <= ?
+	clauses = append(clauses, "start_time >= ? AND start_time <= ?")
+	args = append(args, q.StartTime.Format(time.RFC3339Nano), q.EndTime.Format(time.RFC3339Nano))
+
+	// 3. User scoping: (? = '' OR user_id = ?)
+	clauses = append(clauses, "(? = '' OR user_id = ?)")
+	args = append(args, q.UserID, q.UserID)
+
+	// 4. Tenant isolation: (? = '' OR tenant_id = ?)
+	clauses = append(clauses, "(? = '' OR tenant_id = ?)")
+	args = append(args, q.TenantID, q.TenantID)
+
+	// 5. Environment filter: (? = '' OR environment = ?)
+	clauses = append(clauses, "(? = '' OR environment = ?)")
+	args = append(args, q.Environment, q.Environment)
+
+	return strings.Join(clauses, "\n\t\t\tAND "), args
+}
+
 func (s *Store) QueryTraces(ctx context.Context, q storage.TraceQuery) (*storage.TraceResult, error) {
 	if q.PageSize == 0 {
 		q.PageSize = 50
@@ -273,17 +303,12 @@ func (s *Store) QueryTraces(ctx context.Context, q storage.TraceQuery) (*storage
 	// span-level filters (model, provider, search, job_id) go into a
 	// subquery to find matching trace_ids — this preserves sibling spans
 	// (root spans, DB spans, etc.) in the aggregation.
-	baseWhere := `(? = '' OR project_id = ?) AND start_time >= ? AND start_time <= ?
-			AND (? = '' OR user_id = ?)
-			AND (? = '' OR tenant_id = ?)
-			AND (? = '' OR environment = ?)`
+	baseWhere, baseArgs := buildTraceBaseFilters(q)
 	args := []any{
-		q.ProjectID, q.ProjectID, // subquery 1: primary_model
-		q.ProjectID, q.ProjectID, // subquery 2: primary_provider
-		q.ProjectID, q.ProjectID, // WHERE clause
-		q.StartTime.Format(time.RFC3339Nano), q.EndTime.Format(time.RFC3339Nano),
-		q.UserID, q.UserID, q.TenantID, q.TenantID, q.Environment, q.Environment,
+		q.ProjectID, q.ProjectID, // subquery 1: primary_model (? = '' OR s2.project_id = ?)
+		q.ProjectID, q.ProjectID, // subquery 2: primary_provider (? = '' OR s3.project_id = ?)
 	}
+	args = append(args, baseArgs...)
 
 	// Span-level filters: find trace_ids that contain matching spans.
 	var spanFilters []string
@@ -309,13 +334,10 @@ func (s *Store) QueryTraces(ctx context.Context, q storage.TraceQuery) (*storage
 	// so the outer aggregation still sees ALL spans per trace.
 	where := baseWhere
 	if len(spanFilters) > 0 {
-		subWhere := baseWhere
-		for _, f := range spanFilters {
-			subWhere += "\n\t\t\tAND " + f
-		}
+		subWhere := baseWhere + "\n\t\t\tAND " + strings.Join(spanFilters, "\n\t\t\tAND ")
 		where += "\n\t\t\tAND trace_id IN (SELECT trace_id FROM spans WHERE " + subWhere + ")"
 		// Duplicate the base args for the subquery, then add span filter args.
-		args = append(args, q.ProjectID, q.ProjectID, q.StartTime.Format(time.RFC3339Nano), q.EndTime.Format(time.RFC3339Nano), q.UserID, q.UserID, q.TenantID, q.TenantID, q.Environment, q.Environment)
+		args = append(args, baseArgs...)
 		args = append(args, spanArgs...)
 	}
 

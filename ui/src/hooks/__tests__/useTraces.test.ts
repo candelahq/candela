@@ -11,8 +11,10 @@ vi.mock("@/lib/api", () => ({
   },
 }));
 
+let mockScope = { isPersonalScope: false, mode: "team" };
+
 vi.mock("@/components/UserScopeProvider", () => ({
-  useScope: () => ({ isPersonalScope: false, mode: "team" }),
+  useScope: () => mockScope,
 }));
 
 function mockListResponse() {
@@ -42,6 +44,7 @@ function mockListResponse() {
 describe("useTraces", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockScope = { isPersonalScope: false, mode: "team" };
     mockListTraces.mockImplementation(() => mockListResponse());
     window.history.replaceState(null, "", "/traces");
   });
@@ -141,5 +144,38 @@ describe("useTraces", () => {
     expect(result.current.filters.provider).toBe("anthropic");
     expect(result.current.filters.model).toBe("claude-3-5-sonnet");
     expect(result.current.filters.environment).toBe("production");
+  });
+
+  it("memoizes fetchInitial and preserves reference across re-renders when scope does not change", () => {
+    const { result, rerender } = renderHook(() => useTraces({ syncUrl: false }));
+    const initialFn = result.current.fetchInitial;
+
+    rerender();
+    expect(result.current.fetchInitial).toBe(initialFn);
+  });
+
+  it("re-creates fetchInitial and includes personal scope header when isPersonalScope changes", async () => {
+    const { result, rerender } = renderHook(() => useTraces({ syncUrl: false }));
+    const teamFn = result.current.fetchInitial;
+
+    mockScope = { isPersonalScope: true, mode: "personal" };
+    rerender();
+
+    expect(result.current.fetchInitial).not.toBe(teamFn);
+
+    act(() => {
+      result.current.fetchInitial();
+    });
+
+    await waitFor(() => {
+      expect(mockListTraces).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({
+          headers: expect.objectContaining({
+            "X-Candela-Scope": "personal",
+          }),
+        })
+      );
+    });
   });
 });

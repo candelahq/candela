@@ -15,38 +15,61 @@ import (
 )
 
 func TestValidateAuthConfig(t *testing.T) {
+	origGCECheck := onGCECheck
+	defer func() { onGCECheck = origGCECheck }()
+
+	allEnvs := []string{
+		"K_SERVICE", "K_REVISION", "KUBERNETES_SERVICE_HOST",
+		"ECS_CONTAINER_METADATA_URI", "ECS_CONTAINER_METADATA_URI_V4",
+		"AWS_LAMBDA_FUNCTION_NAME", "CONTAINER_APP_NAME",
+		"GAE_ENV", "GAE_INSTANCE",
+	}
+
 	tests := []struct {
 		name        string
 		devMode     bool
-		kService    string // set as K_SERVICE env var for the test
+		envVar      string
+		envVal      string
 		cloudRunURL string
+		gceCheck    bool
 		wantErr     bool
 	}{
-		{"dev mode on Cloud Run is rejected", true, "candela-server", "https://candela.run.app", true},
-		{"dev mode locally is allowed", true, "", "", false},
-		{"prod mode on Cloud Run is allowed", false, "candela-server", "https://candela.run.app", false},
-		{"prod mode locally is allowed", false, "", "", false},
-		{"dev mode on Cloud Run without CLOUD_RUN_URL is rejected", true, "candela-server", "", true},
-		{"prod mode on Cloud Run without CLOUD_RUN_URL warns but succeeds", false, "candela-server", "", false},
+		{name: "dev mode locally is allowed", devMode: true, wantErr: false},
+		{name: "prod mode locally is allowed", devMode: false, wantErr: false},
+		{name: "dev mode on Cloud Run K_SERVICE is rejected", devMode: true, envVar: "K_SERVICE", envVal: "candela-server", cloudRunURL: "https://candela.run.app", wantErr: true},
+		{name: "prod mode on Cloud Run is allowed", devMode: false, envVar: "K_SERVICE", envVal: "candela-server", cloudRunURL: "https://candela.run.app", wantErr: false},
+		{name: "dev mode on Cloud Run without CLOUD_RUN_URL is rejected", devMode: true, envVar: "K_SERVICE", envVal: "candela-server", wantErr: true},
+		{name: "prod mode on Cloud Run without CLOUD_RUN_URL warns but succeeds", devMode: false, envVar: "K_SERVICE", envVal: "candela-server", wantErr: false},
+		{name: "dev mode on K_REVISION is rejected", devMode: true, envVar: "K_REVISION", envVal: "candela-00001", wantErr: true},
+		{name: "dev mode on Kubernetes is rejected", devMode: true, envVar: "KUBERNETES_SERVICE_HOST", envVal: "10.0.0.1", wantErr: true},
+		{name: "dev mode on ECS is rejected", devMode: true, envVar: "ECS_CONTAINER_METADATA_URI", envVal: "http://169.254.170.2/v3", wantErr: true},
+		{name: "dev mode on ECS v4 is rejected", devMode: true, envVar: "ECS_CONTAINER_METADATA_URI_V4", envVal: "http://169.254.170.2/v4", wantErr: true},
+		{name: "dev mode on AWS Lambda is rejected", devMode: true, envVar: "AWS_LAMBDA_FUNCTION_NAME", envVal: "candela-fn", wantErr: true},
+		{name: "dev mode on Container Apps is rejected", devMode: true, envVar: "CONTAINER_APP_NAME", envVal: "candela-app", wantErr: true},
+		{name: "dev mode on App Engine GAE_ENV is rejected", devMode: true, envVar: "GAE_ENV", envVal: "standard", wantErr: true},
+		{name: "dev mode on App Engine GAE_INSTANCE is rejected", devMode: true, envVar: "GAE_INSTANCE", envVal: "instance-1", wantErr: true},
+		{name: "dev mode on GCE metadata is rejected", devMode: true, gceCheck: true, wantErr: true},
+		{name: "prod mode on GCE metadata is allowed", devMode: false, gceCheck: true, wantErr: false},
 	}
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Clear all production indicators so inherited env doesn't leak (#648).
-			for _, env := range []string{
-				"K_SERVICE", "K_REVISION", "KUBERNETES_SERVICE_HOST",
-				"ECS_CONTAINER_METADATA_URI", "AWS_LAMBDA_FUNCTION_NAME",
-				"CONTAINER_APP_NAME", "GAE_ENV",
-			} {
+			for _, env := range allEnvs {
 				t.Setenv(env, "")
 			}
-			// Set K_SERVICE for this specific test case.
-			if tt.kService != "" {
-				t.Setenv("K_SERVICE", tt.kService)
+			if tt.envVar != "" {
+				t.Setenv(tt.envVar, tt.envVal)
 			}
-			err := validateAuthConfig(tt.devMode, tt.kService, tt.cloudRunURL)
+			onGCECheck = func() bool { return tt.gceCheck }
+
+			kService := ""
+			if tt.envVar == "K_SERVICE" {
+				kService = tt.envVal
+			}
+			err := validateAuthConfig(tt.devMode, kService, tt.cloudRunURL)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("validateAuthConfig(devMode=%v, kService=%q, cloudRunURL=%q) error = %v, wantErr %v",
-					tt.devMode, tt.kService, tt.cloudRunURL, err, tt.wantErr)
+					tt.devMode, kService, tt.cloudRunURL, err, tt.wantErr)
 			}
 		})
 	}

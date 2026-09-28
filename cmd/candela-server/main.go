@@ -24,6 +24,7 @@ import (
 	_ "go.uber.org/automaxprocs" // automatically sets GOMAXPROCS from container CPU quota
 	_ "time/tzdata"              // Embed timezone database for scratch/distroless containers
 
+	"cloud.google.com/go/compute/metadata"
 	"cloud.google.com/go/firestore"
 	firebase "firebase.google.com/go/v4"
 	"golang.org/x/oauth2/google"
@@ -1224,7 +1225,11 @@ func main() {
 		)
 	}
 	if devMode {
-		slog.Info("🔓 Running in dev mode — auth disabled")
+		slog.Warn("⚠️  ===================================================================== ⚠️")
+		slog.Warn("⚠️  CRITICAL SECURITY WARNING: AUTHENTICATION IS DISABLED (dev_mode=true) ⚠️")
+		slog.Warn("⚠️  Synthetic admin identity (dev-admin) will be injected for all calls.  ⚠️")
+		slog.Warn("⚠️  DO NOT USE IN PRODUCTION OR ANY EXPOSED/INTERNET-FACING NETWORK.     ⚠️")
+		slog.Warn("⚠️  ===================================================================== ⚠️")
 	}
 
 	// Enable both HTTP/1 and unencrypted HTTP/2 (replaces deprecated h2c package).
@@ -1639,11 +1644,13 @@ func newMetricsHandler(deps MetricsDeps) http.Handler {
 	})
 }
 
+var onGCECheck = metadata.OnGCE
+
 // validateAuthConfig checks that the auth configuration is safe for the runtime environment.
 // Returns an error if the configuration would be insecure.
 func validateAuthConfig(devMode bool, kService, cloudRunURL string) error {
 	if devMode {
-		// Detect production environments beyond Cloud Run (#648).
+		// Detect production environments beyond Cloud Run (#648, #580).
 		// Any of these env vars indicate the server is running in a managed
 		// production environment where dev_mode must not be enabled.
 		prodIndicators := []struct {
@@ -1654,14 +1661,20 @@ func validateAuthConfig(devMode bool, kService, cloudRunURL string) error {
 			{"K_REVISION", "Cloud Run / Knative"},
 			{"KUBERNETES_SERVICE_HOST", "Kubernetes"},
 			{"ECS_CONTAINER_METADATA_URI", "AWS ECS"},
+			{"ECS_CONTAINER_METADATA_URI_V4", "AWS ECS v4"},
 			{"AWS_LAMBDA_FUNCTION_NAME", "AWS Lambda"},
 			{"CONTAINER_APP_NAME", "Azure Container Apps"},
 			{"GAE_ENV", "App Engine"},
+			{"GAE_INSTANCE", "App Engine"},
 		}
 		for _, p := range prodIndicators {
 			if v := os.Getenv(p.env); v != "" {
 				return fmt.Errorf("auth.dev_mode=true is not allowed in %s (%s=%s)", p.desc, p.env, v)
 			}
+		}
+
+		if onGCECheck != nil && onGCECheck() {
+			return fmt.Errorf("auth.dev_mode=true is not allowed on Google Cloud Platform (GCE metadata server detected)")
 		}
 	}
 	if kService != "" && cloudRunURL == "" {

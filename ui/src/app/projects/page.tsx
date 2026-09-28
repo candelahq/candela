@@ -5,6 +5,7 @@ import { createClient } from "@connectrpc/connect";
 import { transport } from "@/lib/connect";
 import { ErrorBanner } from "@/components/ErrorBanner";
 import { ProjectService } from "@/gen/candela/v1/project_service_pb";
+import { usePageTitle } from "@/hooks/usePageTitle";
 
 interface Project {
   id: string;
@@ -14,6 +15,7 @@ interface Project {
 }
 
 export default function ProjectsPage() {
+  usePageTitle("Projects");
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);

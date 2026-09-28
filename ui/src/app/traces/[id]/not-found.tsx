@@ -1,6 +1,10 @@
-import Link from 'next/link'
+"use client";
+
+import Link from 'next/link';
+import { usePageTitle } from '@/hooks/usePageTitle';
 
 export default function TraceNotFound() {
+  usePageTitle("Trace Not Found");
   return (
     <div style={{
       display: 'flex',

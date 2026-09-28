@@ -13,6 +13,7 @@ import { ScopeToggle } from "@/components/ScopeToggle";
 import { useScope } from "@/components/UserScopeProvider";
 import { ErrorBanner } from "@/components/ErrorBanner";
 import { SkeletonCard } from "@/components/SkeletonCard";
+import { usePageTitle } from "@/hooks/usePageTitle";
 
 // ──────────────────────────────────────────
 // Helpers
@@ -74,6 +75,7 @@ function SortTh({
 type Tab = "catalog" | "usage";
 
 export default function ModelsPage() {
+  usePageTitle("Models");
   const [activeTab, setActiveTab] = useState<Tab>("catalog");
 
   return (

@@ -10,6 +10,7 @@ import { CreateUserModal } from "@/components/admin/CreateUserModal";
 import { BudgetModal } from "@/components/admin/BudgetModal";
 import { GrantsModal } from "@/components/admin/GrantsModal";
 import { DeleteUserModal } from "@/components/admin/DeleteUserModal";
+import { usePageTitle } from "@/hooks/usePageTitle";
 
 const PAGE_SIZE = 10;
 
@@ -60,6 +61,7 @@ function formatDate(ts?: { seconds: bigint }) {
 }
 
 export default function AdminUsersPage() {
+  usePageTitle("Users — Admin");
   const [state, dispatch] = useReducer(reducer, {
     users: [], total: 0, nextPageToken: "", isLoading: true, error: null,
   });

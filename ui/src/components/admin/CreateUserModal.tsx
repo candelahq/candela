@@ -5,6 +5,7 @@ import { userClient } from "@/lib/api";
 import { UserRole } from "@/gen/candela/types/user_pb";
 import { HelpTip } from "@/components/Tooltip";
 import { useCreateUserValidation } from "@/hooks/useProtoValidation";
+import { useModalA11y } from "@/hooks/useModalA11y";
 
 interface CreateUserModalProps {
   onClose: () => void;
@@ -15,6 +16,7 @@ export function CreateUserModal({ onClose, onCreated }: CreateUserModalProps) {
   const [createForm, setCreateForm] = useState({ email: "", displayName: "", role: UserRole.DEVELOPER, budget: 0 });
   const [createError, setCreateError] = useState<string | null>(null);
   const { validate, getError, clearErrors } = useCreateUserValidation();
+  const { modalRef } = useModalA11y({ onClose });
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -45,10 +47,17 @@ export function CreateUserModal({ onClose, onCreated }: CreateUserModalProps) {
 
   return (
     <div className="modal-overlay" onClick={onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()}>
+      <div
+        ref={modalRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="create-user-modal-title"
+        className="modal"
+        onClick={(e) => e.stopPropagation()}
+      >
         <div className="modal-header">
-          <h3>Create User</h3>
-          <button type="button" className="modal-close" onClick={onClose}>×</button>
+          <h3 id="create-user-modal-title">Create User</h3>
+          <button type="button" className="modal-close" onClick={onClose} aria-label="Close dialog">×</button>
         </div>
         <form onSubmit={handleCreate} className="modal-body">
           <div className="form-group">

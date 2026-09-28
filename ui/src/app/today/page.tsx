@@ -9,9 +9,11 @@ import { TokenBar } from "@/components/today/TokenBar";
 import { GrantCard } from "@/components/today/GrantCard";
 import { ForecastBar } from "@/components/today/ForecastBar";
 import { fmtTokens } from "@/components/today/utils";
+import { usePageTitle } from "@/hooks/usePageTitle";
 import "./today.css";
 
 export default function TodayPage() {
+  usePageTitle("Today's Usage & Budget");
   const { data, loading, error, refresh } = useTodayBudget();
   const { forecast: restForecast } = useForecast();
   const forecast = data?.forecast ?? restForecast;

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useReducer, useState } from "react";
 import { userClient } from "@/lib/api";
 import { HelpTip } from "@/components/Tooltip";
 import type { AuditEntry } from "@/gen/candela/types/user_pb";
+import { usePageTitle } from "@/hooks/usePageTitle";
 
 interface AuditState {
   entries: AuditEntry[];
@@ -35,6 +36,7 @@ const actionIcons: Record<string, string> = {
 };
 
 export default function AdminAuditPage() {
+  usePageTitle("Audit Logs — Admin");
   const [userId, setUserId] = useState("");
   const [state, dispatch] = useReducer(reducer, { entries: [], isLoading: false, error: null });
 

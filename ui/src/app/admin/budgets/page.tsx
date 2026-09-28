@@ -1,8 +1,10 @@
 "use client";
 
 import { HelpTip } from "@/components/Tooltip";
+import { usePageTitle } from "@/hooks/usePageTitle";
 
 export default function AdminBudgetsPage() {
+  usePageTitle("Budgets — Admin");
   return (
     <div className="admin-page">
       <div className="admin-page-header">

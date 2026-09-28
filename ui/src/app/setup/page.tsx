@@ -2,6 +2,7 @@
 
 import { useState, useCallback, useRef, useSyncExternalStore } from "react";
 import { openOnboardingWizard } from "@/components/onboarding/OnboardingWizard";
+import { usePageTitle } from "@/hooks/usePageTitle";
 
 // ──────────────────────────────────────────
 // Config snippets
@@ -94,6 +95,7 @@ function getOrigin() {
 const subscribe = () => () => {};
 
 export default function SetupPage() {
+  usePageTitle("Setup");
   const [activeTab, setActiveTab] = useState(CONFIG_TABS[0].id);
   const proxyUrl = useSyncExternalStore(subscribe, getOrigin, () => "https://your-candela-host");
   const [copied, setCopied] = useState(false);

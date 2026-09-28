@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { userClient } from "@/lib/api";
+import { useModalA11y } from "@/hooks/useModalA11y";
 
 interface DeleteUserModalProps {
   userId: string;
@@ -11,6 +12,7 @@ interface DeleteUserModalProps {
 }
 
 export function DeleteUserModal({ userId, email, onClose, onDeleted }: DeleteUserModalProps) {
+  const { modalRef } = useModalA11y({ onClose });
   const [deleteConfirmEmail, setDeleteConfirmEmail] = useState("");
   const [deleteLoading, setDeleteLoading] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
@@ -34,10 +36,17 @@ export function DeleteUserModal({ userId, email, onClose, onDeleted }: DeleteUse
 
   return (
     <div className="modal-overlay" onClick={onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()}>
+      <div
+        ref={modalRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="delete-user-modal-title"
+        className="modal"
+        onClick={(e) => e.stopPropagation()}
+      >
         <div className="modal-header">
-          <h3 className="delete-modal-title">Delete User</h3>
-          <button type="button" className="modal-close" onClick={onClose}>×</button>
+          <h3 id="delete-user-modal-title" className="delete-modal-title">Delete User</h3>
+          <button type="button" className="modal-close" onClick={onClose} aria-label="Close dialog">×</button>
         </div>
         <form onSubmit={handleDelete} className="modal-body">
           <div className="delete-warning-banner">

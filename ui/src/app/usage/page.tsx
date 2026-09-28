@@ -5,8 +5,10 @@ import { BudgetGauge } from "@/components/BudgetGauge";
 import { TimeRangeSelector } from "@/components/TimeRangeSelector";
 import { ErrorBanner } from "@/components/ErrorBanner";
 import { SkeletonCard } from "@/components/SkeletonCard";
+import { usePageTitle } from "@/hooks/usePageTitle";
 
 export default function UsagePage() {
+  usePageTitle("My Usage");
   const { data, loading, error, timeRange, setTimeRange, refresh } = useUsage();
 
   return (

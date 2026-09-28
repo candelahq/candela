@@ -69,17 +69,7 @@ interface OnboardingWizardProps {
 
 export function OnboardingWizard({ forceOpen, onClose }: OnboardingWizardProps) {
   const { user, configured, signIn } = useAuth();
-  const [isOpen, setIsOpen] = useState(() => {
-    if (forceOpen) return true;
-    if (typeof window !== "undefined") {
-      try {
-        return localStorage.getItem(ONBOARDING_COMPLETED_KEY) !== "true";
-      } catch {
-        return false;
-      }
-    }
-    return false;
-  });
+  const [isOpen, setIsOpen] = useState(Boolean(forceOpen));
   const [prevForceOpen, setPrevForceOpen] = useState(forceOpen);
   if (forceOpen !== prevForceOpen) {
     setPrevForceOpen(forceOpen);
@@ -87,6 +77,26 @@ export function OnboardingWizard({ forceOpen, onClose }: OnboardingWizardProps) 
       setIsOpen(true);
     }
   }
+
+  useEffect(() => {
+    if (forceOpen) {
+      setIsOpen(true);
+      return;
+    }
+    if (
+      process.env.NEXT_PUBLIC_DISABLE_ONBOARDING === "true" ||
+      (typeof navigator !== "undefined" && navigator.webdriver)
+    ) {
+      return;
+    }
+    try {
+      if (localStorage.getItem(ONBOARDING_COMPLETED_KEY) !== "true") {
+        setIsOpen(true);
+      }
+    } catch {
+      // localStorage may be unavailable
+    }
+  }, [forceOpen]);
 
   const [currentStep, setCurrentStep] = useState(0);
   const [activeTab, setActiveTab] = useState(CONFIG_TABS[0].id);

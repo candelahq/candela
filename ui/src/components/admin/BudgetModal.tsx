@@ -1,10 +1,11 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { userClient } from "@/lib/api";
 import { BudgetPeriod } from "@/gen/candela/types/user_pb";
 import type { UserBudget } from "@/gen/candela/types/user_pb";
 import { HelpTip } from "@/components/Tooltip";
+import { useModalA11y } from "@/hooks/useModalA11y";
 
 interface BudgetModalProps {
   userId: string;
@@ -14,10 +15,23 @@ interface BudgetModalProps {
 }
 
 export function BudgetModal({ userId, email, onClose, onUpdated }: BudgetModalProps) {
+  const { modalRef } = useModalA11y({ onClose });
+  const inputRef = useRef<HTMLInputElement>(null);
   const [budgetForm, setBudgetForm] = useState({ limitUsd: 0 });
   const [currentBudget, setCurrentBudget] = useState<UserBudget | null>(null);
   const [budgetLoading, setBudgetLoading] = useState(false);
   const [budgetError, setBudgetError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!budgetLoading && inputRef.current && modalRef.current?.contains(document.activeElement)) {
+      if (
+        document.activeElement === modalRef.current ||
+        document.activeElement?.getAttribute("aria-label") === "Close dialog"
+      ) {
+        inputRef.current.focus();
+      }
+    }
+  }, [budgetLoading, modalRef]);
 
   useEffect(() => {
     let active = true;
@@ -67,10 +81,17 @@ export function BudgetModal({ userId, email, onClose, onUpdated }: BudgetModalPr
 
   return (
     <div className="modal-overlay" onClick={onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()}>
+      <div
+        ref={modalRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="budget-modal-title"
+        className="modal"
+        onClick={(e) => e.stopPropagation()}
+      >
         <div className="modal-header">
-          <h3>Daily Budget</h3>
-          <button type="button" className="modal-close" onClick={onClose}>×</button>
+          <h3 id="budget-modal-title">Daily Budget</h3>
+          <button type="button" className="modal-close" onClick={onClose} aria-label="Close dialog">×</button>
         </div>
         <form onSubmit={handleSetBudget} className="modal-body">
           <p className="modal-subtitle">{email}</p>
@@ -102,6 +123,7 @@ export function BudgetModal({ userId, email, onClose, onUpdated }: BudgetModalPr
               <HelpTip text="Spending cap per day. Resets at midnight UTC." />
             </label>
             <input
+              ref={inputRef}
               id="budget-limit"
               type="number"
               min="0"

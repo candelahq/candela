@@ -3,8 +3,10 @@
 import { useLeaderboard } from "@/hooks/useLeaderboard";
 import { TimeRangeSelector } from "@/components/TimeRangeSelector";
 import { ErrorBanner } from "@/components/ErrorBanner";
+import { usePageTitle } from "@/hooks/usePageTitle";
 
 export default function LeaderboardPage() {
+  usePageTitle("Leaderboard — Admin");
   const { rankings, loading, error, timeRange, setTimeRange, refresh } = useLeaderboard();
 
   return (

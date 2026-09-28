@@ -7,6 +7,7 @@ import { ScopeToggle } from "@/components/ScopeToggle";
 import { ErrorBanner } from "@/components/ErrorBanner";
 import { SpanKind } from "@/gen/candela/types/trace_pb";
 import { statusLabel } from "@/lib/traceUtils";
+import { usePageTitle } from "@/hooks/usePageTitle";
 
 const kindLabels: Record<number, string> = {
   [SpanKind.LLM]: "LLM",
@@ -37,6 +38,7 @@ function kindColorForSearch(kind: SpanKind) {
 }
 
 export default function SearchPage() {
+  usePageTitle("Search");
   const router = useRouter();
   const {
     spans,

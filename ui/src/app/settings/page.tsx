@@ -5,6 +5,7 @@ import { dashboardClient } from "@/lib/api";
 import { useCurrentUser } from "@/hooks/useCurrentUser";
 import { timestampFromDate } from "@bufbuild/protobuf/wkt";
 import { API_BASE_URL } from "@/lib/constants";
+import { usePageTitle } from "@/hooks/usePageTitle";
 
 // ──────────────────────────────────────────
 // State
@@ -59,6 +60,7 @@ function reducer(state: SettingsState, action: Action): SettingsState {
 // ──────────────────────────────────────────
 
 export default function SettingsPage() {
+  usePageTitle("Settings");
   const { user, isAdmin, isLoading: userLoading } = useCurrentUser();
 
   const [state, dispatch] = useReducer(reducer, {

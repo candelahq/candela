@@ -168,6 +168,10 @@ export function useTraces(options?: UseTracesOptions) {
   const prevModeRef = useRef(mode);
 
   const fetchRef = useRef<AbortController | null>(null);
+  const filtersRef = useRef(state.filters);
+  filtersRef.current = state.filters;
+  const pageTokenRef = useRef(state.currentPageToken);
+  pageTokenRef.current = state.currentPageToken;
 
   const fetchTraces = useCallback((f: TraceFilters, resetPagination = false) => {
     fetchRef.current?.abort();
@@ -175,7 +179,7 @@ export function useTraces(options?: UseTracesOptions) {
     fetchRef.current = controller;
 
     dispatch({ type: "fetch", filters: f, resetPagination });
-    const pageToken = resetPagination ? "" : state.currentPageToken;
+    const pageToken = resetPagination ? "" : pageTokenRef.current;
 
     // Build headers — the backend interprets the auth token + this hint
     // to decide whether to filter to the authenticated user's traces.
@@ -220,11 +224,12 @@ export function useTraces(options?: UseTracesOptions) {
           dispatch({ type: "error", message: err.message });
         }
       });
-  }, [isPersonalScope, state.currentPageToken]);
+  }, [isPersonalScope]);
 
   const updateFilters = useCallback(
     (patch: Partial<TraceFilters>) => {
-      const next = { ...state.filters, ...patch };
+      const next = { ...filtersRef.current, ...patch };
+      filtersRef.current = next;
       dispatch({ type: "set_filters", filters: next });
 
       const isSearch = "search" in patch;
@@ -232,15 +237,15 @@ export function useTraces(options?: UseTracesOptions) {
 
       if (isSearch) {
         debounceRef.current = setTimeout(() => {
-          if (syncUrl) syncFiltersToUrl(next);
-          fetchTraces(next, true);
+          if (syncUrl) syncFiltersToUrl(filtersRef.current);
+          fetchTraces(filtersRef.current, true);
         }, 300);
       } else {
         if (syncUrl) syncFiltersToUrl(next);
         fetchTraces(next, true);
       }
     },
-    [state.filters, fetchTraces, syncUrl]
+    [fetchTraces, syncUrl]
   );
 
   const clearFilters = useCallback(() => {
@@ -248,6 +253,7 @@ export function useTraces(options?: UseTracesOptions) {
       clearTimeout(debounceRef.current);
       debounceRef.current = null;
     }
+    filtersRef.current = DEFAULT_FILTERS;
     dispatch({ type: "clear_filters" });
     if (syncUrl) syncFiltersToUrl(DEFAULT_FILTERS);
     fetchTraces(DEFAULT_FILTERS, true);
@@ -263,6 +269,7 @@ export function useTraces(options?: UseTracesOptions) {
         debounceRef.current = null;
       }
       const fromUrl = searchParamsToFilters(window.location.search);
+      filtersRef.current = fromUrl;
       dispatch({ type: "set_filters", filters: fromUrl });
       fetchTraces(fromUrl, true);
     };
@@ -283,17 +290,17 @@ export function useTraces(options?: UseTracesOptions) {
   );
 
   const refresh = useCallback(
-    () => fetchTraces(state.filters),
-    [state.filters, fetchTraces]
+    () => fetchTraces(filtersRef.current),
+    [fetchTraces]
   );
 
   // Re-fetch when scope mode changes
   useEffect(() => {
     if (prevModeRef.current !== mode) {
       prevModeRef.current = mode;
-      fetchTraces(state.filters, true);
+      fetchTraces(filtersRef.current, true);
     }
-  }, [mode, fetchTraces, state.filters]);
+  }, [mode, fetchTraces]);
 
   // Only fetch on pagination token changes — filter-driven fetches
   // are handled imperatively by updateFilters/clearFilters.

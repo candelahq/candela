@@ -12,6 +12,7 @@ import { ErrorBanner } from "@/components/ErrorBanner";
 import { SkeletonCard } from "@/components/SkeletonCard";
 import { TenantLeaderboard } from "@/components/TenantLeaderboard";
 import { statusLabel } from "@/lib/traceUtils";
+import { usePageTitle } from "@/hooks/usePageTitle";
 
 type DashboardTab = "overview" | "tenants";
 
@@ -20,6 +21,7 @@ type DashboardTab = "overview" | "tenants";
 // ──────────────────────────────────────────
 
 export default function DashboardPage() {
+  usePageTitle("Dashboard");
   const { includeBudget } = useScope();
   const { isAdmin } = useCurrentUser();
   const [activeTab, setActiveTab] = useState<DashboardTab>("overview");

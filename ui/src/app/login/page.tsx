@@ -3,8 +3,10 @@
 import { useAuth } from "@/components/AuthProvider";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
+import { usePageTitle } from "@/hooks/usePageTitle";
 
 export default function LoginPage() {
+  usePageTitle("Sign In");
   const { user, loading, configured, signIn, authError, clearAuthError } = useAuth();
   const router = useRouter();
   const [localError, setLocalError] = useState<string | null>(null);

@@ -128,4 +128,18 @@ describe("useTraces", () => {
     expect(result.current.filters.model).toBe("deepseek-r1");
     expect(result.current.filters.timeRange).toBe("30d");
   });
+
+  it("preserves rapid successive filter updates without dropping earlier updates", async () => {
+    const { result } = renderHook(() => useTraces({ syncUrl: false }));
+
+    await act(async () => {
+      result.current.updateFilters({ provider: "anthropic" });
+      result.current.updateFilters({ model: "claude-3-5-sonnet" });
+      result.current.updateFilters({ environment: "production" });
+    });
+
+    expect(result.current.filters.provider).toBe("anthropic");
+    expect(result.current.filters.model).toBe("claude-3-5-sonnet");
+    expect(result.current.filters.environment).toBe("production");
+  });
 });

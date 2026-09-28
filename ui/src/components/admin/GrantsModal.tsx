@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import { userClient } from "@/lib/api";
 import type { BudgetGrant } from "@/gen/candela/types/user_pb";
 import { timestampFromDate } from "@bufbuild/protobuf/wkt";
+import { useModalA11y } from "@/hooks/useModalA11y";
 
 function formatDate(ts?: { seconds: bigint }) {
   if (!ts) return "—";
@@ -23,6 +24,7 @@ interface GrantsModalProps {
 }
 
 export function GrantsModal({ userId, email, onClose }: GrantsModalProps) {
+  const { modalRef } = useModalA11y({ onClose });
   const [grants, setGrants] = useState<BudgetGrant[]>([]);
   const [grantsLoading, setGrantsLoading] = useState(false);
   const [grantsError, setGrantsError] = useState<string | null>(null);
@@ -81,10 +83,17 @@ export function GrantsModal({ userId, email, onClose }: GrantsModalProps) {
 
   return (
     <div className="modal-overlay" onClick={onClose}>
-      <div className="modal modal-wide" onClick={(e) => e.stopPropagation()}>
+      <div
+        ref={modalRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="grants-modal-title"
+        className="modal modal-wide"
+        onClick={(e) => e.stopPropagation()}
+      >
         <div className="modal-header">
-          <h3>Grants</h3>
-          <button type="button" className="modal-close" onClick={onClose}>×</button>
+          <h3 id="grants-modal-title">Grants</h3>
+          <button type="button" className="modal-close" onClick={onClose} aria-label="Close dialog">×</button>
         </div>
         <div className="modal-body">
           <div className="grants-header">

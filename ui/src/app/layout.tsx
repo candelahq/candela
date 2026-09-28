@@ -7,7 +7,10 @@ import { UserScopeProvider } from "@/components/UserScopeProvider";
 import { ToastProvider } from "@/components/Toast";
 
 export const metadata: Metadata = {
-  title: "Candela — LLM Observability",
+  title: {
+    default: "Candela — LLM Observability",
+    template: "%s | Candela",
+  },
   description: "Open-source LLM observability platform. Monitor costs, latency, and quality across all your AI providers.",
 };
 

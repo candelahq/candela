@@ -185,4 +185,111 @@ describe("useTodayBudget", () => {
     expect(result.current.data?.totalCostUsd).toBe(3.50);
     expect(result.current.data?.budget?.limitUsd).toBe(50);
   });
+
+  it("stops auto-refreshing after reaching maxConsecutiveErrors and applies exponential backoff", async () => {
+    mockGetMyUsage.mockRejectedValue(new Error("network error"));
+    mockGetMyBudget.mockResolvedValue(null);
+
+    const { result } = renderHook(() =>
+      useTodayBudget({ baseIntervalMs: 1000, maxConsecutiveErrors: 3 })
+    );
+
+    // Initial fetch fails -> consecutiveErrors = 1
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.consecutiveErrors).toBe(1);
+    expect(mockGetMyUsage).toHaveBeenCalledTimes(1);
+
+    // 1st backoff delay: 1000 * 2^1 = 2000ms
+    // Advance 1500ms - should not have refreshed yet
+    act(() => {
+      vi.advanceTimersByTime(1500);
+    });
+    expect(mockGetMyUsage).toHaveBeenCalledTimes(1);
+
+    // Advance remaining 500ms - triggers 2nd fetch -> consecutiveErrors = 2
+    act(() => {
+      vi.advanceTimersByTime(500);
+    });
+    await waitFor(() => expect(result.current.consecutiveErrors).toBe(2));
+    expect(mockGetMyUsage).toHaveBeenCalledTimes(2);
+
+    // 2nd backoff delay: 1000 * 2^2 = 4000ms
+    act(() => {
+      vi.advanceTimersByTime(4000);
+    });
+    await waitFor(() => expect(result.current.consecutiveErrors).toBe(3));
+    expect(mockGetMyUsage).toHaveBeenCalledTimes(3);
+
+    // Max errors (3) reached: auto-refresh is stopped
+    act(() => {
+      vi.advanceTimersByTime(60_000);
+    });
+    // No new calls should be made
+    expect(mockGetMyUsage).toHaveBeenCalledTimes(3);
+
+    // Now manually refresh with a successful response
+    mockGetMyUsage.mockResolvedValueOnce(mockUsageResponse());
+    mockGetMyBudget.mockResolvedValueOnce(mockBudgetResponse());
+
+    act(() => {
+      result.current.refresh();
+    });
+
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(mockGetMyUsage).toHaveBeenCalledTimes(4);
+    expect(result.current.consecutiveErrors).toBe(0);
+    expect(result.current.data).not.toBeNull();
+  });
+
+  it("resets consecutive errors counter to 0 on successful refresh", async () => {
+    mockGetMyUsage.mockRejectedValueOnce(new Error("temporary error"));
+    mockGetMyBudget.mockResolvedValueOnce(null);
+
+    const { result } = renderHook(() =>
+      useTodayBudget({ baseIntervalMs: 1000, maxConsecutiveErrors: 3 })
+    );
+
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.consecutiveErrors).toBe(1);
+
+    mockGetMyUsage.mockResolvedValueOnce(mockUsageResponse());
+    mockGetMyBudget.mockResolvedValueOnce(mockBudgetResponse());
+
+    // Advance 2000ms (1000 * 2^1)
+    act(() => {
+      vi.advanceTimersByTime(2000);
+    });
+
+    await waitFor(() => expect(result.current.consecutiveErrors).toBe(0));
+    expect(result.current.data?.totalCalls).toBe(25);
+  });
+
+  it("increments consecutive errors and reaches error limit on repeated budget RPC failures (partial success)", async () => {
+    mockGetMyUsage.mockResolvedValue(mockUsageResponse());
+    mockGetMyBudget.mockRejectedValue(new Error("firestore budget error"));
+
+    const { result } = renderHook(() =>
+      useTodayBudget({ baseIntervalMs: 1000, maxConsecutiveErrors: 2 })
+    );
+
+    // Initial fetch: usage succeeds, but budget rejects -> consecutiveErrors = 1
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.data?.totalCalls).toBe(25);
+    expect(result.current.data?.budget).toBeNull();
+    expect(result.current.consecutiveErrors).toBe(1);
+
+    // 1st backoff delay: 1000 * 2^1 = 2000ms
+    act(() => {
+      vi.advanceTimersByTime(2000);
+    });
+    // 2nd fetch -> consecutiveErrors = 2 (max reached)
+    await waitFor(() => expect(result.current.consecutiveErrors).toBe(2));
+    expect(mockGetMyUsage).toHaveBeenCalledTimes(2);
+
+    // Advance 60s - should NOT make further calls because maxConsecutiveErrors was reached
+    act(() => {
+      vi.advanceTimersByTime(60_000);
+    });
+    expect(mockGetMyUsage).toHaveBeenCalledTimes(2);
+  });
 });

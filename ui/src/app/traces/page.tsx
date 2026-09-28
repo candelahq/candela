@@ -7,6 +7,7 @@ import { ScopeToggle } from "@/components/ScopeToggle";
 import { ErrorBanner } from "@/components/ErrorBanner";
 import type { TraceFilters } from "@/types/traces";
 import { statusLabel } from "@/lib/traceUtils";
+import { usePageTitle } from "@/hooks/usePageTitle";
 
 const sortOptions = [
   { value: "start_time", label: "Time" },
@@ -16,6 +17,7 @@ const sortOptions = [
 ];
 
 export default function TracesPage() {
+  usePageTitle("Traces");
   const router = useRouter();
   const {
     traces,

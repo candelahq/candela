@@ -50,16 +50,21 @@ export interface TodayBudgetData {
   periodResetsAt: string | null;
 }
 
+export const BASE_REFRESH_INTERVAL_MS = 60_000;
+export const MAX_CONSECUTIVE_ERRORS = 5;
+export const MAX_BACKOFF_MS = 300_000;
+
 type State = {
   data: TodayBudgetData | null;
   loading: boolean;
   error: string | null;
   fetchCount: number;
+  consecutiveErrors: number;
 };
 
 type Action =
   | { type: "fetch" }
-  | { type: "success"; data: TodayBudgetData }
+  | { type: "success"; data: TodayBudgetData; hasPartialError?: boolean }
   | { type: "error"; message: string }
   | { type: "refresh" };
 
@@ -68,9 +73,19 @@ function reducer(state: State, action: Action): State {
     case "fetch":
       return { ...state, loading: true, error: null };
     case "success":
-      return { ...state, loading: false, data: action.data };
+      return {
+        ...state,
+        loading: false,
+        data: action.data,
+        consecutiveErrors: action.hasPartialError ? state.consecutiveErrors + 1 : 0,
+      };
     case "error":
-      return { ...state, loading: false, error: action.message };
+      return {
+        ...state,
+        loading: false,
+        error: action.message,
+        consecutiveErrors: state.consecutiveErrors + 1,
+      };
     case "refresh":
       return { ...state, fetchCount: state.fetchCount + 1 };
   }
@@ -92,12 +107,23 @@ function startOfTodayUTC(): Date {
  *
  * Auto-refreshes every 60 seconds to keep the view live.
  */
-export function useTodayBudget() {
+export interface UseTodayBudgetOptions {
+  baseIntervalMs?: number;
+  maxConsecutiveErrors?: number;
+  maxBackoffMs?: number;
+}
+
+export function useTodayBudget(options?: UseTodayBudgetOptions) {
+  const baseIntervalMs = options?.baseIntervalMs ?? BASE_REFRESH_INTERVAL_MS;
+  const maxConsecutiveErrors = options?.maxConsecutiveErrors ?? MAX_CONSECUTIVE_ERRORS;
+  const maxBackoffMs = options?.maxBackoffMs ?? MAX_BACKOFF_MS;
+
   const [state, dispatch] = useReducer(reducer, {
     data: null,
     loading: true,
     error: null,
     fetchCount: 0,
+    consecutiveErrors: 0,
   });
 
   useEffect(() => {
@@ -117,7 +143,11 @@ export function useTodayBudget() {
       },
     }, { signal });
 
-    const budgetPromise = userClient.getMyBudget({}, { signal }).catch(() => null);
+    let budgetError = false;
+    const budgetPromise = userClient.getMyBudget({}, { signal }).catch(() => {
+      budgetError = true;
+      return null;
+    });
 
     Promise.all([usagePromise, budgetPromise])
       .then(([usageRes, budgetRes]) => {
@@ -162,6 +192,7 @@ export function useTodayBudget() {
 
         dispatch({
           type: "success",
+          hasPartialError: budgetError,
           data: {
             // ── Usage from DashboardService.GetMyUsage (BigQuery) ─────────
             totalCalls: Number(usageRes.totalCalls),
@@ -200,13 +231,32 @@ export function useTodayBudget() {
     return () => controller.abort();
   }, [state.fetchCount]);
 
-  // Auto-refresh every 60 seconds.
+  // Auto-refresh with exponential backoff on errors; stops after maxConsecutiveErrors (#598)
   useEffect(() => {
-    const interval = setInterval(() => {
+    if (state.loading) return;
+    if (state.consecutiveErrors >= maxConsecutiveErrors) return;
+
+    let delay = baseIntervalMs;
+    if (state.consecutiveErrors > 0) {
+      delay = Math.min(
+        baseIntervalMs * Math.pow(2, state.consecutiveErrors),
+        maxBackoffMs
+      );
+    }
+
+    const timer = setTimeout(() => {
       dispatch({ type: "refresh" });
-    }, 60_000);
-    return () => clearInterval(interval);
-  }, []);
+    }, delay);
+
+    return () => clearTimeout(timer);
+  }, [
+    state.loading,
+    state.consecutiveErrors,
+    state.fetchCount,
+    baseIntervalMs,
+    maxConsecutiveErrors,
+    maxBackoffMs,
+  ]);
 
   const refresh = useCallback(() => dispatch({ type: "refresh" }), []);
 
@@ -215,5 +265,6 @@ export function useTodayBudget() {
     loading: state.loading,
     error: state.error,
     refresh,
+    consecutiveErrors: state.consecutiveErrors,
   };
 }

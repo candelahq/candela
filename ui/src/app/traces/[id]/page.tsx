@@ -8,6 +8,7 @@ import type { SpanNode } from "@/hooks/useTrace";
 import { ErrorBanner } from "@/components/ErrorBanner";
 import { AgentDAG } from "@/components/AgentDAG";
 import { SpanStatus } from "@/gen/candela/types/trace_pb";
+import { usePageTitle } from "@/hooks/usePageTitle";
 
 type ViewMode = "waterfall" | "graph";
 
@@ -308,6 +309,13 @@ export default function TraceDetailPage() {
   const { trace, loading, error, selectedSpanId, selectedNode, toggleSpan,
     visibleSpans, collapsedIds, toggleCollapse, collapseAll, expandAll } =
     useTrace(traceId);
+
+  const pageTitle = trace?.rootSpanName
+    ? `Trace: ${trace.rootSpanName}`
+    : traceId
+    ? `Trace ${traceId.slice(0, 8)}`
+    : "Trace Detail";
+  usePageTitle(pageTitle);
 
   return (
     <>

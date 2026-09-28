@@ -17,6 +17,10 @@ const FOCUSABLE_SELECTOR =
 export function useModalA11y({ onClose, isOpen = true }: UseModalA11yOptions) {
   const modalRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLElement | null>(null);
+  const onCloseRef = useRef(onClose);
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  }, [onClose]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -31,8 +35,10 @@ export function useModalA11y({ onClose, isOpen = true }: UseModalA11yOptions) {
       // Find all focusable elements inside the dialog
       const focusable = modal.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR);
       if (focusable.length > 0) {
-        // Focus first element, giving preference to inputs/buttons over close icon if possible
-        const firstInput = modal.querySelector<HTMLElement>("input, select, textarea");
+        // Focus first enabled element, giving preference to inputs over close icon if possible
+        const firstInput = modal.querySelector<HTMLElement>(
+          'input:not([disabled]), select:not([disabled]), textarea:not([disabled])'
+        );
         if (firstInput) {
           firstInput.focus();
         } else {
@@ -46,7 +52,7 @@ export function useModalA11y({ onClose, isOpen = true }: UseModalA11yOptions) {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         e.preventDefault();
-        onClose();
+        onCloseRef.current();
         return;
       }
 
@@ -112,7 +118,7 @@ export function useModalA11y({ onClose, isOpen = true }: UseModalA11yOptions) {
         triggerRef.current.focus();
       }
     };
-  }, [isOpen, onClose]);
+  }, [isOpen]);
 
   return { modalRef };
 }

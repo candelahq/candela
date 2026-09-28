@@ -263,4 +263,33 @@ describe("useTodayBudget", () => {
     await waitFor(() => expect(result.current.consecutiveErrors).toBe(0));
     expect(result.current.data?.totalCalls).toBe(25);
   });
+
+  it("increments consecutive errors and reaches error limit on repeated budget RPC failures (partial success)", async () => {
+    mockGetMyUsage.mockResolvedValue(mockUsageResponse());
+    mockGetMyBudget.mockRejectedValue(new Error("firestore budget error"));
+
+    const { result } = renderHook(() =>
+      useTodayBudget({ baseIntervalMs: 1000, maxConsecutiveErrors: 2 })
+    );
+
+    // Initial fetch: usage succeeds, but budget rejects -> consecutiveErrors = 1
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.data?.totalCalls).toBe(25);
+    expect(result.current.data?.budget).toBeNull();
+    expect(result.current.consecutiveErrors).toBe(1);
+
+    // 1st backoff delay: 1000 * 2^1 = 2000ms
+    act(() => {
+      vi.advanceTimersByTime(2000);
+    });
+    // 2nd fetch -> consecutiveErrors = 2 (max reached)
+    await waitFor(() => expect(result.current.consecutiveErrors).toBe(2));
+    expect(mockGetMyUsage).toHaveBeenCalledTimes(2);
+
+    // Advance 60s - should NOT make further calls because maxConsecutiveErrors was reached
+    act(() => {
+      vi.advanceTimersByTime(60_000);
+    });
+    expect(mockGetMyUsage).toHaveBeenCalledTimes(2);
+  });
 });

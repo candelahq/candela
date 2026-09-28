@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { userClient } from "@/lib/api";
 import { BudgetPeriod } from "@/gen/candela/types/user_pb";
 import type { UserBudget } from "@/gen/candela/types/user_pb";
@@ -16,10 +16,22 @@ interface BudgetModalProps {
 
 export function BudgetModal({ userId, email, onClose, onUpdated }: BudgetModalProps) {
   const { modalRef } = useModalA11y({ onClose });
+  const inputRef = useRef<HTMLInputElement>(null);
   const [budgetForm, setBudgetForm] = useState({ limitUsd: 0 });
   const [currentBudget, setCurrentBudget] = useState<UserBudget | null>(null);
   const [budgetLoading, setBudgetLoading] = useState(false);
   const [budgetError, setBudgetError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!budgetLoading && inputRef.current && modalRef.current?.contains(document.activeElement)) {
+      if (
+        document.activeElement === modalRef.current ||
+        document.activeElement?.getAttribute("aria-label") === "Close dialog"
+      ) {
+        inputRef.current.focus();
+      }
+    }
+  }, [budgetLoading, modalRef]);
 
   useEffect(() => {
     let active = true;
@@ -111,6 +123,7 @@ export function BudgetModal({ userId, email, onClose, onUpdated }: BudgetModalPr
               <HelpTip text="Spending cap per day. Resets at midnight UTC." />
             </label>
             <input
+              ref={inputRef}
               id="budget-limit"
               type="number"
               min="0"

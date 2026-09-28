@@ -64,7 +64,7 @@ type State = {
 
 type Action =
   | { type: "fetch" }
-  | { type: "success"; data: TodayBudgetData }
+  | { type: "success"; data: TodayBudgetData; hasPartialError?: boolean }
   | { type: "error"; message: string }
   | { type: "refresh" };
 
@@ -73,7 +73,12 @@ function reducer(state: State, action: Action): State {
     case "fetch":
       return { ...state, loading: true, error: null };
     case "success":
-      return { ...state, loading: false, data: action.data, consecutiveErrors: 0 };
+      return {
+        ...state,
+        loading: false,
+        data: action.data,
+        consecutiveErrors: action.hasPartialError ? state.consecutiveErrors + 1 : 0,
+      };
     case "error":
       return {
         ...state,
@@ -138,7 +143,11 @@ export function useTodayBudget(options?: UseTodayBudgetOptions) {
       },
     }, { signal });
 
-    const budgetPromise = userClient.getMyBudget({}, { signal }).catch(() => null);
+    let budgetError = false;
+    const budgetPromise = userClient.getMyBudget({}, { signal }).catch(() => {
+      budgetError = true;
+      return null;
+    });
 
     Promise.all([usagePromise, budgetPromise])
       .then(([usageRes, budgetRes]) => {
@@ -183,6 +192,7 @@ export function useTodayBudget(options?: UseTodayBudgetOptions) {
 
         dispatch({
           type: "success",
+          hasPartialError: budgetError,
           data: {
             // ── Usage from DashboardService.GetMyUsage (BigQuery) ─────────
             totalCalls: Number(usageRes.totalCalls),

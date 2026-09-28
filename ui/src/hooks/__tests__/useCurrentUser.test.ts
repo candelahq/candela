@@ -96,4 +96,21 @@ describe("useCurrentUser", () => {
     expect(result.current.user).toBeNull();
     expect(result.current.isAdmin).toBe(false);
   });
+
+  it("transitions out of loading state when resp.user is null/empty", async () => {
+    mockGetCurrentUser.mockResolvedValue({
+      user: null,
+      budget: null,
+      activeGrants: [],
+      totalRemainingUsd: 0,
+    });
+
+    const { result } = renderHook(() => useCurrentUser());
+
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    expect(result.current.user).toBeNull();
+    expect(result.current.isAdmin).toBe(false);
+    expect(result.current.error).toBeNull();
+  });
 });

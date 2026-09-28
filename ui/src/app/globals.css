@@ -420,6 +420,7 @@ tr:hover td {
   padding: 7px 14px;
   font-size: 13px;
   font-weight: 500;
+  font-family: inherit;
   border-radius: var(--radius-md);
   border: 1px solid var(--border);
   background: var(--bg-tertiary);
@@ -428,21 +429,63 @@ tr:hover td {
   transition: all 0.15s ease;
 }
 
-.btn:hover {
+.btn:hover:not(:disabled) {
   background: var(--bg-hover);
   border-color: var(--text-muted);
 }
 
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .btn-primary {
   background: var(--accent);
-  color: #000;
+  color: var(--bg-primary, #000);
   border-color: var(--accent);
   font-weight: 600;
 }
 
-.btn-primary:hover {
+.btn-primary:hover:not(:disabled) {
   background: var(--accent-hover);
   border-color: var(--accent-hover);
+  box-shadow: 0 0 16px rgba(240, 160, 48, 0.3);
+}
+
+.btn-ghost {
+  background: transparent;
+  color: var(--text-secondary);
+  border: 1px solid var(--border);
+}
+
+.btn-ghost:hover:not(:disabled) {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.btn-sm {
+  padding: 4px 12px;
+  font-size: 0.8rem;
+}
+
+.btn-danger {
+  background: rgba(248, 113, 113, 0.15);
+  color: var(--error);
+  border: 1px solid rgba(248, 113, 113, 0.3);
+}
+
+.btn-danger:hover:not(:disabled) {
+  background: rgba(248, 113, 113, 0.25);
+}
+
+.btn-success {
+  background: rgba(52, 211, 153, 0.15);
+  color: var(--success);
+  border: 1px solid rgba(52, 211, 153, 0.3);
+}
+
+.btn-success:hover:not(:disabled) {
+  background: rgba(52, 211, 153, 0.25);
 }
 
 /* Animations */
@@ -1049,7 +1092,7 @@ tr:hover td {
   background: rgba(248, 113, 113, 0.15) !important;
 }
 
-.badge-info {
+.badge-accent {
   background: var(--accent-dim);
   color: var(--accent);
 }
@@ -1852,10 +1895,7 @@ tr:hover .model-bar {
   padding: 3rem;
 }
 
-@keyframes fadeIn {
-  from { opacity: 0; }
-  to { opacity: 1; }
-}
+
 
 /* ──────────────────────────────────────────
    Admin — Table
@@ -1971,74 +2011,7 @@ tr:hover .model-bar {
   color: var(--error);
 }
 
-/* ──────────────────────────────────────────
-   Buttons
-   ────────────────────────────────────────── */
 
-.btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 8px 16px;
-  border: none;
-  border-radius: var(--radius-md);
-  font-size: 0.85rem;
-  font-weight: 500;
-  font-family: inherit;
-  cursor: pointer;
-  transition: all 0.15s ease;
-}
-
-.btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.btn-primary {
-  background: var(--accent);
-  color: var(--bg-primary);
-}
-
-.btn-primary:hover:not(:disabled) {
-  background: var(--accent-hover);
-  box-shadow: 0 0 16px rgba(240, 160, 48, 0.3);
-}
-
-.btn-ghost {
-  background: transparent;
-  color: var(--text-secondary);
-  border: 1px solid var(--border);
-}
-
-.btn-ghost:hover:not(:disabled) {
-  background: var(--bg-hover);
-  color: var(--text-primary);
-}
-
-.btn-sm {
-  padding: 4px 12px;
-  font-size: 0.8rem;
-}
-
-.btn-danger {
-  background: rgba(248, 113, 113, 0.15);
-  color: var(--error);
-  border: 1px solid rgba(248, 113, 113, 0.3);
-}
-
-.btn-danger:hover:not(:disabled) {
-  background: rgba(248, 113, 113, 0.25);
-}
-
-.btn-success {
-  background: rgba(52, 211, 153, 0.15);
-  color: var(--success);
-  border: 1px solid rgba(52, 211, 153, 0.3);
-}
-
-.btn-success:hover:not(:disabled) {
-  background: rgba(52, 211, 153, 0.25);
-}
 
 .action-btn-group {
   display: flex;
@@ -2414,9 +2387,7 @@ tr:hover .model-bar {
   animation: spin 0.8s linear infinite;
 }
 
-@keyframes spin {
-  to { transform: rotate(360deg); }
-}
+
 
 /* ──────────────────────────────────────────
    Budget & Delete modal components

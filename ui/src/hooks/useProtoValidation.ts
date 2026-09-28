@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useState } from "react";
-import { create } from "@bufbuild/protobuf";
+import { create, type DescMessage, type MessageInitShape } from "@bufbuild/protobuf";
 import { createValidator } from "@bufbuild/protovalidate";
 import {
   CreateUserRequestSchema,
@@ -9,8 +9,6 @@ import {
   CreateGrantRequestSchema,
 } from "@/gen/candela/v1/user_service_pb";
 import { ModelCatalogEntrySchema } from "@/gen/candela/types/model_catalog_pb";
-import type { GenMessage } from "@bufbuild/protobuf/codegenv2";
-import type { Message } from "@bufbuild/protobuf";
 
 export interface ValidationError {
   field: string;
@@ -18,25 +16,55 @@ export interface ValidationError {
 }
 
 /**
+ * Singleton protovalidate validator instance at module scope.
+ * Reusing a single validator instance avoids recompilation overhead on each validation invocation.
+ */
+export const defaultValidator = createValidator();
+
+export function extractFieldName(field: unknown): string {
+  if (Array.isArray(field) && field.length > 0) {
+    for (let i = field.length - 1; i >= 0; i--) {
+      const item = field[i];
+      if (item && typeof item === "object" && "name" in item && typeof item.name === "string") {
+        return item.name;
+      }
+    }
+  }
+  const str = String(field || "");
+  const match = str.match(/\.([a-zA-Z0-9_]+)$/);
+  if (match) {
+    return match[1];
+  }
+  return str || "unknown";
+}
+
+/**
  * Validates a protobuf message against its schema's buf/validate annotations.
  * Returns an array of field-level errors.
  */
-async function validateMessage<T extends Message>(
-  schema: GenMessage<T>,
-  values: Record<string, unknown>,
+export async function validateMessage<Desc extends DescMessage>(
+  schema: Desc,
+  values: MessageInitShape<Desc>,
 ): Promise<ValidationError[]> {
   try {
-    const validator = createValidator();
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const msg = create(schema, values as any);
-    const result = validator.validate(schema, msg);
+    const msg = create(schema, values);
+    const result = defaultValidator.validate(schema, msg);
 
     if (result.kind === "valid") {
       return [];
     }
 
+    if (result.kind === "error") {
+      return [
+        {
+          field: "unknown",
+          message: result.error?.message || "Validation failed",
+        },
+      ];
+    }
+
     return (result.violations ?? []).map((v) => ({
-      field: v.field.toString() || "unknown",
+      field: extractFieldName(v.field),
       message: v.message || "Validation failed",
     }));
   } catch (err) {
@@ -49,6 +77,11 @@ async function validateMessage<T extends Message>(
   }
 }
 
+function findError(errors: ValidationError[], field: string): string | undefined {
+  const snakeField = field.replace(/[A-Z]/g, (m) => `_${m.toLowerCase()}`);
+  return errors.find((e) => e.field === field || e.field === snakeField)?.message;
+}
+
 /**
  * Hook for validating CreateUserRequest fields with protovalidate.
  */
@@ -56,12 +89,7 @@ export function useCreateUserValidation() {
   const [errors, setErrors] = useState<ValidationError[]>([]);
 
   const validate = useCallback(
-    async (values: {
-      email: string;
-      displayName?: string;
-      role?: number;
-      dailyBudgetUsd?: number;
-    }) => {
+    async (values: MessageInitShape<typeof CreateUserRequestSchema>) => {
       const errs = await validateMessage(CreateUserRequestSchema, values);
       setErrors(errs);
       return errs.length === 0;
@@ -70,7 +98,7 @@ export function useCreateUserValidation() {
   );
 
   const getError = useCallback(
-    (field: string) => errors.find((e) => e.field === field)?.message,
+    (field: string) => findError(errors, field),
     [errors],
   );
 
@@ -84,7 +112,7 @@ export function useSetBudgetValidation() {
   const [errors, setErrors] = useState<ValidationError[]>([]);
 
   const validate = useCallback(
-    async (values: { userId: string; limitUsd: number; periodType?: number }) => {
+    async (values: MessageInitShape<typeof SetBudgetRequestSchema>) => {
       const errs = await validateMessage(SetBudgetRequestSchema, values);
       setErrors(errs);
       return errs.length === 0;
@@ -93,7 +121,7 @@ export function useSetBudgetValidation() {
   );
 
   const getError = useCallback(
-    (field: string) => errors.find((e) => e.field === field)?.message,
+    (field: string) => findError(errors, field),
     [errors],
   );
 
@@ -107,13 +135,7 @@ export function useCreateGrantValidation() {
   const [errors, setErrors] = useState<ValidationError[]>([]);
 
   const validate = useCallback(
-    async (values: {
-      userId: string;
-      amountUsd: number;
-      reason: string;
-      startsAt?: unknown;
-      expiresAt?: unknown;
-    }) => {
+    async (values: MessageInitShape<typeof CreateGrantRequestSchema>) => {
       const errs = await validateMessage(CreateGrantRequestSchema, values);
       setErrors(errs);
       return errs.length === 0;
@@ -122,7 +144,7 @@ export function useCreateGrantValidation() {
   );
 
   const getError = useCallback(
-    (field: string) => errors.find((e) => e.field === field)?.message,
+    (field: string) => findError(errors, field),
     [errors],
   );
 
@@ -137,17 +159,7 @@ export function useCatalogEntryValidation() {
   const [errors, setErrors] = useState<ValidationError[]>([]);
 
   const validate = useCallback(
-    async (values: {
-      modelId: string;
-      provider: string;
-      displayName?: string;
-      inputPerMillion: number;
-      outputPerMillion: number;
-      enabled?: boolean;
-      category?: string;
-      providerModelId?: string;
-      region?: string;
-    }) => {
+    async (values: MessageInitShape<typeof ModelCatalogEntrySchema>) => {
       const errs = await validateMessage(ModelCatalogEntrySchema, values);
       setErrors(errs);
       return errs.length === 0;
@@ -156,9 +168,10 @@ export function useCatalogEntryValidation() {
   );
 
   const getError = useCallback(
-    (field: string) => errors.find((e) => e.field === field)?.message,
+    (field: string) => findError(errors, field),
     [errors],
   );
 
   return { errors, validate, getError, clearErrors: () => setErrors([]) };
 }
+

@@ -365,12 +365,12 @@ jobs:
           $env:GOARCH = "arm64"
           go build -o candela-windows-arm64.exe ./cmd/candela
 
-  # ── UI build + lint ─────────────────────────────────────────────────────────
-  ui-build-and-lint:
+  # ── UI (lint, build, unit test, E2E) ─────────────────────────────────────────
+  ui:
     needs: changes
     if: needs.changes.outputs.ui == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     container:
       image: ghcr.io/candelahq/candela-dev:latest
       credentials:
@@ -384,8 +384,28 @@ jobs:
       - name: Fix git ownership for Nix flake
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
+      - name: Cache pnpm store
+        uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4
+        with:
+          path: |
+            ~/.local/share/pnpm/store
+            /root/.local/share/pnpm/store
+          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('ui/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-store-
+
+      - name: Cache Playwright browsers
+        uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4
+        with:
+          path: |
+            ~/.cache/ms-playwright
+            /root/.cache/ms-playwright
+          key: ${{ runner.os }}-playwright-${{ hashFiles('ui/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-playwright-
+
       - name: Install dependencies
-        run: nix develop . --command pnpm install
+        run: nix develop . --command pnpm install --frozen-lockfile
         working-directory: ui
 
       - name: Generate TS proto stubs
@@ -406,35 +426,13 @@ jobs:
         run: nix develop . --command pnpm run lint
         working-directory: ui
 
+      - name: Unit and component tests
+        run: nix develop . --command pnpm run test
+        working-directory: ui
+
       - name: Build
         run: nix develop . --command pnpm run build
         working-directory: ui
-
-  # ── UI E2E ──────────────────────────────────────────────────────────────────
-  ui-e2e:
-    needs: [changes, ui-build-and-lint]
-    if: always() && needs.changes.outputs.ui == 'true' && needs.ui-build-and-lint.result == 'success'
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    container:
-      image: ghcr.io/candelahq/candela-dev:latest
-      credentials:
-        username: ${{ github.actor }}
-        password: ${{ secrets.GITHUB_TOKEN }}
-    steps:
-      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
-        with:
-          persist-credentials: false
-
-      - name: Fix git ownership for Nix flake
-        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
-
-      - name: Install dependencies
-        run: nix develop . --command pnpm install
-        working-directory: ui
-
-      - name: Generate TS proto stubs
-        run: nix develop . --command buf generate
 
       - name: Install Playwright browsers
         run: nix develop . --command pnpm exec playwright install --with-deps chromium

@@ -32,5 +32,8 @@ export default defineConfig({
     url: "http://localhost:3000",
     reuseExistingServer: !process.env.CI,
     timeout: 30_000,
+    env: {
+      NEXT_PUBLIC_DISABLE_ONBOARDING: "true",
+    },
   },
 });

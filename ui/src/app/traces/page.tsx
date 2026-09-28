@@ -47,8 +47,9 @@ export default function TracesPage() {
 
   const [filtersOpen, setFiltersOpen] = useState(hasExpandedFilters);
 
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => { fetchInitial(); }, []);
+  useEffect(() => {
+    fetchInitial();
+  }, [fetchInitial]);
 
   return (
     <>

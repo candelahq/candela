@@ -903,3 +903,71 @@ func TestQueryTraces_PrimaryModelCumulativeCost(t *testing.T) {
 		t.Errorf("primary_provider = %q, want provider-a (cumulative 0.12 > 0.10)", tr.PrimaryProvider)
 	}
 }
+
+func TestQueryTraces_AllFiltersSimultaneously(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(time.Microsecond)
+
+	createSpan := func(id, traceID, project, user, tenant, env, model, provider, name, jobID string, status storage.SpanStatus, tOffset time.Duration) storage.Span {
+		sp := testSpan(id, traceID, storage.SpanKindLLM, model)
+		sp.ProjectID = project
+		sp.UserID = user
+		sp.TenantID = tenant
+		sp.Environment = env
+		sp.GenAI.Provider = provider
+		sp.Name = name
+		sp.JobID = jobID
+		sp.Status = status
+		sp.StartTime = now.Add(tOffset)
+		sp.EndTime = sp.StartTime.Add(50 * time.Millisecond)
+		return sp
+	}
+
+	// Target trace: matches ALL filters
+	sTarget := createSpan("s-target", "trace-target", "proj-alpha", "alice@example.com", "tenant-corp", "prod", "gpt-4o", "openai", "rag.query.search", "job-42", storage.SpanStatusError, 0)
+
+	// Non-matching traces: each differs by exactly one filter
+	spans := []storage.Span{
+		sTarget,
+		createSpan("s2", "trace-diff-proj", "proj-other", "alice@example.com", "tenant-corp", "prod", "gpt-4o", "openai", "rag.query.search", "job-42", storage.SpanStatusError, 0),
+		createSpan("s3", "trace-diff-user", "proj-alpha", "bob@example.com", "tenant-corp", "prod", "gpt-4o", "openai", "rag.query.search", "job-42", storage.SpanStatusError, 0),
+		createSpan("s4", "trace-diff-tenant", "proj-alpha", "alice@example.com", "tenant-other", "prod", "gpt-4o", "openai", "rag.query.search", "job-42", storage.SpanStatusError, 0),
+		createSpan("s5", "trace-diff-env", "proj-alpha", "alice@example.com", "tenant-corp", "staging", "gpt-4o", "openai", "rag.query.search", "job-42", storage.SpanStatusError, 0),
+		createSpan("s6", "trace-diff-model", "proj-alpha", "alice@example.com", "tenant-corp", "prod", "claude-3-5-sonnet", "openai", "rag.query.search", "job-42", storage.SpanStatusError, 0),
+		createSpan("s7", "trace-diff-provider", "proj-alpha", "alice@example.com", "tenant-corp", "prod", "gpt-4o", "azure", "rag.query.search", "job-42", storage.SpanStatusError, 0),
+		createSpan("s8", "trace-diff-search", "proj-alpha", "alice@example.com", "tenant-corp", "prod", "gpt-4o", "openai", "embeddings.generate", "job-42", storage.SpanStatusError, 0),
+		createSpan("s9", "trace-diff-job", "proj-alpha", "alice@example.com", "tenant-corp", "prod", "gpt-4o", "openai", "rag.query.search", "job-99", storage.SpanStatusError, 0),
+		createSpan("s10", "trace-diff-status", "proj-alpha", "alice@example.com", "tenant-corp", "prod", "gpt-4o", "openai", "rag.query.search", "job-42", storage.SpanStatusOK, 0),
+		createSpan("s11", "trace-diff-time", "proj-alpha", "alice@example.com", "tenant-corp", "prod", "gpt-4o", "openai", "rag.query.search", "job-42", storage.SpanStatusError, -24*time.Hour),
+	}
+
+	if err := store.IngestSpans(ctx, spans); err != nil {
+		t.Fatalf("ingest failed: %v", err)
+	}
+
+	res, err := store.QueryTraces(ctx, storage.TraceQuery{
+		ProjectID:   "proj-alpha",
+		StartTime:   now.Add(-time.Hour),
+		EndTime:     now.Add(time.Hour),
+		UserID:      "alice@example.com",
+		TenantID:    "tenant-corp",
+		Environment: "prod",
+		Model:       "gpt-4o",
+		Provider:    "openai",
+		Search:      "query",
+		JobID:       "job-42",
+		Status:      storage.SpanStatusError,
+		PageSize:    10,
+	})
+	if err != nil {
+		t.Fatalf("query with all filters failed: %v", err)
+	}
+
+	if len(res.Traces) != 1 {
+		t.Fatalf("got %d traces, want exactly 1", len(res.Traces))
+	}
+	if res.Traces[0].TraceID != "trace-target" {
+		t.Errorf("got trace %s, want trace-target", res.Traces[0].TraceID)
+	}
+}

@@ -169,9 +169,15 @@ export function useTraces(options?: UseTracesOptions) {
 
   const fetchRef = useRef<AbortController | null>(null);
   const filtersRef = useRef(state.filters);
-  filtersRef.current = state.filters;
   const pageTokenRef = useRef(state.currentPageToken);
-  pageTokenRef.current = state.currentPageToken;
+
+  useEffect(() => {
+    filtersRef.current = state.filters;
+  }, [state.filters]);
+
+  useEffect(() => {
+    pageTokenRef.current = state.currentPageToken;
+  }, [state.currentPageToken]);
 
   const fetchTraces = useCallback((f: TraceFilters, resetPagination = false) => {
     fetchRef.current?.abort();
@@ -308,10 +314,9 @@ export function useTraces(options?: UseTracesOptions) {
   useEffect(() => {
     if (prevTokenRef.current !== state.currentPageToken) {
       prevTokenRef.current = state.currentPageToken;
-      fetchTraces(state.filters);
+      fetchTraces(filtersRef.current);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [state.currentPageToken]);
+  }, [state.currentPageToken, fetchTraces]);
 
   const fetchNextPage = useCallback(() => {
     if (!state.nextPageToken) return;
@@ -322,6 +327,10 @@ export function useTraces(options?: UseTracesOptions) {
     if (state.pageTokenHistory.length === 0) return;
     dispatch({ type: "set_page_token", direction: "prev" });
   }, [state.pageTokenHistory]);
+
+  const fetchInitial = useCallback(() => {
+    fetchTraces(filtersRef.current, true);
+  }, [fetchTraces]);
 
   // Abort in-flight request on unmount only. Cleanup must NOT be in the
   // mode/filters effect — fetchTraces already updates fetchRef.current
@@ -343,7 +352,7 @@ export function useTraces(options?: UseTracesOptions) {
     updateFilters,
     clearFilters,
     refresh,
-    fetchInitial: () => fetchTraces(state.filters, true),
+    fetchInitial,
     fetchNextPage,
     fetchPreviousPage,
     hasNextPage: !!state.nextPageToken,

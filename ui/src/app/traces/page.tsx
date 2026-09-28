@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useTraces } from "@/hooks/useTraces";
 import { ScopeToggle } from "@/components/ScopeToggle";
@@ -46,9 +46,13 @@ export default function TracesPage() {
   );
 
   const [filtersOpen, setFiltersOpen] = useState(hasExpandedFilters);
+  const initialFetchedRef = useRef(false);
 
   useEffect(() => {
-    fetchInitial();
+    if (!initialFetchedRef.current) {
+      initialFetchedRef.current = true;
+      fetchInitial();
+    }
   }, [fetchInitial]);
 
   return (

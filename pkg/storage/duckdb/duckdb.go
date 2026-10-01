@@ -3,6 +3,7 @@ package duckdb
 import (
 	"context"
 	"database/sql"
+	"database/sql/driver"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -146,13 +147,10 @@ func (s *Store) IngestSpans(ctx context.Context, spans []storage.Span) error {
 			rollbackCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 			defer cancel()
 			if _, rbErr := conn.ExecContext(rollbackCtx, "ROLLBACK"); rbErr != nil {
-				// If rollback fails, close the underlying driver connection so the connection
-				// is discarded and not returned to the pool with an active uncommitted transaction.
-				_ = conn.Raw(func(driverConn any) error {
-					if dc, ok := driverConn.(interface{ Close() error }); ok {
-						return dc.Close()
-					}
-					return nil
+				// If rollback fails, return driver.ErrBadConn so database/sql marks
+				// the connection as broken and discards it rather than returning it to the pool.
+				_ = conn.Raw(func(any) error {
+					return driver.ErrBadConn
 				})
 			}
 		}

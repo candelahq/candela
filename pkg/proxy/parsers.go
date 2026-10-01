@@ -429,6 +429,19 @@ func (p *googleParser) ParseStreamingResponse(data []byte) (content string, inpu
 		}
 	}
 
+	if lastMeta == nil {
+		if idx := bytes.LastIndex(data, []byte(`"usageMetadata"`)); idx >= 0 {
+			relOpen := bytes.IndexByte(data[idx:], '{')
+			if relOpen >= 0 {
+				var meta map[string]interface{}
+				dec := json.NewDecoder(bytes.NewReader(data[idx+relOpen:]))
+				if err := dec.Decode(&meta); err == nil {
+					lastMeta = meta
+				}
+			}
+		}
+	}
+
 	content = contentBuilder.String()
 	if lastMeta != nil {
 		// Return RAW promptTokenCount — same rationale as ParseResponse.
@@ -517,6 +530,19 @@ func extractModelFromStreamingResponse(provider string, data []byte) string {
 		if json.Unmarshal(data, &single) == nil {
 			if mv, ok := single["modelVersion"].(string); ok && mv != "" {
 				return mv
+			}
+		}
+		// Fallback: scan for "modelVersion": "..." directly in stream data
+		if idx := bytes.LastIndex(data, []byte(`"modelVersion"`)); idx >= 0 {
+			relColon := bytes.IndexByte(data[idx:], ':')
+			if relColon >= 0 {
+				rest := bytes.TrimSpace(data[idx+relColon+1:])
+				if len(rest) > 0 && rest[0] == '"' {
+					endQuote := bytes.IndexByte(rest[1:], '"')
+					if endQuote >= 0 {
+						return string(rest[1 : 1+endQuote])
+					}
+				}
 			}
 		}
 
@@ -696,6 +722,18 @@ func extractGoogleStreamingCache(data []byte) CacheTokens {
 			}
 			if meta, ok := chunk["usageMetadata"].(map[string]interface{}); ok {
 				ct.CacheReadTokens = toInt64(meta["cachedContentTokenCount"])
+			}
+		}
+	}
+	if ct.CacheReadTokens == 0 {
+		if idx := bytes.LastIndex(data, []byte(`"usageMetadata"`)); idx >= 0 {
+			relOpen := bytes.IndexByte(data[idx:], '{')
+			if relOpen >= 0 {
+				var meta map[string]interface{}
+				dec := json.NewDecoder(bytes.NewReader(data[idx+relOpen:]))
+				if err := dec.Decode(&meta); err == nil {
+					ct.CacheReadTokens = toInt64(meta["cachedContentTokenCount"])
+				}
 			}
 		}
 	}

@@ -1125,9 +1125,12 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 	// FAIL-CLOSED: if jobID is set, a task budget MUST exist.
 	var taskReserved float64
 	if p.users != nil && jobID != "" {
-		const budgetCheckFloor = 0.001
-		const reservationFloor = 0.05
-		check, err := p.users.CheckTaskBudget(r.Context(), jobID, estimatedCost)
+		const defaultReservationFloor = 0.05
+		taskCheckAmount := defaultReservationFloor
+		if estimatedCost > taskCheckAmount {
+			taskCheckAmount = estimatedCost
+		}
+		check, err := p.users.CheckTaskBudget(r.Context(), jobID, taskCheckAmount)
 		if err != nil {
 			if errors.Is(err, storage.ErrNotFound) {
 				ProxyErrorResponse(w, http.StatusPaymentRequired,
@@ -1156,11 +1159,8 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 			return
 		} else {
 			// TOCTOU: atomic check-and-reserve for task-level pending spend.
-			taskReserved = reservationFloor
-			if estimatedCost > reservationFloor {
-				taskReserved = estimatedCost
-			}
-			if !p.taskPendingSpend.ReserveIfUnder(jobID, check.RemainingUSD, taskReserved, budgetCheckFloor) {
+			taskReserved = taskCheckAmount
+			if !p.taskPendingSpend.ReserveIfUnder(jobID, check.RemainingUSD, taskReserved, 0.0) {
 				ProxyErrorResponse(w, http.StatusPaymentRequired,
 					"task budget exhausted (concurrent requests in flight)",
 					"task_budget_exhausted")
@@ -1181,10 +1181,10 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 	var budgetReserved float64 // track reservation for Release in deductBudget
 	if p.users != nil && effectiveUserID != "" && (!isAdmin || isServiceAccount) {
 		// Check whether the user can afford this request. Use the estimated
-		// cost when available; fall back to a minimal floor for requests
-		// where the model/cost is unknown ($0.001 is below any cloud model).
-		const budgetCheckFloor = 0.001
-		checkAmount := budgetCheckFloor
+		// cost when available; fall back to a reasonable minimum floor ($0.05)
+		// rather than $0.001 to prevent massive budget overdraft (#525).
+		const defaultReservationFloor = 0.05
+		checkAmount := defaultReservationFloor
 		if estimatedCost > checkAmount {
 			checkAmount = estimatedCost
 		}
@@ -1250,7 +1250,7 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 
 		if !check.Allowed {
 			msg := "budget exhausted — contact your admin for a grant or budget increase"
-			if checkAmount > budgetCheckFloor && check.RemainingUSD > 0 {
+			if checkAmount > 0 && check.RemainingUSD > 0 {
 				msg = fmt.Sprintf("estimated cost $%.4f exceeds remaining budget $%.4f — contact your admin", checkAmount, check.RemainingUSD)
 			}
 			ProxyErrorResponse(w, http.StatusPaymentRequired, msg, "insufficient_budget")
@@ -1264,13 +1264,9 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 		// TOCTOU mitigation: atomic check-and-reserve via ReserveIfUnder.
 		// This is the same pattern used by the task budget gate (#779).
 		// Reserve a conservative estimate so concurrent requests see lower
-		// balance. $0.05 is a realistic floor for most LLM API calls.
-		const reservationFloor = 0.05
-		budgetReserved = reservationFloor
-		if estimatedCost > reservationFloor {
-			budgetReserved = estimatedCost
-		}
-		if !p.pendingSpend.ReserveIfUnder(effectiveUserID, check.RemainingUSD, budgetReserved, budgetCheckFloor) {
+		// balance. $0.05 is a realistic floor for most LLM API calls (#525).
+		budgetReserved = checkAmount
+		if !p.pendingSpend.ReserveIfUnder(effectiveUserID, check.RemainingUSD, budgetReserved, 0.0) {
 			ProxyErrorResponse(w, http.StatusPaymentRequired, "budget exhausted (concurrent requests in flight) — try again shortly", "insufficient_budget")
 			slog.Info("blocked request: budget exhausted after pending spend",
 				"user_id", effectiveUserID,
@@ -2020,11 +2016,11 @@ func (p *Proxy) handleStreamingResponse(
 	}
 	w.WriteHeader(resp.StatusCode)
 
-	// Determine model name for stream chunk translation.
-	var streamModel string
+	// Determine model name for stream chunk translation and token accounting.
 	var streamID string // consistent ID across all chunks in this stream
-	if provider.FormatTranslator != nil {
-		streamModel, _ = extractRequestInfo(provider.Name, reqBody)
+	streamModel, _ := extractRequestInfo(provider.Name, reqBody)
+	if streamModel == "" {
+		streamModel = extractModelFromURLPath(r.URL.Path)
 	}
 
 	// Tee the stream: forward to client AND buffer for observability.
@@ -2038,11 +2034,14 @@ func (p *Proxy) handleStreamingResponse(
 	// truncated but the stream still forwards to the client uninterrupted.
 	var streamBuffer bytes.Buffer
 	const maxStreamCapture = 10 << 20 // 10MB — matches respLimit
+	const maxTailCapture = 128 << 10  // 128KB — comfortably fits final usage and message_delta chunks (#525)
+	tailBuffer := newRollingBuffer(maxTailCapture)
 	streamCapped := false
 	buf := make([]byte, 4096)
 	var ttft time.Duration
 	isFirstChunk := true
 	streamCompleted := false // tracks whether stream ended normally
+	var totalBytesStreamed int64
 
 	for {
 		n, err := resp.Body.Read(buf)
@@ -2053,17 +2052,26 @@ func (p *Proxy) handleStreamingResponse(
 			}
 
 			chunk := buf[:n]
+			totalBytesStreamed += int64(n)
 
 			// Buffer raw upstream data for observability (before translation).
 			if cbAllow && !streamCapped {
 				if streamBuffer.Len()+n > maxStreamCapture {
 					streamCapped = true
+					remainingSpace := maxStreamCapture - streamBuffer.Len()
+					if remainingSpace > 0 {
+						streamBuffer.Write(chunk[:remainingSpace])
+					}
 					slog.Warn("stream capture truncated at 10MB",
 						"provider", provider.Name, "request_id", requestID)
 				} else {
 					streamBuffer.Write(chunk)
 				}
 			}
+			// Always maintain rolling tail buffer so final usage chunks and
+			// token accounting are never lost regardless of response size or
+			// circuit breaker state (#525).
+			_, _ = tailBuffer.Write(chunk)
 
 			// Translate chunk if provider has a FormatTranslator.
 			if provider.FormatTranslator != nil {
@@ -2090,27 +2098,33 @@ func (p *Proxy) handleStreamingResponse(
 
 	endTime := time.Now()
 
-	parseData := streamBuffer.Bytes()
-
 	// Gemini thought_signature capture for streaming (gemini-oai)
 	if p.thoughtSigs != nil && (provider.Name == "gemini-oai" || provider.Name == "google" || provider.Name == "gemini-vertex") {
-		p.thoughtSigs.ExtractAndStoreFromStream(parseData, provider.Name)
+		p.thoughtSigs.ExtractAndStoreFromStream(streamBuffer.Bytes(), provider.Name)
 	}
 
-	// Parse the accumulated stream to extract usage data.
-	// Use bounded timeout to prevent goroutine leaks.
-	streamStatus := storage.SpanStatusOK
-	if !streamCompleted {
-		streamStatus = storage.SpanStatusError
-	}
+	// Reconcile stream info across head buffer and tail buffer (#525).
+	streamInfo := p.extractStreamInfo(
+		provider,
+		streamModel,
+		reqBody,
+		streamBuffer.Bytes(),
+		tailBuffer.Bytes(),
+		streamCapped,
+		streamCompleted,
+		totalBytesStreamed,
+		requestID,
+	)
+
 	// ── Budget deduction (SYNCHRONOUS) — same rationale as handleStandardResponse.
 	if p.users != nil && effectiveUserID != "" {
-		model, _ := extractRequestInfo(provider.Name, reqBody)
-		_, inputTokens, outputTokens := extractStreamingUsage(provider.Name, parseData)
-		ct := extractStreamingCacheTokens(provider.Name, parseData)
+		model := streamInfo.model
 		if model == "" {
-			model = extractModelFromStreamingResponse(provider.Name, parseData)
+			model, _ = extractRequestInfo(provider.Name, reqBody)
 		}
+		inputTokens := streamInfo.inputTokens
+		outputTokens := streamInfo.outputTokens
+		ct := streamInfo.cacheTokens
 		inputTokens = p.calc.NormalizeCachedInputWithTTL(provider.Name, model, inputTokens, ct.CacheReadTokens, ct.CacheCreationTokens, extendedTTL)
 		deductCtx, deductCancel := context.WithTimeout(context.WithoutCancel(r.Context()), 15*time.Second)
 		p.deductBudget(deductCtx, provider, model, effectiveUserID, jobID, inputTokens, outputTokens, time.Since(startTime))
@@ -2125,12 +2139,13 @@ func (p *Proxy) handleStreamingResponse(
 		}
 	} else if p.spendTracker != nil {
 		// Solo mode: record per-model spend for daily limits.
-		model, _ := extractRequestInfo(provider.Name, reqBody)
-		_, inputTokens, outputTokens := extractStreamingUsage(provider.Name, parseData)
-		ct := extractStreamingCacheTokens(provider.Name, parseData)
+		model := streamInfo.model
 		if model == "" {
-			model = extractModelFromStreamingResponse(provider.Name, parseData)
+			model, _ = extractRequestInfo(provider.Name, reqBody)
 		}
+		inputTokens := streamInfo.inputTokens
+		outputTokens := streamInfo.outputTokens
+		ct := streamInfo.cacheTokens
 		inputTokens = p.calc.NormalizeCachedInputWithTTL(provider.Name, model, inputTokens, ct.CacheReadTokens, ct.CacheCreationTokens, extendedTTL)
 		cost := p.calc.Calculate(pricingProvider(provider.Name), model, inputTokens, outputTokens)
 		limitUser := effectiveUserID
@@ -2149,7 +2164,7 @@ func (p *Proxy) handleStreamingResponse(
 			safeGo(func() {
 				defer func() { <-p.spanSem }()
 				defer spanCancel()
-				p.createStreamingSpan(spanCtx, provider, reqBody, parseData, startTime, endTime, ttfb, ttft, requestID, sessionID, effectiveUserID, tenantID, jobID, streamStatus, traceCtx, proxySpanID, extendedTTL)
+				p.createStreamingSpan(spanCtx, provider, reqBody, streamInfo, streamCapped, totalBytesStreamed, startTime, endTime, ttfb, ttft, requestID, sessionID, effectiveUserID, tenantID, jobID, traceCtx, proxySpanID, extendedTTL)
 			})
 		default:
 			spanCancel()
@@ -2534,7 +2549,10 @@ func (p *Proxy) createSpan(
 
 func (p *Proxy) createStreamingSpan(
 	ctx context.Context, provider Provider,
-	reqBody, streamData []byte,
+	reqBody []byte,
+	streamInfo streamParseResult,
+	streamCapped bool,
+	totalBytesStreamed int64,
 	startTime, endTime time.Time,
 	ttfb time.Duration,
 	ttft time.Duration,
@@ -2543,20 +2561,18 @@ func (p *Proxy) createStreamingSpan(
 	effectiveUserID string,
 	tenantID string,
 	jobID string,
-	streamStatus storage.SpanStatus,
 	traceCtx *traceContext,
 	proxySpanID string,
 	extendedTTL bool,
 ) {
 	model, inputContent := extractRequestInfo(provider.Name, reqBody)
-	outputContent, inputTokens, outputTokens := extractStreamingUsage(provider.Name, streamData)
-	ct := extractStreamingCacheTokens(provider.Name, streamData)
-
-	// For Google native, model is in the URL path, not the body.
-	// Fall back to the response's modelVersion field.
 	if model == "" {
-		model = extractModelFromStreamingResponse(provider.Name, streamData)
+		model = streamInfo.model
 	}
+	outputContent := streamInfo.content
+	inputTokens := streamInfo.inputTokens
+	outputTokens := streamInfo.outputTokens
+	ct := streamInfo.cacheTokens
 
 	// Extract <think> tags from streaming output content (#312).
 	// Only for known reasoning models — prevents corrupting legitimate
@@ -2569,6 +2585,23 @@ func (p *Proxy) createStreamingSpan(
 	// Normalize cached input tokens via the calculator (handles all providers).
 	// extendedTTL applies 2.0× for Anthropic 1-hour cache creation (#191).
 	inputTokens = p.calc.NormalizeCachedInputWithTTL(provider.Name, model, inputTokens, ct.CacheReadTokens, ct.CacheCreationTokens, extendedTTL)
+
+	extraAttrs := map[string]string{
+		"proxy.streaming": "true",
+		"llm.ttft_ms":     fmt.Sprintf("%d", ttft.Milliseconds()),
+	}
+	if streamCapped {
+		extraAttrs["proxy.stream_truncated"] = "true"
+	}
+	if streamInfo.streamStatus != storage.SpanStatusOK {
+		extraAttrs["proxy.stream_incomplete"] = "true"
+	}
+	if streamInfo.isEstimated {
+		extraAttrs["proxy.usage_estimated"] = "true"
+	}
+	if totalBytesStreamed > 0 {
+		extraAttrs["proxy.total_bytes_streamed"] = fmt.Sprintf("%d", totalBytesStreamed)
+	}
 
 	p.buildSpan(ctx, spanParams{
 		provider:         provider,
@@ -2584,17 +2617,14 @@ func (p *Proxy) createStreamingSpan(
 		cacheTokens:      ct,
 		startTime:        startTime,
 		endTime:          endTime,
-		status:           streamStatus,
+		status:           streamInfo.streamStatus,
 		ttfb:             ttfb,
 		requestID:        requestID,
 		sessionID:        sessionID,
 		namePrefix:       fmt.Sprintf("%s.chat.stream", provider.Name),
 		traceCtx:         traceCtx,
 		proxySpanID:      proxySpanID,
-		extraAttrs: map[string]string{
-			"proxy.streaming": "true",
-			"llm.ttft_ms":     fmt.Sprintf("%d", ttft.Milliseconds()),
-		},
+		extraAttrs:       extraAttrs,
 	})
 }
 

@@ -348,6 +348,27 @@ func (s *Store) QueryTraces(ctx context.Context, q storage.TraceQuery) (*storage
 		args = append(args, int(q.Status))
 	}
 
+	var countArgs []any
+	countArgs = append(countArgs, baseArgs...)
+	if len(spanFilters) > 0 {
+		countArgs = append(countArgs, baseArgs...)
+		countArgs = append(countArgs, spanArgs...)
+	}
+	if q.Status != 0 {
+		countArgs = append(countArgs, int(q.Status))
+	}
+
+	var totalCount int
+	countQuery := `SELECT COUNT(*) FROM (
+		SELECT 1 FROM spans
+		WHERE ` + where + `
+		GROUP BY trace_id
+		` + having + `
+	) AS matching_traces`
+	if err := s.db.QueryRowContext(ctx, countQuery, countArgs...).Scan(&totalCount); err != nil {
+		return nil, fmt.Errorf("counting traces: %w", err)
+	}
+
 	// Cursor condition for keyset pagination.
 	if cursor.ID != "" {
 		cursorOp := "<" // DESC: fetch rows earlier than cursor
@@ -452,7 +473,7 @@ func (s *Store) QueryTraces(ctx context.Context, q storage.TraceQuery) (*storage
 		})
 	}
 
-	return &storage.TraceResult{Traces: traces, NextPageToken: nextPageToken, TotalCount: len(traces)}, nil
+	return &storage.TraceResult{Traces: traces, NextPageToken: nextPageToken, TotalCount: totalCount}, nil
 }
 
 func (s *Store) SearchSpans(ctx context.Context, q storage.SpanQuery) (*storage.SpanResult, error) {
@@ -468,7 +489,7 @@ func (s *Store) SearchSpans(ctx context.Context, q storage.SpanQuery) (*storage.
 	where := `(? = '' OR project_id = ?) AND start_time >= ? AND start_time <= ?
 			AND (? = 0 OR kind = ?)
 			AND (? = '' OR gen_ai_model = ?)
-			AND (? = '' OR name LIKE '%' || ? || '%' ESCAPE '\')
+			AND (? = '' OR name LIKE ? ESCAPE '\')
 			AND (? = '' OR user_id = ?)
 			AND (? = '' OR tenant_id = ?)`
 
@@ -477,9 +498,15 @@ func (s *Store) SearchSpans(ctx context.Context, q storage.SpanQuery) (*storage.
 		q.StartTime.Format(time.RFC3339Nano), q.EndTime.Format(time.RFC3339Nano),
 		int(q.Kind), int(q.Kind),
 		q.Model, q.Model,
-		q.NameContains, storage.EscapeLike(q.NameContains),
+		q.NameContains, "%" + storage.EscapeLike(q.NameContains) + "%",
 		q.UserID, q.UserID,
 		q.TenantID, q.TenantID,
+	}
+
+	var totalCount int
+	countQuery := `SELECT COUNT(*) FROM spans WHERE ` + where
+	if err := s.db.QueryRowContext(ctx, countQuery, args...).Scan(&totalCount); err != nil {
+		return nil, fmt.Errorf("counting spans: %w", err)
 	}
 
 	if cursor.ID != "" {
@@ -520,7 +547,7 @@ func (s *Store) SearchSpans(ctx context.Context, q storage.SpanQuery) (*storage.
 		})
 	}
 
-	return &storage.SpanResult{Spans: spans, NextPageToken: nextPageToken, TotalCount: len(spans)}, nil
+	return &storage.SpanResult{Spans: spans, NextPageToken: nextPageToken, TotalCount: totalCount}, nil
 }
 
 func (s *Store) GetUsageSummary(ctx context.Context, q storage.UsageQuery) (*storage.UsageSummary, error) {

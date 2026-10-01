@@ -3,6 +3,7 @@ package duckdb
 import (
 	"context"
 	"database/sql"
+	"database/sql/driver"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -124,6 +125,10 @@ func (s *Store) migrate() error {
 }
 
 func (s *Store) IngestSpans(ctx context.Context, spans []storage.Span) error {
+	if len(spans) == 0 {
+		return nil
+	}
+
 	s.writeMu.Lock()
 	defer s.writeMu.Unlock()
 
@@ -133,7 +138,25 @@ func (s *Store) IngestSpans(ctx context.Context, spans []storage.Span) error {
 	}
 	defer func() { _ = conn.Close() }()
 
-	return conn.Raw(func(driverConn any) error {
+	if _, err := conn.ExecContext(ctx, "BEGIN TRANSACTION"); err != nil {
+		return fmt.Errorf("beginning ingest transaction: %w", err)
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			rollbackCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+			defer cancel()
+			if _, rbErr := conn.ExecContext(rollbackCtx, "ROLLBACK"); rbErr != nil {
+				// If rollback fails, return driver.ErrBadConn so database/sql marks
+				// the connection as broken and discards it rather than returning it to the pool.
+				_ = conn.Raw(func(any) error {
+					return driver.ErrBadConn
+				})
+			}
+		}
+	}()
+
+	err = conn.Raw(func(driverConn any) error {
 		duckConn, ok := driverConn.(*duckdb.Conn)
 		if !ok {
 			return fmt.Errorf("driverConn is not *duckdb.Conn")
@@ -204,6 +227,15 @@ func (s *Store) IngestSpans(ctx context.Context, spans []storage.Span) error {
 		}
 		return nil
 	})
+	if err != nil {
+		return err
+	}
+
+	if _, err := conn.ExecContext(ctx, "COMMIT"); err != nil {
+		return fmt.Errorf("committing ingest transaction: %w", err)
+	}
+	committed = true
+	return nil
 }
 
 func (s *Store) GetTrace(ctx context.Context, traceID string) (*storage.Trace, error) {
@@ -340,6 +372,18 @@ func (s *Store) QueryTraces(ctx context.Context, q storage.TraceQuery) (*storage
 		args = append(args, int(q.Status))
 	}
 
+	countArgs := append([]any(nil), args...)
+	var totalCount int
+	countQuery := `SELECT COUNT(*) FROM (
+		SELECT 1 FROM spans
+		WHERE ` + where + `
+		GROUP BY trace_id
+		` + having + `
+	) AS matching_traces`
+	if err := s.db.QueryRowContext(ctx, countQuery, countArgs...).Scan(&totalCount); err != nil {
+		return nil, fmt.Errorf("counting traces: %w", err)
+	}
+
 	// Cursor condition for keyset pagination.
 	if cursor.ID != "" {
 		cursorOp := "<" // DESC: fetch rows earlier than cursor
@@ -425,7 +469,7 @@ func (s *Store) QueryTraces(ctx context.Context, q storage.TraceQuery) (*storage
 		})
 	}
 
-	return &storage.TraceResult{Traces: traces, NextPageToken: nextPageToken, TotalCount: len(traces)}, nil
+	return &storage.TraceResult{Traces: traces, NextPageToken: nextPageToken, TotalCount: totalCount}, nil
 }
 
 func (s *Store) SearchSpans(ctx context.Context, q storage.SpanQuery) (*storage.SpanResult, error) {
@@ -441,7 +485,7 @@ func (s *Store) SearchSpans(ctx context.Context, q storage.SpanQuery) (*storage.
 	where := `(? = '' OR project_id = ?) AND start_time >= ? AND start_time <= ?
 			AND (? = 0 OR kind = ?)
 			AND (? = '' OR gen_ai_model = ?)
-			AND (? = '' OR name LIKE '%' || ? || '%' ESCAPE '\')
+			AND (? = '' OR name LIKE ? ESCAPE '\')
 			AND (? = '' OR user_id = ?)
 			AND (? = '' OR tenant_id = ?)`
 
@@ -449,9 +493,15 @@ func (s *Store) SearchSpans(ctx context.Context, q storage.SpanQuery) (*storage.
 		q.ProjectID, q.ProjectID, q.StartTime, q.EndTime,
 		int(q.Kind), int(q.Kind),
 		q.Model, q.Model,
-		q.NameContains, storage.EscapeLike(q.NameContains),
+		q.NameContains, "%" + storage.EscapeLike(q.NameContains) + "%",
 		q.UserID, q.UserID,
 		q.TenantID, q.TenantID,
+	}
+
+	var totalCount int
+	countQuery := `SELECT COUNT(*) FROM spans WHERE ` + where
+	if err := s.db.QueryRowContext(ctx, countQuery, args...).Scan(&totalCount); err != nil {
+		return nil, fmt.Errorf("counting spans: %w", err)
 	}
 
 	if cursor.ID != "" {
@@ -492,7 +542,7 @@ func (s *Store) SearchSpans(ctx context.Context, q storage.SpanQuery) (*storage.
 		})
 	}
 
-	return &storage.SpanResult{Spans: spans, NextPageToken: nextPageToken, TotalCount: len(spans)}, nil
+	return &storage.SpanResult{Spans: spans, NextPageToken: nextPageToken, TotalCount: totalCount}, nil
 }
 
 func (s *Store) GetUsageSummary(ctx context.Context, q storage.UsageQuery) (*storage.UsageSummary, error) {

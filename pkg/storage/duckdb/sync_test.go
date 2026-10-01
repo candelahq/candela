@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -261,4 +262,230 @@ func TestDuckDB_Prune_AtomicRollback(t *testing.T) {
 	assert.NoError(t, err)
 	_, err = s.GetTrace(ctx, "trace-rb-2")
 	assert.NoError(t, err)
+}
+
+func TestDuckDB_IngestSpans_AtomicRollback(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	// Drop outbox_spans table to simulate partial write failure when writing outbox
+	_, err := s.db.ExecContext(ctx, "DROP TABLE outbox_spans")
+	require.NoError(t, err)
+
+	now := time.Now().UTC()
+	spans := []storage.Span{
+		{
+			SpanID:    "span-ingest-rb-1",
+			TraceID:   "trace-ingest-rb-1",
+			Name:      "test.span.fail",
+			StartTime: now,
+		},
+	}
+
+	err = s.IngestSpans(ctx, spans)
+	assert.Error(t, err, "IngestSpans should fail when outbox_spans table is missing")
+
+	// Verify that spans table has NO trace due to transaction rollback
+	_, err = s.GetTrace(ctx, "trace-ingest-rb-1")
+	assert.Error(t, err, "Trace should not exist in spans table due to rollback")
+}
+
+func TestDuckDB_IngestSpans_ContextCancellationRollback(t *testing.T) {
+	s := newTestStore(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // Cancel before ingest executes
+
+	now := time.Now().UTC()
+	spans := []storage.Span{
+		{
+			SpanID:    "span-ingest-cancel-1",
+			TraceID:   "trace-ingest-cancel-1",
+			Name:      "test.span.cancel",
+			StartTime: now,
+		},
+	}
+
+	err := s.IngestSpans(ctx, spans)
+	assert.Error(t, err, "IngestSpans should fail on canceled context")
+
+	// Verify rollback succeeded and connection pool remains healthy
+	validCtx := context.Background()
+	_, err = s.GetTrace(validCtx, "trace-ingest-cancel-1")
+	assert.Error(t, err, "Canceled trace should not exist in spans table")
+
+	// Ensure subsequent ingestion on the same store succeeds cleanly (no leaked open transaction in conn pool)
+	goodSpans := []storage.Span{
+		{
+			SpanID:    "span-ingest-good-1",
+			TraceID:   "trace-ingest-good-1",
+			Name:      "test.span.good",
+			StartTime: now,
+		},
+	}
+	err = s.IngestSpans(validCtx, goodSpans)
+	assert.NoError(t, err, "Subsequent IngestSpans must succeed on the same store")
+	tr, err := s.GetTrace(validCtx, "trace-ingest-good-1")
+	assert.NoError(t, err)
+	assert.Equal(t, "trace-ingest-good-1", tr.TraceID)
+}
+
+func TestDuckDB_IngestSpans_MidWriteRollback(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	// Recreate outbox_spans with a CHECK constraint rejecting 'span-fail-2'
+	_, err := s.db.ExecContext(ctx, "DROP TABLE outbox_spans")
+	require.NoError(t, err)
+	_, err = s.db.ExecContext(ctx, `
+		CREATE TABLE outbox_spans (
+			span_id VARCHAR,
+			payload_json VARCHAR NOT NULL,
+			attempt_count INTEGER DEFAULT 0,
+			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+			CHECK (span_id != 'span-fail-2')
+		)
+	`)
+	require.NoError(t, err)
+
+	now := time.Now().UTC()
+	spans := []storage.Span{
+		{
+			SpanID:    "span-ok-1",
+			TraceID:   "trace-mid-1",
+			Name:      "span.first.written",
+			StartTime: now,
+		},
+		{
+			SpanID:    "span-fail-2",
+			TraceID:   "trace-mid-1",
+			Name:      "span.second.fail",
+			StartTime: now.Add(time.Second),
+		},
+	}
+
+	err = s.IngestSpans(ctx, spans)
+	assert.Error(t, err, "IngestSpans should fail on constraint violation")
+
+	// Verify that span-ok-1 was rolled back and does NOT exist in spans table
+	_, err = s.GetTrace(ctx, "trace-mid-1")
+	assert.Error(t, err, "First span should be rolled back and not exist in spans table")
+
+	// Verify outbox_spans has 0 rows
+	var outboxCount int
+	err = s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM outbox_spans").Scan(&outboxCount)
+	require.NoError(t, err)
+	assert.Equal(t, 0, outboxCount, "outbox_spans should have 0 rows due to rollback")
+}
+
+type cancelAfterTxContext struct {
+	context.Context
+	doneCh     chan struct{}
+	cancelErr  error
+	valueCalls atomic.Int32
+	mu         sync.Mutex
+}
+
+func newCancelAfterTxContext() *cancelAfterTxContext {
+	return &cancelAfterTxContext{
+		Context: context.Background(),
+		doneCh:  make(chan struct{}),
+	}
+}
+
+func (c *cancelAfterTxContext) Done() <-chan struct{} {
+	return c.doneCh
+}
+
+func (c *cancelAfterTxContext) Err() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.cancelErr
+}
+
+func (c *cancelAfterTxContext) Value(key any) any {
+	if c.valueCalls.Add(1) == 2 {
+		// Second Value call occurs inside conn.ExecContext("BEGIN TRANSACTION")
+		// after the transaction has started. Cancel the context so subsequent
+		// writes occur in an uncommitted transaction and COMMIT fails.
+		c.mu.Lock()
+		select {
+		case <-c.doneCh:
+		default:
+			c.cancelErr = context.Canceled
+			close(c.doneCh)
+		}
+		c.mu.Unlock()
+	}
+	return c.Context.Value(key)
+}
+
+func TestDuckDB_IngestSpans_MidWriteCancellationRollback(t *testing.T) {
+	s := newTestStore(t)
+	// Restrict pool to 1 connection so connection reuse vs discard is directly verified.
+	s.db.SetMaxOpenConns(1)
+	s.db.SetMaxIdleConns(1)
+
+	validCtx := context.Background()
+
+	// Capture the original driver connection pointer from the connection pool.
+	var initialDriverConn any
+	conn, err := s.db.Conn(validCtx)
+	require.NoError(t, err)
+	err = conn.Raw(func(driverConn any) error {
+		initialDriverConn = driverConn
+		return nil
+	})
+	require.NoError(t, err)
+	_ = conn.Close()
+
+	cCtx := newCancelAfterTxContext()
+	now := time.Now().UTC()
+	spans := []storage.Span{
+		{
+			SpanID:    "span-mid-cancel-1",
+			TraceID:   "trace-mid-cancel-1",
+			Name:      "test.span.midcancel",
+			StartTime: now,
+		},
+	}
+
+	err = s.IngestSpans(cCtx, spans)
+	assert.Error(t, err, "IngestSpans should fail when context is canceled before COMMIT")
+
+	// 1. Assert write was rolled back and span is not in spans table
+	_, err = s.GetTrace(validCtx, "trace-mid-cancel-1")
+	assert.Error(t, err, "Trace should not exist in spans table due to rollback")
+
+	// 2. Assert outbox table has 0 rows (rolled back)
+	var outboxCount int
+	err = s.db.QueryRowContext(validCtx, "SELECT COUNT(*) FROM outbox_spans").Scan(&outboxCount)
+	require.NoError(t, err)
+	assert.Equal(t, 0, outboxCount, "outbox_spans should have 0 rows due to rollback")
+
+	// 3. Assert rollback ran on the original connection and connection was NOT discarded
+	connAfter, err := s.db.Conn(validCtx)
+	require.NoError(t, err)
+	var afterDriverConn any
+	err = connAfter.Raw(func(driverConn any) error {
+		afterDriverConn = driverConn
+		return nil
+	})
+	require.NoError(t, err)
+	_ = connAfter.Close()
+	assert.Same(t, initialDriverConn, afterDriverConn, "Original connection must be preserved and reused after rollback")
+
+	// 4. Assert subsequent ingestion succeeds on the reused connection
+	goodSpans := []storage.Span{
+		{
+			SpanID:    "span-reuse-1",
+			TraceID:   "trace-reuse-1",
+			Name:      "test.span.reuse",
+			StartTime: now,
+		},
+	}
+	err = s.IngestSpans(validCtx, goodSpans)
+	assert.NoError(t, err, "Subsequent IngestSpans must succeed on the reused connection")
+	tr, err := s.GetTrace(validCtx, "trace-reuse-1")
+	assert.NoError(t, err)
+	assert.Equal(t, "trace-reuse-1", tr.TraceID)
 }

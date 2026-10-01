@@ -424,6 +424,11 @@ func TestStreamCapture_TruncatedStream_GracefulBillingReconciliation(t *testing.
 		flusher.Flush()
 
 		// Abruptly terminate connection without final usage or [DONE] chunk
+		if hj, ok := w.(http.Hijacker); ok {
+			if conn, _, err := hj.Hijack(); err == nil {
+				_ = conn.Close()
+			}
+		}
 	}))
 	defer upstream.Close()
 
@@ -478,6 +483,9 @@ func TestStreamCapture_TruncatedStream_GracefulBillingReconciliation(t *testing.
 	}
 	if span.Attributes["proxy.usage_estimated"] != "true" {
 		t.Errorf("expected proxy.usage_estimated = true, got %s", span.Attributes["proxy.usage_estimated"])
+	}
+	if span.Attributes["proxy.stream_incomplete"] != "true" {
+		t.Errorf("expected proxy.stream_incomplete = true, got %s", span.Attributes["proxy.stream_incomplete"])
 	}
 	if span.GenAI.CostUSD <= 0 {
 		t.Errorf("span CostUSD = %f, want > 0", span.GenAI.CostUSD)
@@ -534,5 +542,36 @@ func TestBudgetReservation_ReasonableMinimumFloor(t *testing.T) {
 	if resp.StatusCode != http.StatusPaymentRequired {
 		body, _ := io.ReadAll(resp.Body)
 		t.Errorf("status = %d, want 402 Payment Required; body = %s", resp.StatusCode, body)
+	}
+}
+
+// TestExtractStreamInfo_EmptyHead_NonEmptyTail verifies that when headData is empty
+// (e.g. circuit breaker active) but tailData contains usage metadata, exact usage
+// is extracted from tailData rather than falling back to estimation (#525).
+func TestExtractStreamInfo_EmptyHead_NonEmptyTail(t *testing.T) {
+	calc := costcalc.New()
+	p, _ := New(Config{ProjectID: "test"}, &mockSubmitter{}, calc)
+
+	tailChunk := `data: {"id":"chatcmpl-1","choices":[],"usage":{"prompt_tokens":120,"completion_tokens":450,"total_tokens":570}}` + "\n\n"
+	res := p.extractStreamInfo(
+		Provider{Name: "openai"},
+		"gpt-4o",
+		[]byte(`{"model":"gpt-4o"}`),
+		nil,               // headData empty (e.g. circuit breaker disabled capture)
+		[]byte(tailChunk), // tailData present
+		false,             // streamCapped false
+		true,              // streamCompleted true
+		int64(len(tailChunk)),
+		"req-cb-1",
+	)
+
+	if res.inputTokens != 120 {
+		t.Errorf("inputTokens = %d, want 120", res.inputTokens)
+	}
+	if res.outputTokens != 450 {
+		t.Errorf("outputTokens = %d, want 450", res.outputTokens)
+	}
+	if res.isEstimated {
+		t.Errorf("expected isEstimated = false, got true")
 	}
 }

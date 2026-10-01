@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"time"
 
 	"github.com/candelahq/candela/pkg/storage"
@@ -118,8 +119,14 @@ func (w *Writer) Close() error {
 
 // newHTTPClient creates an OTLP/HTTP trace client.
 func newHTTPClient(cfg Config) (otlptrace.Client, error) {
+	endpoint := cfg.Endpoint
+	if u, err := url.Parse(endpoint); err == nil && (u.Path == "" || u.Path == "/") {
+		u.Path = "/v1/traces"
+		endpoint = u.String()
+	}
+
 	opts := []otlptracehttp.Option{
-		otlptracehttp.WithEndpointURL(cfg.Endpoint),
+		otlptracehttp.WithEndpointURL(endpoint),
 	}
 
 	if cfg.Insecure {

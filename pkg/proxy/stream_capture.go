@@ -58,8 +58,8 @@ func (p *Proxy) extractStreamInfo(
 		res.streamStatus = storage.SpanStatusError
 	}
 
-	// 2. If stream was capped (>10MB), inspect tail buffer for final usage chunks.
-	if streamCapped && len(tailData) > 0 {
+	// 2. If stream was capped (>10MB) or head buffer is empty, inspect tail buffer for final usage chunks.
+	if (streamCapped || len(headData) == 0) && len(tailData) > 0 {
 		_, tailInput, tailOutput := extractStreamingUsage(provider.Name, tailData)
 		tailCT := extractStreamingCacheTokens(provider.Name, tailData)
 		tailModel := extractModelFromStreamingResponse(provider.Name, tailData)

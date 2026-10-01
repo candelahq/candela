@@ -288,3 +288,90 @@ func TestDuckDB_IngestSpans_AtomicRollback(t *testing.T) {
 	_, err = s.GetTrace(ctx, "trace-ingest-rb-1")
 	assert.Error(t, err, "Trace should not exist in spans table due to rollback")
 }
+
+func TestDuckDB_IngestSpans_ContextCancellationRollback(t *testing.T) {
+	s := newTestStore(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // Cancel before ingest executes
+
+	now := time.Now().UTC()
+	spans := []storage.Span{
+		{
+			SpanID:    "span-ingest-cancel-1",
+			TraceID:   "trace-ingest-cancel-1",
+			Name:      "test.span.cancel",
+			StartTime: now,
+		},
+	}
+
+	err := s.IngestSpans(ctx, spans)
+	assert.Error(t, err, "IngestSpans should fail on canceled context")
+
+	// Verify rollback succeeded and connection pool remains healthy
+	validCtx := context.Background()
+	_, err = s.GetTrace(validCtx, "trace-ingest-cancel-1")
+	assert.Error(t, err, "Canceled trace should not exist in spans table")
+
+	// Ensure subsequent ingestion on the same store succeeds cleanly (no leaked open transaction in conn pool)
+	goodSpans := []storage.Span{
+		{
+			SpanID:    "span-ingest-good-1",
+			TraceID:   "trace-ingest-good-1",
+			Name:      "test.span.good",
+			StartTime: now,
+		},
+	}
+	err = s.IngestSpans(validCtx, goodSpans)
+	assert.NoError(t, err, "Subsequent IngestSpans must succeed on the same store")
+	tr, err := s.GetTrace(validCtx, "trace-ingest-good-1")
+	assert.NoError(t, err)
+	assert.Equal(t, "trace-ingest-good-1", tr.TraceID)
+}
+
+func TestDuckDB_IngestSpans_MidWriteRollback(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	// Recreate outbox_spans with a CHECK constraint rejecting 'span-fail-2'
+	_, err := s.db.ExecContext(ctx, "DROP TABLE outbox_spans")
+	require.NoError(t, err)
+	_, err = s.db.ExecContext(ctx, `
+		CREATE TABLE outbox_spans (
+			span_id VARCHAR,
+			payload_json VARCHAR NOT NULL,
+			attempt_count INTEGER DEFAULT 0,
+			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+			CHECK (span_id != 'span-fail-2')
+		)
+	`)
+	require.NoError(t, err)
+
+	now := time.Now().UTC()
+	spans := []storage.Span{
+		{
+			SpanID:    "span-ok-1",
+			TraceID:   "trace-mid-1",
+			Name:      "span.first.written",
+			StartTime: now,
+		},
+		{
+			SpanID:    "span-fail-2",
+			TraceID:   "trace-mid-1",
+			Name:      "span.second.fail",
+			StartTime: now.Add(time.Second),
+		},
+	}
+
+	err = s.IngestSpans(ctx, spans)
+	assert.Error(t, err, "IngestSpans should fail on constraint violation")
+
+	// Verify that span-ok-1 was rolled back and does NOT exist in spans table
+	_, err = s.GetTrace(ctx, "trace-mid-1")
+	assert.Error(t, err, "First span should be rolled back and not exist in spans table")
+
+	// Verify outbox_spans has 0 rows
+	var outboxCount int
+	err = s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM outbox_spans").Scan(&outboxCount)
+	require.NoError(t, err)
+	assert.Equal(t, 0, outboxCount, "outbox_spans should have 0 rows due to rollback")
+}

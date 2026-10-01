@@ -143,7 +143,18 @@ func (s *Store) IngestSpans(ctx context.Context, spans []storage.Span) error {
 	committed := false
 	defer func() {
 		if !committed {
-			_, _ = conn.ExecContext(ctx, "ROLLBACK")
+			rollbackCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+			defer cancel()
+			if _, rbErr := conn.ExecContext(rollbackCtx, "ROLLBACK"); rbErr != nil {
+				// If rollback fails, close the underlying driver connection so the connection
+				// is discarded and not returned to the pool with an active uncommitted transaction.
+				_ = conn.Raw(func(driverConn any) error {
+					if dc, ok := driverConn.(interface{ Close() error }); ok {
+						return dc.Close()
+					}
+					return nil
+				})
+			}
 		}
 	}()
 

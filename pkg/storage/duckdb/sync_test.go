@@ -262,3 +262,29 @@ func TestDuckDB_Prune_AtomicRollback(t *testing.T) {
 	_, err = s.GetTrace(ctx, "trace-rb-2")
 	assert.NoError(t, err)
 }
+
+func TestDuckDB_IngestSpans_AtomicRollback(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	// Drop outbox_spans table to simulate partial write failure when writing outbox
+	_, err := s.db.ExecContext(ctx, "DROP TABLE outbox_spans")
+	require.NoError(t, err)
+
+	now := time.Now().UTC()
+	spans := []storage.Span{
+		{
+			SpanID:    "span-ingest-rb-1",
+			TraceID:   "trace-ingest-rb-1",
+			Name:      "test.span.fail",
+			StartTime: now,
+		},
+	}
+
+	err = s.IngestSpans(ctx, spans)
+	assert.Error(t, err, "IngestSpans should fail when outbox_spans table is missing")
+
+	// Verify that spans table has NO trace due to transaction rollback
+	_, err = s.GetTrace(ctx, "trace-ingest-rb-1")
+	assert.Error(t, err, "Trace should not exist in spans table due to rollback")
+}

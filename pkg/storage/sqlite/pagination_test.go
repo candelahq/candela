@@ -48,6 +48,9 @@ func TestQueryTraces_Pagination(t *testing.T) {
 	if len(res1.Traces) != 50 {
 		t.Fatalf("page 1 traces = %d, want 50", len(res1.Traces))
 	}
+	if res1.TotalCount != 120 {
+		t.Errorf("page 1 TotalCount = %d, want 120", res1.TotalCount)
+	}
 	if res1.NextPageToken == "" {
 		t.Fatal("page 1 expected non-empty NextPageToken")
 	}
@@ -70,6 +73,9 @@ func TestQueryTraces_Pagination(t *testing.T) {
 	if len(res2.Traces) != 50 {
 		t.Fatalf("page 2 traces = %d, want 50", len(res2.Traces))
 	}
+	if res2.TotalCount != 120 {
+		t.Errorf("page 2 TotalCount = %d, want 120", res2.TotalCount)
+	}
 	if res2.NextPageToken == "" {
 		t.Fatal("page 2 expected non-empty NextPageToken")
 	}
@@ -87,6 +93,9 @@ func TestQueryTraces_Pagination(t *testing.T) {
 	}
 	if len(res3.Traces) != 20 {
 		t.Fatalf("page 3 traces = %d, want 20", len(res3.Traces))
+	}
+	if res3.TotalCount != 120 {
+		t.Errorf("page 3 TotalCount = %d, want 120", res3.TotalCount)
 	}
 	if res3.NextPageToken != "" {
 		t.Errorf("page 3 expected empty NextPageToken, got %q", res3.NextPageToken)
@@ -150,5 +159,90 @@ func TestQueryTraces_NoDuplicates(t *testing.T) {
 		if seen[tr.TraceID] {
 			t.Errorf("duplicate trace found across pages: %s", tr.TraceID)
 		}
+	}
+}
+
+func TestSearchSpans_Pagination_TotalCount(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(time.Microsecond)
+
+	var spans []storage.Span
+	for i := 0; i < 25; i++ {
+		spans = append(spans, storage.Span{
+			SpanID:    fmt.Sprintf("span-test-%02d", i),
+			TraceID:   fmt.Sprintf("trace-test-%02d", i),
+			Name:      "llm.call",
+			Kind:      storage.SpanKindLLM,
+			Status:    storage.SpanStatusOK,
+			StartTime: now.Add(time.Duration(i) * time.Second),
+			EndTime:   now.Add(time.Duration(i)*time.Second + time.Millisecond*500),
+			ProjectID: "proj-search-count",
+		})
+	}
+	if err := s.IngestSpans(ctx, spans); err != nil {
+		t.Fatalf("ingest spans: %v", err)
+	}
+
+	// Page 1
+	res1, err := s.SearchSpans(ctx, storage.SpanQuery{
+		ProjectID: "proj-search-count",
+		StartTime: now.Add(-time.Minute),
+		EndTime:   now.Add(time.Hour),
+		PageSize:  10,
+	})
+	if err != nil {
+		t.Fatalf("search page 1: %v", err)
+	}
+	if len(res1.Spans) != 10 {
+		t.Errorf("page 1 len = %d, want 10", len(res1.Spans))
+	}
+	if res1.TotalCount != 25 {
+		t.Errorf("page 1 TotalCount = %d, want 25", res1.TotalCount)
+	}
+	if res1.NextPageToken == "" {
+		t.Fatal("page 1 expected non-empty NextPageToken")
+	}
+
+	// Page 2
+	res2, err := s.SearchSpans(ctx, storage.SpanQuery{
+		ProjectID: "proj-search-count",
+		StartTime: now.Add(-time.Minute),
+		EndTime:   now.Add(time.Hour),
+		PageSize:  10,
+		PageToken: res1.NextPageToken,
+	})
+	if err != nil {
+		t.Fatalf("search page 2: %v", err)
+	}
+	if len(res2.Spans) != 10 {
+		t.Errorf("page 2 len = %d, want 10", len(res2.Spans))
+	}
+	if res2.TotalCount != 25 {
+		t.Errorf("page 2 TotalCount = %d, want 25", res2.TotalCount)
+	}
+	if res2.NextPageToken == "" {
+		t.Fatal("page 2 expected non-empty NextPageToken")
+	}
+
+	// Page 3
+	res3, err := s.SearchSpans(ctx, storage.SpanQuery{
+		ProjectID: "proj-search-count",
+		StartTime: now.Add(-time.Minute),
+		EndTime:   now.Add(time.Hour),
+		PageSize:  10,
+		PageToken: res2.NextPageToken,
+	})
+	if err != nil {
+		t.Fatalf("search page 3: %v", err)
+	}
+	if len(res3.Spans) != 5 {
+		t.Errorf("page 3 len = %d, want 5", len(res3.Spans))
+	}
+	if res3.TotalCount != 25 {
+		t.Errorf("page 3 TotalCount = %d, want 25", res3.TotalCount)
+	}
+	if res3.NextPageToken != "" {
+		t.Errorf("page 3 expected empty NextPageToken, got %q", res3.NextPageToken)
 	}
 }

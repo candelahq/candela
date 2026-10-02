@@ -449,6 +449,12 @@ proxy:
     - anthropic-direct
     # - anthropic-bedrock  # Uncomment to enable AWS Bedrock
     - gemini-oai
+
+  # Observability Span Content Sanitization (#590)
+  # Max characters stored for prompt, completion, and reasoning content in spans.
+  # Also automatically scrubs API keys, PEM private keys, SSNs, and emails.
+  # Default: 1000 characters. Set to -1 for unlimited length (scrubbing still applies).
+  max_content_len: 1000
 ```
 
 ---

@@ -919,6 +919,7 @@ func main() {
 				MaxIdleConns:        cfg.Proxy.MaxIdleConns,
 				MaxIdleConnsPerHost: cfg.Proxy.MaxIdleConnsPerHost,
 				MaxConnsPerHost:     cfg.Proxy.MaxConnsPerHost,
+				MaxContentLen:       cfg.Proxy.MaxContentLen,
 			}, proc, calc)
 			if err != nil {
 				slog.Error("invalid proxy configuration", "error", err)

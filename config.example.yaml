@@ -20,6 +20,12 @@ proxy:
   enabled: true
   project_id: "default"
 
+  # Maximum length (in characters) of prompt, completion, and reasoning content
+  # stored in observability spans. Also automatically scrubs known sensitive patterns
+  # (API keys, SSNs, emails, private keys).
+  # Default: 1000 characters. Set to -1 for unlimited length (scrubbing still applies).
+  max_content_len: 1000
+
   # Vertex AI configuration (required for Anthropic proxy).
   # Set your GCP project and region. Auth is automatic via ADC
   # (run: candela auth login).

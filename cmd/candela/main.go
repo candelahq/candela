@@ -89,6 +89,7 @@ type Config struct {
 	MaxRequestCost   float64                  `yaml:"max_request_cost_usd"` // Per-request cost cap (0 = disabled)
 	DailyLimits      []proxy.SpendLimitConfig `yaml:"daily_limits"`         // Per-model daily spend limits
 	DefaultMaxTokens int                      `yaml:"default_max_tokens"`   // Injected when client omits max_tokens (default: 8192)
+	MaxContentLen    int                      `yaml:"max_content_len"`      // Max span content length in characters (#590)
 }
 
 // LocalProvider configures a direct cloud provider for solo mode.
@@ -1615,6 +1616,7 @@ func buildCloudProxy(cfg Config, submitter *processor.SpanProcessor) (*proxy.Pro
 		ProjectID:      "local",
 		MaxRequestCost: cfg.MaxRequestCost,
 		DailyLimits:    cfg.DailyLimits,
+		MaxContentLen:  cfg.MaxContentLen,
 	}, submitter, calc)
 	if err != nil {
 		slog.Error("invalid proxy configuration", "error", err)

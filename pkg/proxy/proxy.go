@@ -315,6 +315,9 @@ type Proxy struct {
 
 	// Gemini thought_signature cache for gemini-oai thinking+tools
 	thoughtSigs *ThoughtSignatureStore
+
+	// #590: Max span content length in characters (0 = unlimited).
+	maxContentLen int
 }
 
 // Config holds proxy configuration.
@@ -334,6 +337,9 @@ type Config struct {
 	MaxIdleConns        int `yaml:"max_idle_conns"`          // default: 200
 	MaxIdleConnsPerHost int `yaml:"max_idle_conns_per_host"` // default: 50
 	MaxConnsPerHost     int `yaml:"max_conns_per_host"`      // default: 100
+
+	// #590: Max span content length in characters (default: 1000, -1 = unlimited).
+	MaxContentLen int `yaml:"max_content_len"`
 }
 
 // DefaultProviders returns the standard LLM provider configurations.
@@ -435,6 +441,13 @@ func New(cfg Config, submitter SpanSubmitter, calc *costcalc.Calculator) (*Proxy
 		breakers[p.Name] = NewCircuitBreaker(cbCfg)
 	}
 
+	maxContentLen := cfg.MaxContentLen
+	if maxContentLen == 0 {
+		maxContentLen = DefaultMaxContentLen
+	} else if maxContentLen < 0 {
+		maxContentLen = 0 // 0 = unlimited
+	}
+
 	p := &Proxy{
 		providers:        providers,
 		submitter:        submitter,
@@ -450,6 +463,7 @@ func New(cfg Config, submitter SpanSubmitter, calc *costcalc.Calculator) (*Proxy
 		taskPendingSpend: newPendingSpendTracker(),
 		thoughtSigs:      NewThoughtSignatureStore(15 * time.Minute),
 		client:           newUpstreamHTTPClient(cfg),
+		maxContentLen:    maxContentLen,
 	}
 
 	// Initialize fallback resolver if configured.
@@ -587,6 +601,18 @@ func (p *Proxy) GetCacheTTL() CacheTTL {
 		}
 	}
 	return CacheTTL5m
+}
+
+// MaxContentLen returns the configured span content truncation limit in characters (0 = unlimited).
+func (p *Proxy) MaxContentLen() int {
+	return p.maxContentLen
+}
+
+func (p *Proxy) sanitizeSpanContent(s string) string {
+	if s == "" {
+		return ""
+	}
+	return SanitizeSpanContent(s, p.maxContentLen)
 }
 
 // RegisterRoutes registers proxy routes on the given mux.
@@ -2444,9 +2470,9 @@ func (p *Proxy) buildSpan(ctx context.Context, params spanParams) {
 			OutputTokens:        params.outputTokens,
 			TotalTokens:         totalTokens,
 			CostUSD:             cost,
-			InputContent:        params.inputContent,
-			OutputContent:       params.outputContent,
-			ReasoningContent:    params.reasoningContent,
+			InputContent:        p.sanitizeSpanContent(params.inputContent),
+			OutputContent:       p.sanitizeSpanContent(params.outputContent),
+			ReasoningContent:    p.sanitizeSpanContent(params.reasoningContent),
 			CacheReadTokens:     params.cacheTokens.CacheReadTokens,
 			CacheCreationTokens: params.cacheTokens.CacheCreationTokens,
 			InputRate:           inputRate,

@@ -1199,17 +1199,12 @@ func runForeground() {
 	var cloudCalc *costcalc.Calculator
 	cloudModels := make(map[string]string)
 	if soloMode && len(cfg.Providers) > 0 {
-		cloudProxy, cloudModels = buildCloudProxy(*cfg, spanProc)
+		cloudProxy, cloudModels, cloudCalc = buildCloudProxy(*cfg, spanProc)
 	}
-	// Wire the cloud proxy into the config API for runtime caching control.
+	// Wire the cloud proxy and shared calculator into the config API for runtime caching control (#521).
 	configAPI.cloudProxy = cloudProxy
 	configAPI.calc = cloudCalc
 	configAPI.configWarnings = configWarnings(*cfg)
-	// Create a calc for pricing-based model filtering.
-	// Uses the same defaults as the cloud proxy's embedded calc.
-	if len(cloudModels) > 0 {
-		cloudCalc = costcalc.New()
-	}
 
 	lmH := newLMHandler(mgr, remoteProxy, runtimeLocalProxy, localHandler, cloudProxy, cloudModels, cloudCalc, soloMode, cfg.DefaultMaxTokens)
 	lmAddr := fmt.Sprintf("127.0.0.1:%d", lmPort)
@@ -1414,7 +1409,7 @@ func buildLocalProxy(upstream string) *httputil.ReverseProxy {
 
 // buildCloudProxy creates a proxy.Proxy for direct cloud model access in solo mode.
 // Uses Google ADC for authentication to Vertex AI endpoints (Gemini + Anthropic).
-func buildCloudProxy(cfg Config, submitter *processor.SpanProcessor) (*proxy.Proxy, map[string]string) {
+func buildCloudProxy(cfg Config, submitter *processor.SpanProcessor) (*proxy.Proxy, map[string]string, *costcalc.Calculator) {
 	region := cfg.VertexAI.Region
 	if env := os.Getenv("CANDELA_VERTEX_REGION"); env != "" {
 		region = env
@@ -1453,7 +1448,7 @@ func buildCloudProxy(cfg Config, submitter *processor.SpanProcessor) (*proxy.Pro
 		}
 		if project == "" {
 			slog.Error("vertex_ai.project is required for GCP providers — set it in ~/.config/candela/config.yaml")
-			return nil, nil
+			return nil, nil, nil
 		}
 
 		// Get GCP ADC token source.
@@ -1462,7 +1457,7 @@ func buildCloudProxy(cfg Config, submitter *processor.SpanProcessor) (*proxy.Pro
 			"https://www.googleapis.com/auth/cloud-platform")
 		if adcErr != nil {
 			slog.Error("failed to get GCP credentials — run 'candela auth login'", "error", adcErr)
-			return nil, nil
+			return nil, nil, nil
 		}
 	}
 
@@ -1476,7 +1471,7 @@ func buildCloudProxy(cfg Config, submitter *processor.SpanProcessor) (*proxy.Pro
 		awsProvider = cloudauth.NewAWSProvider(awsRegion, cfg.AWS.Profile)
 		if !awsProvider.IsConfigured() {
 			slog.Error("AWS credentials not found — run 'candela auth login --provider aws'")
-			return nil, nil
+			return nil, nil, nil
 		}
 	}
 
@@ -1611,7 +1606,7 @@ func buildCloudProxy(cfg Config, submitter *processor.SpanProcessor) (*proxy.Pro
 	}
 
 	if len(providers) == 0 {
-		return nil, nil
+		return nil, nil, nil
 	}
 
 	calc := costcalc.New()
@@ -1623,7 +1618,7 @@ func buildCloudProxy(cfg Config, submitter *processor.SpanProcessor) (*proxy.Pro
 	}, submitter, calc)
 	if err != nil {
 		slog.Error("invalid proxy configuration", "error", err)
-		return nil, nil
+		return nil, nil, nil
 	}
 
 	var names []string
@@ -1631,5 +1626,5 @@ func buildCloudProxy(cfg Config, submitter *processor.SpanProcessor) (*proxy.Pro
 		names = append(names, p.Name)
 	}
 	slog.Info("☁️ direct cloud providers enabled", "providers", names, "models", len(cloudModels))
-	return cloudProxy, cloudModels
+	return cloudProxy, cloudModels, calc
 }

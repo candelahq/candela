@@ -92,3 +92,32 @@ func TestProperty_CostLinearScaling(t *testing.T) {
 		}
 	})
 }
+
+// Property: Negative token counts are clamped and never produce negative costs (#536).
+func TestProperty_NegativeTokensNeverProduceNegativeCost(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		provider := rapid.SampledFrom([]string{"openai", "anthropic", "google", "local"}).Draw(t, "provider")
+		model := rapid.SampledFrom([]string{"gpt-4o", "claude-sonnet-4-20250514", "gemini-2.5-pro", "unknown-model"}).Draw(t, "model")
+		inputTokens := rapid.IntRange(-1_000_000, 1_000_000).Draw(t, "input_tokens")
+		outputTokens := rapid.IntRange(-1_000_000, 1_000_000).Draw(t, "output_tokens")
+
+		calc := New()
+		cost := calc.Calculate(provider, model, int64(inputTokens), int64(outputTokens))
+		if cost < 0 {
+			t.Fatalf("negative cost %f for %s/%s (%d, %d)", cost, provider, model, inputTokens, outputTokens)
+		}
+
+		clampedInput := int64(inputTokens)
+		if clampedInput < 0 {
+			clampedInput = 0
+		}
+		clampedOutput := int64(outputTokens)
+		if clampedOutput < 0 {
+			clampedOutput = 0
+		}
+		expectedCost := calc.Calculate(provider, model, clampedInput, clampedOutput)
+		if math.Abs(cost-expectedCost) > 1e-9 {
+			t.Fatalf("cost with negative tokens (%f) != cost with clamped tokens (%f)", cost, expectedCost)
+		}
+	})
+}

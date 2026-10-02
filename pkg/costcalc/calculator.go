@@ -313,6 +313,17 @@ func newBase() *Calculator {
 // Calculate returns the estimated cost in USD for the given model and token counts.
 // Local models always return $0.00. Unknown cloud models log a warning (once) and return $0.00.
 func (c *Calculator) Calculate(provider, model string, inputTokens, outputTokens int64) float64 {
+	// Clamp negative token counts to zero to prevent budget inflation and negative costs (#536).
+	if inputTokens < 0 {
+		inputTokens = 0
+	}
+	if outputTokens < 0 {
+		outputTokens = 0
+	}
+	if inputTokens == 0 && outputTokens == 0 {
+		return 0
+	}
+
 	// Local models run on your hardware — no API cost.
 	if strings.ToLower(provider) == "local" {
 		return 0

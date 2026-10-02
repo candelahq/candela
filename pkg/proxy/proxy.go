@@ -2214,6 +2214,12 @@ func (p *Proxy) deductBudget(ctx context.Context, provider Provider, model, user
 
 	isSA := isServiceAccountID(userID)
 
+	if inputTokens < 0 {
+		inputTokens = 0
+	}
+	if outputTokens < 0 {
+		outputTokens = 0
+	}
 	totalTokens := inputTokens + outputTokens
 	cost := p.calc.Calculate(pricingProvider(provider.Name), model, inputTokens, outputTokens)
 	// Time-based cost fallback for self-hosted models.

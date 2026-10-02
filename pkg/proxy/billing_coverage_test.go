@@ -318,10 +318,12 @@ func TestProxy_CostCalculation_E2E(t *testing.T) {
 type trackingDeductUserStore struct {
 	budgetUserStore
 	deductCount atomic.Int64
+	lastTokens  atomic.Int64
 }
 
-func (s *trackingDeductUserStore) DeductSpend(_ context.Context, _ string, _ float64, _ int64) error {
+func (s *trackingDeductUserStore) DeductSpend(_ context.Context, _ string, _ float64, tokens int64) error {
 	s.deductCount.Add(1)
+	s.lastTokens.Store(tokens)
 	return nil
 }
 
@@ -507,6 +509,35 @@ func TestDeductBudget_SkipsEmptyUserID(t *testing.T) {
 
 	if got := store.deductCount.Load(); got != 0 {
 		t.Errorf("DeductSpend called %d times for empty userID, want 0", got)
+	}
+}
+
+func TestDeductBudget_ClampsNegativeTokens(t *testing.T) {
+	store := &trackingDeductUserStore{
+		budgetUserStore: budgetUserStore{
+			checkResult: &storage.BudgetCheckResult{Allowed: true, RemainingUSD: 100},
+		},
+	}
+	calc := costcalc.New()
+	p, _ := New(Config{ProjectID: "test"}, &mockSubmitter{}, calc)
+	p.SetUserStore(store)
+
+	// Negative input tokens, positive output tokens.
+	// Raw sum would be -100 + 50 = -50. Clamped: 0 + 50 = 50.
+	p.deductBudget(context.Background(), Provider{Name: "anthropic"}, "claude-sonnet-4-20250514", "user@test.com", "", -100, 50, 0)
+
+	if got := store.deductCount.Load(); got != 1 {
+		t.Fatalf("DeductSpend called %d times, want 1", got)
+	}
+	if got := store.lastTokens.Load(); got != 50 {
+		t.Errorf("DeductSpend totalTokens = %d, want 50 (negative input tokens clamped)", got)
+	}
+
+	// Both negative: 0 + 0 = 0 tokens, 0 cost -> should skip DeductSpend.
+	store.deductCount.Store(0)
+	p.deductBudget(context.Background(), Provider{Name: "anthropic"}, "claude-sonnet-4-20250514", "user@test.com", "", -50, -50, 0)
+	if got := store.deductCount.Load(); got != 0 {
+		t.Errorf("DeductSpend called %d times for purely negative tokens, want 0", got)
 	}
 }
 

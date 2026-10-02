@@ -148,6 +148,72 @@ func TestIngestSpans_CacheTokensRoundTrip(t *testing.T) {
 	if searchGot.GenAI.CacheCreationTokens != 3400 {
 		t.Errorf("SearchSpans CacheCreationTokens = %d, want 3400", searchGot.GenAI.CacheCreationTokens)
 	}
+
+	// Cache-only GenAI span: other GenAI fields remain empty/zero.
+	// Verifies that CacheReadTokens / CacheCreationTokens alone trigger
+	// reconstruction of GenAIAttributes on round-trip (#527).
+	cacheOnlySpan := storage.Span{
+		TraceID:   "trace-cache-only",
+		SpanID:    "span-cache-only",
+		Kind:      storage.SpanKindLLM,
+		Status:    storage.SpanStatusOK,
+		StartTime: now,
+		EndTime:   now.Add(50 * time.Millisecond),
+		Duration:  50 * time.Millisecond,
+		GenAI: &storage.GenAIAttributes{
+			CacheReadTokens:     8000,
+			CacheCreationTokens: 1200,
+		},
+	}
+
+	if err := s.IngestSpans(ctx, []storage.Span{cacheOnlySpan}); err != nil {
+		t.Fatalf("ingest cache-only span: %v", err)
+	}
+
+	cacheTrace, err := s.GetTrace(ctx, "trace-cache-only")
+	if err != nil {
+		t.Fatalf("get trace cache-only: %v", err)
+	}
+	if len(cacheTrace.Spans) != 1 {
+		t.Fatalf("span count = %d, want 1", len(cacheTrace.Spans))
+	}
+	gotCache := cacheTrace.Spans[0]
+	if gotCache.GenAI == nil {
+		t.Fatal("GenAI is nil for cache-only span in GetTrace")
+	}
+	if gotCache.GenAI.CacheReadTokens != 8000 {
+		t.Errorf("GetTrace cache-only CacheReadTokens = %d, want 8000", gotCache.GenAI.CacheReadTokens)
+	}
+	if gotCache.GenAI.CacheCreationTokens != 1200 {
+		t.Errorf("GetTrace cache-only CacheCreationTokens = %d, want 1200", gotCache.GenAI.CacheCreationTokens)
+	}
+
+	cacheSearchRes, err := s.SearchSpans(ctx, storage.SpanQuery{
+		StartTime: cacheOnlySpan.StartTime.Add(-time.Hour),
+		EndTime:   cacheOnlySpan.EndTime.Add(time.Hour),
+	})
+	if err != nil {
+		t.Fatalf("search spans cache-only: %v", err)
+	}
+	var foundCacheSpan *storage.Span
+	for i := range cacheSearchRes.Spans {
+		if cacheSearchRes.Spans[i].SpanID == "span-cache-only" {
+			foundCacheSpan = &cacheSearchRes.Spans[i]
+			break
+		}
+	}
+	if foundCacheSpan == nil {
+		t.Fatal("cache-only span not found in SearchSpans")
+	}
+	if foundCacheSpan.GenAI == nil {
+		t.Fatal("GenAI is nil for cache-only span in SearchSpans")
+	}
+	if foundCacheSpan.GenAI.CacheReadTokens != 8000 {
+		t.Errorf("SearchSpans cache-only CacheReadTokens = %d, want 8000", foundCacheSpan.GenAI.CacheReadTokens)
+	}
+	if foundCacheSpan.GenAI.CacheCreationTokens != 1200 {
+		t.Errorf("SearchSpans cache-only CacheCreationTokens = %d, want 1200", foundCacheSpan.GenAI.CacheCreationTokens)
+	}
 }
 
 func TestGetTraceNotFound(t *testing.T) {

@@ -838,7 +838,7 @@ func TestBuildCloudProxy_NoProject(t *testing.T) {
 
 	// This may return nil due to missing project or ADC — either is acceptable.
 	// The key test is that it doesn't panic.
-	cp, models := buildCloudProxy(cfg, nil)
+	cp, models, _ := buildCloudProxy(cfg, nil)
 
 	// Without a valid project, we expect nil.
 	// (If running in a CI with gcloud configured, it may succeed — that's OK too.)
@@ -859,7 +859,7 @@ func TestBuildCloudProxy_UnknownProvider(t *testing.T) {
 
 	// This may fail on ADC in CI, but should not panic.
 	// The point is: unknown provider doesn't crash.
-	cp, models := buildCloudProxy(cfg, nil)
+	cp, models, _ := buildCloudProxy(cfg, nil)
 
 	// If ADC not available, both nil — OK.
 	if cp != nil {

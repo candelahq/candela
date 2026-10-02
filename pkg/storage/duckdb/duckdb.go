@@ -245,7 +245,8 @@ func (s *Store) GetTrace(ctx context.Context, traceID string) (*storage.Trace, e
 			start_time, end_time, duration_ns, project_id, environment, service_name,
 			gen_ai_model, gen_ai_provider, gen_ai_input_tokens, gen_ai_output_tokens,
 			gen_ai_total_tokens, gen_ai_cost_usd, gen_ai_temperature, gen_ai_max_tokens,
-			gen_ai_input_content, gen_ai_output_content, attributes, user_id, session_id, tenant_id, job_id
+			gen_ai_input_content, gen_ai_output_content, attributes, user_id, session_id, tenant_id, job_id,
+			gen_ai_cache_read_tokens, gen_ai_cache_creation_tokens
 		FROM spans WHERE trace_id = ? AND (? = '' OR user_id = ? OR user_id = '') ORDER BY start_time ASC
 	`, traceID, userID, userID)
 	if err != nil {
@@ -516,7 +517,8 @@ func (s *Store) SearchSpans(ctx context.Context, q storage.SpanQuery) (*storage.
 			start_time, end_time, duration_ns, project_id, environment, service_name,
 			gen_ai_model, gen_ai_provider, gen_ai_input_tokens, gen_ai_output_tokens,
 			gen_ai_total_tokens, gen_ai_cost_usd, gen_ai_temperature, gen_ai_max_tokens,
-			gen_ai_input_content, gen_ai_output_content, attributes, user_id, session_id, tenant_id, job_id
+			gen_ai_input_content, gen_ai_output_content, attributes, user_id, session_id, tenant_id, job_id,
+			gen_ai_cache_read_tokens, gen_ai_cache_creation_tokens
 		FROM spans
 		WHERE `+where+`
 		ORDER BY start_time DESC, span_id DESC
@@ -803,6 +805,8 @@ func scanSpans(rows *sql.Rows) ([]storage.Span, error) {
 			&span.SessionID,
 			&span.TenantID,
 			&span.JobID,
+			&genAI.CacheReadTokens,
+			&genAI.CacheCreationTokens,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("scanning span: %w", err)
@@ -817,7 +821,8 @@ func scanSpans(rows *sql.Rows) ([]storage.Span, error) {
 		// provider, or may report input/output counts without a total.
 		if genAI.Model != "" || genAI.Provider != "" ||
 			genAI.InputTokens > 0 || genAI.OutputTokens > 0 ||
-			genAI.TotalTokens > 0 || genAI.CostUSD > 0 {
+			genAI.TotalTokens > 0 || genAI.CostUSD > 0 ||
+			genAI.CacheReadTokens > 0 || genAI.CacheCreationTokens > 0 {
 			span.GenAI = &genAI
 		}
 

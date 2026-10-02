@@ -121,6 +121,60 @@ func TestIngestSpans_RoundTrip(t *testing.T) {
 	}
 }
 
+func TestIngestSpans_CacheTokensRoundTrip(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+
+	span := testSpan("span-cache-1", "trace-cache-1", storage.SpanKindLLM, "gemini-2.5-pro")
+	span.GenAI.CacheReadTokens = 12500
+	span.GenAI.CacheCreationTokens = 3400
+
+	if err := store.IngestSpans(ctx, []storage.Span{span}); err != nil {
+		t.Fatalf("ingest: %v", err)
+	}
+
+	// Read back via GetTrace
+	trace, err := store.GetTrace(ctx, "trace-cache-1")
+	if err != nil {
+		t.Fatalf("get trace: %v", err)
+	}
+	if len(trace.Spans) != 1 {
+		t.Fatalf("span count = %d, want 1", len(trace.Spans))
+	}
+	got := trace.Spans[0]
+	if got.GenAI == nil {
+		t.Fatal("GenAI is nil")
+	}
+	if got.GenAI.CacheReadTokens != 12500 {
+		t.Errorf("GetTrace CacheReadTokens = %d, want 12500", got.GenAI.CacheReadTokens)
+	}
+	if got.GenAI.CacheCreationTokens != 3400 {
+		t.Errorf("GetTrace CacheCreationTokens = %d, want 3400", got.GenAI.CacheCreationTokens)
+	}
+
+	// Read back via SearchSpans
+	searchRes, err := store.SearchSpans(ctx, storage.SpanQuery{
+		StartTime: span.StartTime.Add(-time.Hour),
+		EndTime:   span.EndTime.Add(time.Hour),
+	})
+	if err != nil {
+		t.Fatalf("search spans: %v", err)
+	}
+	if len(searchRes.Spans) != 1 {
+		t.Fatalf("search span count = %d, want 1", len(searchRes.Spans))
+	}
+	searchGot := searchRes.Spans[0]
+	if searchGot.GenAI == nil {
+		t.Fatal("SearchSpans GenAI is nil")
+	}
+	if searchGot.GenAI.CacheReadTokens != 12500 {
+		t.Errorf("SearchSpans CacheReadTokens = %d, want 12500", searchGot.GenAI.CacheReadTokens)
+	}
+	if searchGot.GenAI.CacheCreationTokens != 3400 {
+		t.Errorf("SearchSpans CacheCreationTokens = %d, want 3400", searchGot.GenAI.CacheCreationTokens)
+	}
+}
+
 func TestIngestSpans_Attributes(t *testing.T) {
 	store := newTestStore(t)
 	ctx := context.Background()

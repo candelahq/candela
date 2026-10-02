@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/candelahq/candela/pkg/costcalc"
 	"github.com/candelahq/candela/pkg/proxy"
 )
 
@@ -247,5 +248,61 @@ func TestConfigAPI_SetCaching_ResponseIncludesWarnings(t *testing.T) {
 	}
 	if resp.Warnings[0] != warnings[0] {
 		t.Errorf("warnings[0] = %q, want %q", resp.Warnings[0], warnings[0])
+	}
+}
+
+func TestConfigAPI_GetConfig_WithCalc(t *testing.T) {
+	calc := costcalc.New()
+	api := &localAPI{calc: calc}
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /_local/api/config", api.handleGetConfig)
+
+	req := httptest.NewRequest(http.MethodGet, "/_local/api/config", nil)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", w.Code)
+	}
+
+	var resp cachingConfigResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode error: %v", err)
+	}
+	if !strings.Contains(resp.Caching.Gemini.CacheDiscount, "override") {
+		t.Errorf("expected runtime override in cache discount when calc is set, got %q", resp.Caching.Gemini.CacheDiscount)
+	}
+}
+
+func TestConfigAPI_SetCaching_GeminiDiscount(t *testing.T) {
+	calc := costcalc.New()
+	p := proxy.NewProxyForTest(map[string]proxy.Provider{
+		"anthropic": {Name: "anthropic", FormatTranslator: &proxy.AnthropicFormatTranslator{}},
+	})
+	api := &localAPI{cloudProxy: p, calc: calc}
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /_local/api/config/caching", api.handleSetCaching)
+
+	req := httptest.NewRequest(http.MethodPost, "/_local/api/config/caching", strings.NewReader(`{"gemini_cache_discount": 0.85}`))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", w.Code)
+	}
+
+	var resp cachingConfigResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode error: %v", err)
+	}
+	if resp.Caching.Gemini.CacheDiscount != "85% (runtime override)" {
+		t.Errorf("cache discount = %q, want '85%% (runtime override)'", resp.Caching.Gemini.CacheDiscount)
+	}
+
+	// Verify calc was updated
+	dc, ok := calc.GetCacheDiscount("google")
+	if !ok || dc.ReadDiscount != 0.85 {
+		t.Errorf("calc discount = %v, want 0.85", dc.ReadDiscount)
 	}
 }

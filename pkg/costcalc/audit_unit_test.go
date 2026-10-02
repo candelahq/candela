@@ -147,11 +147,20 @@ func TestCalculate_ZeroTokens(t *testing.T) {
 func TestCalculate_NegativeTokens(t *testing.T) {
 	calc := New()
 	cost := calc.Calculate("google", "gemini-2.5-pro", -100, -50)
-	// Calculator does not clamp negative tokens — that's the caller's
-	// responsibility. Verify the function doesn't panic and returns a
-	// finite value (negative cost is the expected arithmetic result).
-	if math.IsNaN(cost) || math.IsInf(cost, 0) {
-		t.Errorf("Calculate with negative tokens = %v, want finite", cost)
+	if cost != 0 {
+		t.Errorf("Calculate with negative tokens = %v, want 0", cost)
+	}
+
+	costSingleInput := calc.Calculate("google", "gemini-2.5-pro", -100, 50)
+	costOnlyPositive := calc.Calculate("google", "gemini-2.5-pro", 0, 50)
+	if costSingleInput != costOnlyPositive {
+		t.Errorf("Calculate with negative input tokens = %v, want %v", costSingleInput, costOnlyPositive)
+	}
+
+	costSingleOutput := calc.Calculate("google", "gemini-2.5-pro", 100, -50)
+	costOnlyInput := calc.Calculate("google", "gemini-2.5-pro", 100, 0)
+	if costSingleOutput != costOnlyInput {
+		t.Errorf("Calculate with negative output tokens = %v, want %v", costSingleOutput, costOnlyInput)
 	}
 }
 

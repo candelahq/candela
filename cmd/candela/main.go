@@ -1201,15 +1201,15 @@ func runForeground() {
 	if soloMode && len(cfg.Providers) > 0 {
 		cloudProxy, cloudModels = buildCloudProxy(*cfg, spanProc)
 	}
-	// Wire the cloud proxy into the config API for runtime caching control.
-	configAPI.cloudProxy = cloudProxy
-	configAPI.calc = cloudCalc
-	configAPI.configWarnings = configWarnings(*cfg)
-	// Create a calc for pricing-based model filtering.
+	// Create a calc for pricing-based model filtering and config API cache discounts (#521).
 	// Uses the same defaults as the cloud proxy's embedded calc.
 	if len(cloudModels) > 0 {
 		cloudCalc = costcalc.New()
 	}
+	// Wire the cloud proxy into the config API for runtime caching control.
+	configAPI.cloudProxy = cloudProxy
+	configAPI.calc = cloudCalc
+	configAPI.configWarnings = configWarnings(*cfg)
 
 	lmH := newLMHandler(mgr, remoteProxy, runtimeLocalProxy, localHandler, cloudProxy, cloudModels, cloudCalc, soloMode, cfg.DefaultMaxTokens)
 	lmAddr := fmt.Sprintf("127.0.0.1:%d", lmPort)

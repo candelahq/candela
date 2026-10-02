@@ -13,7 +13,7 @@ RUN CGO_ENABLED=0 go build -o /tetragon-test-runner ./test/e2e/tetragon/test-run
 
 # Run-stage: minimal image with the test binary.
 # alpine:3.21
-FROM alpine:3.21@sha256:ce64758a109eb420d874a118f87920e625e12d3634e03b4a5573fd9f6e5d3507
+FROM alpine:3.24@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6
 
 RUN apk add --no-cache ca-certificates
 

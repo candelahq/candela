@@ -74,6 +74,14 @@ export function useCurrentUser(): CurrentUser {
       const resp = await userClient.getCurrentUser({}, { signal: controller.signal });
       if (!controller.signal.aborted) {
         if (resp.user) {
+          const roleStr = resp.user.role === UserRole.ADMIN ? "admin" : "developer";
+          const secure =
+            typeof window !== "undefined" && window.location.protocol === "https:"
+              ? "; Secure"
+              : "";
+          if (typeof document !== "undefined") {
+            document.cookie = `candela_role=${roleStr}; path=/; max-age=3600; SameSite=Lax${secure}`;
+          }
           dispatch({
             type: "success",
             user: resp.user,

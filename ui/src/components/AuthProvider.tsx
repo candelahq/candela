@@ -51,9 +51,33 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (!firebaseAuth) return;
-    const unsubscribe = onAuthStateChanged(firebaseAuth, (user) => {
+    const unsubscribe = onAuthStateChanged(firebaseAuth, async (user) => {
       setUser(user);
       setLoading(false);
+      if (user) {
+        try {
+          const token = await user.getIdToken();
+          const tokenResult = await user.getIdTokenResult();
+          const role =
+            (tokenResult.claims.role as string) ||
+            (tokenResult.claims.admin ? "admin" : "developer");
+          const secure =
+            typeof window !== "undefined" && window.location.protocol === "https:"
+              ? "; Secure"
+              : "";
+          document.cookie = `__session=${token}; path=/; max-age=3600; SameSite=Lax${secure}`;
+          document.cookie = `candela_role=${role}; path=/; max-age=3600; SameSite=Lax${secure}`;
+        } catch {
+          // Token retrieval failed
+        }
+      } else {
+        const secure =
+          typeof window !== "undefined" && window.location.protocol === "https:"
+            ? "; Secure"
+            : "";
+        document.cookie = `__session=; path=/; max-age=0; SameSite=Lax${secure}`;
+        document.cookie = `candela_role=; path=/; max-age=0; SameSite=Lax${secure}`;
+      }
     });
     return unsubscribe;
   }, []);
@@ -82,6 +106,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (!firebaseAuth) return;
     try {
       await firebaseSignOut(firebaseAuth);
+      const secure =
+        typeof window !== "undefined" && window.location.protocol === "https:"
+          ? "; Secure"
+          : "";
+      document.cookie = `__session=; path=/; max-age=0; SameSite=Lax${secure}`;
+      document.cookie = `candela_role=; path=/; max-age=0; SameSite=Lax${secure}`;
       setAuthError(null);
     } catch (err: unknown) {
       setAuthError(err instanceof Error ? err.message : "Failed to sign out");

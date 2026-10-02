@@ -18,6 +18,14 @@ async function mockConnectRPC(
 
 // Mock GetCurrentUser to return an admin user.
 async function mockAdminUser(page: import("@playwright/test").Page) {
+  await page.context().addCookies([
+    {
+      name: "candela_role",
+      value: "admin",
+      domain: "localhost",
+      path: "/",
+    },
+  ]);
   await mockConnectRPC(page, "/candela.v1.UserService/GetCurrentUser", {
     user: {
       id: "admin-1",
@@ -33,6 +41,14 @@ async function mockAdminUser(page: import("@playwright/test").Page) {
 
 // Mock GetCurrentUser to return a developer user.
 async function mockDevUser(page: import("@playwright/test").Page) {
+  await page.context().addCookies([
+    {
+      name: "candela_role",
+      value: "developer",
+      domain: "localhost",
+      path: "/",
+    },
+  ]);
   await mockConnectRPC(page, "/candela.v1.UserService/GetCurrentUser", {
     user: {
       id: "dev-1",

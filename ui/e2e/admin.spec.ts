@@ -33,6 +33,14 @@ async function mockConnectRPCError(
 
 // Mock GetCurrentUser to return an admin user.
 async function mockAdminUser(page: import("@playwright/test").Page) {
+  await page.context().addCookies([
+    {
+      name: "candela_role",
+      value: "admin",
+      domain: "localhost",
+      path: "/",
+    },
+  ]);
   await mockConnectRPC(page, "/candela.v1.UserService/GetCurrentUser", {
     user: {
       id: "admin-1",
@@ -48,6 +56,14 @@ async function mockAdminUser(page: import("@playwright/test").Page) {
 
 // Mock GetCurrentUser to return a developer user.
 async function mockDevUser(page: import("@playwright/test").Page) {
+  await page.context().addCookies([
+    {
+      name: "candela_role",
+      value: "developer",
+      domain: "localhost",
+      path: "/",
+    },
+  ]);
   await mockConnectRPC(page, "/candela.v1.UserService/GetCurrentUser", {
     user: {
       id: "dev-1",
@@ -83,6 +99,30 @@ test.describe("Admin Route Guard", () => {
     await mockDevUser(page);
     await page.goto("/admin/audit");
     await expect(page.locator("h2").filter({ hasText: "Access Denied" })).toBeVisible();
+  });
+
+  test("server-side middleware blocks non-admin and does not ship admin bundles", async ({ request }) => {
+    const response = await request.get("/admin/users", {
+      headers: {
+        Cookie: "candela_role=developer",
+      },
+    });
+    expect(response.status()).toBe(403);
+    const body = await response.text();
+    expect(body).toContain("Access Denied");
+    expect(body).not.toContain("users-table");
+    expect(body).not.toContain("/_next/static/chunks/app/admin");
+  });
+
+  test("server-side middleware blocks unauthenticated requests to admin routes", async ({ request }) => {
+    const response = await request.get("/admin/users", {
+      maxRedirects: 0,
+    });
+    // In test/dev mode without Firebase, unauthenticated requests are blocked with 403 Access Denied
+    expect([401, 403, 307, 308]).toContain(response.status());
+    const body = await response.text();
+    expect(body).toContain("Access Denied");
+    expect(body).not.toContain("users-table");
   });
 });
 

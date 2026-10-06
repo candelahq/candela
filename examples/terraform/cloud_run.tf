@@ -6,7 +6,8 @@
 # ──────────────────────────────────────────────────
 
 locals {
-  image = "${var.region}-docker.pkg.dev/${var.project_id}/${google_artifact_registry_repository.candela.repository_id}/candela-server:${var.image_tag}"
+  image       = "${var.region}-docker.pkg.dev/${var.project_id}/${google_artifact_registry_repository.candela.repository_id}/candela-server:${var.image_tag}"
+  iap_enabled = var.iap_enabled || (var.custom_domain != "" && var.iap_oauth_client_id != "")
 }
 
 resource "google_cloud_run_v2_service" "candela" {
@@ -17,7 +18,10 @@ resource "google_cloud_run_v2_service" "candela" {
 
   deletion_protection = false
 
-  ingress = (var.custom_domain != "" && var.iap_oauth_client_id != "") ? "INGRESS_TRAFFIC_INTERNAL_LOAD_BALANCER" : "INGRESS_TRAFFIC_ALL"
+  # Ingress control: When IAP is enabled, restrict ingress to INTERNAL_LOAD_BALANCER
+  # so direct *.run.app URLs return 403 Forbidden to internet callers.
+  # When IAP is not enabled, standard ingress is maintained with strict group-based invoker IAM.
+  ingress = local.iap_enabled ? "INGRESS_TRAFFIC_INTERNAL_LOAD_BALANCER" : "INGRESS_TRAFFIC_ALL"
 
   template {
     service_account = google_service_account.candela.email
@@ -131,10 +135,17 @@ resource "google_cloud_run_v2_service" "candela" {
 # 2. The caller must have roles/run.invoker on the service
 # candela-local injects ID tokens automatically for developer tools.
 
-# When IAP is enabled, Cloud Run needs allUsers invoker because ingress is
-# restricted to the Internal Load Balancer. IAP handles the access gate.
+# When IAP is enabled, Cloud Run requires the allUsers invoker binding ONLY because
+# ingress is restricted to INGRESS_TRAFFIC_INTERNAL_LOAD_BALANCER.
+# Direct requests to *.run.app return 403 Forbidden at Google's edge.
+# All internet traffic MUST traverse the Global External HTTPS Load Balancer,
+# where Cloud IAP enforces identity checks against the configured Google Group.
+#
+# CRITICAL SECURITY RULE: allUsers invoker MUST be conditional on IAP being enabled
+# (and ingress being restricted to INTERNAL_LOAD_BALANCER). It MUST NEVER be created
+# when ingress is INGRESS_TRAFFIC_ALL, which would allow direct *.run.app URL bypass.
 resource "google_cloud_run_v2_service_iam_member" "allow_unauthenticated" {
-  count    = (var.custom_domain != "" && var.iap_oauth_client_id != "") ? 1 : 0
+  count    = local.iap_enabled ? 1 : 0
   project  = google_cloud_run_v2_service.candela.project
   location = google_cloud_run_v2_service.candela.location
   name     = google_cloud_run_v2_service.candela.name

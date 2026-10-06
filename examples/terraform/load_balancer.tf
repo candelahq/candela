@@ -147,7 +147,7 @@ resource "google_compute_global_forwarding_rule" "candela_http" {
 
 # Grant the Google Group access through IAP.
 resource "google_iap_web_backend_service_iam_member" "candela_users" {
-  count               = (local.has_custom_domain && var.iap_oauth_client_id != "") ? 1 : 0
+  count               = (local.has_custom_domain && local.iap_enabled && var.iap_oauth_client_id != "") ? 1 : 0
   web_backend_service = google_compute_backend_service.candela[0].name
   role                = "roles/iap.httpsResourceAccessor"
   member              = "group:${var.invoker_google_group}"

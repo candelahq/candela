@@ -140,3 +140,9 @@ variable "iap_oauth_client_secret" {
   sensitive   = true
   default     = ""
 }
+
+variable "iap_enabled" {
+  description = "Enable Identity-Aware Proxy (IAP) access control. When true, restricts Cloud Run ingress to internal load balancer only so direct *.run.app URLs return 403 Forbidden, and allUsers invoker is only granted behind the IAP perimeter."
+  type        = bool
+  default     = false
+}

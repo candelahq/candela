@@ -1,6 +1,7 @@
 package main
 
 import (
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -10,10 +11,19 @@ import (
 )
 
 func TestFindProcessesOnPort_NoListeners(t *testing.T) {
-	// Use a very high ephemeral port that's unlikely to be in use.
-	procs := findProcessesOnPort(59999)
+	// Dynamically acquire and close an ephemeral port so it is guaranteed to have no listener.
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("failed to bind ephemeral port: %v", err)
+	}
+	port := ln.Addr().(*net.TCPAddr).Port
+	if err := ln.Close(); err != nil {
+		t.Fatalf("failed to close listener: %v", err)
+	}
+
+	procs := findProcessesOnPort(port)
 	if len(procs) != 0 {
-		t.Errorf("expected no processes on port 59999, got %d", len(procs))
+		t.Errorf("expected no processes on port %d, got %d", port, len(procs))
 	}
 }
 

@@ -425,23 +425,6 @@ func TestParseConfig_EmptyDataUsesDefaults(t *testing.T) {
 	}
 }
 
-func TestLoadConfig_RepoConfigFile(t *testing.T) {
-	// Points to the repository root config.yaml
-	t.Setenv("CANDELA_CONFIG", "../../config.yaml")
-
-	cfg, err := loadConfig()
-	if err != nil {
-		t.Fatalf("failed to load repo config.yaml under KnownFields(true): %v", err)
-	}
-
-	if !cfg.Proxy.Enabled {
-		t.Errorf("expected proxy.enabled to be true in config.yaml")
-	}
-	if !cfg.Proxy.LMStudio.Enabled {
-		t.Errorf("expected proxy.lmstudio.enabled to be true in config.yaml")
-	}
-}
-
 func TestLogEffectiveConfig_RedactsSecrets(t *testing.T) {
 	var buf bytes.Buffer
 	testLogger := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{

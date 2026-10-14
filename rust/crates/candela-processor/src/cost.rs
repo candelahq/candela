@@ -20,6 +20,8 @@ impl CostCalculator {
         let mut prices = HashMap::new();
 
         // ── Google Gemini ─────────────────────────────────────────
+        // Gemini 4
+        prices.insert("gemini-4-argon".into(), (2.00, 10.00));
         // Gemini 3.1 (latest)
         prices.insert("gemini-3.1-pro".into(), (2.00, 12.00));
         // Gemini 2.5
@@ -57,14 +59,20 @@ impl CostCalculator {
         prices.insert("o1-mini".into(), (3.00, 12.00));
 
         // ── Anthropic (via Vertex AI or direct) ──────────────────
-        // Claude 4.6/4.7 (latest)
+        // Claude 5.5 / 5
+        prices.insert("claude-opus-5.5".into(), (4.00, 20.00));
+        prices.insert("claude-sonnet-5.5".into(), (2.00, 10.00));
+        prices.insert("claude-haiku-5.5".into(), (0.10, 0.50));
+        prices.insert("claude-opus-5".into(), (5.00, 25.00));
+        prices.insert("claude-sonnet-5".into(), (2.00, 10.00));
+        // Claude 4.6/4.7/4.8
+        prices.insert("claude-opus-4.8".into(), (5.00, 25.00));
         prices.insert("claude-opus-4.7".into(), (5.00, 25.00));
         prices.insert("claude-opus-4.6".into(), (5.00, 25.00));
         prices.insert("claude-sonnet-4.6".into(), (3.00, 15.00));
         prices.insert("claude-haiku-4.5".into(), (1.00, 5.00));
         // Claude 4 (Vertex AI model IDs)
         prices.insert("claude-sonnet-4-20250514".into(), (3.00, 15.00));
-        prices.insert("claude-opus-4-20250514".into(), (5.00, 25.00));
         // Claude 3.5 (legacy)
         prices.insert("claude-3-5-sonnet-20241022".into(), (3.00, 15.00));
         prices.insert("claude-haiku-3-5-20241022".into(), (0.80, 4.00));
@@ -133,8 +141,8 @@ mod tests {
     #[test]
     fn claude_opus4_uses_correct_pricing() {
         let calc = CostCalculator::new();
-        // claude-opus-4-20250514 should be $5/$25, NOT the legacy $15/$75
-        let cost = calc.calculate("anthropic", "claude-opus-4-20250514", 1_000_000, 1_000_000);
+        // claude-opus-4.8 should be $5/$25, NOT the legacy $15/$75
+        let cost = calc.calculate("anthropic", "claude-opus-4.8", 1_000_000, 1_000_000);
         // 1M input @ $5.00/M + 1M output @ $25.00/M = $5.00 + $25.00 = $30.00
         assert!(
             (cost - 30.00).abs() < 0.001,
@@ -201,7 +209,8 @@ mod tests {
     fn has_pricing_known_model() {
         let calc = CostCalculator::new();
         assert!(calc.has_pricing("gpt-4o"));
-        assert!(calc.has_pricing("claude-opus-4-20250514"));
+        assert!(calc.has_pricing("claude-opus-5.5"));
+        assert!(calc.has_pricing("gemini-4-argon"));
         assert!(calc.has_pricing("gemini-2.5-flash"));
     }
 

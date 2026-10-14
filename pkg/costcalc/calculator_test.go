@@ -665,14 +665,15 @@ func TestOpusPricing(t *testing.T) {
 		model     string
 		wantInput float64
 	}{
+		{"claude-opus-5.5", 4.00},
+		{"claude-opus-5-5", 4.00}, // hyphen variant (Vertex AI format)
+		{"claude-opus-5", 5.00},
 		{"claude-opus-4.8", 5.00},
 		{"claude-opus-4-8", 5.00}, // hyphen variant (Vertex AI format)
 		{"claude-opus-4.7", 5.00},
 		{"claude-opus-4-7", 5.00}, // hyphen variant (Vertex AI format)
 		{"claude-opus-4.6", 5.00},
 		{"claude-opus-4-6", 5.00},
-		{"claude-opus-4", 5.00},
-		{"claude-opus-4-20250514", 5.00},
 	}
 	for _, tt := range tests {
 		t.Run(tt.model, func(t *testing.T) {

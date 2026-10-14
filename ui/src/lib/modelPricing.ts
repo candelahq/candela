@@ -34,6 +34,7 @@ export interface CacheEfficiency {
 
 const PRICING_MAP: Record<string, ModelPricing> = {
   // Google Gemini
+  "gemini-4-argon":          { inputPerMillion: 2.00,  outputPerMillion: 10.00 },
   "gemini-3.5-flash":        { inputPerMillion: 1.50,  outputPerMillion: 9.00 },
   "gemini-3.1-pro":          { inputPerMillion: 2.00,  outputPerMillion: 12.00 },
   "gemini-3.1-flash":        { inputPerMillion: 0.50,  outputPerMillion: 3.00 },
@@ -67,14 +68,18 @@ const PRICING_MAP: Record<string, ModelPricing> = {
   "o1-mini":         { inputPerMillion: 3.00,  outputPerMillion: 12.00 },
 
   // Anthropic
+  "claude-opus-5.5":              { inputPerMillion: 4.00,  outputPerMillion: 20.00 },
+  "claude-sonnet-5.5":            { inputPerMillion: 2.00,  outputPerMillion: 10.00 },
+  "claude-haiku-5.5":             { inputPerMillion: 0.10,  outputPerMillion: 0.50 },
+  "claude-opus-5":                { inputPerMillion: 5.00,  outputPerMillion: 25.00 },
+  "claude-sonnet-5":              { inputPerMillion: 2.00,  outputPerMillion: 10.00 },
+  "claude-opus-4.8":              { inputPerMillion: 5.00,  outputPerMillion: 25.00 },
   "claude-opus-4.7":              { inputPerMillion: 5.00,  outputPerMillion: 25.00 },
   "claude-opus-4.6":              { inputPerMillion: 5.00,  outputPerMillion: 25.00 },
   "claude-sonnet-4.6":            { inputPerMillion: 3.00,  outputPerMillion: 15.00 },
   "claude-haiku-4.5":             { inputPerMillion: 1.00,  outputPerMillion: 5.00 },
   "claude-sonnet-4":              { inputPerMillion: 3.00,  outputPerMillion: 15.00 },
-  "claude-opus-4":                { inputPerMillion: 5.00,  outputPerMillion: 25.00 },
   "claude-sonnet-4-20250514":     { inputPerMillion: 3.00,  outputPerMillion: 15.00 },
-  "claude-opus-4-20250514":       { inputPerMillion: 5.00,  outputPerMillion: 25.00 },
   "claude-3-5-sonnet-20241022":   { inputPerMillion: 3.00,  outputPerMillion: 15.00 },
   "claude-haiku-3-5-20241022":    { inputPerMillion: 0.80,  outputPerMillion: 4.00 },
   "claude-3-opus-20240229":       { inputPerMillion: 15.00, outputPerMillion: 75.00 },

@@ -16,6 +16,14 @@
 export interface ModelPricing {
   inputPerMillion: number;
   outputPerMillion: number;
+  /** Optional high-tier rates when input context exceeds tierThresholdTokens */
+  inputPerMillionHigh?: number;
+  outputPerMillionHigh?: number;
+  tierThresholdTokens?: number;
+  /** Optional ISO-8601 promotional expiration timestamp and post-promo fallback rates */
+  validUntil?: string;
+  fallbackInputPerMillion?: number;
+  fallbackOutputPerMillion?: number;
 }
 
 export interface CacheEfficiency {
@@ -34,6 +42,13 @@ export interface CacheEfficiency {
 
 const PRICING_MAP: Record<string, ModelPricing> = {
   // Google Gemini
+  "gemini-4-argon": {
+    inputPerMillion: 2.00,
+    outputPerMillion: 10.00,
+    validUntil: "2026-11-30T23:59:59Z",
+    fallbackInputPerMillion: 4.00,
+    fallbackOutputPerMillion: 20.00,
+  },
   "gemini-3.5-flash":        { inputPerMillion: 1.50,  outputPerMillion: 9.00 },
   "gemini-3.1-pro":          { inputPerMillion: 2.00,  outputPerMillion: 12.00 },
   "gemini-3.1-flash":        { inputPerMillion: 0.50,  outputPerMillion: 3.00 },
@@ -67,14 +82,24 @@ const PRICING_MAP: Record<string, ModelPricing> = {
   "o1-mini":         { inputPerMillion: 3.00,  outputPerMillion: 12.00 },
 
   // Anthropic
+  "claude-opus-5.5":              { inputPerMillion: 4.00,  outputPerMillion: 20.00 },
+  "claude-sonnet-5.5":            { inputPerMillion: 2.00,  outputPerMillion: 10.00 },
+  "claude-haiku-5.5": {
+    inputPerMillion: 0.10,
+    outputPerMillion: 0.50,
+    inputPerMillionHigh: 0.50,
+    outputPerMillionHigh: 2.50,
+    tierThresholdTokens: 100000,
+  },
+  "claude-opus-5":                { inputPerMillion: 5.00,  outputPerMillion: 25.00 },
+  "claude-sonnet-5":              { inputPerMillion: 2.00,  outputPerMillion: 10.00 },
+  "claude-opus-4.8":              { inputPerMillion: 5.00,  outputPerMillion: 25.00 },
   "claude-opus-4.7":              { inputPerMillion: 5.00,  outputPerMillion: 25.00 },
   "claude-opus-4.6":              { inputPerMillion: 5.00,  outputPerMillion: 25.00 },
   "claude-sonnet-4.6":            { inputPerMillion: 3.00,  outputPerMillion: 15.00 },
   "claude-haiku-4.5":             { inputPerMillion: 1.00,  outputPerMillion: 5.00 },
   "claude-sonnet-4":              { inputPerMillion: 3.00,  outputPerMillion: 15.00 },
-  "claude-opus-4":                { inputPerMillion: 5.00,  outputPerMillion: 25.00 },
   "claude-sonnet-4-20250514":     { inputPerMillion: 3.00,  outputPerMillion: 15.00 },
-  "claude-opus-4-20250514":       { inputPerMillion: 5.00,  outputPerMillion: 25.00 },
   "claude-3-5-sonnet-20241022":   { inputPerMillion: 3.00,  outputPerMillion: 15.00 },
   "claude-haiku-3-5-20241022":    { inputPerMillion: 0.80,  outputPerMillion: 4.00 },
   "claude-3-opus-20240229":       { inputPerMillion: 15.00, outputPerMillion: 75.00 },
@@ -94,10 +119,26 @@ const PRICING_MAP: Record<string, ModelPricing> = {
 
 /**
  * Look up static list pricing for a model.
+ * If promotional pricing has expired relative to `now`, the fallback rates
+ * are returned automatically.
  * Returns null for models without a known price (e.g. local/custom).
  */
-export function getModelPricing(model: string): ModelPricing | null {
-  return PRICING_MAP[model.toLowerCase()] ?? null;
+export function getModelPricing(
+  model: string,
+  now: Date = new Date()
+): ModelPricing | null {
+  const entry = PRICING_MAP[model.toLowerCase()];
+  if (!entry) return null;
+
+  if (entry.validUntil && now.getTime() > Date.parse(entry.validUntil)) {
+    return {
+      ...entry,
+      inputPerMillion: entry.fallbackInputPerMillion ?? entry.inputPerMillion,
+      outputPerMillion: entry.fallbackOutputPerMillion ?? entry.outputPerMillion,
+    };
+  }
+
+  return entry;
 }
 
 /**

@@ -8,7 +8,17 @@
 
 models:
   # ── Google Gemini ─────────────────────────────────────────
-  # Gemini 3.8 (latest, Sep 2026)
+  # Gemini 4 Argon (latest, Oct 2026) — launch pricing through Nov 30, 2026.
+  # Standard pricing ($4/$20) takes effect Dec 1, 2026.
+  - provider: google
+    model: gemini-4-argon
+    input_per_million: 2.00
+    output_per_million: 10.00
+    valid_until: 2026-11-30T23:59:59Z
+    fallback_input_per_million: 4.00
+    fallback_output_per_million: 20.00
+
+  # Gemini 3.8 (Sep 2026)
   - provider: google
     model: gemini-3.8-flash
     input_per_million: 0.75
@@ -69,12 +79,30 @@ models:
     output_per_million: 0.40
 
   # ── Anthropic Claude ──────────────────────────────────────
-  # Claude 4.6/4.7/4.8 (latest) — canonical dotted format.
-  # Hyphenated variants (e.g. claude-opus-4-7 from Vertex AI) are
-  # resolved via normalizeModelID in resolve(), not duplicated here.
+  # Claude 4.6/4.7/4.8 & 5.x — canonical dotted format.
+  # Hyphenated variants (e.g. claude-opus-5-5, claude-opus-4-7 from Vertex AI)
+  # are resolved via normalizeModelID in resolve(), not duplicated here.
   #
-  # All Opus 4.x versions are $5/$25 per Anthropic pricing.
+  # All Opus 4.x versions are $5/$25 per Anthropic pricing; Opus 5.5 is $4/$20.
   # (Claude 3 Opus was $15/$75 — do NOT confuse the two.)
+  - provider: anthropic
+    model: claude-opus-5.5
+    input_per_million: 4.00
+    output_per_million: 20.00
+
+  - provider: anthropic
+    model: claude-sonnet-5.5
+    input_per_million: 2.00
+    output_per_million: 10.00
+
+  - provider: anthropic
+    model: claude-haiku-5.5
+    input_per_million: 0.10
+    output_per_million: 0.50
+    input_per_million_high: 0.50
+    output_per_million_high: 2.50
+    tier_threshold_tokens: 100000
+
   - provider: anthropic
     model: claude-opus-4.8
     input_per_million: 5.00
@@ -106,21 +134,11 @@ models:
     input_per_million: 3.00
     output_per_million: 15.00
 
-  - provider: anthropic
-    model: claude-opus-4
-    input_per_million: 5.00
-    output_per_million: 25.00
-
   # Claude 4 (Vertex AI model IDs with date suffix)
   - provider: anthropic
     model: claude-sonnet-4-20250514
     input_per_million: 3.00
     output_per_million: 15.00
-
-  - provider: anthropic
-    model: claude-opus-4-20250514
-    input_per_million: 5.00
-    output_per_million: 25.00
 
   # Claude Sonnet 5 (June 2026) — launch pricing through Aug 31, 2026.
   # Standard pricing ($3/$15) takes effect Sep 1, 2026 (#639).

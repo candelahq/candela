@@ -120,8 +120,8 @@ func TestCalculator_AnthropicDirect_HasPricing(t *testing.T) {
 	if !c.HasPricing("anthropic-direct", "claude-sonnet-4-20250514") {
 		t.Error("HasPricing(anthropic-direct, claude-sonnet-4-20250514) should be true via alias")
 	}
-	if !c.HasPricing("anthropic-direct", "claude-opus-4-20250514") {
-		t.Error("HasPricing(anthropic-direct, claude-opus-4-20250514) should be true via alias")
+	if !c.HasPricing("anthropic-direct", "claude-opus-5.5") {
+		t.Error("HasPricing(anthropic-direct, claude-opus-5.5) should be true via alias")
 	}
 }
 
@@ -170,8 +170,8 @@ func TestCalculator_AnthropicVertex_HasPricing(t *testing.T) {
 	if !c.HasPricing("anthropic-vertex", "claude-sonnet-4-20250514") {
 		t.Error("HasPricing(anthropic-vertex, claude-sonnet-4-20250514) should be true via alias")
 	}
-	if !c.HasPricing("anthropic-vertex", "claude-opus-4-20250514") {
-		t.Error("HasPricing(anthropic-vertex, claude-opus-4-20250514) should be true via alias")
+	if !c.HasPricing("anthropic-vertex", "claude-opus-5.5") {
+		t.Error("HasPricing(anthropic-vertex, claude-opus-5.5) should be true via alias")
 	}
 }
 

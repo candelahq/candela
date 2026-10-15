@@ -10,7 +10,7 @@
 # ── Stage 1: Build Go backend ──
 # DuckDB requires glibc (not musl/Alpine) for its static bindings.
 # golang:1.26-bookworm (1.26.9)
-FROM golang:1.26-bookworm@sha256:d9c68c2c51161e12fd77e4c6320687c9cd86e1af1e3ad6e6cd63ff970641453c AS builder
+FROM golang:1.27-bookworm@sha256:5cf287a799e6b94384bad13d16b14904c531f51ba65792237e122ce42b392f61 AS builder
 
 RUN apt-get update && apt-get install -y --no-install-recommends build-essential && rm -rf /var/lib/apt/lists/*
 

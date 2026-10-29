@@ -10,6 +10,10 @@ linters:
       - scratch
       - ui/node_modules
       - gen
+    rules:
+      - path: _test\.go
+        linters:
+          - errcheck
   settings:
     depguard:
       rules:

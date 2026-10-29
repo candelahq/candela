@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useReducer } from "react";
 import { useAuth } from "@/components/AuthProvider";
 
 export const ONBOARDING_COMPLETED_KEY = "candela:onboarding_completed";
@@ -69,7 +69,7 @@ interface OnboardingWizardProps {
 
 export function OnboardingWizard({ forceOpen, onClose }: OnboardingWizardProps) {
   const { user, configured, signIn } = useAuth();
-  const [isOpen, setIsOpen] = useState(Boolean(forceOpen));
+  const [isOpen, setIsOpen] = useReducer((_: boolean, open: boolean) => open, Boolean(forceOpen));
   const [prevForceOpen, setPrevForceOpen] = useState(forceOpen);
   if (forceOpen !== prevForceOpen) {
     setPrevForceOpen(forceOpen);
@@ -80,7 +80,6 @@ export function OnboardingWizard({ forceOpen, onClose }: OnboardingWizardProps) 
 
   useEffect(() => {
     if (forceOpen) {
-      setIsOpen(true);
       return;
     }
     if (

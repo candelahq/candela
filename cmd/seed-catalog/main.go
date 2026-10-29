@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"log"
 	"log/slog"
+	"os"
 	"strings"
 
 	"cloud.google.com/go/firestore"
@@ -110,6 +111,9 @@ func main() {
 		fmt.Printf(", %d errors", result.errors)
 	}
 	fmt.Println(".")
+	if result.errors > 0 {
+		os.Exit(1)
+	}
 }
 
 // seedEntries writes catalog entries to the store. When merge is true, existing

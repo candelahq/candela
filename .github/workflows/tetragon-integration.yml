@@ -34,8 +34,8 @@ permissions:
 jobs:
   tetragon-e2e:
     name: Tetragon E2E
-    # Ubuntu has full BPF support; macOS runners do not.
-    runs-on: ubuntu-latest
+    # Pin ubuntu-24.04 (Linux 6.8); ubuntu-26.04 (Linux 7.0+) rejects tetragon v1.3.0's bpf_multi_kprobe_v61.o.
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
 
     steps:

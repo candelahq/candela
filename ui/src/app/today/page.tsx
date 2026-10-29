@@ -190,7 +190,7 @@ export default function TodayPage() {
           {!loading && data?.models.length === 0 ? (
             <div className="empty-state">
               <div className="empty-state-icon">🤖</div>
-              <div className="empty-state-title">No personal activity yet today</div>
+              <div className="empty-state-title">No activity yet today</div>
               <div className="empty-state-desc">
                 Send requests through the Candela proxy and your per-model token usage will appear here in real time.
                 {isAdmin && (

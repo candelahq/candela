@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useReducer, useRef } from "react";
+import { useSyncExternalStore } from "react";
 import { userClient } from "@/lib/api";
 import type { User, UserBudget, BudgetGrant } from "@/gen/candela/types/user_pb";
 import { UserRole } from "@/gen/candela/types/user_pb";
@@ -15,37 +15,6 @@ export interface CurrentUser {
   error: string | null;
 }
 
-type Action =
-  | { type: "loading" }
-  | { type: "success"; user: User; budget: UserBudget | null; grants: BudgetGrant[]; remaining: number }
-  | { type: "no_user" }
-  | { type: "error"; message: string };
-
-function reducer(state: CurrentUser, action: Action): CurrentUser {
-  switch (action.type) {
-    case "loading":
-      return { ...state, isLoading: true, error: null };
-    case "success":
-      return {
-        user: action.user,
-        budget: action.budget,
-        activeGrants: action.grants,
-        totalRemainingUsd: action.remaining,
-        isAdmin: action.user.role === UserRole.ADMIN,
-        isLoading: false,
-        error: null,
-      };
-    case "no_user":
-      return {
-        ...initialState,
-        isLoading: false,
-        error: null,
-      };
-    case "error":
-      return { ...state, isLoading: false, error: action.message };
-  }
-}
-
 const initialState: CurrentUser = {
   user: null,
   budget: null,
@@ -56,55 +25,96 @@ const initialState: CurrentUser = {
   error: null,
 };
 
+type Listener = () => void;
+
+let sharedState: CurrentUser = initialState;
+const listeners = new Set<Listener>();
+let inFlightController: AbortController | null = null;
+let hasFetchedWhileMounted = false;
+
+function publish(next: CurrentUser) {
+  sharedState = next;
+  for (const listener of listeners) {
+    listener();
+  }
+}
+
+async function startSharedFetch() {
+  inFlightController?.abort();
+  const controller = new AbortController();
+  inFlightController = controller;
+  hasFetchedWhileMounted = true;
+
+  try {
+    const resp = await userClient.getCurrentUser({}, { signal: controller.signal });
+    if (controller.signal.aborted) return;
+
+    if (resp.user) {
+      const roleStr = resp.user.role === UserRole.ADMIN ? "admin" : "developer";
+      const secure =
+        typeof window !== "undefined" && window.location.protocol === "https:"
+          ? "; Secure"
+          : "";
+      if (typeof document !== "undefined") {
+        document.cookie = `candela_role=${roleStr}; path=/; max-age=3600; SameSite=Lax${secure}`;
+      }
+      publish({
+        user: resp.user,
+        budget: resp.budget ?? null,
+        activeGrants: resp.activeGrants,
+        totalRemainingUsd: resp.totalRemainingUsd,
+        isAdmin: resp.user.role === UserRole.ADMIN,
+        isLoading: false,
+        error: null,
+      });
+    } else {
+      publish({
+        ...initialState,
+        isLoading: false,
+        error: null,
+      });
+    }
+  } catch (err: unknown) {
+    if (controller.signal.aborted) return;
+    const message = err instanceof Error ? err.message : "Failed to load user";
+    publish({ ...sharedState, isLoading: false, error: message });
+  } finally {
+    if (inFlightController === controller) {
+      inFlightController = null;
+    }
+  }
+}
+
+function subscribe(listener: Listener): () => void {
+  listeners.add(listener);
+  if (!hasFetchedWhileMounted) {
+    void startSharedFetch();
+  }
+
+  return () => {
+    listeners.delete(listener);
+    if (listeners.size === 0) {
+      inFlightController?.abort();
+      inFlightController = null;
+      hasFetchedWhileMounted = false;
+      sharedState = initialState;
+    }
+  };
+}
+
+function getSnapshot(): CurrentUser {
+  return sharedState;
+}
+
+function getServerSnapshot(): CurrentUser {
+  return initialState;
+}
+
 /**
  * Fetches the current authenticated user's profile, budget, and grants.
- * Caches the result for the lifetime of the component tree.
+ * Shares state and deduplicates the getCurrentUser RPC across all mounted
+ * consumers in the component tree.
  */
 export function useCurrentUser(): CurrentUser {
-  const [state, dispatch] = useReducer(reducer, initialState);
-  const fetchRef = useRef<AbortController | null>(null);
-
-  const fetchUser = useCallback(async () => {
-    fetchRef.current?.abort();
-    const controller = new AbortController();
-    fetchRef.current = controller;
-
-    dispatch({ type: "loading" });
-    try {
-      const resp = await userClient.getCurrentUser({}, { signal: controller.signal });
-      if (!controller.signal.aborted) {
-        if (resp.user) {
-          const roleStr = resp.user.role === UserRole.ADMIN ? "admin" : "developer";
-          const secure =
-            typeof window !== "undefined" && window.location.protocol === "https:"
-              ? "; Secure"
-              : "";
-          if (typeof document !== "undefined") {
-            document.cookie = `candela_role=${roleStr}; path=/; max-age=3600; SameSite=Lax${secure}`;
-          }
-          dispatch({
-            type: "success",
-            user: resp.user,
-            budget: resp.budget ?? null,
-            grants: resp.activeGrants,
-            remaining: resp.totalRemainingUsd,
-          });
-        } else {
-          dispatch({ type: "no_user" });
-        }
-      }
-    } catch (err: unknown) {
-      if (!controller.signal.aborted) {
-        const message = err instanceof Error ? err.message : "Failed to load user";
-        dispatch({ type: "error", message });
-      }
-    }
-  }, []);
-
-  useEffect(() => {
-    fetchUser();
-    return () => fetchRef.current?.abort();
-  }, [fetchUser]);
-
-  return state;
+  return useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
 }

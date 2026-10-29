@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useReducer, useState } from "react";
+import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import { userClient } from "@/lib/api";
 import { HelpTip } from "@/components/Tooltip";
 import { useToast } from "@/components/Toast";
@@ -101,6 +101,13 @@ export default function AdminUsersPage() {
     }
   }, [statusFilter]);
 
+  const fetchUsersRef = useRef(fetchUsers);
+  const currentPageTokenRef = useRef(currentPageToken);
+  useEffect(() => {
+    fetchUsersRef.current = fetchUsers;
+    currentPageTokenRef.current = currentPageToken;
+  }, [fetchUsers, currentPageToken]);
+
   useEffect(() => {
     fetchUsers("");
   }, [fetchUsers]);
@@ -131,7 +138,7 @@ export default function AdminUsersPage() {
     setActionLoading(userId);
     try {
       await userClient.deactivateUser({ id: userId });
-      fetchUsers(currentPageToken);
+      fetchUsersRef.current(currentPageTokenRef.current);
     } catch (err: unknown) {
       toast(err instanceof Error ? err.message : "Failed to deactivate user", "error");
     } finally {
@@ -143,7 +150,7 @@ export default function AdminUsersPage() {
     setActionLoading(userId);
     try {
       await userClient.reactivateUser({ id: userId });
-      fetchUsers(currentPageToken);
+      fetchUsersRef.current(currentPageTokenRef.current);
     } catch (err: unknown) {
       toast(err instanceof Error ? err.message : "Failed to reactivate user", "error");
     } finally {

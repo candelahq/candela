@@ -588,9 +588,6 @@ func (s *Store) QueryTraces(ctx context.Context, tq storage.TraceQuery) (*storag
 	// Batch-fetch all columns that querySpans() expects, but use '' literals
 	// for large text content fields (input/output content) to avoid scanning
 	// MBs of prompt/response text just to build a trace list summary.
-	// Include a ±24h start_time window around [tq.StartTime, tq.EndTime] so
-	// BigQuery prunes day partitions while still capturing all spans of any
-	// trace that straddles the query window boundary.
 	// IMPORTANT: querySpans() scans into a full spanRow struct — missing columns
 	// in the SELECT will silently zero-fill every field, causing 0 token counts
 	// and blank model names in the trace list.
@@ -605,16 +602,12 @@ func (s *Store) QueryTraces(ctx context.Context, tq storage.TraceQuery) (*storag
 		       attributes, user_id, session_id, tenant_id, job_id, trace_group, labels
 		FROM %s
 		WHERE trace_id IN UNNEST(@traceIDs)
-		  AND start_time >= @startTime
-		  AND start_time <= @endTime
 		ORDER BY start_time ASC, span_id ASC
 	`, quoteTable(s.tableID))
 
 	bq := s.client.Query(batchQuery)
 	bq.SetParameters([]bigquery.QueryParameter{
 		{Name: "traceIDs", Value: traceIDs},
-		{Name: "startTime", Value: tq.StartTime.Add(-24 * time.Hour)},
-		{Name: "endTime", Value: tq.EndTime.Add(24 * time.Hour)},
 	})
 
 	allSpans, err := s.querySpans(ctx, bq)

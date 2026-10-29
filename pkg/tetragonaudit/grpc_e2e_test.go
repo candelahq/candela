@@ -164,12 +164,13 @@ func TestE2E_StreamAndProcess(t *testing.T) {
 	defer cancel()
 
 	// Run in background so we can inspect results.
-	done := make(chan error, 1)
+	done := make(chan struct{})
 	go func() {
-		done <- src.StreamEventsWithRetry(ctx, pipeline, RetryConfig{
+		_ = src.StreamEventsWithRetry(ctx, pipeline, RetryConfig{
 			InitialDelay: 50 * time.Millisecond,
 			MaxDelay:     200 * time.Millisecond,
 		})
+		close(done)
 	}()
 
 	// Wait for the first connection to be served.
@@ -242,12 +243,13 @@ func TestE2E_ReconnectAfterError(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	done := make(chan error, 1)
+	done := make(chan struct{})
 	go func() {
-		done <- src.StreamEventsWithRetry(ctx, pipeline, RetryConfig{
+		_ = src.StreamEventsWithRetry(ctx, pipeline, RetryConfig{
 			InitialDelay: 50 * time.Millisecond,
 			MaxDelay:     100 * time.Millisecond,
 		})
+		close(done)
 	}()
 
 	// Wait for both connections.
@@ -304,13 +306,14 @@ func TestE2E_HealthToggles(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	done := make(chan error, 1)
+	done := make(chan struct{})
 	go func() {
-		done <- src.StreamEventsWithRetry(ctx, pipeline, RetryConfig{
+		_ = src.StreamEventsWithRetry(ctx, pipeline, RetryConfig{
 			// Use longer delays so we can observe the disconnected state.
 			InitialDelay: 500 * time.Millisecond,
 			MaxDelay:     1 * time.Second,
 		})
+		close(done)
 	}()
 
 	// Wait for first connection.
@@ -375,12 +378,13 @@ func TestE2E_CleanEOFBackoff(t *testing.T) {
 
 	start := time.Now()
 
-	done := make(chan error, 1)
+	done := make(chan struct{})
 	go func() {
-		done <- src.StreamEventsWithRetry(ctx, pipeline, RetryConfig{
+		_ = src.StreamEventsWithRetry(ctx, pipeline, RetryConfig{
 			InitialDelay: initialDelay,
 			MaxDelay:     1 * time.Second,
 		})
+		close(done)
 	}()
 
 	// Wait for both connections.
@@ -424,12 +428,13 @@ func TestE2E_MultipleReconnects(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	done := make(chan error, 1)
+	done := make(chan struct{})
 	go func() {
-		done <- src.StreamEventsWithRetry(ctx, pipeline, RetryConfig{
+		_ = src.StreamEventsWithRetry(ctx, pipeline, RetryConfig{
 			InitialDelay: 20 * time.Millisecond,
 			MaxDelay:     100 * time.Millisecond,
 		})
+		close(done)
 	}()
 
 	// Wait for all 4 connections.
@@ -543,11 +548,12 @@ func TestE2E_DrainAfterShutdown(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
-	done := make(chan error, 1)
+	done := make(chan struct{})
 	go func() {
-		done <- src.StreamEventsWithRetry(ctx, pipeline, RetryConfig{
+		_ = src.StreamEventsWithRetry(ctx, pipeline, RetryConfig{
 			InitialDelay: 50 * time.Millisecond,
 		})
+		close(done)
 	}()
 
 	mock.waitForConnections(t, 1, 2*time.Second)

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useReducer, useRef, useState } from "react";
+import { useCallback, useEffect, useReducer, useState } from "react";
 import { userClient } from "@/lib/api";
 import { HelpTip } from "@/components/Tooltip";
 import { useToast } from "@/components/Toast";
@@ -81,16 +81,12 @@ export default function AdminUsersPage() {
   const [grantsModal, setGrantsModal] = useState<{ userId: string; email: string } | null>(null);
   const [deleteModal, setDeleteModal] = useState<{ userId: string; email: string } | null>(null);
 
-  // Stable ref for statusFilter to avoid re-creating fetchUsers on every filter change
-  const statusFilterRef = useRef(statusFilter);
-  statusFilterRef.current = statusFilter;
-
   const fetchUsers = useCallback(async (pageToken = ""): Promise<boolean> => {
     dispatch({ type: "loading" });
     try {
       const resp = await userClient.listUsers({
         pagination: { pageSize: PAGE_SIZE, pageToken },
-        statusFilter: statusFilterRef.current,
+        statusFilter,
       });
       dispatch({
         type: "success",
@@ -103,13 +99,11 @@ export default function AdminUsersPage() {
       dispatch({ type: "error", message: err instanceof Error ? err.message : "Failed to load users" });
       return false;
     }
-  }, []);
+  }, [statusFilter]);
 
   useEffect(() => {
-    setCurrentPageToken("");
-    setPageTokenHistory([]);
     fetchUsers("");
-  }, [fetchUsers, statusFilter]);
+  }, [fetchUsers]);
 
   const handleNextPage = async () => {
     if (!state.nextPageToken) return;
@@ -171,7 +165,11 @@ export default function AdminUsersPage() {
           <select
             className="form-input form-input-sm"
             value={statusFilter}
-            onChange={(e) => setStatusFilter(Number(e.target.value) as UserStatus)}
+            onChange={(e) => {
+              setStatusFilter(Number(e.target.value) as UserStatus);
+              setCurrentPageToken("");
+              setPageTokenHistory([]);
+            }}
             id="status-filter"
           >
             <option value={UserStatus.UNSPECIFIED}>All Statuses</option>

@@ -114,9 +114,14 @@ func TestQueryTraces_BuildsCorrectSQL(t *testing.T) {
 	assertParam(t, traceIDQuery.params, "userID")
 	assertParam(t, traceIDQuery.params, "pageSize")
 
-	// Verify second query (batch span fetch).
+	// Verify second query (batch span fetch) includes partition-pruning predicates.
 	assertContains(t, batchSpanQuery.sql, "trace_id IN UNNEST(@traceIDs)")
+	assertContains(t, batchSpanQuery.sql, "AND start_time >= @startTime")
+	assertContains(t, batchSpanQuery.sql, "AND start_time <= @endTime")
 	assertParam(t, batchSpanQuery.params, "traceIDs")
+	assertParam(t, batchSpanQuery.params, "startTime")
+	assertParam(t, batchSpanQuery.params, "endTime")
+	assertNoDuplicateParams(t, batchSpanQuery.params)
 
 	// Verify that trace-001 from the first query is passed to the second.
 	for _, p := range batchSpanQuery.params {
@@ -221,7 +226,7 @@ func TestSearchSpans_BuildsCorrectSQL(t *testing.T) {
 		PageSize:     25,
 	})
 
-	assertContains(t, capturedQuery.sql, "SELECT * FROM")
+	assertContains(t, capturedQuery.sql, "'' AS gen_ai_input_content, '' AS gen_ai_output_content")
 	assertContains(t, capturedQuery.sql, "LIMIT @pageSize")
 	assertContains(t, capturedQuery.sql, "@projectID")
 	assertContains(t, capturedQuery.sql, "@kind")

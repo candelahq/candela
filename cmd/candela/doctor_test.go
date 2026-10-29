@@ -95,14 +95,15 @@ func TestFindProcessesOnPort_DeduplicatesPIDs(t *testing.T) {
 	}
 	// findProcessesOnPort should not return the same PID twice
 	// even if lsof shows multiple file descriptors for the same process.
-	// We test this indirectly: start one listener, verify we get exactly 1 result.
+	// Bind port 0 so the OS assigns a guaranteed-unused ephemeral port.
 	listener := exec.Command("python3", "-c", `
 import socket, time, sys
 s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-s.bind(('127.0.0.1', 59997))
+s.bind(('127.0.0.1', 0))
+port = s.getsockname()[1]
 s.listen(1)
-sys.stdout.write('ready\n')
+sys.stdout.write(f'ready:{port}\n')
 sys.stdout.flush()
 time.sleep(30)
 `)
@@ -117,13 +118,19 @@ time.sleep(30)
 
 	buf := make([]byte, 64)
 	n, _ := stdout.Read(buf)
-	if !strings.Contains(string(buf[:n]), "ready") {
-		t.Fatal("listener did not become ready")
+	line := strings.TrimSpace(string(buf[:n]))
+	portStr, ok := strings.CutPrefix(line, "ready:")
+	if !ok {
+		t.Fatalf("listener did not become ready, got %q", line)
+	}
+	port, err := strconv.Atoi(portStr)
+	if err != nil {
+		t.Fatalf("invalid listener port %q: %v", portStr, err)
 	}
 
-	procs := findProcessesOnPort(59997)
+	procs := findProcessesOnPort(port)
 	if len(procs) != 1 {
-		t.Errorf("expected exactly 1 process, got %d", len(procs))
+		t.Errorf("expected exactly 1 process on port %d, got %d", port, len(procs))
 	}
 }
 

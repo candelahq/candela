@@ -1,7 +1,9 @@
 "use client";
 
+import Link from "next/link";
 import { useTodayBudget } from "@/hooks/useTodayBudget";
 import { useForecast } from "@/hooks/useForecast";
+import { useCurrentUser } from "@/hooks/useCurrentUser";
 import { ErrorBanner } from "@/components/ErrorBanner";
 import { useEffect, useMemo, useState } from "react";
 import { BudgetRing } from "@/components/today/BudgetRing";
@@ -16,6 +18,7 @@ export default function TodayPage() {
   usePageTitle("Today's Usage & Budget");
   const { data, loading, error, refresh } = useTodayBudget();
   const { forecast: restForecast } = useForecast();
+  const { isAdmin } = useCurrentUser();
   const forecast = data?.forecast ?? restForecast;
 
   const totalTokens = data
@@ -187,9 +190,25 @@ export default function TodayPage() {
           {!loading && data?.models.length === 0 ? (
             <div className="empty-state">
               <div className="empty-state-icon">🤖</div>
-              <div className="empty-state-title">No activity yet today</div>
+              <div className="empty-state-title">No personal activity yet today</div>
               <div className="empty-state-desc">
                 Send requests through the Candela proxy and your per-model token usage will appear here in real time.
+                {isAdmin && (
+                  <div style={{ marginTop: 12 }}>
+                    Looking for team-wide usage? View{" "}
+                    <Link href="/" style={{ color: "var(--accent)", textDecoration: "underline" }}>
+                      Dashboard
+                    </Link>
+                    {" · "}
+                    <Link href="/admin/budgets" style={{ color: "var(--accent)", textDecoration: "underline" }}>
+                      Budgets
+                    </Link>
+                    {" · "}
+                    <Link href="/admin/leaderboard" style={{ color: "var(--accent)", textDecoration: "underline" }}>
+                      Leaderboard
+                    </Link>
+                  </div>
+                )}
               </div>
             </div>
           ) : loading && !data ? (

@@ -114,8 +114,11 @@ func (r *Runtime) Stop(ctx context.Context) error {
 
 	// Wait for the process to exit, with a grace period.
 	// Also honor caller context cancellation.
-	done := make(chan error, 1)
-	go func() { done <- r.cmd.Wait() }()
+	done := make(chan struct{})
+	go func() {
+		_ = r.cmd.Wait()
+		close(done)
+	}()
 
 	const gracePeriod = 5 * time.Second
 	select {

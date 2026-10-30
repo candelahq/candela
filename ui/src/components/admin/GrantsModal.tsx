@@ -26,35 +26,41 @@ interface GrantsModalProps {
 interface GrantsState {
   grants: BudgetGrant[];
   grantsLoading: boolean;
-  grantsError: string | null;
+  listError: string | null;
+  mutationError: string | null;
 }
 
 type GrantsAction =
   | { type: "loading" }
   | { type: "success"; grants: BudgetGrant[] }
-  | { type: "error"; message: string }
-  | { type: "clearError" };
+  | { type: "listError"; message: string }
+  | { type: "mutationError"; message: string }
+  | { type: "clearMutationError" };
 
 function grantsReducer(state: GrantsState, action: GrantsAction): GrantsState {
   switch (action.type) {
     case "loading":
-      return { ...state, grantsLoading: true, grantsError: null };
+      return { ...state, grantsLoading: true, listError: null };
     case "success":
-      return { grants: action.grants, grantsLoading: false, grantsError: null };
-    case "error":
-      return { ...state, grantsLoading: false, grantsError: action.message };
-    case "clearError":
-      return { ...state, grantsError: null };
+      return { ...state, grants: action.grants, grantsLoading: false, listError: null };
+    case "listError":
+      return { ...state, grantsLoading: false, listError: action.message };
+    case "mutationError":
+      return { ...state, mutationError: action.message };
+    case "clearMutationError":
+      return { ...state, mutationError: null };
   }
 }
 
 export function GrantsModal({ userId, email, onClose }: GrantsModalProps) {
   const { modalRef } = useModalA11y({ onClose });
-  const [{ grants, grantsLoading, grantsError }, dispatch] = useReducer(grantsReducer, {
+  const [{ grants, grantsLoading, listError, mutationError }, dispatch] = useReducer(grantsReducer, {
     grants: [],
     grantsLoading: false,
-    grantsError: null,
+    listError: null,
+    mutationError: null,
   });
+  const grantsError = mutationError ?? listError;
   const [showAddGrant, setShowAddGrant] = useState(false);
   const [grantForm, setGrantForm] = useState({ amountUsd: 0, reason: "", expiresAt: defaultExpiry() });
   const [grantSubmitting, setGrantSubmitting] = useState(false);
@@ -65,7 +71,7 @@ export function GrantsModal({ userId, email, onClose }: GrantsModalProps) {
       const resp = await userClient.listGrants({ userId, activeOnly: false });
       dispatch({ type: "success", grants: resp.grants });
     } catch (err: unknown) {
-      dispatch({ type: "error", message: err instanceof Error ? err.message : "Failed to load grants" });
+      dispatch({ type: "listError", message: err instanceof Error ? err.message : "Failed to load grants" });
     }
   }, [userId]);
 
@@ -76,7 +82,7 @@ export function GrantsModal({ userId, email, onClose }: GrantsModalProps) {
   const handleAddGrant = async (e: React.FormEvent) => {
     e.preventDefault();
     setGrantSubmitting(true);
-    dispatch({ type: "clearError" });
+    dispatch({ type: "clearMutationError" });
     try {
       await userClient.createGrant({
         userId,
@@ -89,19 +95,19 @@ export function GrantsModal({ userId, email, onClose }: GrantsModalProps) {
       setGrantForm({ amountUsd: 0, reason: "", expiresAt: defaultExpiry() });
       fetchGrants();
     } catch (err: unknown) {
-      dispatch({ type: "error", message: err instanceof Error ? err.message : "Failed to create grant" });
+      dispatch({ type: "mutationError", message: err instanceof Error ? err.message : "Failed to create grant" });
     } finally {
       setGrantSubmitting(false);
     }
   };
 
   const handleRevokeGrant = async (grantId: string) => {
-    dispatch({ type: "clearError" });
+    dispatch({ type: "clearMutationError" });
     try {
       await userClient.revokeGrant({ userId, grantId });
       fetchGrants();
     } catch (err: unknown) {
-      dispatch({ type: "error", message: err instanceof Error ? err.message : "Failed to revoke grant" });
+      dispatch({ type: "mutationError", message: err instanceof Error ? err.message : "Failed to revoke grant" });
     }
   };
 

@@ -709,8 +709,20 @@ func (s *Store) SearchSpans(ctx context.Context, sq storage.SpanQuery) (*storage
 		params = append(params, bigquery.QueryParameter{Name: "cursorTs", Value: cursor.Timestamp}, bigquery.QueryParameter{Name: "cursorId", Value: cursor.ID})
 	}
 
+	// Project explicit columns with '' literals for large prompt/response text
+	// fields (gen_ai_input_content / gen_ai_output_content) so the /search list
+	// view does not scan MBs of payload text across partitions. Full content is
+	// loaded on demand via GetTrace when a span row is clicked.
 	query := fmt.Sprintf(`
-		SELECT * FROM %s
+		SELECT span_id, trace_id, parent_span_id, name, kind, status, status_message,
+		       start_time, end_time, duration_ns, project_id, environment, service_name,
+		       gen_ai_model, gen_ai_provider,
+		       gen_ai_input_tokens, gen_ai_output_tokens, gen_ai_total_tokens,
+		       gen_ai_cost_usd, gen_ai_temperature, gen_ai_max_tokens,
+		       '' AS gen_ai_input_content, '' AS gen_ai_output_content,
+		       gen_ai_cache_read_tokens, gen_ai_cache_creation_tokens,
+		       attributes, user_id, session_id, tenant_id, job_id, trace_group, labels
+		FROM %s
 		WHERE (@projectID = '' OR project_id = @projectID)
 		  AND start_time >= @startTime
 		  AND start_time <= @endTime

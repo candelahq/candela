@@ -113,4 +113,29 @@ describe("useCurrentUser", () => {
     expect(result.current.isAdmin).toBe(false);
     expect(result.current.error).toBeNull();
   });
+
+  it("shares state and deduplicates getCurrentUser across concurrent consumers", async () => {
+    mockGetCurrentUser.mockResolvedValue({
+      user: {
+        id: "admin-1",
+        email: "admin@azra-ai.com",
+        role: UserRole.ADMIN,
+      },
+      budget: null,
+      activeGrants: [],
+      totalRemainingUsd: 42,
+    });
+
+    const { result } = renderHook(() => ({
+      sidebar: useCurrentUser(),
+      today: useCurrentUser(),
+    }));
+
+    await waitFor(() => expect(result.current.sidebar.isLoading).toBe(false));
+    expect(result.current.today.isLoading).toBe(false);
+    expect(result.current.sidebar.isAdmin).toBe(true);
+    expect(result.current.today.isAdmin).toBe(true);
+    expect(result.current.today.totalRemainingUsd).toBe(42);
+    expect(mockGetCurrentUser).toHaveBeenCalledTimes(1);
+  });
 });

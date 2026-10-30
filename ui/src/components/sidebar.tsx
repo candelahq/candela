@@ -118,7 +118,12 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
         )}
         <div className="sidebar-env">
           <span className="env-dot" />
-          <span>Development</span>
+          <span>
+            {process.env.NEXT_PUBLIC_CANDELA_ENV ||
+              (process.env.NODE_ENV === "production"
+                ? "Production"
+                : "Development")}
+          </span>
         </div>
       </div>
     </aside>

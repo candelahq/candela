@@ -128,6 +128,8 @@ func TestIngestSpans_CacheTokensRoundTrip(t *testing.T) {
 	span := testSpan("span-cache-1", "trace-cache-1", storage.SpanKindLLM, "gemini-2.5-pro")
 	span.GenAI.CacheReadTokens = 12500
 	span.GenAI.CacheCreationTokens = 3400
+	span.GenAI.PromptTokens = 20000
+	span.GenAI.CacheCostUSD = 0.00125
 
 	if err := store.IngestSpans(ctx, []storage.Span{span}); err != nil {
 		t.Fatalf("ingest: %v", err)
@@ -150,6 +152,12 @@ func TestIngestSpans_CacheTokensRoundTrip(t *testing.T) {
 	}
 	if got.GenAI.CacheCreationTokens != 3400 {
 		t.Errorf("GetTrace CacheCreationTokens = %d, want 3400", got.GenAI.CacheCreationTokens)
+	}
+	if got.GenAI.PromptTokens != 20000 {
+		t.Errorf("GetTrace PromptTokens = %d, want 20000", got.GenAI.PromptTokens)
+	}
+	if got.GenAI.CacheCostUSD != 0.00125 {
+		t.Errorf("GetTrace CacheCostUSD = %g, want 0.00125", got.GenAI.CacheCostUSD)
 	}
 
 	// Read back via SearchSpans

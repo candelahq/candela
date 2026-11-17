@@ -950,3 +950,104 @@ func TestQueryTraces_AllFiltersSimultaneously_SQLite(t *testing.T) {
 		t.Errorf("got trace %s, want trace-target", res.Traces[0].TraceID)
 	}
 }
+
+// TestPromptTokensAndCacheCostRoundTrip proves the true prompt size and the
+// cache dollars survive storage and aggregate, which is what the local traces
+// API and the usage views read.
+func TestPromptTokensAndCacheCostRoundTrip(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(time.Microsecond)
+
+	spans := []storage.Span{
+		{
+			SpanID: "span-cost-1", TraceID: "trace-cost-1", Name: "llm.chat",
+			Kind: storage.SpanKindLLM, Status: storage.SpanStatusOK,
+			StartTime: now, EndTime: now.Add(100 * time.Millisecond),
+			Duration: 100 * time.Millisecond, ProjectID: "proj-1",
+			GenAI: &storage.GenAIAttributes{
+				Model: "claude-sonnet-4-20250514", Provider: "anthropic",
+				InputTokens: 121, OutputTokens: 12, TotalTokens: 133,
+				CostUSD: 0.000543, PromptTokens: 190,
+				CacheReadTokens: 80, CacheCreationTokens: 10,
+				CacheCostUSD: 6.15e-5,
+			},
+		},
+		{
+			SpanID: "span-cost-2", TraceID: "trace-cost-2", Name: "llm.chat",
+			Kind: storage.SpanKindLLM, Status: storage.SpanStatusOK,
+			StartTime: now.Add(time.Second), EndTime: now.Add(time.Second + 100*time.Millisecond),
+			Duration: 100 * time.Millisecond, ProjectID: "proj-1",
+			GenAI: &storage.GenAIAttributes{
+				Model: "claude-sonnet-4-20250514", Provider: "anthropic",
+				InputTokens: 100, OutputTokens: 8, TotalTokens: 108,
+				CostUSD: 0.00042, PromptTokens: 100,
+			},
+		},
+	}
+
+	if err := s.IngestSpans(ctx, spans); err != nil {
+		t.Fatalf("ingest failed: %v", err)
+	}
+
+	trace, err := s.GetTrace(ctx, "trace-cost-1")
+	if err != nil {
+		t.Fatalf("get trace failed: %v", err)
+	}
+	if got := trace.Spans[0].GenAI; got == nil {
+		t.Fatal("GenAI is nil")
+	} else {
+		if got.PromptTokens != 190 {
+			t.Errorf("GetTrace PromptTokens = %d, want 190", got.PromptTokens)
+		}
+		if diff := got.CacheCostUSD - 6.15e-5; diff > 1e-12 || diff < -1e-12 {
+			t.Errorf("GetTrace CacheCostUSD = %g, want 6.15e-05", got.CacheCostUSD)
+		}
+	}
+
+	search, err := s.SearchSpans(ctx, storage.SpanQuery{
+		ProjectID: "proj-1",
+		StartTime: now.Add(-time.Hour),
+		EndTime:   now.Add(time.Hour),
+		Kind:      storage.SpanKindLLM,
+	})
+	if err != nil {
+		t.Fatalf("search spans failed: %v", err)
+	}
+	if len(search.Spans) != 2 {
+		t.Fatalf("SearchSpans returned %d spans, want 2", len(search.Spans))
+	}
+	if got := search.Spans[0].GenAI; got == nil || got.PromptTokens != 100 {
+		t.Errorf("SearchSpans PromptTokens = %v, want 100", got)
+	}
+
+	query := storage.UsageQuery{
+		ProjectID: "proj-1",
+		StartTime: now.Add(-time.Hour),
+		EndTime:   now.Add(time.Hour),
+	}
+	summary, err := s.GetUsageSummary(ctx, query)
+	if err != nil {
+		t.Fatalf("usage summary failed: %v", err)
+	}
+	if summary.TotalPromptTokens != 290 {
+		t.Errorf("TotalPromptTokens = %d, want 290", summary.TotalPromptTokens)
+	}
+	if diff := summary.TotalCacheCostUSD - 6.15e-5; diff > 1e-12 || diff < -1e-12 {
+		t.Errorf("TotalCacheCostUSD = %g, want 6.15e-05", summary.TotalCacheCostUSD)
+	}
+
+	models, err := s.GetModelBreakdown(ctx, query)
+	if err != nil {
+		t.Fatalf("model breakdown failed: %v", err)
+	}
+	if len(models) != 1 {
+		t.Fatalf("GetModelBreakdown returned %d models, want 1", len(models))
+	}
+	if models[0].PromptTokens != 290 {
+		t.Errorf("model PromptTokens = %d, want 290", models[0].PromptTokens)
+	}
+	if diff := models[0].CacheCostUSD - 6.15e-5; diff > 1e-12 || diff < -1e-12 {
+		t.Errorf("model CacheCostUSD = %g, want 6.15e-05", models[0].CacheCostUSD)
+	}
+}

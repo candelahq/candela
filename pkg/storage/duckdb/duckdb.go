@@ -107,6 +107,9 @@ func (s *Store) migrate() error {
 		// Migration: add cache token columns for prompt caching visibility.
 		`ALTER TABLE spans ADD COLUMN IF NOT EXISTS gen_ai_cache_read_tokens BIGINT DEFAULT 0`,
 		`ALTER TABLE spans ADD COLUMN IF NOT EXISTS gen_ai_cache_creation_tokens BIGINT DEFAULT 0`,
+		// Migration: add the true prompt size and what the cache tokens cost.
+		`ALTER TABLE spans ADD COLUMN IF NOT EXISTS gen_ai_prompt_tokens BIGINT DEFAULT 0`,
+		`ALTER TABLE spans ADD COLUMN IF NOT EXISTS gen_ai_cache_cost_usd DOUBLE DEFAULT 0`,
 		// Sync Outbox
 		`CREATE TABLE IF NOT EXISTS outbox_spans (
 			span_id VARCHAR,
@@ -203,6 +206,7 @@ func (s *Store) IngestSpans(ctx context.Context, spans []storage.Span) error {
 				span.TenantID,
 				span.JobID,
 				genAI.CacheReadTokens, genAI.CacheCreationTokens,
+				genAI.PromptTokens, genAI.CacheCostUSD,
 			); err != nil {
 				return fmt.Errorf("appending span %s: %w", span.SpanID, err)
 			}
@@ -246,7 +250,7 @@ func (s *Store) GetTrace(ctx context.Context, traceID string) (*storage.Trace, e
 			gen_ai_model, gen_ai_provider, gen_ai_input_tokens, gen_ai_output_tokens,
 			gen_ai_total_tokens, gen_ai_cost_usd, gen_ai_temperature, gen_ai_max_tokens,
 			gen_ai_input_content, gen_ai_output_content, attributes, user_id, session_id, tenant_id, job_id,
-			gen_ai_cache_read_tokens, gen_ai_cache_creation_tokens
+			gen_ai_cache_read_tokens, gen_ai_cache_creation_tokens, gen_ai_prompt_tokens, gen_ai_cache_cost_usd
 		FROM spans WHERE trace_id = ? AND (? = '' OR user_id = ? OR user_id = '') ORDER BY start_time ASC
 	`, traceID, userID, userID)
 	if err != nil {
@@ -518,7 +522,7 @@ func (s *Store) SearchSpans(ctx context.Context, q storage.SpanQuery) (*storage.
 			gen_ai_model, gen_ai_provider, gen_ai_input_tokens, gen_ai_output_tokens,
 			gen_ai_total_tokens, gen_ai_cost_usd, gen_ai_temperature, gen_ai_max_tokens,
 			gen_ai_input_content, gen_ai_output_content, attributes, user_id, session_id, tenant_id, job_id,
-			gen_ai_cache_read_tokens, gen_ai_cache_creation_tokens
+			gen_ai_cache_read_tokens, gen_ai_cache_creation_tokens, gen_ai_prompt_tokens, gen_ai_cache_cost_usd
 		FROM spans
 		WHERE `+where+`
 		ORDER BY start_time DESC, span_id DESC
@@ -566,7 +570,9 @@ func (s *Store) GetUsageSummary(ctx context.Context, q storage.UsageQuery) (*sto
 				THEN CAST(COUNT(DISTINCT CASE WHEN status = 2 THEN trace_id ELSE NULL END) AS DOUBLE) / COUNT(DISTINCT trace_id)
 				ELSE 0 END,
 			COALESCE(SUM(gen_ai_cache_read_tokens), 0)::BIGINT,
-			COALESCE(SUM(gen_ai_cache_creation_tokens), 0)::BIGINT
+			COALESCE(SUM(gen_ai_cache_creation_tokens), 0)::BIGINT,
+			COALESCE(SUM(gen_ai_prompt_tokens), 0)::BIGINT,
+			COALESCE(SUM(gen_ai_cache_cost_usd), 0)::DOUBLE
 		FROM spans
 		WHERE (? = '' OR project_id = ?) AND start_time >= ? AND start_time <= ?
 			AND (? = '' OR user_id = ?)
@@ -576,6 +582,7 @@ func (s *Store) GetUsageSummary(ctx context.Context, q storage.UsageQuery) (*sto
 		&summary.TotalInputTokens, &summary.TotalOutputTokens, &summary.TotalCostUSD,
 		&summary.AvgLatencyMs, &summary.ErrorRate,
 		&summary.TotalCacheReadTokens, &summary.TotalCacheCreationTokens,
+		&summary.TotalPromptTokens, &summary.TotalCacheCostUSD,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("querying usage: %w", err)
@@ -592,7 +599,9 @@ func (s *Store) GetModelBreakdown(ctx context.Context, q storage.UsageQuery) ([]
 			COALESCE(SUM(gen_ai_cost_usd), 0)::DOUBLE,
 			COALESCE(AVG(duration_ns), 0)::DOUBLE / 1000000.0,
 			COALESCE(SUM(gen_ai_cache_read_tokens), 0)::BIGINT,
-			COALESCE(SUM(gen_ai_cache_creation_tokens), 0)::BIGINT
+			COALESCE(SUM(gen_ai_cache_creation_tokens), 0)::BIGINT,
+			COALESCE(SUM(gen_ai_prompt_tokens), 0)::BIGINT,
+			COALESCE(SUM(gen_ai_cache_cost_usd), 0)::DOUBLE
 		FROM spans
 		WHERE (? = '' OR project_id = ?) AND start_time >= ? AND start_time <= ?
 			AND gen_ai_model != ''
@@ -611,7 +620,8 @@ func (s *Store) GetModelBreakdown(ctx context.Context, q storage.UsageQuery) ([]
 		var m storage.ModelUsage
 		err := rows.Scan(&m.Model, &m.Provider, &m.CallCount,
 			&m.InputTokens, &m.OutputTokens, &m.CostUSD, &m.AvgLatencyMs,
-			&m.CacheReadTokens, &m.CacheCreationTokens)
+			&m.CacheReadTokens, &m.CacheCreationTokens,
+			&m.PromptTokens, &m.CacheCostUSD)
 		if err != nil {
 			return nil, fmt.Errorf("scanning model: %w", err)
 		}
@@ -807,6 +817,8 @@ func scanSpans(rows *sql.Rows) ([]storage.Span, error) {
 			&span.JobID,
 			&genAI.CacheReadTokens,
 			&genAI.CacheCreationTokens,
+			&genAI.PromptTokens,
+			&genAI.CacheCostUSD,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("scanning span: %w", err)
@@ -822,7 +834,8 @@ func scanSpans(rows *sql.Rows) ([]storage.Span, error) {
 		if genAI.Model != "" || genAI.Provider != "" ||
 			genAI.InputTokens > 0 || genAI.OutputTokens > 0 ||
 			genAI.TotalTokens > 0 || genAI.CostUSD > 0 ||
-			genAI.CacheReadTokens > 0 || genAI.CacheCreationTokens > 0 {
+			genAI.CacheReadTokens > 0 || genAI.CacheCreationTokens > 0 ||
+			genAI.PromptTokens > 0 || genAI.CacheCostUSD > 0 {
 			span.GenAI = &genAI
 		}
 

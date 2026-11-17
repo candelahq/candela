@@ -24,6 +24,7 @@ import (
 	"net/url"
 	"os"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -2217,6 +2218,8 @@ type spanParams struct {
 	reasoningContent string
 	inputTokens      int64
 	outputTokens     int64
+	promptTokens     int64       // true prompt size, cache tokens included
+	cacheCostUSD     float64     // USD charged for the cache tokens
 	cacheTokens      CacheTokens // raw prompt cache breakdown
 	startTime        time.Time
 	endTime          time.Time
@@ -2398,6 +2401,18 @@ func (p *Proxy) deductBudget(ctx context.Context, provider Provider, model, user
 	}
 }
 
+// promptTokensFor returns the true prompt size of a request. OpenAI and Google
+// report prompt tokens inclusive of cache, so the raw input already covers it.
+// Additive providers such as Anthropic report fresh input only, so the cache
+// counts are added back. The cost-normalized input is not usable here because
+// it has the cache discounts baked in.
+func promptTokensFor(calc *costcalc.Calculator, provider string, rawInput int64, ct CacheTokens) int64 {
+	if cfg, ok := calc.GetCacheDiscount(pricingProvider(provider)); ok && !cfg.InputIncludesCache {
+		return rawInput + ct.CacheReadTokens + ct.CacheCreationTokens
+	}
+	return rawInput
+}
+
 // buildSpan constructs a storage.Span from parsed parameters and submits it.
 // Budget deduction is handled separately by deductBudget (called synchronously
 // in the request handler) — buildSpan only handles span creation and storage.
@@ -2442,6 +2457,12 @@ func (p *Proxy) buildSpan(ctx context.Context, params spanParams) {
 	if params.cacheTokens.CacheCreationTokens > 0 {
 		attrs["gen_ai.usage.cache_creation_tokens"] = fmt.Sprintf("%d", params.cacheTokens.CacheCreationTokens)
 	}
+	if params.promptTokens > 0 {
+		attrs["gen_ai.usage.prompt_tokens"] = fmt.Sprintf("%d", params.promptTokens)
+	}
+	if params.cacheCostUSD > 0 {
+		attrs["gen_ai.usage.cache_cost_usd"] = strconv.FormatFloat(params.cacheCostUSD, 'g', -1, 64)
+	}
 
 	// Use caller's trace context if present (W3C Trace Context propagation).
 	// This nests the proxy span under the caller's OTel span.
@@ -2470,11 +2491,13 @@ func (p *Proxy) buildSpan(ctx context.Context, params spanParams) {
 			OutputTokens:        params.outputTokens,
 			TotalTokens:         totalTokens,
 			CostUSD:             cost,
+			PromptTokens:        params.promptTokens,
 			InputContent:        p.sanitizeSpanContent(params.inputContent),
 			OutputContent:       p.sanitizeSpanContent(params.outputContent),
 			ReasoningContent:    p.sanitizeSpanContent(params.reasoningContent),
 			CacheReadTokens:     params.cacheTokens.CacheReadTokens,
 			CacheCreationTokens: params.cacheTokens.CacheCreationTokens,
+			CacheCostUSD:        params.cacheCostUSD,
 			InputRate:           inputRate,
 			OutputRate:          outputRate,
 			DiscountPercent:     discountPct,
@@ -2528,6 +2551,7 @@ func (p *Proxy) createSpan(
 	model, inputContent := extractRequestInfo(provider.Name, reqBody)
 	outputContent, inputTokens, outputTokens := extractResponseInfo(provider.Name, respBody)
 	ct := extractCacheTokens(provider.Name, respBody)
+	rawInputTokens := inputTokens
 
 	// For Google native, model is in the URL path, not the body.
 	// Fall back to the response's modelVersion field.
@@ -2546,6 +2570,8 @@ func (p *Proxy) createSpan(
 	// Normalize cached input tokens via the calculator (handles all providers).
 	// extendedTTL applies 2.0× for Anthropic 1-hour cache creation (#191).
 	inputTokens = p.calc.NormalizeCachedInputWithTTL(provider.Name, model, inputTokens, ct.CacheReadTokens, ct.CacheCreationTokens, extendedTTL)
+	promptTokens := promptTokensFor(p.calc, provider.Name, rawInputTokens, ct)
+	cacheCostUSD := p.calc.CacheCostUSD(provider.Name, model, rawInputTokens, ct.CacheReadTokens, ct.CacheCreationTokens, extendedTTL)
 
 	status := storage.SpanStatusOK
 	if statusCode >= 400 {
@@ -2563,6 +2589,8 @@ func (p *Proxy) createSpan(
 		reasoningContent: reasoningContent,
 		inputTokens:      inputTokens,
 		outputTokens:     outputTokens,
+		promptTokens:     promptTokens,
+		cacheCostUSD:     cacheCostUSD,
 		cacheTokens:      ct,
 		startTime:        startTime,
 		endTime:          endTime,
@@ -2605,6 +2633,7 @@ func (p *Proxy) createStreamingSpan(
 	inputTokens := streamInfo.inputTokens
 	outputTokens := streamInfo.outputTokens
 	ct := streamInfo.cacheTokens
+	rawInputTokens := inputTokens
 
 	// Extract <think> tags from streaming output content (#312).
 	// Only for known reasoning models — prevents corrupting legitimate
@@ -2617,6 +2646,8 @@ func (p *Proxy) createStreamingSpan(
 	// Normalize cached input tokens via the calculator (handles all providers).
 	// extendedTTL applies 2.0× for Anthropic 1-hour cache creation (#191).
 	inputTokens = p.calc.NormalizeCachedInputWithTTL(provider.Name, model, inputTokens, ct.CacheReadTokens, ct.CacheCreationTokens, extendedTTL)
+	promptTokens := promptTokensFor(p.calc, provider.Name, rawInputTokens, ct)
+	cacheCostUSD := p.calc.CacheCostUSD(provider.Name, model, rawInputTokens, ct.CacheReadTokens, ct.CacheCreationTokens, extendedTTL)
 
 	extraAttrs := map[string]string{
 		"proxy.streaming": "true",
@@ -2646,6 +2677,8 @@ func (p *Proxy) createStreamingSpan(
 		reasoningContent: reasoningContent,
 		inputTokens:      inputTokens,
 		outputTokens:     outputTokens,
+		promptTokens:     promptTokens,
+		cacheCostUSD:     cacheCostUSD,
 		cacheTokens:      ct,
 		startTime:        startTime,
 		endTime:          endTime,

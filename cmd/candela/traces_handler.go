@@ -39,6 +39,8 @@ type spanJSON struct {
 	JobID               string  `json:"job_id,omitempty"`
 	CacheReadTokens     int64   `json:"cache_read_tokens,omitempty"`
 	CacheCreationTokens int64   `json:"cache_creation_tokens,omitempty"`
+	PromptTokens        int64   `json:"prompt_tokens,omitempty"`
+	CacheCostUSD        float64 `json:"cache_cost_usd,omitempty"`
 }
 
 func newTracesHandler(reader storage.SpanReader) http.Handler {
@@ -112,6 +114,8 @@ func (h *tracesHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			sj.CostUSD = s.GenAI.CostUSD
 			sj.CacheReadTokens = s.GenAI.CacheReadTokens
 			sj.CacheCreationTokens = s.GenAI.CacheCreationTokens
+			sj.PromptTokens = s.GenAI.PromptTokens
+			sj.CacheCostUSD = s.GenAI.CacheCostUSD
 		}
 		spans = append(spans, sj)
 	}

@@ -173,6 +173,8 @@ func TestTracesHandler_ReturnsSpans(t *testing.T) {
 				InputTokens:  50,
 				OutputTokens: 25,
 				TotalTokens:  75,
+				PromptTokens: 190,
+				CacheCostUSD: 6.15e-5,
 			},
 		},
 	})
@@ -204,6 +206,12 @@ func TestTracesHandler_ReturnsSpans(t *testing.T) {
 	}
 	if s.InputTokens != 50 {
 		t.Errorf("input_tokens = %d, want 50", s.InputTokens)
+	}
+	if s.PromptTokens != 190 {
+		t.Errorf("prompt_tokens = %d, want 190", s.PromptTokens)
+	}
+	if diff := s.CacheCostUSD - 6.15e-5; diff > 1e-12 || diff < -1e-12 {
+		t.Errorf("cache_cost_usd = %g, want 6.15e-05", s.CacheCostUSD)
 	}
 	if s.Status != "ok" {
 		t.Errorf("status = %q, want ok", s.Status)

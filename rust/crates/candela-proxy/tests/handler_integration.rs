@@ -651,7 +651,10 @@ async fn proxy_cache_tokens_streaming() {
 
     assert_eq!(resp.status(), 200);
     let body = resp.text().await.unwrap();
-    assert!(body.contains("[DONE]"), "stream must reach the client intact");
+    assert!(
+        body.contains("[DONE]"),
+        "stream must reach the client intact"
+    );
 
     tokio::time::sleep(std::time::Duration::from_millis(150)).await;
 
@@ -671,4 +674,3 @@ async fn proxy_cache_tokens_streaming() {
         Some(&"true".to_string())
     );
 }
-

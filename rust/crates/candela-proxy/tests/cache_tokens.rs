@@ -27,12 +27,11 @@ struct Case {
 }
 
 fn fixture() -> Fixture {
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../../test/fixtures/cache_tokens.json");
-    let data = std::fs::read(&path)
-        .unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
-    let fixture: Fixture = serde_json::from_slice(&data)
-        .unwrap_or_else(|e| panic!("parse {}: {e}", path.display()));
+    let path =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../test/fixtures/cache_tokens.json");
+    let data = std::fs::read(&path).unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
+    let fixture: Fixture =
+        serde_json::from_slice(&data).unwrap_or_else(|e| panic!("parse {}: {e}", path.display()));
     assert!(!fixture.cases.is_empty(), "{} has no cases", path.display());
     fixture
 }

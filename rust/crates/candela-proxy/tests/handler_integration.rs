@@ -611,3 +611,64 @@ async fn proxy_keeps_client_stream_options() {
     let echoed: serde_json::Value = resp.json().await.unwrap();
     assert_eq!(echoed["stream_options"]["include_usage"], false);
 }
+
+/// Start a mock upstream that answers every request with one SSE stream.
+async fn start_streaming_upstream() -> String {
+    let app = Router::new().route(
+        "/v1/chat/completions",
+        post(|| async {
+            (
+                [("content-type", "text/event-stream")],
+                "data: {\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}\n\ndata: {\"choices\":[],\"usage\":{\"prompt_tokens\":100,\"completion_tokens\":20,\"prompt_tokens_details\":{\"cached_tokens\":60}}}\n\ndata: [DONE]\n\n",
+            )
+        }),
+    );
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://127.0.0.1:{}", listener.local_addr().unwrap().port());
+    tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    url
+}
+
+/// INT-14: A streaming response reports the cache tokens from its final chunk.
+#[tokio::test]
+async fn proxy_cache_tokens_streaming() {
+    let upstream_url = start_streaming_upstream().await;
+    let submitter = Arc::new(TestSubmitter::new());
+    let (proxy_url, _) = start_proxy(&upstream_url, submitter.clone()).await;
+
+    let client = reqwest::Client::new();
+    let resp = client
+        .post(format!("{}/proxy/openai/v1/chat/completions", proxy_url))
+        .header("content-type", "application/json")
+        .json(&serde_json::json!({
+            "model": "gpt-4o",
+            "stream": true,
+            "messages": [{"role": "user", "content": "stream cache test"}]
+        }))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), 200);
+    let body = resp.text().await.unwrap();
+    assert!(body.contains("[DONE]"), "stream must reach the client intact");
+
+    tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+
+    let spans = submitter.captured_spans();
+    assert_eq!(spans.len(), 1, "exactly one span should be captured");
+    let gen_ai = spans[0].gen_ai.as_ref().unwrap();
+    assert_eq!(gen_ai.cache_read_tokens, 60);
+    assert_eq!(gen_ai.cache_creation_tokens, 0);
+    assert_eq!(gen_ai.input_tokens, 100);
+    assert_eq!(gen_ai.output_tokens, 20);
+    assert_eq!(
+        spans[0].attributes.get("gen_ai.usage.cache_read_tokens"),
+        Some(&"60".to_string())
+    );
+    assert_eq!(
+        spans[0].attributes.get("llm.streaming"),
+        Some(&"true".to_string())
+    );
+}
+

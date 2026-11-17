@@ -279,6 +279,30 @@ fn int_field(obj: &serde_json::Map<String, Value>, key: &str) -> i64 {
     obj.get(key).and_then(Value::as_i64).unwrap_or(0)
 }
 
+// ── Streaming Usage Injection ──
+
+/// Adds `stream_options.include_usage` to an OpenAI-family streaming request.
+///
+/// OpenAI-compatible endpoints omit usage from the final SSE chunk unless the
+/// request asks for it, so without this a streaming response carries no cache
+/// numbers to measure. A client-supplied `stream_options` is never overridden.
+/// Returns `None` when the body should go upstream unchanged.
+pub fn inject_stream_usage_option(provider: &str, body: &[u8]) -> Option<Vec<u8>> {
+    if parser_family(provider) != Some(ParserFamily::OpenAi) {
+        return None;
+    }
+    let mut req: Value = serde_json::from_slice(body).ok()?;
+    let obj = req.as_object_mut()?;
+    if obj.contains_key("stream_options") {
+        return None;
+    }
+    obj.insert(
+        "stream_options".to_string(),
+        serde_json::json!({ "include_usage": true }),
+    );
+    serde_json::to_vec(&req).ok()
+}
+
 // ── OpenAI Parser ──
 
 struct OpenAIParser;
@@ -886,6 +910,61 @@ mod tests {
             b"data: {\"usage\":{\"prompt_tokens_details\":{\"cached_tokens\":60}}}\ndata: [DONE]\n";
         let cache = extract_streaming_cache_tokens("unknown", data);
         assert_eq!(cache, CacheTokens::default());
+    }
+
+    // ── Streaming usage injection ──
+
+    #[test]
+    fn inject_stream_usage_option_openai_family() {
+        let body = br#"{"model":"m","messages":[],"stream":true}"#;
+        for provider in [
+            "openai",
+            "gemini-oai",
+            "mistral",
+            "deepseek",
+            "deepseek-v3",
+            "qwen",
+            "zai",
+            "meta",
+            "xai",
+        ] {
+            let injected = inject_stream_usage_option(provider, body)
+                .unwrap_or_else(|| panic!("{provider} should inject stream_options"));
+            let parsed: Value = serde_json::from_slice(&injected).unwrap();
+            assert_eq!(
+                parsed["stream_options"]["include_usage"], true,
+                "failed for {provider}"
+            );
+        }
+    }
+
+    #[test]
+    fn inject_stream_usage_option_skips_other_families() {
+        let body = br#"{"model":"m","messages":[],"stream":true}"#;
+        for provider in [
+            "anthropic",
+            "anthropic-bedrock",
+            "google",
+            "gemini-vertex",
+            "unknown",
+        ] {
+            assert_eq!(
+                inject_stream_usage_option(provider, body),
+                None,
+                "failed for {provider}"
+            );
+        }
+    }
+
+    #[test]
+    fn inject_stream_usage_option_keeps_client_options() {
+        let body = br#"{"model":"m","stream":true,"stream_options":{"include_usage":false}}"#;
+        assert_eq!(inject_stream_usage_option("openai", body), None);
+    }
+
+    #[test]
+    fn inject_stream_usage_option_passes_invalid_json() {
+        assert_eq!(inject_stream_usage_option("openai", b"not json"), None);
     }
 
     // ── Fallback / edge cases ──

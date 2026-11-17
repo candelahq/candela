@@ -156,6 +156,18 @@ pub async fn proxy_handler(
     // ── 5. Detect streaming ──
     let is_streaming = detect_streaming(&request_bytes);
 
+    // ── 5b. Ask OpenAI-family upstreams for the final usage chunk ──
+    // Without it a streaming response carries no usage, so no cache numbers
+    // exist to measure. Translated requests already control their own options.
+    let upstream_body = if is_streaming && provider.format_translator.is_none() {
+        match parsers::inject_stream_usage_option(&provider_name, &upstream_body) {
+            Some(injected) => Bytes::from(injected),
+            None => upstream_body,
+        }
+    } else {
+        upstream_body
+    };
+
     // ── 6. Build upstream URL ──
     // SECURITY: Sanitize the rest path to prevent directory traversal.
     let sanitized_rest = sanitize_path(&rest);

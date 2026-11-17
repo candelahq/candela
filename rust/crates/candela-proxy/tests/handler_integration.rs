@@ -549,3 +549,65 @@ async fn proxy_traceparent_overrides_x_trace_id() {
     // Traceparent trace_id should win over x-trace-id
     assert_eq!(spans[0].trace_id, "1111222233334444aaaabbbbccccdddd");
 }
+
+/// Echoes the request body back so the test can inspect what went upstream.
+async fn start_echo_upstream() -> String {
+    let app = Router::new().route(
+        "/v1/chat/completions",
+        post(|body: String| async move { ([("content-type", "application/json")], body) }),
+    );
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://127.0.0.1:{}", listener.local_addr().unwrap().port());
+    tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    url
+}
+
+/// INT-15: A streaming OpenAI request asks upstream for the usage chunk.
+#[tokio::test]
+async fn proxy_injects_stream_usage_option() {
+    let upstream_url = start_echo_upstream().await;
+    let submitter = Arc::new(TestSubmitter::new());
+    let (proxy_url, _) = start_proxy(&upstream_url, submitter.clone()).await;
+
+    let client = reqwest::Client::new();
+    let resp = client
+        .post(format!("{}/proxy/openai/v1/chat/completions", proxy_url))
+        .header("content-type", "application/json")
+        .json(&serde_json::json!({
+            "model": "gpt-4o",
+            "stream": true,
+            "messages": [{"role": "user", "content": "injection test"}]
+        }))
+        .send()
+        .await
+        .unwrap();
+
+    let echoed: serde_json::Value = resp.json().await.unwrap();
+    assert_eq!(echoed["stream_options"]["include_usage"], true);
+    assert_eq!(echoed["model"], "gpt-4o");
+}
+
+/// INT-16: A client-supplied stream_options is forwarded untouched.
+#[tokio::test]
+async fn proxy_keeps_client_stream_options() {
+    let upstream_url = start_echo_upstream().await;
+    let submitter = Arc::new(TestSubmitter::new());
+    let (proxy_url, _) = start_proxy(&upstream_url, submitter.clone()).await;
+
+    let client = reqwest::Client::new();
+    let resp = client
+        .post(format!("{}/proxy/openai/v1/chat/completions", proxy_url))
+        .header("content-type", "application/json")
+        .json(&serde_json::json!({
+            "model": "gpt-4o",
+            "stream": true,
+            "stream_options": {"include_usage": false},
+            "messages": [{"role": "user", "content": "keep options"}]
+        }))
+        .send()
+        .await
+        .unwrap();
+
+    let echoed: serde_json::Value = resp.json().await.unwrap();
+    assert_eq!(echoed["stream_options"]["include_usage"], false);
+}

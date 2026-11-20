@@ -78,7 +78,7 @@ url = "2"
 tokio-test = "0.4"
 
 # Harness deps
-rusqlite = { version = "0.35", features = ["bundled", "chrono"] }
+rusqlite = { version = "0.41", features = ["bundled", "chrono"] }
 clap = { version = "4", features = ["derive", "env"] }
 dirs = "6"
 

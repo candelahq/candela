@@ -9,6 +9,11 @@ ignore = [
     # candela-harness uses unary RPCs exclusively; upgrade to connectrpc 0.8+ requires
     # updating buffa protoc-gen-buffa stubs.
     "RUSTSEC-2026-0304",
+    # RUSTSEC-2026-0543: chrono is unmaintained; every version is affected and no
+    # safe upgrade exists. chrono is pulled in by rusqlite's `chrono` feature and by
+    # our own timestamp handling. Replacing it means moving to jiff or time across
+    # the workspace, which is a migration of its own.
+    "RUSTSEC-2026-0543",
 ]
 
 [licenses]

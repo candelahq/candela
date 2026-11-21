@@ -18,12 +18,13 @@ use axum::extract::{Path, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use bytes::Bytes;
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use regex::Regex;
 use tracing::{error, info, warn};
 
 use candela_core::{GenAIAttributes, Span, SpanKind, SpanStatus};
 
+use crate::capture::{CapturedStream, StreamTap};
 use crate::ids::{new_span_id, new_trace_id};
 use crate::parsers::{self, CacheTokens};
 use crate::{Proxy, SpanSubmitter};
@@ -80,6 +81,150 @@ fn add_cache_attrs(attrs: &mut BTreeMap<String, String>, cache: &CacheTokens) {
             "gen_ai.usage.cache_creation_tokens".into(),
             cache.cache_creation_tokens.to_string(),
         );
+    }
+}
+
+/// Everything a streaming span needs that is known before the stream runs.
+struct StreamingSpanInputs {
+    provider: String,
+    model: String,
+    input_content: String,
+    status: SpanStatus,
+    status_message: Option<String>,
+    start_time: DateTime<Utc>,
+    trace_id: String,
+    parent_span_id: Option<String>,
+    attributes: BTreeMap<String, String>,
+    project_id: String,
+    environment: Option<String>,
+    service_name: Option<String>,
+    user_id: Option<String>,
+    session_id: Option<String>,
+    tenant_id: Option<String>,
+    job_id: Option<String>,
+    submitter: Arc<dyn SpanSubmitter>,
+}
+
+/// Parses a finished stream and submits its span.
+fn finish_streaming_span(inputs: StreamingSpanInputs, captured: CapturedStream) {
+    let StreamingSpanInputs {
+        provider,
+        model,
+        input_content,
+        status,
+        status_message,
+        start_time,
+        trace_id,
+        parent_span_id,
+        mut attributes,
+        project_id,
+        environment,
+        service_name,
+        user_id,
+        session_id,
+        tenant_id,
+        job_id,
+        submitter,
+    } = inputs;
+
+    let (_, mut usage) = parsers::extract_streaming_usage(&provider, &captured.head);
+    let mut cache = parsers::extract_streaming_cache_tokens(&provider, &captured.head);
+
+    // A capped or empty head can cut off the final usage chunk, which the tail
+    // always holds.
+    if captured.capped || captured.head.is_empty() {
+        let (_, tail_usage) = parsers::extract_streaming_usage(&provider, &captured.tail);
+        let tail_cache = parsers::extract_streaming_cache_tokens(&provider, &captured.tail);
+        if tail_usage.input_tokens > 0 {
+            usage.input_tokens = tail_usage.input_tokens;
+        }
+        if tail_usage.output_tokens > 0 {
+            usage.output_tokens = tail_usage.output_tokens;
+        }
+        usage.total_tokens = usage.input_tokens.saturating_add(usage.output_tokens);
+        cache.cache_read_tokens = cache.cache_read_tokens.max(tail_cache.cache_read_tokens);
+        cache.cache_creation_tokens = cache
+            .cache_creation_tokens
+            .max(tail_cache.cache_creation_tokens);
+    }
+
+    let (status, status_message) = if captured.completed {
+        (status, status_message)
+    } else {
+        (
+            SpanStatus::Error,
+            status_message.or_else(|| Some("stream ended before completion".to_string())),
+        )
+    };
+
+    attributes.insert(
+        "http.duration_ms".into(),
+        captured.elapsed.as_millis().to_string(),
+    );
+    attributes.insert(
+        "proxy.total_bytes_streamed".into(),
+        captured.total_bytes.to_string(),
+    );
+    if let Some(ttfb) = captured.ttfb {
+        attributes.insert("proxy.ttfb_ms".into(), ttfb.as_millis().to_string());
+    }
+    add_cache_attrs(&mut attributes, &cache);
+
+    let span = Span {
+        span_id: new_span_id(),
+        trace_id,
+        parent_span_id,
+        name: format!("llm.{provider}.chat"),
+        kind: SpanKind::Llm,
+        status,
+        status_message,
+        start_time,
+        end_time: Utc::now(),
+        duration: captured.elapsed,
+        gen_ai: if model.is_empty() {
+            None
+        } else {
+            Some(GenAIAttributes {
+                model,
+                provider: provider.clone(),
+                input_tokens: usage.input_tokens,
+                output_tokens: usage.output_tokens,
+                total_tokens: usage.total_tokens,
+                input_content,
+                cache_read_tokens: cache.cache_read_tokens,
+                cache_creation_tokens: cache.cache_creation_tokens,
+                ..Default::default()
+            })
+        },
+        attributes,
+        project_id,
+        environment,
+        service_name,
+        user_id,
+        session_id,
+        tenant_id,
+        job_id,
+    };
+
+    info!(
+        provider = %provider,
+        input_tokens = usage.input_tokens,
+        output_tokens = usage.output_tokens,
+        cache_read_tokens = cache.cache_read_tokens,
+        cache_creation_tokens = cache.cache_creation_tokens,
+        duration_ms = %captured.elapsed.as_millis(),
+        streaming = true,
+        "streamed request completed"
+    );
+
+    // The tap can finish outside a runtime (a dropped response during shutdown).
+    match tokio::runtime::Handle::try_current() {
+        Ok(handle) => {
+            handle.spawn(async move {
+                submitter.submit_batch(vec![span]);
+            });
+        }
+        Err(_) => submitter.submit_batch(vec![span]),
     }
 }
 
@@ -156,6 +301,18 @@ pub async fn proxy_handler(
     // ── 5. Detect streaming ──
     let is_streaming = detect_streaming(&request_bytes);
 
+    // ── 5b. Ask OpenAI-family upstreams for the final usage chunk ──
+    // Without it a streaming response carries no usage, so no cache numbers
+    // exist to measure. Translated requests already control their own options.
+    let upstream_body = if is_streaming && provider.format_translator.is_none() {
+        match parsers::inject_stream_usage_option(&provider_name, &upstream_body) {
+            Some(injected) => Bytes::from(injected),
+            None => upstream_body,
+        }
+    } else {
+        upstream_body
+    };
+
     // ── 6. Build upstream URL ──
     // SECURITY: Sanitize the rest path to prevent directory traversal.
     let sanitized_rest = sanitize_path(&rest);
@@ -213,12 +370,8 @@ pub async fn proxy_handler(
             state.proxy.record_failure(&provider_name).await;
         }
 
-        // Build a lightweight span for streaming requests.
-        // We can't extract token usage or output content without buffering,
-        // so those fields are left empty. Clients should report usage separately.
-        let elapsed = start.elapsed();
-        let end_time = Utc::now();
-
+        // The span is built when the stream ends, from the bytes the tap keeps.
+        // Building it here would record zeros for every token count.
         let input_content =
             String::from_utf8_lossy(&request_bytes[..request_bytes.len().min(16384)])
                 .chars()
@@ -251,7 +404,6 @@ pub async fn proxy_handler(
         attributes.insert("http.method".into(), "POST".into());
         attributes.insert("http.url".into(), upstream_url.clone());
         attributes.insert("http.status_code".into(), status.as_u16().to_string());
-        attributes.insert("http.duration_ms".into(), elapsed.as_millis().to_string());
         attributes.insert("http.request_id".into(), request_id.clone());
         attributes.insert("llm.provider".into(), provider_name.clone());
         attributes.insert("llm.streaming".into(), "true".into());
@@ -268,27 +420,15 @@ pub async fn proxy_handler(
             )
         };
 
-        let span = Span {
-            span_id: new_span_id(),
-            trace_id,
-            parent_span_id,
-            name: format!("llm.{provider_name}.chat"),
-            kind: SpanKind::Llm,
+        let span_inputs = StreamingSpanInputs {
+            provider: provider_name.clone(),
+            model: model.clone(),
+            input_content,
             status: span_status,
             status_message,
             start_time,
-            end_time,
-            duration: elapsed,
-            gen_ai: if model.is_empty() {
-                None
-            } else {
-                Some(GenAIAttributes {
-                    model: model.clone(),
-                    provider: provider_name.clone(),
-                    input_content,
-                    ..Default::default()
-                })
-            },
+            trace_id,
+            parent_span_id,
             attributes,
             project_id: state.proxy.project_id().to_string(),
             environment: extract_header_str(&headers, "x-environment"),
@@ -297,25 +437,23 @@ pub async fn proxy_handler(
             session_id,
             tenant_id,
             job_id,
+            submitter: Arc::clone(&state.submitter),
         };
-
-        let submitter = Arc::clone(&state.submitter);
-        tokio::spawn(async move {
-            submitter.submit_batch(vec![span]);
-        });
 
         info!(
             provider = %provider_name,
             model = %model,
             status = %status.as_u16(),
-            duration_ms = %elapsed.as_millis(),
             streaming = true,
             "proxied streaming request"
         );
 
-        // Stream the response body through without buffering.
-        let byte_stream = resp.bytes_stream();
-        let body = Body::from_stream(byte_stream);
+        let tap = StreamTap::new(
+            start,
+            Box::pin(resp.bytes_stream()),
+            Box::new(move |captured| finish_streaming_span(span_inputs, captured)),
+        );
+        let body = Body::from_stream(tap);
 
         let mut response = Response::builder()
             .status(StatusCode::from_u16(status.as_u16()).unwrap_or(StatusCode::OK));

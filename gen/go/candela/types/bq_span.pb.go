@@ -90,9 +90,16 @@ type BqSpanRow struct {
 	Attributes []*BqAttribute `protobuf:"bytes,40,rep,name=attributes,proto3" json:"attributes,omitempty"`
 	// User-defined labels for custom filtering and cost attribution.
 	// Set via X-Candela-Labels header (comma-separated k=v pairs).
-	Labels        []*BqAttribute `protobuf:"bytes,41,rep,name=labels,proto3" json:"labels,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	Labels []*BqAttribute `protobuf:"bytes,41,rep,name=labels,proto3" json:"labels,omitempty"`
+	// True prompt size: fresh input plus cache reads and cache writes where the
+	// provider reports them separately. This is the denominator for the cache
+	// hit share. gen_ai_input_tokens stays the cost-normalized billing figure.
+	GenAiPromptTokens int64 `protobuf:"varint,42,opt,name=gen_ai_prompt_tokens,json=genAiPromptTokens,proto3" json:"gen_ai_prompt_tokens,omitempty"`
+	// Amount charged for cache reads and cache writes, in USD. Part of
+	// gen_ai_cost_usd, not an extra charge.
+	GenAiCacheCostUsd float64 `protobuf:"fixed64,43,opt,name=gen_ai_cache_cost_usd,json=genAiCacheCostUsd,proto3" json:"gen_ai_cache_cost_usd,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
 }
 
 func (x *BqSpanRow) Reset() {
@@ -335,6 +342,20 @@ func (x *BqSpanRow) GetLabels() []*BqAttribute {
 	return nil
 }
 
+func (x *BqSpanRow) GetGenAiPromptTokens() int64 {
+	if x != nil {
+		return x.GenAiPromptTokens
+	}
+	return 0
+}
+
+func (x *BqSpanRow) GetGenAiCacheCostUsd() float64 {
+	if x != nil {
+		return x.GenAiCacheCostUsd
+	}
+	return 0
+}
+
 // BqAttribute is a key-value pair stored as a RECORD in BigQuery.
 type BqAttribute struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -394,7 +415,8 @@ var File_candela_types_bq_span_proto protoreflect.FileDescriptor
 
 const file_candela_types_bq_span_proto_rawDesc = "" +
 	"\n" +
-	"\x1bcandela/types/bq_span.proto\x12\rcandela.types\x1a\x0ebq_field.proto\x1a\x0ebq_table.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"\xc1\t\n" +
+	"\x1bcandela/types/bq_span.proto\x12\rcandela.types\x1a\x0ebq_field.proto\x1a\x0ebq_table.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"\xa4\n" +
+	"\n" +
 	"\tBqSpanRow\x12\x1e\n" +
 	"\aspan_id\x18\x01 \x01(\tB\x05\xea?\x02\b\x01R\x06spanId\x12 \n" +
 	"\btrace_id\x18\x02 \x01(\tB\x05\xea?\x02\b\x01R\atraceId\x12$\n" +
@@ -434,7 +456,9 @@ const file_candela_types_bq_span_proto_rawDesc = "" +
 	"\n" +
 	"attributes\x18( \x03(\v2\x1a.candela.types.BqAttributeR\n" +
 	"attributes\x122\n" +
-	"\x06labels\x18) \x03(\v2\x1a.candela.types.BqAttributeR\x06labels:\n" +
+	"\x06labels\x18) \x03(\v2\x1a.candela.types.BqAttributeR\x06labels\x12/\n" +
+	"\x14gen_ai_prompt_tokens\x18* \x01(\x03R\x11genAiPromptTokens\x120\n" +
+	"\x15gen_ai_cache_cost_usd\x18+ \x01(\x01R\x11genAiCacheCostUsd:\n" +
 	"\xea?\a\n" +
 	"\x05spans\"C\n" +
 	"\vBqAttribute\x12\x17\n" +

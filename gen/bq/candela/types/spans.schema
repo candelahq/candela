@@ -206,5 +206,17 @@
     "description": "The attribute value (stringified)."
    }
   ]
+ },
+ {
+  "name": "gen_ai_prompt_tokens",
+  "type": "INTEGER",
+  "mode": "NULLABLE",
+  "description": "True prompt size: fresh input plus cache reads and cache writes where the\n provider reports them separately. This is the denominator for the cache\n hit share. gen_ai_input_tokens stays the cost-normalized billing figure."
+ },
+ {
+  "name": "gen_ai_cache_cost_usd",
+  "type": "FLOAT",
+  "mode": "NULLABLE",
+  "description": "Amount charged for cache reads and cache writes, in USD. Part of\n gen_ai_cost_usd, not an extra charge."
  }
 ]

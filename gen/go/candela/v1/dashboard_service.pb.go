@@ -92,10 +92,22 @@ type GetUsageSummaryResponse struct {
 	TotalCostUsd      float64                `protobuf:"fixed64,6,opt,name=total_cost_usd,json=totalCostUsd,proto3" json:"total_cost_usd,omitempty"`
 	AvgLatencyMs      float64                `protobuf:"fixed64,7,opt,name=avg_latency_ms,json=avgLatencyMs,proto3" json:"avg_latency_ms,omitempty"`
 	ErrorRate         float64                `protobuf:"fixed64,8,opt,name=error_rate,json=errorRate,proto3" json:"error_rate,omitempty"`
-	// Cache metrics — these fields are subsets of total_input_tokens.
-	// Cache hit rate = cache_read_tokens / input_tokens (excludes output tokens).
+	// Cache metrics. These are NOT subsets of total_input_tokens. Anthropic
+	// reports input_tokens as fresh tokens only, so cache reads and writes are
+	// additive. OpenAI and Google report a prompt count that already includes
+	// the cached tokens. Use total_prompt_tokens as the denominator for the
+	// cache hit share.
 	TotalCacheReadTokens     int64 `protobuf:"varint,9,opt,name=total_cache_read_tokens,json=totalCacheReadTokens,proto3" json:"total_cache_read_tokens,omitempty"`
 	TotalCacheCreationTokens int64 `protobuf:"varint,10,opt,name=total_cache_creation_tokens,json=totalCacheCreationTokens,proto3" json:"total_cache_creation_tokens,omitempty"`
+	// True prompt size for the window: fresh tokens plus cache reads and cache
+	// writes where the provider reports them separately. This is the cache hit
+	// denominator. total_input_tokens stays the cost-normalized figure used for
+	// billing.
+	TotalPromptTokens int64 `protobuf:"varint,11,opt,name=total_prompt_tokens,json=totalPromptTokens,proto3" json:"total_prompt_tokens,omitempty"`
+	// Amount charged for cache reads and cache writes in the window, in USD.
+	// This is part of total_cost_usd, not a separate charge. Fresh input cost
+	// plus this figure equals the input portion of total_cost_usd.
+	TotalCacheCostUsd float64 `protobuf:"fixed64,12,opt,name=total_cache_cost_usd,json=totalCacheCostUsd,proto3" json:"total_cache_cost_usd,omitempty"`
 	// Time series for charts
 	TracesOverTime              []*TimeSeriesPoint `protobuf:"bytes,20,rep,name=traces_over_time,json=tracesOverTime,proto3" json:"traces_over_time,omitempty"`
 	CostOverTime                []*TimeSeriesPoint `protobuf:"bytes,21,rep,name=cost_over_time,json=costOverTime,proto3" json:"cost_over_time,omitempty"`
@@ -204,6 +216,20 @@ func (x *GetUsageSummaryResponse) GetTotalCacheReadTokens() int64 {
 func (x *GetUsageSummaryResponse) GetTotalCacheCreationTokens() int64 {
 	if x != nil {
 		return x.TotalCacheCreationTokens
+	}
+	return 0
+}
+
+func (x *GetUsageSummaryResponse) GetTotalPromptTokens() int64 {
+	if x != nil {
+		return x.TotalPromptTokens
+	}
+	return 0
+}
+
+func (x *GetUsageSummaryResponse) GetTotalCacheCostUsd() float64 {
+	if x != nil {
+		return x.TotalCacheCostUsd
 	}
 	return 0
 }
@@ -414,12 +440,21 @@ type ModelUsage struct {
 	OutputTokens int64                  `protobuf:"varint,5,opt,name=output_tokens,json=outputTokens,proto3" json:"output_tokens,omitempty"`
 	CostUsd      float64                `protobuf:"fixed64,6,opt,name=cost_usd,json=costUsd,proto3" json:"cost_usd,omitempty"`
 	AvgLatencyMs float64                `protobuf:"fixed64,7,opt,name=avg_latency_ms,json=avgLatencyMs,proto3" json:"avg_latency_ms,omitempty"`
-	// Cache metrics per model — subset of input_tokens.
-	// Cache hit rate = cache_read_tokens / input_tokens.
+	// Cache metrics per model. Not a subset of input_tokens: Anthropic reports
+	// input_tokens as fresh tokens only, so these are additive, while OpenAI and
+	// Google include the cached tokens in their prompt count.
 	CacheReadTokens     int64 `protobuf:"varint,8,opt,name=cache_read_tokens,json=cacheReadTokens,proto3" json:"cache_read_tokens,omitempty"`
 	CacheCreationTokens int64 `protobuf:"varint,9,opt,name=cache_creation_tokens,json=cacheCreationTokens,proto3" json:"cache_creation_tokens,omitempty"`
-	unknownFields       protoimpl.UnknownFields
-	sizeCache           protoimpl.SizeCache
+	// True prompt size for this model: fresh tokens plus cache reads and cache
+	// writes where the provider reports them separately. This is the cache hit
+	// denominator. input_tokens stays the cost-normalized figure used for
+	// billing, which is why dividing by it can exceed 100%.
+	PromptTokens int64 `protobuf:"varint,10,opt,name=prompt_tokens,json=promptTokens,proto3" json:"prompt_tokens,omitempty"`
+	// Amount charged for cache reads and cache writes for this model, in USD.
+	// Part of cost_usd, not an extra charge.
+	CacheCostUsd  float64 `protobuf:"fixed64,11,opt,name=cache_cost_usd,json=cacheCostUsd,proto3" json:"cache_cost_usd,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *ModelUsage) Reset() {
@@ -511,6 +546,20 @@ func (x *ModelUsage) GetCacheReadTokens() int64 {
 func (x *ModelUsage) GetCacheCreationTokens() int64 {
 	if x != nil {
 		return x.CacheCreationTokens
+	}
+	return 0
+}
+
+func (x *ModelUsage) GetPromptTokens() int64 {
+	if x != nil {
+		return x.PromptTokens
+	}
+	return 0
+}
+
+func (x *ModelUsage) GetCacheCostUsd() float64 {
+	if x != nil {
+		return x.CacheCostUsd
 	}
 	return 0
 }
@@ -1428,7 +1477,7 @@ const file_candela_v1_dashboard_service_proto_rawDesc = "" +
 	"project_id\x18\x01 \x01(\tR\tprojectId\x127\n" +
 	"\n" +
 	"time_range\x18\x02 \x01(\v2\x18.candela.types.TimeRangeR\ttimeRange\x12 \n" +
-	"\venvironment\x18\x03 \x01(\tR\venvironment\"\xf9\a\n" +
+	"\venvironment\x18\x03 \x01(\tR\venvironment\"\xda\b\n" +
 	"\x17GetUsageSummaryResponse\x12!\n" +
 	"\ftotal_traces\x18\x01 \x01(\x03R\vtotalTraces\x12\x1f\n" +
 	"\vtotal_spans\x18\x02 \x01(\x03R\n" +
@@ -1442,7 +1491,9 @@ const file_candela_v1_dashboard_service_proto_rawDesc = "" +
 	"error_rate\x18\b \x01(\x01R\terrorRate\x125\n" +
 	"\x17total_cache_read_tokens\x18\t \x01(\x03R\x14totalCacheReadTokens\x12=\n" +
 	"\x1btotal_cache_creation_tokens\x18\n" +
-	" \x01(\x03R\x18totalCacheCreationTokens\x12E\n" +
+	" \x01(\x03R\x18totalCacheCreationTokens\x12.\n" +
+	"\x13total_prompt_tokens\x18\v \x01(\x03R\x11totalPromptTokens\x12/\n" +
+	"\x14total_cache_cost_usd\x18\f \x01(\x01R\x11totalCacheCostUsd\x12E\n" +
 	"\x10traces_over_time\x18\x14 \x03(\v2\x1b.candela.v1.TimeSeriesPointR\x0etracesOverTime\x12A\n" +
 	"\x0ecost_over_time\x18\x15 \x03(\v2\x1b.candela.v1.TimeSeriesPointR\fcostOverTime\x12E\n" +
 	"\x10tokens_over_time\x18\x16 \x03(\v2\x1b.candela.v1.TimeSeriesPointR\x0etokensOverTime\x12Y\n" +
@@ -1459,7 +1510,7 @@ const file_candela_v1_dashboard_service_proto_rawDesc = "" +
 	"\n" +
 	"time_range\x18\x02 \x01(\v2\x18.candela.types.TimeRangeR\ttimeRange\"K\n" +
 	"\x19GetModelBreakdownResponse\x12.\n" +
-	"\x06models\x18\x01 \x03(\v2\x16.candela.v1.ModelUsageR\x06models\"\xc6\x02\n" +
+	"\x06models\x18\x01 \x03(\v2\x16.candela.v1.ModelUsageR\x06models\"\x91\x03\n" +
 	"\n" +
 	"ModelUsage\x12\x14\n" +
 	"\x05model\x18\x01 \x01(\tR\x05model\x12\x1a\n" +
@@ -1471,7 +1522,10 @@ const file_candela_v1_dashboard_service_proto_rawDesc = "" +
 	"\bcost_usd\x18\x06 \x01(\x01R\acostUsd\x12$\n" +
 	"\x0eavg_latency_ms\x18\a \x01(\x01R\favgLatencyMs\x12*\n" +
 	"\x11cache_read_tokens\x18\b \x01(\x03R\x0fcacheReadTokens\x122\n" +
-	"\x15cache_creation_tokens\x18\t \x01(\x03R\x13cacheCreationTokens\"\x8c\x01\n" +
+	"\x15cache_creation_tokens\x18\t \x01(\x03R\x13cacheCreationTokens\x12#\n" +
+	"\rprompt_tokens\x18\n" +
+	" \x01(\x03R\fpromptTokens\x12$\n" +
+	"\x0ecache_cost_usd\x18\v \x01(\x01R\fcacheCostUsd\"\x8c\x01\n" +
 	"\x1cGetLatencyPercentilesRequest\x12\x1d\n" +
 	"\n" +
 	"project_id\x18\x01 \x01(\tR\tprojectId\x127\n" +

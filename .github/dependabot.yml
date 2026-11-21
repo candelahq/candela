@@ -12,6 +12,13 @@ updates:
     labels:
       - "supply-chain"
       - "dependencies"
+    groups:
+      docker-minor-patch:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
 
   # Production and deploy Dockerfiles in deploy/
   - package-ecosystem: "docker"
@@ -23,6 +30,13 @@ updates:
     labels:
       - "supply-chain"
       - "dependencies"
+    groups:
+      docker-minor-patch:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
 
   # E2E test client Dockerfile
   - package-ecosystem: "docker"
@@ -34,6 +48,13 @@ updates:
     labels:
       - "supply-chain"
       - "dependencies"
+    groups:
+      docker-minor-patch:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
 
   # E2E Tetragon test runner Dockerfile
   - package-ecosystem: "docker"
@@ -45,6 +66,13 @@ updates:
     labels:
       - "supply-chain"
       - "dependencies"
+    groups:
+      docker-minor-patch:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
 
   # GitHub Actions workflows
   - package-ecosystem: "github-actions"
@@ -56,3 +84,7 @@ updates:
     labels:
       - "ci"
       - "dependencies"
+    groups:
+      github-actions:
+        patterns:
+          - "*"

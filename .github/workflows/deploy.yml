@@ -72,12 +72,12 @@ jobs:
           service_account: ${{ secrets.WIF_SERVICE_ACCOUNT }}
 
       - name: Set up Cloud SDK
-        uses: google-github-actions/setup-gcloud@77e7a554d41e2ee56fc945c52dfd3f33d12def9a # v2
+        uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v2
 
       # ── Create GitHub Deployment ─────────────────────────────────────
       - name: Create deployment
         id: deployment
-        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v7
         env:
           DEPLOY_IMAGE: ${{ env.IMAGE }}
         with:
@@ -95,7 +95,7 @@ jobs:
             core.setOutput('id', deployment.data.id);
 
       - name: Set deployment in_progress
-        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v7
         env:
           DEPLOYMENT_ID: ${{ steps.deployment.outputs.id }}
         with:
@@ -224,7 +224,7 @@ jobs:
       # ── Deployment status ────────────────────────────────────────────
       - name: Mark deployment success
         if: success()
-        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v7
         env:
           DEPLOYMENT_ID: ${{ steps.deployment.outputs.id }}
           SERVICE_URL: ${{ steps.canary.outputs.service_url }}
@@ -241,7 +241,7 @@ jobs:
 
       - name: Mark deployment failure
         if: failure()
-        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v7
         env:
           DEPLOYMENT_ID: ${{ steps.deployment.outputs.id }}
         with:

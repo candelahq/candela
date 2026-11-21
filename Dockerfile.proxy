@@ -5,7 +5,7 @@
 # Run:    docker run -p 8080:8080 -e PROVIDERS=openai,anthropic candela-proxy
 
 # rust:1.87-alpine
-FROM rust:1.87-alpine@sha256:126df0f2a57e675f9306fe180b833982ffb996e90a92a793bb75253cfeed5475 AS builder
+FROM rust:1.100-alpine@sha256:8d0e82abfdf9a38071e07cabc5afba4ddbe077631a80e4e742a760c38beadc33 AS builder
 
 RUN apk add --no-cache musl-dev
 

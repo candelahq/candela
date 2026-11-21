@@ -59,7 +59,7 @@ jobs:
           service_account: ${{ secrets.WIF_SERVICE_ACCOUNT }}
 
       - name: Set up Cloud SDK
-        uses: google-github-actions/setup-gcloud@77e7a554d41e2ee56fc945c52dfd3f33d12def9a # v2
+        uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v2
 
       # ── Validate and resolve target revision ─────────────────────────
       - name: Resolve rollback target
@@ -188,7 +188,7 @@ jobs:
       # ── Audit trail ──────────────────────────────────────────────────
       - name: Record rollback deployment
         if: always()
-        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v7
         env:
           TARGET_REVISION: ${{ steps.target.outputs.revision }}
           JOB_STATUS: ${{ job.status }}

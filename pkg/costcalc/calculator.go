@@ -358,32 +358,37 @@ func (c *Calculator) Calculate(provider, model string, inputTokens, outputTokens
 	// rates when the prompt exceeds that threshold (e.g. Gemini 2.5 Pro >200K).
 	// The tier 1 rate applies to tokens up to the threshold, and the high-tier
 	// rate applies only to the overflow tokens (#638).
-	var inputCost float64
-	if p.TierThresholdTokens > 0 && inputTokens > p.TierThresholdTokens && p.InputPerMillionHigh > 0 {
-		baseTokens := p.TierThresholdTokens
-		overflowTokens := inputTokens - p.TierThresholdTokens
-		inputCost = (float64(baseTokens) / 1_000_000 * p.InputPerMillion) +
-			(float64(overflowTokens) / 1_000_000 * p.InputPerMillionHigh)
-	} else {
-		inputCost = float64(inputTokens) / 1_000_000 * p.InputPerMillion
-	}
-
 	outputRate := p.OutputPerMillion
 	if p.TierThresholdTokens > 0 && inputTokens > p.TierThresholdTokens && p.OutputPerMillionHigh > 0 {
 		outputRate = p.OutputPerMillionHigh
 	}
 	outputCost := float64(outputTokens) / 1_000_000 * outputRate
-	baseCost := inputCost + outputCost
 
-	// Apply model-level discount, then global discount.
+	return c.discounted(p, c.inputCostUSD(p, inputTokens)+outputCost)
+}
+
+// inputCostUSD returns the USD charged for tokens at pricing p, applying
+// tiered rates. It is the input portion of Calculate, shared so the cache cost
+// cannot drift from the billed input cost. Discounts are applied by discounted.
+func (c *Calculator) inputCostUSD(p ModelPricing, tokens int64) float64 {
+	if p.TierThresholdTokens > 0 && tokens > p.TierThresholdTokens && p.InputPerMillionHigh > 0 {
+		baseTokens := p.TierThresholdTokens
+		overflowTokens := tokens - p.TierThresholdTokens
+		return float64(baseTokens)/1_000_000*p.InputPerMillion +
+			float64(overflowTokens)/1_000_000*p.InputPerMillionHigh
+	}
+	return float64(tokens) / 1_000_000 * p.InputPerMillion
+}
+
+// discounted applies the model-level discount, then the global discount.
+func (c *Calculator) discounted(p ModelPricing, cost float64) float64 {
 	if p.DiscountPercent > 0 {
-		baseCost *= (1 - p.DiscountPercent)
+		cost *= 1 - p.DiscountPercent
 	}
 	if c.globalDiscount > 0 {
-		baseCost *= (1 - c.globalDiscount)
+		cost *= 1 - c.globalDiscount
 	}
-
-	return baseCost
+	return cost
 }
 
 // CalculateTimeBased returns cost based on request duration for self-hosted models.
@@ -532,6 +537,58 @@ func (c *Calculator) NormalizeCachedInputWithTTL(provider, model string, rawInpu
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
+	cfg, ok := c.cacheConfigFor(provider, model, extendedTTL)
+	if !ok {
+		// No cache discount info for this provider. Return raw.
+		return rawInput
+	}
+	return normalizeCachedInput(cfg, rawInput, cacheRead, cacheCreate)
+}
+
+// CacheCostUSD returns the USD charged for the cache-read and cache-write
+// tokens of one request. It is the cached tokens' share of the input cost that
+// Calculate charges for the normalized input, so it never exceeds that cost.
+// Providers with no cache pricing return 0, because every prompt token is
+// billed at the full input rate and nothing is attributable to caching.
+func (c *Calculator) CacheCostUSD(provider, model string, rawInput, cacheRead, cacheCreate int64, extendedTTL bool) float64 {
+	rawInput, cacheRead, cacheCreate = max(rawInput, 0), max(cacheRead, 0), max(cacheCreate, 0)
+	if cacheRead == 0 && cacheCreate == 0 {
+		return 0
+	}
+
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	cfg, ok := c.cacheConfigFor(provider, model, extendedTTL)
+	if !ok {
+		return 0
+	}
+	p, ok := c.resolve(provider, model)
+	if !ok {
+		return 0
+	}
+	normalized := normalizeCachedInput(cfg, rawInput, cacheRead, cacheCreate)
+	if normalized <= 0 {
+		return 0
+	}
+
+	// Additive providers charge cache writes at the creation rate. Inclusive
+	// providers carry them inside the prompt at the full input rate, so only
+	// cache reads are a separate charge there.
+	cachedTokens := float64(cacheRead) * cfg.ReadDiscount
+	if !cfg.InputIncludesCache {
+		cachedTokens += float64(cacheCreate) * cfg.CreateMultiplier
+	}
+	share := cachedTokens / float64(normalized)
+
+	return c.discounted(p, c.inputCostUSD(p, normalized)) * share
+}
+
+// cacheConfigFor resolves a provider's cache pricing for model, with the
+// Google model-aware read rate and the Anthropic 1-hour creation multiplier
+// applied. ok is false when the provider has no cache pricing configured.
+// Callers must hold c.mu.
+func (c *Calculator) cacheConfigFor(provider, model string, extendedTTL bool) (CacheDiscountConfig, bool) {
 	// Resolve provider alias (e.g. "gemini-oai" → "google").
 	canonical := strings.ToLower(provider)
 	if alias, ok := c.aliases[canonical]; ok {
@@ -540,8 +597,7 @@ func (c *Calculator) NormalizeCachedInputWithTTL(provider, model string, rawInpu
 
 	cfg, ok := c.cacheDiscounts[canonical]
 	if !ok {
-		// Unknown provider — no cache discount info, return raw.
-		return rawInput
+		return CacheDiscountConfig{}, false
 	}
 
 	// Google/Gemini models have model-aware cache discount rates by default.
@@ -553,14 +609,22 @@ func (c *Calculator) NormalizeCachedInputWithTTL(provider, model string, rawInpu
 	}
 
 	// Anthropic 1-hour TTL charges 2.0× for cache creation (vs 1.25× for 5m).
-	// Override the multiplier when the caller signals extended TTL.
 	createMultiplier := cfg.CreateMultiplier
 	if extendedTTL && canonical == "anthropic" {
 		createMultiplier = anthropicExtendedCacheCreateMultiplier
 	}
 
-	cachedReadEq := int64(math.Round(float64(cacheRead) * readDiscount))
-	cachedCreateEq := int64(math.Round(float64(cacheCreate) * createMultiplier))
+	return CacheDiscountConfig{
+		ReadDiscount:       readDiscount,
+		CreateMultiplier:   createMultiplier,
+		InputIncludesCache: cfg.InputIncludesCache,
+	}, true
+}
+
+// normalizeCachedInput applies cfg's rates to the raw token counts.
+func normalizeCachedInput(cfg CacheDiscountConfig, rawInput, cacheRead, cacheCreate int64) int64 {
+	cachedReadEq := int64(math.Round(float64(cacheRead) * cfg.ReadDiscount))
+	cachedCreateEq := int64(math.Round(float64(cacheCreate) * cfg.CreateMultiplier))
 
 	if cfg.InputIncludesCache {
 		// Inclusive mode (OpenAI, Google): rawInput already contains cache tokens.

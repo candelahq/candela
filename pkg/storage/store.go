@@ -98,12 +98,22 @@ type GenAIAttributes struct {
 	OutputContent    string  `json:"output_content,omitempty"`
 	ReasoningContent string  `json:"reasoning_content,omitempty" firestore:"reasoning_content,omitempty" bigquery:"reasoning_content"`
 
+	// PromptTokens is the true prompt size: fresh input plus cache reads and
+	// writes for additive providers, and the reported prompt for inclusive
+	// ones. InputTokens is the cost-equivalent value, so the two differ.
+	// CacheReadTokens/PromptTokens is the real cache hit share.
+	PromptTokens int64 `json:"prompt_tokens,omitempty"`
+
 	// Cache token breakdown (Anthropic prompt caching).
 	// These are the RAW counts from the API — not cost-normalized.
 	// InputTokens above is the cost-equivalent value (base + cache_read×0.1 + cache_creation×1.25).
 	// Showing both lets developers see their cache hit rate and optimize prompts.
 	CacheReadTokens     int64 `json:"cache_read_tokens,omitempty"`
 	CacheCreationTokens int64 `json:"cache_creation_tokens,omitempty"`
+
+	// CacheCostUSD is the USD charged for the cache read and write tokens of
+	// this request. The rest of CostUSD is what the fresh tokens cost.
+	CacheCostUSD float64 `json:"cache_cost_usd,omitempty"`
 
 	// Point-in-time pricing snapshot (USD per 1M tokens).
 	// Recorded at request time so historical spans retain the rates
@@ -283,6 +293,12 @@ type UsageSummary struct {
 	// CacheCreationTokens = tokens written to cache (Anthropic: 1.25× base cost).
 	TotalCacheReadTokens     int64
 	TotalCacheCreationTokens int64
+
+	// TotalPromptTokens is the sum of the true prompt sizes, so
+	// TotalCacheReadTokens/TotalPromptTokens is the real cache hit share.
+	TotalPromptTokens int64
+	// TotalCacheCostUSD is what the cache tokens cost, in USD.
+	TotalCacheCostUSD float64
 }
 
 // UsageQuery defines filters for usage summary queries.
@@ -331,6 +347,9 @@ type ModelUsage struct {
 	// Populated by CombinedUsageReader; zero when fetched via GetModelBreakdown.
 	CacheReadTokens     int64
 	CacheCreationTokens int64
+	// PromptTokens and CacheCostUSD aggregate the per-request values.
+	PromptTokens int64
+	CacheCostUSD float64
 }
 
 type JobUsageSummary struct {

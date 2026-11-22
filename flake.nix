@@ -53,7 +53,7 @@
         devShells.default = pkgs.mkShell {
           buildInputs = with pkgs; [
             # Go
-            go_1_26
+            go_1_27
             gopls
             golangci-lint
             gotools
@@ -68,7 +68,7 @@
 
             # Node.js (for web UI)
             nodejs_22
-            pnpm
+            pnpm_11
 
             # Python (for eval engine)
             python312
@@ -86,7 +86,7 @@
             (google-cloud-sdk.withExtraComponents [
               google-cloud-sdk.components.cloud-firestore-emulator
             ])
-            jdk21_headless    # Required by the Firestore emulator (Java 8+ JRE)
+            jdk25_headless    # Required by the Firestore emulator (Java 25+ JRE)
             jq
             yq-go
             hurl              # HTTP functional test runner (Go/Rust parity suite)

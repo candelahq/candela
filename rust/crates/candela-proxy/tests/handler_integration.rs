@@ -561,10 +561,10 @@ async fn proxy_traceparent_overrides_x_trace_id() {
 
 /// Echoes the request body back so the test can inspect what went upstream.
 async fn start_echo_upstream() -> String {
-    let app = Router::new().route(
-        "/v1/chat/completions",
-        post(|body: String| async move { ([("content-type", "application/json")], body) }),
-    );
+    let echo = |body: String| async move { ([("content-type", "application/json")], body) };
+    let app = Router::new()
+        .route("/v1/chat/completions", post(echo))
+        .route("/v1/responses", post(echo));
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let url = format!("http://127.0.0.1:{}", listener.local_addr().unwrap().port());
     tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
@@ -622,26 +622,22 @@ async fn proxy_keeps_client_stream_options() {
 }
 
 /// Start a mock upstream that answers every request with one SSE stream.
-async fn start_streaming_upstream() -> String {
+async fn start_streaming_upstream() -> (String, &'static str) {
+    const STREAM_BODY: &str = "data: {\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}\n\ndata: {\"choices\":[],\"usage\":{\"prompt_tokens\":100,\"completion_tokens\":20,\"prompt_tokens_details\":{\"cached_tokens\":60}}}\n\ndata: [DONE]\n\n";
     let app = Router::new().route(
         "/v1/chat/completions",
-        post(|| async {
-            (
-                [("content-type", "text/event-stream")],
-                "data: {\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}\n\ndata: {\"choices\":[],\"usage\":{\"prompt_tokens\":100,\"completion_tokens\":20,\"prompt_tokens_details\":{\"cached_tokens\":60}}}\n\ndata: [DONE]\n\n",
-            )
-        }),
+        post(|| async { ([("content-type", "text/event-stream")], STREAM_BODY) }),
     );
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let url = format!("http://127.0.0.1:{}", listener.local_addr().unwrap().port());
     tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
-    url
+    (url, STREAM_BODY)
 }
 
 /// INT-14: A streaming response reports the cache tokens from its final chunk.
 #[tokio::test]
 async fn proxy_cache_tokens_streaming() {
-    let upstream_url = start_streaming_upstream().await;
+    let (upstream_url, expected_body) = start_streaming_upstream().await;
     let submitter = Arc::new(TestSubmitter::new());
     let (proxy_url, _) = start_proxy(&upstream_url, submitter.clone()).await;
 
@@ -660,10 +656,7 @@ async fn proxy_cache_tokens_streaming() {
 
     assert_eq!(resp.status(), 200);
     let body = resp.text().await.unwrap();
-    assert!(
-        body.contains("[DONE]"),
-        "stream must reach the client intact"
-    );
+    assert_eq!(body, expected_body, "stream must reach the client intact");
 
     tokio::time::sleep(std::time::Duration::from_millis(150)).await;
 
@@ -686,36 +679,39 @@ async fn proxy_cache_tokens_streaming() {
 
 /// Start a mock upstream serving a >10 MiB SSE stream where the head reports
 /// `cached_tokens: 100` and the tail (after 10 MiB) corrects it to `60`.
-async fn start_capped_streaming_upstream() -> String {
+async fn start_capped_streaming_upstream() -> (String, Arc<String>) {
+    let mut expected = String::from(
+        "data: {\"choices\":[],\"usage\":{\"prompt_tokens_details\":{\"cached_tokens\":100}}}\n\n",
+    );
+    let filler = "data: {\"choices\":[{\"delta\":{\"content\":\"a\"}}]}\n\n";
+    // Exceed MAX_HEAD (10 MiB = 10_485_760 bytes) so StreamTap caps head and fills tail.
+    let repeat_count = (10_600_000 / filler.len()) + 1;
+    expected.reserve(repeat_count * filler.len() + 256);
+    for _ in 0..repeat_count {
+        expected.push_str(filler);
+    }
+    expected.push_str(
+        "data: {\"choices\":[],\"usage\":{\"prompt_tokens\":100,\"completion_tokens\":20,\"prompt_tokens_details\":{\"cached_tokens\":60}}}\n\ndata: [DONE]\n\n",
+    );
+    let payload = Arc::new(expected);
+    let route_payload = Arc::clone(&payload);
     let app = Router::new().route(
         "/v1/chat/completions",
-        post(|| async {
-            let mut body = String::from(
-                "data: {\"choices\":[],\"usage\":{\"prompt_tokens_details\":{\"cached_tokens\":100}}}\n\n",
-            );
-            let filler = "data: {\"choices\":[{\"delta\":{\"content\":\"a\"}}]}\n\n";
-            // Exceed MAX_HEAD (10 MiB = 10_485_760 bytes) so StreamTap caps head and fills tail.
-            let repeat_count = (10_600_000 / filler.len()) + 1;
-            body.reserve(repeat_count * filler.len() + 256);
-            for _ in 0..repeat_count {
-                body.push_str(filler);
-            }
-            body.push_str(
-                "data: {\"choices\":[],\"usage\":{\"prompt_tokens\":100,\"completion_tokens\":20,\"prompt_tokens_details\":{\"cached_tokens\":60}}}\n\ndata: [DONE]\n\n",
-            );
-            ([("content-type", "text/event-stream")], body)
+        post(move || {
+            let body = Arc::clone(&route_payload);
+            async move { ([("content-type", "text/event-stream")], (*body).clone()) }
         }),
     );
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let url = format!("http://127.0.0.1:{}", listener.local_addr().unwrap().port());
     tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
-    url
+    (url, payload)
 }
 
 /// INT-17: A capped (>10 MiB) stream merges tail usage over stale head cache counts.
 #[tokio::test]
 async fn proxy_cache_tokens_capped_stream() {
-    let upstream_url = start_capped_streaming_upstream().await;
+    let (upstream_url, expected_body) = start_capped_streaming_upstream().await;
     let submitter = Arc::new(TestSubmitter::new());
     let (proxy_url, _) = start_proxy(&upstream_url, submitter.clone()).await;
 
@@ -734,8 +730,8 @@ async fn proxy_cache_tokens_capped_stream() {
 
     assert_eq!(resp.status(), 200);
     let body = resp.text().await.unwrap();
-    assert!(
-        body.contains("[DONE]"),
+    assert_eq!(
+        body, *expected_body,
         "capped stream must reach the client intact"
     );
 
@@ -781,8 +777,8 @@ async fn start_google_streaming_upstream() -> String {
     url
 }
 
-/// INT-18: Native Gemini `:streamGenerateContent` requests use the streaming path
-/// and preserve `cachedContentTokenCount`.
+/// INT-18: Native Gemini `:streamGenerateContent` requests use the streaming path,
+/// extract URL model, and preserve ordinary + cached token counts.
 #[tokio::test]
 async fn proxy_google_stream_generate_content_detects_streaming() {
     let upstream_url = start_google_streaming_upstream().await;
@@ -817,6 +813,14 @@ async fn proxy_google_stream_generate_content_detects_streaming() {
     }
 
     assert_eq!(spans.len(), 1, "exactly one span should be captured");
+    let gen_ai = spans[0]
+        .gen_ai
+        .as_ref()
+        .expect("native Gemini span should resolve model from URL path");
+    assert_eq!(gen_ai.model, "gemini-2.5-flash");
+    assert_eq!(gen_ai.input_tokens, 100);
+    assert_eq!(gen_ai.output_tokens, 50);
+    assert_eq!(gen_ai.cache_read_tokens, 80);
     assert_eq!(
         spans[0].attributes.get("llm.streaming"),
         Some(&"true".to_string())
@@ -824,5 +828,33 @@ async fn proxy_google_stream_generate_content_detects_streaming() {
     assert_eq!(
         spans[0].attributes.get("gen_ai.usage.cache_read_tokens"),
         Some(&"80".to_string())
+    );
+}
+
+/// INT-19: Streaming `/v1/responses` requests do not get `stream_options.include_usage` injected.
+#[tokio::test]
+async fn proxy_skips_stream_usage_option_on_responses_endpoint() {
+    let upstream_url = start_echo_upstream().await;
+    let submitter = Arc::new(TestSubmitter::new());
+    let (proxy_url, _) = start_proxy(&upstream_url, submitter.clone()).await;
+
+    let client = reqwest::Client::new();
+    let resp = client
+        .post(format!("{}/proxy/openai/v1/responses", proxy_url))
+        .header("content-type", "application/json")
+        .json(&serde_json::json!({
+            "model": "gpt-4o",
+            "stream": true,
+            "input": "hello"
+        }))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), 200);
+    let echoed: serde_json::Value = resp.json().await.unwrap();
+    assert!(
+        echoed.get("stream_options").is_none(),
+        "Responses API must not receive stream_options.include_usage"
     );
 }

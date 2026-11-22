@@ -282,6 +282,9 @@ pub async fn proxy_handler(
         }
     };
 
+    // SECURITY: Sanitize the rest path before checking URL-based models and endpoints.
+    let sanitized_rest = sanitize_path(&rest);
+
     // ── 4. Parse model from request + optionally translate ──
     let (upstream_body, model) = if let Some(ref translator) = provider.format_translator {
         match translator.translate_request(&request_bytes) {
@@ -292,20 +295,27 @@ pub async fn proxy_handler(
             }
         }
     } else {
-        // Passthrough — extract model from JSON body.
-        let model = extract_model(&request_bytes).unwrap_or_default();
+        // Passthrough — extract model from JSON body, falling back to URL path for native Gemini.
+        let model = extract_model(&request_bytes)
+            .or_else(|| {
+                matches!(provider_name.as_str(), "google" | "gemini-vertex")
+                    .then(|| extract_model_from_url_path(&sanitized_rest))
+                    .flatten()
+            })
+            .unwrap_or_default();
         (request_bytes.clone(), model)
     };
 
     // ── 5. Detect streaming ──
-    // SECURITY: Sanitize the rest path before checking path-based streaming providers.
-    let sanitized_rest = sanitize_path(&rest);
     let is_streaming = is_streaming_request(&provider_name, &sanitized_rest, &request_bytes);
 
     // ── 5b. Ask OpenAI-family upstreams for the final usage chunk ──
     // Without it a streaming response carries no usage, so no cache numbers
-    // exist to measure. Translated requests already control their own options.
-    let upstream_body = if is_streaming && provider.format_translator.is_none() {
+    // exist to measure. Translated requests and the Responses API are excluded.
+    let upstream_body = if is_streaming
+        && provider.format_translator.is_none()
+        && supports_stream_include_usage(&sanitized_rest)
+    {
         match parsers::inject_stream_usage_option(&provider_name, &upstream_body) {
             Some(injected) => Bytes::from(injected),
             None => upstream_body,
@@ -684,6 +694,28 @@ fn is_streaming_request(provider: &str, path: &str, body: &[u8]) -> bool {
             && path.contains("streamGenerateContent"))
 }
 
+/// Extract a model name from a native Google/Gemini URL path
+/// (e.g. `v1beta/models/gemini-2.5-flash:streamGenerateContent` -> `gemini-2.5-flash`).
+fn extract_model_from_url_path(path: &str) -> Option<String> {
+    let rest = path
+        .rsplit_once("models/")
+        .filter(|(prefix, _)| prefix.is_empty() || prefix.ends_with('/'))
+        .map(|(_, rest)| rest)?;
+    let model = rest.split(':').next().unwrap_or(rest);
+    let model = model.split('/').next().unwrap_or(model);
+    if model.is_empty() {
+        None
+    } else {
+        Some(model.to_string())
+    }
+}
+
+/// OpenAI's Responses API (`/v1/responses`) rejects `stream_options.include_usage`.
+fn supports_stream_include_usage(path: &str) -> bool {
+    let trimmed = path.trim_matches('/');
+    !(trimmed == "responses" || trimmed.ends_with("/responses"))
+}
+
 /// Extract a string header value.
 fn extract_header_str(headers: &HeaderMap, key: &str) -> Option<String> {
     headers
@@ -814,6 +846,34 @@ mod tests {
             "v1/models/streamGenerateContent",
             body
         ));
+    }
+
+    #[test]
+    fn extract_model_from_url_path_parses_native_gemini_routes() {
+        assert_eq!(
+            extract_model_from_url_path("v1beta/models/gemini-2.5-flash:streamGenerateContent"),
+            Some("gemini-2.5-flash".into())
+        );
+        assert_eq!(
+            extract_model_from_url_path(
+                "v1/projects/p/locations/us-central1/publishers/google/models/gemini-2.5-pro:generateContent"
+            ),
+            Some("gemini-2.5-pro".into())
+        );
+        assert_eq!(
+            extract_model_from_url_path("models/gemini-2.0-flash:generateContent"),
+            Some("gemini-2.0-flash".into())
+        );
+        assert_eq!(extract_model_from_url_path("v1/chat/completions"), None);
+    }
+
+    #[test]
+    fn supports_stream_include_usage_excludes_responses_endpoint() {
+        assert!(supports_stream_include_usage("v1/chat/completions"));
+        assert!(supports_stream_include_usage("chat/completions"));
+        assert!(!supports_stream_include_usage("v1/responses"));
+        assert!(!supports_stream_include_usage("responses"));
+        assert!(!supports_stream_include_usage("/openai/v1/responses/"));
     }
 
     #[test]

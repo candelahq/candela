@@ -76,10 +76,15 @@ impl StreamTap {
             }
         }
 
-        self.tail.extend(chunk);
-        if self.tail.len() > MAX_TAIL {
-            let excess = self.tail.len() - MAX_TAIL;
-            self.tail.drain(..excess);
+        if chunk.len() >= MAX_TAIL {
+            self.tail.clear();
+            self.tail.extend(&chunk[chunk.len() - MAX_TAIL..]);
+        } else {
+            let overflow = (self.tail.len() + chunk.len()).saturating_sub(MAX_TAIL);
+            if overflow > 0 {
+                self.tail.drain(..overflow);
+            }
+            self.tail.extend(chunk);
         }
     }
 

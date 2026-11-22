@@ -278,13 +278,19 @@ fn google_streaming_cache_present(data: &[u8]) -> StreamingCacheTokens {
 }
 
 fn embedded_google_cached_tokens(data: &[u8]) -> Option<i64> {
-    let idx = last_subslice(data, b"\"usageMetadata\"")?;
-    let open = data[idx..].iter().position(|b| *b == b'{')?;
-    let mut de = serde_json::Deserializer::from_slice(&data[idx + open..]);
-    let Ok(Value::Object(meta)) = Value::deserialize(&mut de) else {
-        return None;
-    };
-    opt_int_field(&meta, "cachedContentTokenCount")
+    let mut slice = data;
+    while let Some(idx) = last_subslice(slice, b"\"usageMetadata\"") {
+        if let Some(open) = slice[idx..].iter().position(|b| *b == b'{') {
+            let mut de = serde_json::Deserializer::from_slice(&slice[idx + open..]);
+            if let Ok(Value::Object(meta)) = Value::deserialize(&mut de)
+                && let Some(val) = opt_int_field(&meta, "cachedContentTokenCount")
+            {
+                return Some(val);
+            }
+        }
+        slice = &slice[..idx];
+    }
+    None
 }
 
 /// Visits every parsed payload in an SSE stream, skipping `[DONE]` and
@@ -654,8 +660,78 @@ impl ProviderParser for GoogleParser {
     }
 
     fn parse_streaming_response(&self, data: &[u8]) -> (String, TokenUsage) {
-        // Google streaming uses a different endpoint — fall back to standard parsing.
-        self.parse_response(data)
+        let (content, usage) = self.parse_response(data);
+        if usage.input_tokens > 0 || usage.output_tokens > 0 {
+            return (content, usage);
+        }
+
+        let mut content = String::new();
+        let mut last_meta: Option<serde_json::Map<String, Value>> = None;
+
+        if let Ok(chunks) = serde_json::from_slice::<Vec<Value>>(data) {
+            for chunk in &chunks {
+                append_google_chunk_text(chunk, &mut content);
+                if let Some(meta) = chunk.get("usageMetadata").and_then(Value::as_object) {
+                    last_meta = Some(meta.clone());
+                }
+            }
+        } else {
+            let mut de = serde_json::Deserializer::from_slice(data);
+            while let Ok(chunk) = Value::deserialize(&mut de) {
+                append_google_chunk_text(&chunk, &mut content);
+                if let Some(meta) = chunk.get("usageMetadata").and_then(Value::as_object) {
+                    last_meta = Some(meta.clone());
+                }
+            }
+        }
+
+        if last_meta.is_none() {
+            let mut slice = data;
+            while let Some(idx) = last_subslice(slice, b"\"usageMetadata\"") {
+                if let Some(open) = slice[idx..].iter().position(|b| *b == b'{') {
+                    let mut de = serde_json::Deserializer::from_slice(&slice[idx + open..]);
+                    if let Ok(Value::Object(meta)) = Value::deserialize(&mut de) {
+                        last_meta = Some(meta);
+                        break;
+                    }
+                }
+                slice = &slice[..idx];
+            }
+        }
+
+        let usage = last_meta
+            .as_ref()
+            .map(google_usage_from_meta)
+            .unwrap_or_default();
+        (content, usage)
+    }
+}
+
+fn google_usage_from_meta(meta: &serde_json::Map<String, Value>) -> TokenUsage {
+    let input = int_field(meta, "promptTokenCount");
+    let output = int_field(meta, "candidatesTokenCount")
+        .saturating_add(int_field(meta, "thoughtsTokenCount"));
+    TokenUsage {
+        input_tokens: input,
+        output_tokens: output,
+        total_tokens: input.saturating_add(output),
+    }
+}
+
+fn append_google_chunk_text(chunk: &Value, content: &mut String) {
+    if let Some(parts) = chunk
+        .get("candidates")
+        .and_then(Value::as_array)
+        .and_then(|cands| cands.first())
+        .and_then(|c| c.get("content"))
+        .and_then(|c| c.get("parts"))
+        .and_then(Value::as_array)
+    {
+        for part in parts {
+            if let Some(text) = part.get("text").and_then(Value::as_str) {
+                content.push_str(text);
+            }
+        }
     }
 }
 
@@ -1128,5 +1204,33 @@ mod tests {
         let merged = extract_streaming_cache_tokens_present("openai", head_data)
             .merge(extract_streaming_cache_tokens_present("openai", tail_data));
         assert_eq!(merged.cache_read_tokens, 0);
+    }
+
+    #[test]
+    fn google_streaming_usage_array_and_ndjson() {
+        let array = br#"[{"candidates":[{"content":{"parts":[{"text":"hel"}]}}],"usageMetadata":{"promptTokenCount":100,"candidatesTokenCount":10}},{"candidates":[{"content":{"parts":[{"text":"lo"}]}}],"usageMetadata":{"promptTokenCount":100,"candidatesTokenCount":50,"thoughtsTokenCount":15,"cachedContentTokenCount":80}}]"#;
+        let (content, usage) = extract_streaming_usage("google", array);
+        assert_eq!(content, "hello");
+        assert_eq!(usage.input_tokens, 100);
+        assert_eq!(usage.output_tokens, 65);
+        assert_eq!(usage.total_tokens, 165);
+
+        let ndjson = b"{\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"a\"}]}}],\"usageMetadata\":{\"promptTokenCount\":100,\"candidatesTokenCount\":10}}\n{\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"b\"}]}}],\"usageMetadata\":{\"promptTokenCount\":100,\"candidatesTokenCount\":50,\"cachedContentTokenCount\":80}}\n";
+        let (nd_content, nd_usage) = extract_streaming_usage("gemini-vertex", ndjson);
+        assert_eq!(nd_content, "ab");
+        assert_eq!(nd_usage.input_tokens, 100);
+        assert_eq!(nd_usage.output_tokens, 50);
+        assert_eq!(nd_usage.total_tokens, 150);
+    }
+
+    #[test]
+    fn google_streaming_cache_clipped_prefix_retains_earlier_count() {
+        let clipped = b"truncated\":1},{\"usageMetadata\":{\"promptTokenCount\":100,\"cachedContentTokenCount\":80}},{\"candidates\":[{\"finishReason\":\"STOP\"}],\"usageMetadata\":{\"promptTokenCount\":100,\"candidatesTokenCount\":50}}]";
+        let cache = extract_streaming_cache_tokens("google", clipped);
+        assert_eq!(cache.cache_read_tokens, 80);
+
+        let (_, usage) = extract_streaming_usage("google", clipped);
+        assert_eq!(usage.input_tokens, 100);
+        assert_eq!(usage.output_tokens, 50);
     }
 }

@@ -52,15 +52,18 @@ struct LogSubmitter;
 impl SpanSubmitter for LogSubmitter {
     fn submit_batch(&self, spans: Vec<Span>) {
         for span in &spans {
+            let gen_ai = span.gen_ai.as_ref();
             info!(
                 trace_id = %span.trace_id,
                 span_id = %span.span_id,
                 name = %span.name,
                 duration_ms = span.duration.as_millis() as u64,
-                model = span.gen_ai.as_ref().map(|g| g.model.as_str()).unwrap_or(""),
-                input_tokens = span.gen_ai.as_ref().map(|g| g.input_tokens).unwrap_or(0),
-                output_tokens = span.gen_ai.as_ref().map(|g| g.output_tokens).unwrap_or(0),
-                cost_usd = span.gen_ai.as_ref().map(|g| g.cost_usd).unwrap_or(0.0),
+                model = gen_ai.map(|g| g.model.as_str()).unwrap_or(""),
+                input_tokens = gen_ai.map(|g| g.input_tokens).unwrap_or(0),
+                output_tokens = gen_ai.map(|g| g.output_tokens).unwrap_or(0),
+                cache_read_tokens = gen_ai.map(|g| g.cache_read_tokens).unwrap_or(0),
+                cache_creation_tokens = gen_ai.map(|g| g.cache_creation_tokens).unwrap_or(0),
+                cost_usd = gen_ai.map(|g| g.cost_usd).unwrap_or(0.0),
                 "span captured"
             );
         }

@@ -1,0 +1,14 @@
+.git
+.direnv
+.lefthook-remotes
+**/node_modules
+ui/.next
+ui/out
+ui/coverage
+ui/playwright-report
+ui/test-results
+rust/target
+**/.env
+**/.env.local
+**/.env.*.local
+dist/

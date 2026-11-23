@@ -6,6 +6,7 @@
 //! fallback parser for unknown providers. Each parser extracts token usage
 //! from both standard JSON responses and SSE streaming data.
 
+use serde::Deserialize;
 use serde_json::Value;
 
 /// Extracted token usage from an LLM response.
@@ -27,6 +28,35 @@ pub struct CacheTokens {
     pub cache_creation_tokens: i64,
 }
 
+/// Streaming cache counts preserving field presence so tail updates can overwrite head values cleanly.
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub(crate) struct StreamingCacheTokens {
+    pub cache_read_tokens: Option<i64>,
+    pub cache_creation_tokens: Option<i64>,
+}
+
+impl StreamingCacheTokens {
+    pub(crate) fn merge(self, tail: Self) -> CacheTokens {
+        CacheTokens {
+            cache_read_tokens: tail
+                .cache_read_tokens
+                .or(self.cache_read_tokens)
+                .unwrap_or(0),
+            cache_creation_tokens: tail
+                .cache_creation_tokens
+                .or(self.cache_creation_tokens)
+                .unwrap_or(0),
+        }
+    }
+
+    pub(crate) fn into_cache_tokens(self) -> CacheTokens {
+        CacheTokens {
+            cache_read_tokens: self.cache_read_tokens.unwrap_or(0),
+            cache_creation_tokens: self.cache_creation_tokens.unwrap_or(0),
+        }
+    }
+}
+
 // ── Provider Parser Trait ──
 
 /// Provider-specific response parser.
@@ -46,13 +76,62 @@ pub trait ProviderParser: Send + Sync {
     fn parse_streaming_response(&self, data: &[u8]) -> (String, TokenUsage);
 }
 
+// ── Provider Registry ──
+
+/// Response format family a provider speaks.
+///
+/// One family decides both which parser runs and how cache tokens are read, so
+/// the two answers cannot disagree about a provider.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ParserFamily {
+    OpenAi,
+    Anthropic,
+    Google,
+}
+
+/// Provider name to parser family.
+///
+/// Mirrors Go's `parserRegistry` in `pkg/proxy/parsers.go`. Every name here is
+/// also a case in `test/fixtures/cache_tokens.json`, and a test in each
+/// language fails when the two lists drift apart.
+const REGISTRY: &[(&str, ParserFamily)] = &[
+    ("openai", ParserFamily::OpenAi),
+    ("gemini-oai", ParserFamily::OpenAi),
+    ("mistral", ParserFamily::OpenAi),
+    ("deepseek", ParserFamily::OpenAi),
+    ("deepseek-v3", ParserFamily::OpenAi),
+    ("qwen", ParserFamily::OpenAi),
+    ("zai", ParserFamily::OpenAi),
+    ("meta", ParserFamily::OpenAi),
+    ("xai", ParserFamily::OpenAi),
+    ("anthropic", ParserFamily::Anthropic),
+    ("anthropic-direct", ParserFamily::Anthropic),
+    ("anthropic-vertex", ParserFamily::Anthropic),
+    ("anthropic-bedrock", ParserFamily::Anthropic),
+    ("google", ParserFamily::Google),
+    ("gemini-vertex", ParserFamily::Google),
+];
+
+/// Returns the parser family for a provider name, or `None` when unregistered.
+pub fn parser_family(provider: &str) -> Option<ParserFamily> {
+    REGISTRY
+        .iter()
+        .find(|(name, _)| *name == provider)
+        .map(|(_, family)| *family)
+}
+
+/// Every provider name the parsers know, in registry order.
+pub fn registered_providers() -> impl Iterator<Item = &'static str> {
+    REGISTRY.iter().map(|(name, _)| *name)
+}
+
 /// Returns the appropriate parser for a provider name.
 pub fn get_parser(provider: &str) -> Box<dyn ProviderParser> {
-    match provider {
-        "openai" | "gemini-oai" => Box::new(OpenAIParser),
-        "anthropic" | "anthropic-direct" | "anthropic-vertex" => Box::new(AnthropicParser),
-        "google" => Box::new(GoogleParser),
-        _ => Box::new(FallbackParser),
+    match parser_family(provider) {
+        Some(ParserFamily::OpenAi) => Box::new(OpenAIParser),
+        Some(ParserFamily::Anthropic) => Box::new(AnthropicParser),
+        Some(ParserFamily::Google) => Box::new(GoogleParser),
+        None => Box::new(FallbackParser),
     }
 }
 
@@ -65,161 +144,220 @@ pub fn extract_cache_tokens(provider: &str, body: &[u8]) -> CacheTokens {
         Err(_) => return CacheTokens::default(),
     };
 
-    match provider {
-        "anthropic" | "anthropic-direct" | "anthropic-vertex" => {
-            if let Some(usage) = val.get("usage").and_then(|u| u.as_object()) {
-                CacheTokens {
-                    cache_read_tokens: usage
-                        .get("cache_read_input_tokens")
-                        .and_then(|v| v.as_i64())
-                        .unwrap_or(0),
-                    cache_creation_tokens: usage
-                        .get("cache_creation_input_tokens")
-                        .and_then(|v| v.as_i64())
-                        .unwrap_or(0),
-                }
-            } else {
-                CacheTokens::default()
-            }
-        }
-        "openai" | "gemini-oai" => {
-            if let Some(details) = val
-                .get("usage")
-                .and_then(|u| u.get("prompt_tokens_details"))
-                .and_then(|d| d.as_object())
-            {
-                CacheTokens {
-                    cache_read_tokens: details
-                        .get("cached_tokens")
-                        .and_then(|v| v.as_i64())
-                        .unwrap_or(0),
-                    cache_creation_tokens: 0,
-                }
-            } else {
-                CacheTokens::default()
-            }
-        }
-        "google" => {
-            if let Some(meta) = val.get("usageMetadata").and_then(|m| m.as_object()) {
-                CacheTokens {
-                    cache_read_tokens: meta
-                        .get("cachedContentTokenCount")
-                        .and_then(|v| v.as_i64())
-                        .unwrap_or(0),
-                    cache_creation_tokens: 0,
-                }
-            } else {
-                CacheTokens::default()
-            }
-        }
-        _ => CacheTokens::default(),
+    match parser_family(provider) {
+        Some(ParserFamily::Anthropic) => anthropic_cache(&val),
+        Some(ParserFamily::OpenAi) => openai_cache(&val),
+        Some(ParserFamily::Google) => google_cache(&val),
+        None => CacheTokens::default(),
+    }
+}
+
+fn anthropic_cache(val: &Value) -> CacheTokens {
+    match val.get("usage").and_then(Value::as_object) {
+        Some(usage) => CacheTokens {
+            cache_read_tokens: int_field(usage, "cache_read_input_tokens"),
+            cache_creation_tokens: int_field(usage, "cache_creation_input_tokens"),
+        },
+        None => CacheTokens::default(),
+    }
+}
+
+fn openai_cache(val: &Value) -> CacheTokens {
+    match val
+        .get("usage")
+        .and_then(|u| u.get("prompt_tokens_details"))
+        .and_then(Value::as_object)
+    {
+        Some(details) => CacheTokens {
+            cache_read_tokens: int_field(details, "cached_tokens"),
+            cache_creation_tokens: 0,
+        },
+        None => CacheTokens::default(),
+    }
+}
+
+fn google_cache(val: &Value) -> CacheTokens {
+    match val.get("usageMetadata").and_then(Value::as_object) {
+        Some(meta) => CacheTokens {
+            cache_read_tokens: int_field(meta, "cachedContentTokenCount"),
+            cache_creation_tokens: 0,
+        },
+        None => CacheTokens::default(),
     }
 }
 
 /// Extract cache token counts from accumulated SSE streaming data.
 pub fn extract_streaming_cache_tokens(provider: &str, data: &[u8]) -> CacheTokens {
-    let text = String::from_utf8_lossy(data);
+    extract_streaming_cache_tokens_present(provider, data).into_cache_tokens()
+}
 
-    match provider {
-        "anthropic" | "anthropic-direct" | "anthropic-vertex" => {
-            // Anthropic puts cache tokens in `message_start` event's usage block.
-            for line in text.lines() {
-                let line = line.trim();
-                if !line.starts_with("data: ") {
-                    continue;
-                }
-                let payload = &line["data: ".len()..];
-                if payload == "[DONE]" {
-                    continue;
-                }
-                let chunk: Value = match serde_json::from_str(payload) {
-                    Ok(v) => v,
-                    Err(_) => continue,
-                };
-                // Check message_start event → message.usage
-                if let Some(usage) = chunk
-                    .get("message")
-                    .and_then(|m| m.get("usage"))
-                    .and_then(|u| u.as_object())
-                {
-                    let read = usage
-                        .get("cache_read_input_tokens")
-                        .and_then(|v| v.as_i64())
-                        .unwrap_or(0);
-                    let creation = usage
-                        .get("cache_creation_input_tokens")
-                        .and_then(|v| v.as_i64())
-                        .unwrap_or(0);
-                    if read > 0 || creation > 0 {
-                        return CacheTokens {
-                            cache_read_tokens: read,
-                            cache_creation_tokens: creation,
-                        };
-                    }
-                }
-            }
-            CacheTokens::default()
-        }
-        // OpenAI streaming: usage in the final SSE chunk.
-        "openai" | "gemini-oai" => {
-            for line in text.lines() {
-                let line = line.trim();
-                if !line.starts_with("data: ") {
-                    continue;
-                }
-                let payload = &line["data: ".len()..];
-                if payload == "[DONE]" {
-                    continue;
-                }
-                let chunk: Value = match serde_json::from_str(payload) {
-                    Ok(v) => v,
-                    Err(_) => continue,
-                };
-                if let Some(details) = chunk
-                    .get("usage")
-                    .and_then(|u| u.get("prompt_tokens_details"))
-                    .and_then(|d| d.as_object())
-                {
-                    let read = details
-                        .get("cached_tokens")
-                        .and_then(|v| v.as_i64())
-                        .unwrap_or(0);
-                    if read > 0 {
-                        return CacheTokens {
-                            cache_read_tokens: read,
-                            cache_creation_tokens: 0,
-                        };
-                    }
-                }
-            }
-            CacheTokens::default()
-        }
-        // Google streaming: JSON array or newline-delimited chunks.
-        "google" => {
-            for line in text.lines() {
-                let line = line.trim();
-                // Google streams can be JSON arrays or newline-delimited objects.
-                let chunk: Value = match serde_json::from_str(line) {
-                    Ok(v) => v,
-                    Err(_) => continue,
-                };
-                if let Some(meta) = chunk.get("usageMetadata").and_then(|m| m.as_object()) {
-                    let read = meta
-                        .get("cachedContentTokenCount")
-                        .and_then(|v| v.as_i64())
-                        .unwrap_or(0);
-                    if read > 0 {
-                        return CacheTokens {
-                            cache_read_tokens: read,
-                            cache_creation_tokens: 0,
-                        };
-                    }
-                }
-            }
-            CacheTokens::default()
-        }
-        _ => CacheTokens::default(),
+pub(crate) fn extract_streaming_cache_tokens_present(
+    provider: &str,
+    data: &[u8],
+) -> StreamingCacheTokens {
+    match parser_family(provider) {
+        Some(ParserFamily::Anthropic) => anthropic_streaming_cache_present(data),
+        Some(ParserFamily::OpenAi) => openai_streaming_cache_present(data),
+        Some(ParserFamily::Google) => google_streaming_cache_present(data),
+        None => StreamingCacheTokens::default(),
     }
+}
+
+fn anthropic_streaming_cache_present(data: &[u8]) -> StreamingCacheTokens {
+    let mut ct = StreamingCacheTokens::default();
+    for_each_sse_chunk(data, |chunk| {
+        // `message_start` reports the prompt's cache counts inside message.usage,
+        // `message_delta` repeats them at the top level. The last positive value
+        // wins, so a later event corrects an earlier one.
+        if let Some(usage) = chunk
+            .get("message")
+            .and_then(|m| m.get("usage"))
+            .and_then(Value::as_object)
+        {
+            keep_last_positive(&mut ct, usage);
+        }
+        if let Some(usage) = chunk.get("usage").and_then(Value::as_object) {
+            keep_last_positive(&mut ct, usage);
+        }
+    });
+    ct
+}
+
+fn openai_streaming_cache_present(data: &[u8]) -> StreamingCacheTokens {
+    let mut ct = StreamingCacheTokens::default();
+    for_each_sse_chunk(data, |chunk| {
+        // The final chunk carries usage when stream_options.include_usage is set.
+        if let Some(read) = chunk
+            .get("usage")
+            .and_then(|u| u.get("prompt_tokens_details"))
+            .and_then(Value::as_object)
+            .and_then(|details| opt_int_field(details, "cached_tokens"))
+        {
+            ct.cache_read_tokens = Some(read);
+        }
+    });
+    ct
+}
+
+fn google_streaming_cache_present(data: &[u8]) -> StreamingCacheTokens {
+    let mut read = None;
+
+    // Google streams either one JSON array or newline-delimited objects.
+    if let Ok(chunks) = serde_json::from_slice::<Vec<Value>>(data) {
+        for chunk in &chunks {
+            if let Some(v) = chunk
+                .get("usageMetadata")
+                .and_then(Value::as_object)
+                .and_then(|meta| opt_int_field(meta, "cachedContentTokenCount"))
+            {
+                read = Some(v);
+            }
+        }
+    } else {
+        let mut de = serde_json::Deserializer::from_slice(data);
+        while let Ok(chunk) = Value::deserialize(&mut de) {
+            if let Some(v) = chunk
+                .get("usageMetadata")
+                .and_then(Value::as_object)
+                .and_then(|meta| opt_int_field(meta, "cachedContentTokenCount"))
+            {
+                read = Some(v);
+            }
+        }
+    }
+
+    // Last resort: a usageMetadata object embedded in a larger payload.
+    if read.is_none() {
+        read = embedded_google_cached_tokens(data);
+    }
+
+    StreamingCacheTokens {
+        cache_read_tokens: read,
+        cache_creation_tokens: None,
+    }
+}
+
+fn embedded_google_cached_tokens(data: &[u8]) -> Option<i64> {
+    let mut slice = data;
+    while let Some(idx) = last_subslice(slice, b"\"usageMetadata\"") {
+        if let Some(open) = slice[idx..].iter().position(|b| *b == b'{') {
+            let mut de = serde_json::Deserializer::from_slice(&slice[idx + open..]);
+            if let Ok(Value::Object(meta)) = Value::deserialize(&mut de)
+                && let Some(val) = opt_int_field(&meta, "cachedContentTokenCount")
+            {
+                return Some(val);
+            }
+        }
+        slice = &slice[..idx];
+    }
+    None
+}
+
+/// Visits every parsed payload in an SSE stream, skipping `[DONE]` and
+/// unparseable lines.
+fn for_each_sse_chunk(data: &[u8], mut visit: impl FnMut(&Value)) {
+    for line in String::from_utf8_lossy(data).lines() {
+        let Some(payload) = line.trim().strip_prefix("data: ") else {
+            continue;
+        };
+        if payload == "[DONE]" {
+            continue;
+        }
+        if let Ok(chunk) = serde_json::from_str::<Value>(payload) {
+            visit(&chunk);
+        }
+    }
+}
+
+fn keep_last_positive(ct: &mut StreamingCacheTokens, usage: &serde_json::Map<String, Value>) {
+    if let Some(read) = opt_int_field(usage, "cache_read_input_tokens").filter(|&v| v > 0) {
+        ct.cache_read_tokens = Some(read);
+    }
+    if let Some(creation) = opt_int_field(usage, "cache_creation_input_tokens").filter(|&v| v > 0) {
+        ct.cache_creation_tokens = Some(creation);
+    }
+}
+
+fn last_subslice(haystack: &[u8], needle: &[u8]) -> Option<usize> {
+    haystack
+        .windows(needle.len())
+        .rposition(|window| window == needle)
+}
+
+fn opt_int_field(obj: &serde_json::Map<String, Value>, key: &str) -> Option<i64> {
+    let val = obj.get(key)?;
+    let n = val
+        .as_i64()
+        .or_else(|| val.as_f64().filter(|f| f.is_finite()).map(|f| f as i64))?;
+    Some(n.max(0))
+}
+
+fn int_field(obj: &serde_json::Map<String, Value>, key: &str) -> i64 {
+    opt_int_field(obj, key).unwrap_or(0)
+}
+
+// ── Streaming Usage Injection ──
+
+/// Adds `stream_options.include_usage` to an OpenAI-family streaming request.
+///
+/// OpenAI-compatible endpoints omit usage from the final SSE chunk unless the
+/// request asks for it, so without this a streaming response carries no cache
+/// numbers to measure. A client-supplied `stream_options` is never overridden.
+/// Returns `None` when the body should go upstream unchanged.
+pub fn inject_stream_usage_option(provider: &str, body: &[u8]) -> Option<Vec<u8>> {
+    if parser_family(provider) != Some(ParserFamily::OpenAi) {
+        return None;
+    }
+    let mut req: Value = serde_json::from_slice(body).ok()?;
+    let obj = req.as_object_mut()?;
+    if obj.contains_key("stream_options") {
+        return None;
+    }
+    obj.insert(
+        "stream_options".to_string(),
+        serde_json::json!({ "include_usage": true }),
+    );
+    serde_json::to_vec(&req).ok()
 }
 
 // ── OpenAI Parser ──
@@ -522,8 +660,78 @@ impl ProviderParser for GoogleParser {
     }
 
     fn parse_streaming_response(&self, data: &[u8]) -> (String, TokenUsage) {
-        // Google streaming uses a different endpoint — fall back to standard parsing.
-        self.parse_response(data)
+        let (content, usage) = self.parse_response(data);
+        if usage.input_tokens > 0 || usage.output_tokens > 0 {
+            return (content, usage);
+        }
+
+        let mut content = String::new();
+        let mut last_meta: Option<serde_json::Map<String, Value>> = None;
+
+        if let Ok(chunks) = serde_json::from_slice::<Vec<Value>>(data) {
+            for chunk in &chunks {
+                append_google_chunk_text(chunk, &mut content);
+                if let Some(meta) = chunk.get("usageMetadata").and_then(Value::as_object) {
+                    last_meta = Some(meta.clone());
+                }
+            }
+        } else {
+            let mut de = serde_json::Deserializer::from_slice(data);
+            while let Ok(chunk) = Value::deserialize(&mut de) {
+                append_google_chunk_text(&chunk, &mut content);
+                if let Some(meta) = chunk.get("usageMetadata").and_then(Value::as_object) {
+                    last_meta = Some(meta.clone());
+                }
+            }
+        }
+
+        if last_meta.is_none() {
+            let mut slice = data;
+            while let Some(idx) = last_subslice(slice, b"\"usageMetadata\"") {
+                if let Some(open) = slice[idx..].iter().position(|b| *b == b'{') {
+                    let mut de = serde_json::Deserializer::from_slice(&slice[idx + open..]);
+                    if let Ok(Value::Object(meta)) = Value::deserialize(&mut de) {
+                        last_meta = Some(meta);
+                        break;
+                    }
+                }
+                slice = &slice[..idx];
+            }
+        }
+
+        let usage = last_meta
+            .as_ref()
+            .map(google_usage_from_meta)
+            .unwrap_or_default();
+        (content, usage)
+    }
+}
+
+fn google_usage_from_meta(meta: &serde_json::Map<String, Value>) -> TokenUsage {
+    let input = int_field(meta, "promptTokenCount");
+    let output = int_field(meta, "candidatesTokenCount")
+        .saturating_add(int_field(meta, "thoughtsTokenCount"));
+    TokenUsage {
+        input_tokens: input,
+        output_tokens: output,
+        total_tokens: input.saturating_add(output),
+    }
+}
+
+fn append_google_chunk_text(chunk: &Value, content: &mut String) {
+    if let Some(parts) = chunk
+        .get("candidates")
+        .and_then(Value::as_array)
+        .and_then(|cands| cands.first())
+        .and_then(|c| c.get("content"))
+        .and_then(|c| c.get("parts"))
+        .and_then(Value::as_array)
+    {
+        for part in parts {
+            if let Some(text) = part.get("text").and_then(Value::as_str) {
+                content.push_str(text);
+            }
+        }
     }
 }
 
@@ -657,9 +865,63 @@ mod tests {
     #[test]
     fn cache_tokens_anthropic_aliases() {
         let body = br#"{"usage":{"cache_read_input_tokens":42}}"#;
-        for provider in &["anthropic", "anthropic-direct", "anthropic-vertex"] {
+        for provider in [
+            "anthropic",
+            "anthropic-direct",
+            "anthropic-vertex",
+            "anthropic-bedrock",
+        ] {
             let cache = extract_cache_tokens(provider, body);
             assert_eq!(cache.cache_read_tokens, 42, "failed for {provider}");
+        }
+    }
+
+    #[test]
+    fn cache_tokens_openai_family_aliases() {
+        let body =
+            br#"{"usage":{"prompt_tokens":5000,"prompt_tokens_details":{"cached_tokens":3000}}}"#;
+        for provider in [
+            "openai",
+            "gemini-oai",
+            "mistral",
+            "deepseek",
+            "deepseek-v3",
+            "qwen",
+            "zai",
+            "meta",
+            "xai",
+        ] {
+            let cache = extract_cache_tokens(provider, body);
+            assert_eq!(cache.cache_read_tokens, 3000, "failed for {provider}");
+            assert_eq!(cache.cache_creation_tokens, 0, "failed for {provider}");
+        }
+    }
+
+    #[test]
+    fn cache_tokens_google_aliases() {
+        let body = br#"{"usageMetadata":{"promptTokenCount":100,"cachedContentTokenCount":50}}"#;
+        for provider in ["google", "gemini-vertex"] {
+            let cache = extract_cache_tokens(provider, body);
+            assert_eq!(cache.cache_read_tokens, 50, "failed for {provider}");
+        }
+    }
+
+    #[test]
+    fn registered_providers_parse_token_usage() {
+        // A registered provider must never fall through to the no-op parser.
+        let openai_body = br#"{"usage":{"prompt_tokens":7,"completion_tokens":3}}"#;
+        let anthropic_body = br#"{"usage":{"input_tokens":7,"output_tokens":3}}"#;
+        let google_body = br#"{"usageMetadata":{"promptTokenCount":7,"candidatesTokenCount":3}}"#;
+
+        for (provider, body) in [
+            ("xai", &openai_body[..]),
+            ("deepseek", &openai_body[..]),
+            ("anthropic-bedrock", &anthropic_body[..]),
+            ("gemini-vertex", &google_body[..]),
+        ] {
+            let (_, usage) = extract_response_usage(provider, body);
+            assert_eq!(usage.input_tokens, 7, "failed for {provider}");
+            assert_eq!(usage.output_tokens, 3, "failed for {provider}");
         }
     }
 
@@ -729,6 +991,109 @@ mod tests {
         assert_eq!(cache.cache_creation_tokens, 0);
     }
 
+    #[test]
+    fn streaming_cache_tokens_anthropic_reads_message_delta() {
+        // Vertex AI reports cache counts on message_delta instead of message_start.
+        let data = b"data: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":10}}}\ndata: {\"type\":\"message_delta\",\"usage\":{\"output_tokens\":42,\"cache_read_input_tokens\":30000,\"cache_creation_input_tokens\":100}}\ndata: [DONE]\n";
+        let cache = extract_streaming_cache_tokens("anthropic-vertex", data);
+        assert_eq!(cache.cache_read_tokens, 30000);
+        assert_eq!(cache.cache_creation_tokens, 100);
+    }
+
+    #[test]
+    fn streaming_cache_tokens_anthropic_last_value_wins() {
+        // A later event corrects an earlier one instead of being ignored.
+        let data = b"data: {\"type\":\"message_start\",\"message\":{\"usage\":{\"cache_read_input_tokens\":5000,\"cache_creation_input_tokens\":50}}}\ndata: {\"type\":\"message_delta\",\"usage\":{\"cache_read_input_tokens\":60000,\"cache_creation_input_tokens\":300}}\ndata: [DONE]\n";
+        let cache = extract_streaming_cache_tokens("anthropic", data);
+        assert_eq!(cache.cache_read_tokens, 60000);
+        assert_eq!(cache.cache_creation_tokens, 300);
+    }
+
+    #[test]
+    fn streaming_cache_tokens_openai_last_chunk_wins() {
+        let data = b"data: {\"usage\":{\"prompt_tokens_details\":{\"cached_tokens\":10}}}\ndata: {\"usage\":{\"prompt_tokens\":100,\"prompt_tokens_details\":{\"cached_tokens\":60}}}\ndata: [DONE]\n";
+        let cache = extract_streaming_cache_tokens("xai", data);
+        assert_eq!(cache.cache_read_tokens, 60);
+    }
+
+    #[test]
+    fn streaming_cache_tokens_google_json_array() {
+        let data = br#"[{"usageMetadata":{"promptTokenCount":100,"candidatesTokenCount":10}},{"usageMetadata":{"promptTokenCount":100,"candidatesTokenCount":50,"cachedContentTokenCount":80}}]"#;
+        let cache = extract_streaming_cache_tokens("google", data);
+        assert_eq!(cache.cache_read_tokens, 80);
+    }
+
+    #[test]
+    fn streaming_cache_tokens_google_embedded_usage_metadata() {
+        // Unparseable framing still yields the last usageMetadata object.
+        let data = b"prefix chunk {\"usageMetadata\":{\"promptTokenCount\":100,\"cachedContentTokenCount\":77}} suffix";
+        let cache = extract_streaming_cache_tokens("gemini-vertex", data);
+        assert_eq!(cache.cache_read_tokens, 77);
+    }
+
+    #[test]
+    fn streaming_cache_tokens_unknown_provider() {
+        let data =
+            b"data: {\"usage\":{\"prompt_tokens_details\":{\"cached_tokens\":60}}}\ndata: [DONE]\n";
+        let cache = extract_streaming_cache_tokens("unknown", data);
+        assert_eq!(cache, CacheTokens::default());
+    }
+
+    // ── Streaming usage injection ──
+
+    #[test]
+    fn inject_stream_usage_option_openai_family() {
+        let body = br#"{"model":"m","messages":[],"stream":true}"#;
+        for provider in [
+            "openai",
+            "gemini-oai",
+            "mistral",
+            "deepseek",
+            "deepseek-v3",
+            "qwen",
+            "zai",
+            "meta",
+            "xai",
+        ] {
+            let injected = inject_stream_usage_option(provider, body)
+                .unwrap_or_else(|| panic!("{provider} should inject stream_options"));
+            let parsed: Value = serde_json::from_slice(&injected).unwrap();
+            assert_eq!(
+                parsed["stream_options"]["include_usage"], true,
+                "failed for {provider}"
+            );
+        }
+    }
+
+    #[test]
+    fn inject_stream_usage_option_skips_other_families() {
+        let body = br#"{"model":"m","messages":[],"stream":true}"#;
+        for provider in [
+            "anthropic",
+            "anthropic-bedrock",
+            "google",
+            "gemini-vertex",
+            "unknown",
+        ] {
+            assert_eq!(
+                inject_stream_usage_option(provider, body),
+                None,
+                "failed for {provider}"
+            );
+        }
+    }
+
+    #[test]
+    fn inject_stream_usage_option_keeps_client_options() {
+        let body = br#"{"model":"m","stream":true,"stream_options":{"include_usage":false}}"#;
+        assert_eq!(inject_stream_usage_option("openai", body), None);
+    }
+
+    #[test]
+    fn inject_stream_usage_option_passes_invalid_json() {
+        assert_eq!(inject_stream_usage_option("openai", b"not json"), None);
+    }
+
     // ── Fallback / edge cases ──
 
     #[test]
@@ -769,5 +1134,103 @@ mod tests {
 
         // Google uses different endpoints, not body param
         assert!(!is_streaming_request("google", br#"{"stream":true}"#));
+    }
+
+    #[test]
+    fn float_encoded_cache_counts_and_negative_clamping() {
+        let openai = br#"{"usage":{"prompt_tokens_details":{"cached_tokens":4096.0}}}"#;
+        assert_eq!(
+            extract_cache_tokens("openai", openai).cache_read_tokens,
+            4096
+        );
+
+        let openai_sci = br#"{"usage":{"prompt_tokens_details":{"cached_tokens":4.096e3}}}"#;
+        assert_eq!(
+            extract_cache_tokens("openai", openai_sci).cache_read_tokens,
+            4096
+        );
+
+        let anthropic =
+            br#"{"usage":{"cache_read_input_tokens":128.0,"cache_creation_input_tokens":-5.0}}"#;
+        let a = extract_cache_tokens("anthropic", anthropic);
+        assert_eq!(a.cache_read_tokens, 128);
+        assert_eq!(a.cache_creation_tokens, 0);
+
+        let google = br#"{"usageMetadata":{"cachedContentTokenCount":80.0}}"#;
+        assert_eq!(extract_cache_tokens("google", google).cache_read_tokens, 80);
+
+        let google_neg = br#"{"usageMetadata":{"cachedContentTokenCount":-5}}"#;
+        assert_eq!(
+            extract_cache_tokens("google", google_neg).cache_read_tokens,
+            0
+        );
+    }
+
+    #[test]
+    fn streaming_cache_tokens_merge_semantics() {
+        let head = StreamingCacheTokens {
+            cache_read_tokens: Some(100),
+            cache_creation_tokens: Some(25),
+        };
+        // Present lower tail count replaces higher head count; absent field keeps head.
+        let tail = StreamingCacheTokens {
+            cache_read_tokens: Some(60),
+            cache_creation_tokens: None,
+        };
+        assert_eq!(
+            head.clone().merge(tail),
+            CacheTokens {
+                cache_read_tokens: 60,
+                cache_creation_tokens: 25,
+            }
+        );
+
+        // Explicit zero in tail overwrites non-zero head value.
+        let tail_zero = StreamingCacheTokens {
+            cache_read_tokens: Some(0),
+            cache_creation_tokens: Some(0),
+        };
+        assert_eq!(
+            head.merge(tail_zero),
+            CacheTokens {
+                cache_read_tokens: 0,
+                cache_creation_tokens: 0,
+            }
+        );
+
+        // Stream where head had cached_tokens=100 and tail corrected to 0.
+        let head_data = b"data: {\"usage\":{\"prompt_tokens_details\":{\"cached_tokens\":100}}}\n";
+        let tail_data = b"data: {\"usage\":{\"prompt_tokens_details\":{\"cached_tokens\":0}}}\n";
+        let merged = extract_streaming_cache_tokens_present("openai", head_data)
+            .merge(extract_streaming_cache_tokens_present("openai", tail_data));
+        assert_eq!(merged.cache_read_tokens, 0);
+    }
+
+    #[test]
+    fn google_streaming_usage_array_and_ndjson() {
+        let array = br#"[{"candidates":[{"content":{"parts":[{"text":"hel"}]}}],"usageMetadata":{"promptTokenCount":100,"candidatesTokenCount":10}},{"candidates":[{"content":{"parts":[{"text":"lo"}]}}],"usageMetadata":{"promptTokenCount":100,"candidatesTokenCount":50,"thoughtsTokenCount":15,"cachedContentTokenCount":80}}]"#;
+        let (content, usage) = extract_streaming_usage("google", array);
+        assert_eq!(content, "hello");
+        assert_eq!(usage.input_tokens, 100);
+        assert_eq!(usage.output_tokens, 65);
+        assert_eq!(usage.total_tokens, 165);
+
+        let ndjson = b"{\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"a\"}]}}],\"usageMetadata\":{\"promptTokenCount\":100,\"candidatesTokenCount\":10}}\n{\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"b\"}]}}],\"usageMetadata\":{\"promptTokenCount\":100,\"candidatesTokenCount\":50,\"cachedContentTokenCount\":80}}\n";
+        let (nd_content, nd_usage) = extract_streaming_usage("gemini-vertex", ndjson);
+        assert_eq!(nd_content, "ab");
+        assert_eq!(nd_usage.input_tokens, 100);
+        assert_eq!(nd_usage.output_tokens, 50);
+        assert_eq!(nd_usage.total_tokens, 150);
+    }
+
+    #[test]
+    fn google_streaming_cache_clipped_prefix_retains_earlier_count() {
+        let clipped = b"truncated\":1},{\"usageMetadata\":{\"promptTokenCount\":100,\"cachedContentTokenCount\":80}},{\"candidates\":[{\"finishReason\":\"STOP\"}],\"usageMetadata\":{\"promptTokenCount\":100,\"candidatesTokenCount\":50}}]";
+        let cache = extract_streaming_cache_tokens("google", clipped);
+        assert_eq!(cache.cache_read_tokens, 80);
+
+        let (_, usage) = extract_streaming_usage("google", clipped);
+        assert_eq!(usage.input_tokens, 100);
+        assert_eq!(usage.output_tokens, 50);
     }
 }

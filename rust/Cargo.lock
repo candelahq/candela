@@ -503,6 +503,7 @@ dependencies = [
  "bytes",
  "candela-core",
  "chrono",
+ "futures-core",
  "http-body-util",
  "hyper",
  "hyper-util",

@@ -1,0 +1,215 @@
+{
+  "description": "Cache-token parity fixture. One case per provider name in the Go parserRegistry. Read by pkg/proxy/parsers_cache_tokens_test.go and rust/crates/candela-proxy/tests/cache_tokens.rs. Both languages assert that their registry matches this provider list exactly, so a provider added to one proxy without a case here fails a test.",
+  "cases": [
+    {
+      "provider": "openai",
+      "standard_body": {
+        "usage": {
+          "prompt_tokens": 5000,
+          "completion_tokens": 200,
+          "total_tokens": 5200,
+          "prompt_tokens_details": { "cached_tokens": 4096 }
+        }
+      },
+      "streaming_body": "data: {\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}\ndata: {\"choices\":[],\"usage\":{\"prompt_tokens\":5000,\"completion_tokens\":200,\"prompt_tokens_details\":{\"cached_tokens\":4096}}}\ndata: [DONE]\n",
+      "cache_read_tokens": 4096,
+      "cache_creation_tokens": 0
+    },
+    {
+      "provider": "gemini-oai",
+      "standard_body": {
+        "usage": {
+          "prompt_tokens": 5000,
+          "completion_tokens": 200,
+          "total_tokens": 5200,
+          "prompt_tokens_details": { "cached_tokens": 4096 }
+        }
+      },
+      "streaming_body": "data: {\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}\ndata: {\"choices\":[],\"usage\":{\"prompt_tokens\":5000,\"completion_tokens\":200,\"prompt_tokens_details\":{\"cached_tokens\":4096}}}\ndata: [DONE]\n",
+      "cache_read_tokens": 4096,
+      "cache_creation_tokens": 0
+    },
+    {
+      "provider": "mistral",
+      "standard_body": {
+        "usage": {
+          "prompt_tokens": 5000,
+          "completion_tokens": 200,
+          "total_tokens": 5200,
+          "prompt_tokens_details": { "cached_tokens": 4096 }
+        }
+      },
+      "streaming_body": "data: {\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}\ndata: {\"choices\":[],\"usage\":{\"prompt_tokens\":5000,\"completion_tokens\":200,\"prompt_tokens_details\":{\"cached_tokens\":4096}}}\ndata: [DONE]\n",
+      "cache_read_tokens": 4096,
+      "cache_creation_tokens": 0
+    },
+    {
+      "provider": "deepseek",
+      "standard_body": {
+        "usage": {
+          "prompt_tokens": 5000,
+          "completion_tokens": 200,
+          "total_tokens": 5200,
+          "prompt_tokens_details": { "cached_tokens": 4096 }
+        }
+      },
+      "streaming_body": "data: {\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}\ndata: {\"choices\":[],\"usage\":{\"prompt_tokens\":5000,\"completion_tokens\":200,\"prompt_tokens_details\":{\"cached_tokens\":4096}}}\ndata: [DONE]\n",
+      "cache_read_tokens": 4096,
+      "cache_creation_tokens": 0
+    },
+    {
+      "provider": "deepseek-v3",
+      "standard_body": {
+        "usage": {
+          "prompt_tokens": 5000,
+          "completion_tokens": 200,
+          "total_tokens": 5200,
+          "prompt_tokens_details": { "cached_tokens": 4096 }
+        }
+      },
+      "streaming_body": "data: {\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}\ndata: {\"choices\":[],\"usage\":{\"prompt_tokens\":5000,\"completion_tokens\":200,\"prompt_tokens_details\":{\"cached_tokens\":4096}}}\ndata: [DONE]\n",
+      "cache_read_tokens": 4096,
+      "cache_creation_tokens": 0
+    },
+    {
+      "provider": "qwen",
+      "standard_body": {
+        "usage": {
+          "prompt_tokens": 5000,
+          "completion_tokens": 200,
+          "total_tokens": 5200,
+          "prompt_tokens_details": { "cached_tokens": 4096 }
+        }
+      },
+      "streaming_body": "data: {\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}\ndata: {\"choices\":[],\"usage\":{\"prompt_tokens\":5000,\"completion_tokens\":200,\"prompt_tokens_details\":{\"cached_tokens\":4096}}}\ndata: [DONE]\n",
+      "cache_read_tokens": 4096,
+      "cache_creation_tokens": 0
+    },
+    {
+      "provider": "zai",
+      "standard_body": {
+        "usage": {
+          "prompt_tokens": 5000,
+          "completion_tokens": 200,
+          "total_tokens": 5200,
+          "prompt_tokens_details": { "cached_tokens": 4096 }
+        }
+      },
+      "streaming_body": "data: {\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}\ndata: {\"choices\":[],\"usage\":{\"prompt_tokens\":5000,\"completion_tokens\":200,\"prompt_tokens_details\":{\"cached_tokens\":4096}}}\ndata: [DONE]\n",
+      "cache_read_tokens": 4096,
+      "cache_creation_tokens": 0
+    },
+    {
+      "provider": "meta",
+      "standard_body": {
+        "usage": {
+          "prompt_tokens": 5000,
+          "completion_tokens": 200,
+          "total_tokens": 5200,
+          "prompt_tokens_details": { "cached_tokens": 4096 }
+        }
+      },
+      "streaming_body": "data: {\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}\ndata: {\"choices\":[],\"usage\":{\"prompt_tokens\":5000,\"completion_tokens\":200,\"prompt_tokens_details\":{\"cached_tokens\":4096}}}\ndata: [DONE]\n",
+      "cache_read_tokens": 4096,
+      "cache_creation_tokens": 0
+    },
+    {
+      "provider": "xai",
+      "standard_body": {
+        "usage": {
+          "prompt_tokens": 5000,
+          "completion_tokens": 200,
+          "total_tokens": 5200,
+          "prompt_tokens_details": { "cached_tokens": 4096 }
+        }
+      },
+      "streaming_body": "data: {\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}\ndata: {\"choices\":[],\"usage\":{\"prompt_tokens\":5000,\"completion_tokens\":200,\"prompt_tokens_details\":{\"cached_tokens\":4096}}}\ndata: [DONE]\n",
+      "cache_read_tokens": 4096,
+      "cache_creation_tokens": 0
+    },
+    {
+      "provider": "anthropic",
+      "standard_body": {
+        "usage": {
+          "input_tokens": 21,
+          "output_tokens": 393,
+          "cache_read_input_tokens": 188086,
+          "cache_creation_input_tokens": 500
+        }
+      },
+      "streaming_body": "data: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":21,\"cache_read_input_tokens\":50000,\"cache_creation_input_tokens\":200}}}\ndata: {\"type\":\"content_block_delta\",\"delta\":{\"type\":\"text_delta\",\"text\":\"hello\"}}\ndata: {\"type\":\"message_delta\",\"usage\":{\"output_tokens\":42,\"cache_read_input_tokens\":188086,\"cache_creation_input_tokens\":500}}\ndata: [DONE]\n",
+      "cache_read_tokens": 188086,
+      "cache_creation_tokens": 500
+    },
+    {
+      "provider": "anthropic-direct",
+      "standard_body": {
+        "usage": {
+          "input_tokens": 21,
+          "output_tokens": 393,
+          "cache_read_input_tokens": 188086,
+          "cache_creation_input_tokens": 500
+        }
+      },
+      "streaming_body": "data: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":21,\"cache_read_input_tokens\":50000,\"cache_creation_input_tokens\":200}}}\ndata: {\"type\":\"content_block_delta\",\"delta\":{\"type\":\"text_delta\",\"text\":\"hello\"}}\ndata: {\"type\":\"message_delta\",\"usage\":{\"output_tokens\":42,\"cache_read_input_tokens\":188086,\"cache_creation_input_tokens\":500}}\ndata: [DONE]\n",
+      "cache_read_tokens": 188086,
+      "cache_creation_tokens": 500
+    },
+    {
+      "provider": "anthropic-vertex",
+      "standard_body": {
+        "usage": {
+          "input_tokens": 21,
+          "output_tokens": 393,
+          "cache_read_input_tokens": 188086,
+          "cache_creation_input_tokens": 500
+        }
+      },
+      "streaming_body": "data: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":21,\"cache_read_input_tokens\":50000,\"cache_creation_input_tokens\":200}}}\ndata: {\"type\":\"content_block_delta\",\"delta\":{\"type\":\"text_delta\",\"text\":\"hello\"}}\ndata: {\"type\":\"message_delta\",\"usage\":{\"output_tokens\":42,\"cache_read_input_tokens\":188086,\"cache_creation_input_tokens\":500}}\ndata: [DONE]\n",
+      "cache_read_tokens": 188086,
+      "cache_creation_tokens": 500
+    },
+    {
+      "provider": "anthropic-bedrock",
+      "standard_body": {
+        "usage": {
+          "input_tokens": 21,
+          "output_tokens": 393,
+          "cache_read_input_tokens": 188086,
+          "cache_creation_input_tokens": 500
+        }
+      },
+      "streaming_body": "data: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":21,\"cache_read_input_tokens\":50000,\"cache_creation_input_tokens\":200}}}\ndata: {\"type\":\"content_block_delta\",\"delta\":{\"type\":\"text_delta\",\"text\":\"hello\"}}\ndata: {\"type\":\"message_delta\",\"usage\":{\"output_tokens\":42,\"cache_read_input_tokens\":188086,\"cache_creation_input_tokens\":500}}\ndata: [DONE]\n",
+      "cache_read_tokens": 188086,
+      "cache_creation_tokens": 500
+    },
+    {
+      "provider": "google",
+      "standard_body": {
+        "candidates": [{ "content": { "parts": [{ "text": "hi" }] } }],
+        "usageMetadata": {
+          "promptTokenCount": 100,
+          "candidatesTokenCount": 50,
+          "cachedContentTokenCount": 80
+        }
+      },
+      "streaming_body": "[{\"usageMetadata\":{\"promptTokenCount\":100,\"candidatesTokenCount\":10}},{\"usageMetadata\":{\"promptTokenCount\":100,\"candidatesTokenCount\":50,\"cachedContentTokenCount\":80}}]",
+      "cache_read_tokens": 80,
+      "cache_creation_tokens": 0
+    },
+    {
+      "provider": "gemini-vertex",
+      "standard_body": {
+        "candidates": [{ "content": { "parts": [{ "text": "hi" }] } }],
+        "usageMetadata": {
+          "promptTokenCount": 100,
+          "candidatesTokenCount": 50,
+          "cachedContentTokenCount": 80
+        }
+      },
+      "streaming_body": "{\"usageMetadata\":{\"promptTokenCount\":100,\"candidatesTokenCount\":10}}\n{\"usageMetadata\":{\"promptTokenCount\":100,\"candidatesTokenCount\":50,\"cachedContentTokenCount\":80}}\n",
+      "cache_read_tokens": 80,
+      "cache_creation_tokens": 0
+    }
+  ]
+}

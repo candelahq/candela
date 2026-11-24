@@ -33,6 +33,10 @@ jsonpath "$.choices[0].finish_reason" == "stop"
 jsonpath "$.usage.prompt_tokens" isInteger
 jsonpath "$.usage.completion_tokens" isInteger
 jsonpath "$.usage.total_tokens" isInteger
+# prompt_tokens = input (15) + cache read (12) + cache write (3)
+jsonpath "$.usage.prompt_tokens" == 30
+jsonpath "$.usage.total_tokens" == 38
+jsonpath "$.usage.prompt_tokens_details.cached_tokens" == 12
 
 
 # ── W3C Traceparent propagation ───────────────────────────────────────────────

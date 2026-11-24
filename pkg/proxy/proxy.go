@@ -60,12 +60,11 @@ type FormatTranslator interface {
 	// TranslateResponse converts the upstream response body to the client format.
 	TranslateResponse(body []byte, model string) ([]byte, error)
 
-	// TranslateStreamChunk converts a single upstream SSE data payload to client format.
-	// streamID is a pointer to a string that persists across calls for a single stream.
-	// On the first call it should point to an empty string; the function will populate
-	// it (from the Anthropic message_start ID or a generated fallback) and reuse it
-	// on subsequent calls so every chunk in the stream shares the same ID.
-	TranslateStreamChunk(chunk []byte, model string, streamID *string) ([]byte, error)
+	// TranslateStreamChunk converts upstream SSE bytes to client format.
+	// state persists across calls for a single stream: it keeps a consistent
+	// chunk ID, the usage seen so far, and any incomplete trailing line.
+	// On the first call it should point to a zero StreamState.
+	TranslateStreamChunk(chunk []byte, model string, state *StreamState) ([]byte, error)
 }
 
 // PathRewriter rewrites the upstream URL path for provider-specific routing
@@ -2044,7 +2043,7 @@ func (p *Proxy) handleStreamingResponse(
 	w.WriteHeader(resp.StatusCode)
 
 	// Determine model name for stream chunk translation and token accounting.
-	var streamID string // consistent ID across all chunks in this stream
+	var streamState StreamState
 	streamModel, _ := extractRequestInfo(provider.Name, reqBody)
 	if streamModel == "" {
 		streamModel = extractModelFromURLPath(r.URL.Path)
@@ -2102,7 +2101,7 @@ func (p *Proxy) handleStreamingResponse(
 
 			// Translate chunk if provider has a FormatTranslator.
 			if provider.FormatTranslator != nil {
-				translated, transErr := provider.FormatTranslator.TranslateStreamChunk(chunk, streamModel, &streamID)
+				translated, transErr := provider.FormatTranslator.TranslateStreamChunk(chunk, streamModel, &streamState)
 				if transErr != nil {
 					slog.Debug("stream chunk translation failed", "error", transErr)
 					// Forward raw chunk on error.

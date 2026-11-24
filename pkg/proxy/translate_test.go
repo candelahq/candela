@@ -1481,11 +1481,30 @@ func TestTranslateStreamChunk_SplitLines(t *testing.T) {
 	}
 
 	for i := 0; i <= len(data); i++ {
-		// Copy into fresh slices to catch any aliasing of the caller's buffer.
-		a := append([]byte(nil), data[:i]...)
-		b := append([]byte(nil), data[i:]...)
-		if got := feed(t, a, b); !equal(got, want) {
+		if got := feed(t, data[:i], data[i:]); !equal(got, want) {
 			t.Fatalf("split at %d: got %+v, want %+v", i, got, want)
+		}
+	}
+
+	// The proxy reuses one read buffer, so bytes kept from an earlier read
+	// must survive that buffer being overwritten by the next read.
+	for _, size := range []int{1, 7, 64, 4096} {
+		var state StreamState
+		var out []byte
+		readBuf := make([]byte, size)
+		for off := 0; off < len(data); off += size {
+			n := copy(readBuf, data[off:])
+			b, err := translator.TranslateStreamChunk(readBuf[:n], model, &state)
+			if err != nil {
+				t.Fatalf("TranslateStreamChunk failed: %v", err)
+			}
+			out = append(out, b...)
+			for i := range readBuf {
+				readBuf[i] = 'X'
+			}
+		}
+		if got := summarize(t, out); !equal(got, want) {
+			t.Fatalf("reused %d-byte buffer: got %+v, want %+v", size, got, want)
 		}
 	}
 
@@ -1498,29 +1517,128 @@ func TestTranslateStreamChunk_SplitLines(t *testing.T) {
 	}
 }
 
-func TestTranslateStreamChunk_OversizedPartialDropped(t *testing.T) {
+func TestTranslateStreamChunk_OversizedLineDropped(t *testing.T) {
 	translator := &AnthropicFormatTranslator{}
-	var state StreamState
+	const model = "claude-sonnet-4-20250514"
 
-	big := bytes.Repeat([]byte("x"), maxStreamPartialLine+1)
-	out, err := translator.TranslateStreamChunk(big, "claude-sonnet-4-20250514", &state)
-	if err != nil {
-		t.Fatalf("TranslateStreamChunk failed: %v", err)
-	}
-	if len(out) != 0 {
-		t.Errorf("expected no output, got %d bytes", len(out))
-	}
-	if state.partial != nil {
-		t.Errorf("partial = %d bytes, want reset", len(state.partial))
+	// The tail of the oversized line looks like a valid event; it must not be
+	// emitted however the reads are split.
+	oversized := append(bytes.Repeat([]byte("x"), maxStreamPartialLine+10),
+		[]byte(`data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"LEAK"}}`)...)
+	next := `data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"ok"}}` + "\n" +
+		`data: {"type":"message_stop"}` + "\n"
+	stream := append(append(oversized, '\n'), next...)
+	nlAt := len(oversized)
+
+	schedules := map[string][]int{
+		"single read":                   nil,
+		"split right before newline":    {nlAt},
+		"split right after newline":     {nlAt + 1},
+		"split inside the long line":    {maxStreamPartialLine / 2},
+		"cap exceeded before newline":   {maxStreamPartialLine + 5, nlAt},
+		"newline shares read with tail": {maxStreamPartialLine + 5},
+		"split inside the next line":    {nlAt + 10},
 	}
 
-	out, err = translator.TranslateStreamChunk([]byte("data: {\"type\":\"message_stop\"}\n"), "claude-sonnet-4-20250514", &state)
-	if err != nil {
-		t.Fatalf("TranslateStreamChunk failed: %v", err)
+	for name, cuts := range schedules {
+		t.Run(name, func(t *testing.T) {
+			var state StreamState
+			var out []byte
+			prev := 0
+			for _, c := range append(cuts, len(stream)) {
+				b, err := translator.TranslateStreamChunk(stream[prev:c], model, &state)
+				if err != nil {
+					t.Fatalf("TranslateStreamChunk failed: %v", err)
+				}
+				out = append(out, b...)
+				prev = c
+			}
+			got := string(out)
+			if strings.Contains(got, "LEAK") {
+				t.Errorf("oversized line content leaked into output")
+			}
+			if !strings.Contains(got, `"content":"ok"`) || !strings.Contains(got, "data: [DONE]") {
+				t.Errorf("expected events after the oversized line, got %q", got)
+			}
+			if len(state.partial) != 0 || state.discarding {
+				t.Errorf("state not reset: partial=%d discarding=%v", len(state.partial), state.discarding)
+			}
+		})
 	}
-	if !strings.Contains(string(out), "data: [DONE]") {
-		t.Errorf("expected stream to recover after reset, got %q", out)
+}
+
+func TestTranslateStreamChunk_MultipleMessageDeltas(t *testing.T) {
+	translator := &AnthropicFormatTranslator{}
+
+	tests := []struct {
+		name       string
+		events     []string
+		wantFinish string
+		wantOutput int64
+	}{
+		{
+			name: "intermediate delta without stop_reason",
+			events: []string{
+				`{"type":"message_start","message":{"id":"msg_1","usage":{"input_tokens":10}}}`,
+				`{"type":"message_delta","delta":{},"usage":{"output_tokens":3}}`,
+				`{"type":"message_delta","delta":{"stop_reason":"max_tokens"},"usage":{"output_tokens":9}}`,
+				`{"type":"message_stop"}`,
+			},
+			wantFinish: "length",
+			wantOutput: 9,
+		},
+		{
+			name: "no stop_reason at all finishes at message_stop",
+			events: []string{
+				`{"type":"message_start","message":{"id":"msg_1","usage":{"input_tokens":10}}}`,
+				`{"type":"message_delta","delta":{},"usage":{"output_tokens":4}}`,
+				`{"type":"message_stop"}`,
+			},
+			wantFinish: "stop",
+			wantOutput: 4,
+		},
 	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var state StreamState
+			var out []byte
+			for _, ev := range tt.events {
+				b, err := translator.TranslateStreamChunk([]byte("data: "+ev+"\n\n"), "claude-sonnet-4-20250514", &state)
+				if err != nil {
+					t.Fatalf("TranslateStreamChunk failed: %v", err)
+				}
+				out = append(out, b...)
+			}
+
+			var finishes []openAIStreamChunk
+			for _, p := range parseSSEPayloads(t, out) {
+				raw, _ := json.Marshal(p)
+				var chunk openAIStreamChunk
+				if err := json.Unmarshal(raw, &chunk); err != nil {
+					t.Fatalf("failed to unmarshal chunk: %v", err)
+				}
+				if len(chunk.Choices) > 0 && chunk.Choices[0].FinishReason != "" {
+					finishes = append(finishes, chunk)
+				}
+			}
+			if len(finishes) != 1 {
+				t.Fatalf("finishing chunks = %d, want 1", len(finishes))
+			}
+			if got := finishes[0].Choices[0].FinishReason; got != tt.wantFinish {
+				t.Errorf("finish_reason = %q, want %q", got, tt.wantFinish)
+			}
+			assertUsage(t, finishes[0].Usage, 10, tt.wantOutput, 10+tt.wantOutput, nil)
+			if !strings.HasSuffix(string(out), "data: [DONE]\n\n") {
+				t.Errorf("stream should end with [DONE], got %q", out)
+			}
+		})
+	}
+}
+
+func TestAnthropicUsageToOpenAI_ClampsNegative(t *testing.T) {
+	u := anthropicUsage{InputTokens: 10, OutputTokens: 5, CacheReadInputTokens: -100, CacheCreationInputTokens: -7}
+	assertUsage(t, u.toOpenAI(), 10, 5, 15, nil)
 }
 
 func int64Ptr(v int64) *int64 { return &v }

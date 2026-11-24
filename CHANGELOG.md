@@ -28,6 +28,7 @@ All notable changes to Candela are documented here, organized by development pha
 ### Fixed
 
 - Anthropic → OpenAI translation now reports the full prompt size in `usage.prompt_tokens` (uncached + cache read + cache write) and the cache-read share in `prompt_tokens_details.cached_tokens`, for streaming and non-streaming responses. Clients such as opencode previously saw only the uncached tokens. Split SSE lines across upstream reads are no longer dropped by the stream translator.
+- **Go API change:** `proxy.FormatTranslator.TranslateStreamChunk` now takes a `*proxy.StreamState` instead of a `*string` stream ID. Out-of-tree implementations must update their signature; callers should create one zero-value `StreamState` per stream and pass the same pointer on every call for that stream.
 
 ## v0.10.1 — 2026-07-07
 

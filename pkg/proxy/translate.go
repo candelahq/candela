@@ -402,6 +402,12 @@ type StreamState struct {
 	usage    anthropicUsage
 	hasUsage bool
 	partial  []byte
+	// discarding is set after an oversized line was dropped and stays set
+	// until that line's terminating newline arrives.
+	discarding bool
+	// pendingFinish is set by a message_delta without stop_reason; the
+	// finish chunk is then emitted on a later stop_reason or at message_stop.
+	pendingFinish bool
 }
 
 func (t *AnthropicFormatTranslator) TranslateStreamChunk(data []byte, model string, state *StreamState) ([]byte, error) {
@@ -416,9 +422,19 @@ func (t *AnthropicFormatTranslator) TranslateStreamChunk(data []byte, model stri
 		state.ID = "chatcmpl-" + GenerateSpanID()
 	}
 
+	if state.discarding {
+		nl := bytes.IndexByte(data, '\n')
+		if nl < 0 {
+			return nil, nil
+		}
+		data = data[nl+1:]
+		state.discarding = false
+	}
+
 	// Upstream reads are not aligned to SSE lines, so an incomplete trailing
 	// line is kept for the next call. It is copied because the caller reuses
-	// its read buffer.
+	// its read buffer. Lines longer than maxStreamPartialLine are dropped
+	// whole, wherever the read boundaries fall.
 	buf := append(state.partial, data...)
 	lastNL := bytes.LastIndexByte(buf, '\n')
 	if lastNL < 0 {
@@ -427,14 +443,19 @@ func (t *AnthropicFormatTranslator) TranslateStreamChunk(data []byte, model stri
 		state.partial = append([]byte(nil), buf[lastNL+1:]...)
 	}
 	if len(state.partial) > maxStreamPartialLine {
-		slog.Debug("dropping oversized partial SSE line", "bytes", len(state.partial))
+		slog.Debug("dropping oversized SSE line", "bytes", len(state.partial))
 		state.partial = nil
+		state.discarding = true
 	}
 	if lastNL < 0 {
 		return nil, nil
 	}
 
 	for _, line := range strings.Split(string(buf[:lastNL]), "\n") {
+		if len(line) > maxStreamPartialLine {
+			slog.Debug("dropping oversized SSE line", "bytes", len(line))
+			continue
+		}
 		line = strings.TrimSpace(line)
 
 		// Drop "event:" lines and empty lines — OpenAI SSE doesn't use them.
@@ -571,26 +592,24 @@ func (t *AnthropicFormatTranslator) TranslateStreamChunk(data []byte, model stri
 			stopDelta, _ := chunk["delta"].(map[string]interface{})
 			sr, _ := stopDelta["stop_reason"].(string)
 
-			oaiChunk := openAIStreamChunk{
-				ID:      state.ID,
-				Object:  "chat.completion.chunk",
-				Created: time.Now().Unix(),
-				Model:   info.Display,
-				Choices: []openAIStreamChoice{
-					{Index: 0, Delta: openAIDelta{}, FinishReason: mapStopReason(sr)},
-				},
-			}
 			if usage != nil {
 				state.usage.merge(usage)
 				state.hasUsage = true
 			}
-			if state.hasUsage {
-				oaiChunk.Usage = state.usage.toOpenAI()
+			// Anthropic may send several message_delta events; only the one
+			// carrying stop_reason ends the message.
+			if sr == "" {
+				state.pendingFinish = true
+				continue
 			}
-			b, _ := json.Marshal(oaiChunk)
-			result.WriteString("data: " + string(b) + "\n\n")
+			state.pendingFinish = false
+			result.WriteString(finishChunk(state, info.Display, sr))
 
 		case "message_stop":
+			if state.pendingFinish {
+				state.pendingFinish = false
+				result.WriteString(finishChunk(state, info.Display, ""))
+			}
 			result.WriteString("data: [DONE]\n\n")
 
 		case "ping", "content_block_stop":
@@ -602,6 +621,25 @@ func (t *AnthropicFormatTranslator) TranslateStreamChunk(data []byte, model stri
 	}
 
 	return []byte(result.String()), nil
+}
+
+// finishChunk builds the final OpenAI chunk with the finish reason and the
+// usage merged so far.
+func finishChunk(state *StreamState, model, stopReason string) string {
+	oaiChunk := openAIStreamChunk{
+		ID:      state.ID,
+		Object:  "chat.completion.chunk",
+		Created: time.Now().Unix(),
+		Model:   model,
+		Choices: []openAIStreamChoice{
+			{Index: 0, Delta: openAIDelta{}, FinishReason: mapStopReason(stopReason)},
+		},
+	}
+	if state.hasUsage {
+		oaiChunk.Usage = state.usage.toOpenAI()
+	}
+	b, _ := json.Marshal(oaiChunk)
+	return "data: " + string(b) + "\n\n"
 }
 
 // ====================================================================
@@ -872,14 +910,18 @@ type anthropicUsage struct {
 // excludes cached tokens, while OpenAI's prompt_tokens includes them and
 // reports the cache-read share in prompt_tokens_details.cached_tokens.
 func (u anthropicUsage) toOpenAI() *openAIUsage {
-	prompt := u.InputTokens + u.CacheReadInputTokens + u.CacheCreationInputTokens
+	input := max(u.InputTokens, 0)
+	output := max(u.OutputTokens, 0)
+	cacheRead := max(u.CacheReadInputTokens, 0)
+	cacheCreation := max(u.CacheCreationInputTokens, 0)
+	prompt := input + cacheRead + cacheCreation
 	out := &openAIUsage{
 		PromptTokens:     prompt,
-		CompletionTokens: u.OutputTokens,
-		TotalTokens:      prompt + u.OutputTokens,
+		CompletionTokens: output,
+		TotalTokens:      prompt + output,
 	}
-	if u.CacheReadInputTokens > 0 {
-		out.PromptTokensDetails = &openAIPromptTokenDetails{CachedTokens: u.CacheReadInputTokens}
+	if cacheRead > 0 {
+		out.PromptTokensDetails = &openAIPromptTokenDetails{CachedTokens: cacheRead}
 	}
 	return out
 }

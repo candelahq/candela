@@ -25,6 +25,10 @@ All notable changes to Candela are documented here, organized by development pha
 - Configurable OIDC claim mapping (subject, email, roles, tenants) with sensible defaults
 - New docs page: `docs/generic-oidc.md` with provider-specific quickstarts
 
+### Fixed
+
+- Anthropic → OpenAI translation now reports the full prompt size in `usage.prompt_tokens` (uncached + cache read + cache write) and the cache-read share in `prompt_tokens_details.cached_tokens`, for streaming and non-streaming responses. Clients such as opencode previously saw only the uncached tokens. Split SSE lines across upstream reads are no longer dropped by the stream translator.
+
 ## v0.10.1 — 2026-07-07
 
 ### Breaking Change — Anthropic Caching Config Restructured

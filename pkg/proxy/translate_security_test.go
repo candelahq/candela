@@ -50,8 +50,8 @@ func TestTranslateStreamChunk_MalformedSSE(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			var streamID string
-			result, err := translator.TranslateStreamChunk([]byte(tc.data), "claude-sonnet-4-20250514", &streamID)
+			var state StreamState
+			result, err := translator.TranslateStreamChunk([]byte(tc.data), "claude-sonnet-4-20250514", &state)
 			if err != nil {
 				t.Fatalf("unexpected error for %q: %v", tc.name, err)
 			}

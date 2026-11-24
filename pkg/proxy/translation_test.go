@@ -26,7 +26,7 @@ func (m *mockFailingTranslator) TranslateResponse(body []byte, model string) ([]
 	return []byte(`{"translated":true}`), nil
 }
 
-func (m *mockFailingTranslator) TranslateStreamChunk(chunk []byte, model string, streamID *string) ([]byte, error) {
+func (m *mockFailingTranslator) TranslateStreamChunk(chunk []byte, model string, state *StreamState) ([]byte, error) {
 	return chunk, nil
 }
 

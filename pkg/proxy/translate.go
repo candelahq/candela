@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -383,11 +384,7 @@ func (t *AnthropicFormatTranslator) TranslateResponse(body []byte, model string)
 				FinishReason: mapStopReason(anthResp.StopReason),
 			},
 		},
-		Usage: openAIUsage{
-			PromptTokens:     anthResp.Usage.InputTokens,
-			CompletionTokens: anthResp.Usage.OutputTokens,
-			TotalTokens:      anthResp.Usage.InputTokens + anthResp.Usage.OutputTokens,
-		},
+		Usage: *anthResp.Usage.toOpenAI(),
 	}
 
 	return json.Marshal(oaiResp)
@@ -395,24 +392,49 @@ func (t *AnthropicFormatTranslator) TranslateResponse(body []byte, model string)
 
 // --- Streaming Translation: Anthropic SSE → OpenAI SSE ---
 
-func (t *AnthropicFormatTranslator) TranslateStreamChunk(data []byte, model string, streamID *string) ([]byte, error) {
+// maxStreamPartialLine caps the buffered incomplete SSE line so a misbehaving
+// upstream cannot grow StreamState.partial without limit.
+const maxStreamPartialLine = 1 << 20
+
+// StreamState carries per-stream data across TranslateStreamChunk calls.
+type StreamState struct {
+	ID       string
+	usage    anthropicUsage
+	hasUsage bool
+	partial  []byte
+}
+
+func (t *AnthropicFormatTranslator) TranslateStreamChunk(data []byte, model string, state *StreamState) ([]byte, error) {
 	info := ParseModelName(model)
 	var result strings.Builder
 
-	// Guard against nil streamID to prevent a nil-pointer dereference.
-	if streamID == nil {
-		fallback := ""
-		streamID = &fallback
+	if state == nil {
+		state = &StreamState{}
 	}
 
-	// Populate the stream ID on first call if not yet set.
-	// The caller passes a pointer to a string that persists across calls for
-	// the entire stream, so every chunk shares the same ID.
-	if *streamID == "" {
-		*streamID = "chatcmpl-" + GenerateSpanID()
+	if state.ID == "" {
+		state.ID = "chatcmpl-" + GenerateSpanID()
 	}
 
-	for _, line := range strings.Split(string(data), "\n") {
+	// Upstream reads are not aligned to SSE lines, so an incomplete trailing
+	// line is kept for the next call. It is copied because the caller reuses
+	// its read buffer.
+	buf := append(state.partial, data...)
+	lastNL := bytes.LastIndexByte(buf, '\n')
+	if lastNL < 0 {
+		state.partial = buf
+	} else {
+		state.partial = append([]byte(nil), buf[lastNL+1:]...)
+	}
+	if len(state.partial) > maxStreamPartialLine {
+		slog.Debug("dropping oversized partial SSE line", "bytes", len(state.partial))
+		state.partial = nil
+	}
+	if lastNL < 0 {
+		return nil, nil
+	}
+
+	for _, line := range strings.Split(string(buf[:lastNL]), "\n") {
 		line = strings.TrimSpace(line)
 
 		// Drop "event:" lines and empty lines — OpenAI SSE doesn't use them.
@@ -441,10 +463,16 @@ func (t *AnthropicFormatTranslator) TranslateStreamChunk(data []byte, model stri
 		case "message_start":
 			// Prefer the Anthropic message ID for traceability.
 			if msgID := getStringField(chunk, "message", "id"); msgID != "" {
-				*streamID = msgID
+				state.ID = msgID
+			}
+			if msg, ok := chunk["message"].(map[string]interface{}); ok {
+				if usage, ok := msg["usage"].(map[string]interface{}); ok {
+					state.usage.merge(usage)
+					state.hasUsage = true
+				}
 			}
 			oaiChunk := openAIStreamChunk{
-				ID:      *streamID,
+				ID:      state.ID,
 				Object:  "chat.completion.chunk",
 				Created: time.Now().Unix(),
 				Model:   info.Display,
@@ -463,7 +491,7 @@ func (t *AnthropicFormatTranslator) TranslateStreamChunk(data []byte, model stri
 				text, _ := delta["text"].(string)
 				if text != "" {
 					oaiChunk := openAIStreamChunk{
-						ID:      *streamID,
+						ID:      state.ID,
 						Object:  "chat.completion.chunk",
 						Created: time.Now().Unix(),
 						Model:   info.Display,
@@ -479,7 +507,7 @@ func (t *AnthropicFormatTranslator) TranslateStreamChunk(data []byte, model stri
 				partialJSON, _ := delta["partial_json"].(string)
 				if partialJSON != "" {
 					oaiChunk := map[string]interface{}{
-						"id":      *streamID,
+						"id":      state.ID,
 						"object":  "chat.completion.chunk",
 						"created": time.Now().Unix(),
 						"model":   info.Display,
@@ -511,7 +539,7 @@ func (t *AnthropicFormatTranslator) TranslateStreamChunk(data []byte, model stri
 				toolID, _ := cb["id"].(string)
 				toolName, _ := cb["name"].(string)
 				oaiChunk := map[string]interface{}{
-					"id":      *streamID,
+					"id":      state.ID,
 					"object":  "chat.completion.chunk",
 					"created": time.Now().Unix(),
 					"model":   info.Display,
@@ -544,7 +572,7 @@ func (t *AnthropicFormatTranslator) TranslateStreamChunk(data []byte, model stri
 			sr, _ := stopDelta["stop_reason"].(string)
 
 			oaiChunk := openAIStreamChunk{
-				ID:      *streamID,
+				ID:      state.ID,
 				Object:  "chat.completion.chunk",
 				Created: time.Now().Unix(),
 				Model:   info.Display,
@@ -553,11 +581,11 @@ func (t *AnthropicFormatTranslator) TranslateStreamChunk(data []byte, model stri
 				},
 			}
 			if usage != nil {
-				oaiChunk.Usage = &openAIUsage{
-					PromptTokens:     toInt64(usage["input_tokens"]),
-					CompletionTokens: toInt64(usage["output_tokens"]),
-					TotalTokens:      toInt64(usage["input_tokens"]) + toInt64(usage["output_tokens"]),
-				}
+				state.usage.merge(usage)
+				state.hasUsage = true
+			}
+			if state.hasUsage {
+				oaiChunk.Usage = state.usage.toOpenAI()
 			}
 			b, _ := json.Marshal(oaiChunk)
 			result.WriteString("data: " + string(b) + "\n\n")
@@ -761,9 +789,14 @@ type openAIMessage struct {
 }
 
 type openAIUsage struct {
-	PromptTokens     int64 `json:"prompt_tokens"`
-	CompletionTokens int64 `json:"completion_tokens"`
-	TotalTokens      int64 `json:"total_tokens"`
+	PromptTokens        int64                     `json:"prompt_tokens"`
+	CompletionTokens    int64                     `json:"completion_tokens"`
+	TotalTokens         int64                     `json:"total_tokens"`
+	PromptTokensDetails *openAIPromptTokenDetails `json:"prompt_tokens_details,omitempty"`
+}
+
+type openAIPromptTokenDetails struct {
+	CachedTokens int64 `json:"cached_tokens"`
 }
 
 type openAIStreamChunk struct {
@@ -829,8 +862,41 @@ type anthropicContent struct {
 }
 
 type anthropicUsage struct {
-	InputTokens  int64 `json:"input_tokens"`
-	OutputTokens int64 `json:"output_tokens"`
+	InputTokens              int64 `json:"input_tokens"`
+	OutputTokens             int64 `json:"output_tokens"`
+	CacheReadInputTokens     int64 `json:"cache_read_input_tokens"`
+	CacheCreationInputTokens int64 `json:"cache_creation_input_tokens"`
+}
+
+// toOpenAI maps Anthropic usage to OpenAI semantics: Anthropic's input_tokens
+// excludes cached tokens, while OpenAI's prompt_tokens includes them and
+// reports the cache-read share in prompt_tokens_details.cached_tokens.
+func (u anthropicUsage) toOpenAI() *openAIUsage {
+	prompt := u.InputTokens + u.CacheReadInputTokens + u.CacheCreationInputTokens
+	out := &openAIUsage{
+		PromptTokens:     prompt,
+		CompletionTokens: u.OutputTokens,
+		TotalTokens:      prompt + u.OutputTokens,
+	}
+	if u.CacheReadInputTokens > 0 {
+		out.PromptTokensDetails = &openAIPromptTokenDetails{CachedTokens: u.CacheReadInputTokens}
+	}
+	return out
+}
+
+// merge overwrites each count with a positive value from m, matching
+// extractAnthropicStreamingCache (last positive value wins). Vertex repeats
+// input and cache counts in message_delta, so adding would double count.
+func (u *anthropicUsage) merge(m map[string]interface{}) {
+	set := func(dst *int64, key string) {
+		if v := toInt64(m[key]); v > 0 {
+			*dst = v
+		}
+	}
+	set(&u.InputTokens, "input_tokens")
+	set(&u.OutputTokens, "output_tokens")
+	set(&u.CacheReadInputTokens, "cache_read_input_tokens")
+	set(&u.CacheCreationInputTokens, "cache_creation_input_tokens")
 }
 
 // --- Helpers ---

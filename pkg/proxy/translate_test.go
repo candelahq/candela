@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"bytes"
 	"encoding/json"
 	"strings"
 	"testing"
@@ -626,6 +627,9 @@ func TestTranslateResponse_Standard(t *testing.T) {
 	if result.Usage.TotalTokens != 18 {
 		t.Errorf("total_tokens = %d, want 18", result.Usage.TotalTokens)
 	}
+	if result.Usage.PromptTokensDetails != nil {
+		t.Errorf("prompt_tokens_details = %+v, want nil", result.Usage.PromptTokensDetails)
+	}
 }
 
 func TestTranslateResponse_MaxTokensStop(t *testing.T) {
@@ -730,6 +734,9 @@ func TestTranslateResponse_ToolUse(t *testing.T) {
 	if result.Usage.CompletionTokens != 50 {
 		t.Errorf("completion_tokens = %d, want 50", result.Usage.CompletionTokens)
 	}
+	if result.Usage.PromptTokensDetails != nil {
+		t.Errorf("prompt_tokens_details = %+v, want nil", result.Usage.PromptTokensDetails)
+	}
 }
 
 func TestTranslateResponse_ToolUseOnly(t *testing.T) {
@@ -816,11 +823,11 @@ func TestTranslateResponse_ToolUseOnly(t *testing.T) {
 
 func TestTranslateStreamChunk_ContentDelta(t *testing.T) {
 	translator := &AnthropicFormatTranslator{}
-	var streamID string
+	var state StreamState
 
-	chunk := `data: {"type":"content_block_delta","delta":{"type":"text_delta","text":"Hello"}}`
+	chunk := "data: {\"type\":\"content_block_delta\",\"delta\":{\"type\":\"text_delta\",\"text\":\"Hello\"}}\n"
 
-	translated, err := translator.TranslateStreamChunk([]byte(chunk), "claude-sonnet-4-20250514", &streamID)
+	translated, err := translator.TranslateStreamChunk([]byte(chunk), "claude-sonnet-4-20250514", &state)
 	if err != nil {
 		t.Fatalf("TranslateStreamChunk failed: %v", err)
 	}
@@ -836,11 +843,11 @@ func TestTranslateStreamChunk_ContentDelta(t *testing.T) {
 
 func TestTranslateStreamChunk_MessageStop(t *testing.T) {
 	translator := &AnthropicFormatTranslator{}
-	var streamID string
+	var state StreamState
 
-	chunk := `data: {"type":"message_stop"}`
+	chunk := "data: {\"type\":\"message_stop\"}\n"
 
-	translated, err := translator.TranslateStreamChunk([]byte(chunk), "claude-sonnet-4-20250514", &streamID)
+	translated, err := translator.TranslateStreamChunk([]byte(chunk), "claude-sonnet-4-20250514", &state)
 	if err != nil {
 		t.Fatalf("TranslateStreamChunk failed: %v", err)
 	}
@@ -869,11 +876,11 @@ data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text
 data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":5}}`,
 	}
 
-	var streamID string
+	var state StreamState
 	var allIDs []string
 
 	for _, c := range chunks {
-		translated, err := translator.TranslateStreamChunk([]byte(c), "claude-sonnet-4-20250514", &streamID)
+		translated, err := translator.TranslateStreamChunk([]byte(c+"\n"), "claude-sonnet-4-20250514", &state)
 		if err != nil {
 			t.Fatalf("TranslateStreamChunk failed: %v", err)
 		}
@@ -909,9 +916,8 @@ data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"outpu
 		}
 	}
 
-	// The streamID pointer should also reflect the Anthropic message ID.
-	if streamID != expectedID {
-		t.Errorf("streamID pointer: got %q, want %q", streamID, expectedID)
+	if state.ID != expectedID {
+		t.Errorf("state.ID: got %q, want %q", state.ID, expectedID)
 	}
 }
 
@@ -925,11 +931,11 @@ func TestTranslateStreamChunk_ConsistentID_NoMessageStart(t *testing.T) {
 		`data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" world"}}`,
 	}
 
-	var streamID string
+	var state StreamState
 	var allIDs []string
 
 	for _, c := range chunks {
-		translated, err := translator.TranslateStreamChunk([]byte(c), "claude-sonnet-4-20250514", &streamID)
+		translated, err := translator.TranslateStreamChunk([]byte(c+"\n"), "claude-sonnet-4-20250514", &state)
 		if err != nil {
 			t.Fatalf("TranslateStreamChunk failed: %v", err)
 		}
@@ -1200,5 +1206,365 @@ func TestVertexAIMaaSPathRewriter_EmptyModel(t *testing.T) {
 	got = rewriter.RewritePath("", true)
 	if got != "" {
 		t.Errorf("RewritePath(\"\", true) = %q, want empty string", got)
+	}
+}
+
+func TestTranslateResponse_CacheTokens(t *testing.T) {
+	translator := &AnthropicFormatTranslator{}
+
+	tests := []struct {
+		name           string
+		usage          string
+		wantPrompt     int64
+		wantCompletion int64
+		wantTotal      int64
+		wantCached     *int64
+	}{
+		{
+			name:           "no cache",
+			usage:          `{"input_tokens":10,"output_tokens":8}`,
+			wantPrompt:     10,
+			wantCompletion: 8,
+			wantTotal:      18,
+		},
+		{
+			name:           "cache read only",
+			usage:          `{"input_tokens":4,"cache_read_input_tokens":1600,"output_tokens":6}`,
+			wantPrompt:     1604,
+			wantCompletion: 6,
+			wantTotal:      1610,
+			wantCached:     int64Ptr(1600),
+		},
+		{
+			name:           "read and creation",
+			usage:          `{"input_tokens":21,"cache_read_input_tokens":188086,"cache_creation_input_tokens":500,"output_tokens":42}`,
+			wantPrompt:     188607,
+			wantCompletion: 42,
+			wantTotal:      188649,
+			wantCached:     int64Ptr(188086),
+		},
+		{
+			name:           "creation only",
+			usage:          `{"input_tokens":5,"cache_creation_input_tokens":2000,"output_tokens":3}`,
+			wantPrompt:     2005,
+			wantCompletion: 3,
+			wantTotal:      2008,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			body := `{"id":"msg_1","type":"message","role":"assistant","content":[{"type":"text","text":"hi"}],"stop_reason":"end_turn","usage":` + tt.usage + `}`
+			translated, err := translator.TranslateResponse([]byte(body), "claude-sonnet-4-20250514")
+			if err != nil {
+				t.Fatalf("TranslateResponse failed: %v", err)
+			}
+			var result openAIResponse
+			if err := json.Unmarshal(translated, &result); err != nil {
+				t.Fatalf("failed to unmarshal: %v", err)
+			}
+			assertUsage(t, &result.Usage, tt.wantPrompt, tt.wantCompletion, tt.wantTotal, tt.wantCached)
+		})
+	}
+}
+
+func TestTranslateStreamChunk_Usage(t *testing.T) {
+	translator := &AnthropicFormatTranslator{}
+
+	start := func(usage string) string {
+		if usage == "" {
+			return `{"type":"message_start","message":{"id":"msg_1","role":"assistant","content":[]}}`
+		}
+		return `{"type":"message_start","message":{"id":"msg_1","role":"assistant","content":[],"usage":` + usage + `}}`
+	}
+	delta := func(usage string) string {
+		if usage == "" {
+			return `{"type":"message_delta","delta":{"stop_reason":"end_turn"}}`
+		}
+		return `{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":` + usage + `}`
+	}
+
+	tests := []struct {
+		name           string
+		events         []string
+		wantUsage      bool
+		wantPrompt     int64
+		wantCompletion int64
+		wantTotal      int64
+		wantCached     *int64
+	}{
+		{
+			name: "start carries cache, delta only output",
+			events: []string{
+				start(`{"input_tokens":21,"cache_read_input_tokens":50000,"cache_creation_input_tokens":200,"output_tokens":1}`),
+				delta(`{"output_tokens":42}`),
+			},
+			wantUsage:      true,
+			wantPrompt:     50221,
+			wantCompletion: 42,
+			wantTotal:      50263,
+			wantCached:     int64Ptr(50000),
+		},
+		{
+			name: "delta repeats everything",
+			events: []string{
+				start(`{"input_tokens":10,"cache_read_input_tokens":5000,"cache_creation_input_tokens":50}`),
+				delta(`{"input_tokens":10,"output_tokens":42,"cache_read_input_tokens":5000,"cache_creation_input_tokens":50}`),
+			},
+			wantUsage:      true,
+			wantPrompt:     5060,
+			wantCompletion: 42,
+			wantTotal:      5102,
+			wantCached:     int64Ptr(5000),
+		},
+		{
+			name: "delta has final cache values",
+			events: []string{
+				start(`{"input_tokens":21,"cache_read_input_tokens":50000,"cache_creation_input_tokens":200}`),
+				delta(`{"output_tokens":42,"cache_read_input_tokens":188086,"cache_creation_input_tokens":500}`),
+			},
+			wantUsage:      true,
+			wantPrompt:     188607,
+			wantCompletion: 42,
+			wantTotal:      188649,
+			wantCached:     int64Ptr(188086),
+		},
+		{
+			name: "no message_start usage",
+			events: []string{
+				start(""),
+				delta(`{"output_tokens":5}`),
+			},
+			wantUsage:      true,
+			wantPrompt:     0,
+			wantCompletion: 5,
+			wantTotal:      5,
+		},
+		{
+			name: "no usage anywhere",
+			events: []string{
+				start(""),
+				delta(""),
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var state StreamState
+			var payloads []map[string]json.RawMessage
+			for _, ev := range tt.events {
+				out, err := translator.TranslateStreamChunk([]byte("data: "+ev+"\n\n"), "claude-sonnet-4-20250514", &state)
+				if err != nil {
+					t.Fatalf("TranslateStreamChunk failed: %v", err)
+				}
+				payloads = append(payloads, parseSSEPayloads(t, out)...)
+			}
+
+			var withUsage []map[string]json.RawMessage
+			for _, p := range payloads {
+				if _, ok := p["usage"]; ok {
+					withUsage = append(withUsage, p)
+				}
+			}
+
+			if !tt.wantUsage {
+				if len(withUsage) != 0 {
+					t.Fatalf("expected no usage, got %d chunks with usage", len(withUsage))
+				}
+				return
+			}
+			if len(withUsage) != 1 {
+				t.Fatalf("chunks with usage = %d, want 1", len(withUsage))
+			}
+
+			var chunk openAIStreamChunk
+			raw, _ := json.Marshal(withUsage[0])
+			if err := json.Unmarshal(raw, &chunk); err != nil {
+				t.Fatalf("failed to unmarshal usage chunk: %v", err)
+			}
+			if len(chunk.Choices) != 1 || chunk.Choices[0].FinishReason == "" {
+				t.Errorf("usage chunk should carry finish_reason, got %+v", chunk.Choices)
+			}
+			assertUsage(t, chunk.Usage, tt.wantPrompt, tt.wantCompletion, tt.wantTotal, tt.wantCached)
+		})
+	}
+}
+
+func TestTranslateStreamChunk_SplitLines(t *testing.T) {
+	translator := &AnthropicFormatTranslator{}
+	const model = "claude-sonnet-4-20250514"
+
+	stream := "event: message_start\n" +
+		`data: {"type":"message_start","message":{"id":"msg_split","role":"assistant","content":[],"usage":{"input_tokens":21,"cache_read_input_tokens":188086,"cache_creation_input_tokens":500,"output_tokens":1}}}` + "\n\n" +
+		"event: content_block_delta\n" +
+		`data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Hello"}}` + "\n\n" +
+		"event: content_block_delta\n" +
+		`data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" world"}}` + "\n\n" +
+		"event: message_delta\n" +
+		`data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":42}}` + "\n\n" +
+		"event: message_stop\n" +
+		`data: {"type":"message_stop"}` + "\n\n"
+
+	type summary struct {
+		content string
+		finish  string
+		usage   openAIUsage
+		done    int
+	}
+	summarize := func(t *testing.T, out []byte) summary {
+		t.Helper()
+		var s summary
+		for _, line := range strings.Split(string(out), "\n") {
+			if !strings.HasPrefix(line, "data: ") {
+				continue
+			}
+			payload := strings.TrimPrefix(line, "data: ")
+			if payload == "[DONE]" {
+				s.done++
+				continue
+			}
+			var chunk openAIStreamChunk
+			if err := json.Unmarshal([]byte(payload), &chunk); err != nil {
+				t.Fatalf("invalid translated chunk %q: %v", payload, err)
+			}
+			for _, c := range chunk.Choices {
+				s.content += c.Delta.Content
+				if c.FinishReason != "" {
+					s.finish = c.FinishReason
+				}
+			}
+			if chunk.Usage != nil {
+				s.usage = *chunk.Usage
+			}
+		}
+		return s
+	}
+	feed := func(t *testing.T, parts ...[]byte) summary {
+		t.Helper()
+		var state StreamState
+		var out []byte
+		for _, p := range parts {
+			b, err := translator.TranslateStreamChunk(p, model, &state)
+			if err != nil {
+				t.Fatalf("TranslateStreamChunk failed: %v", err)
+			}
+			out = append(out, b...)
+		}
+		if len(state.partial) != 0 {
+			t.Errorf("partial not drained: %q", state.partial)
+		}
+		return summarize(t, out)
+	}
+	equal := func(a, b summary) bool {
+		if a.content != b.content || a.finish != b.finish || a.done != b.done {
+			return false
+		}
+		if a.usage.PromptTokens != b.usage.PromptTokens ||
+			a.usage.CompletionTokens != b.usage.CompletionTokens ||
+			a.usage.TotalTokens != b.usage.TotalTokens {
+			return false
+		}
+		if (a.usage.PromptTokensDetails == nil) != (b.usage.PromptTokensDetails == nil) {
+			return false
+		}
+		return a.usage.PromptTokensDetails == nil ||
+			a.usage.PromptTokensDetails.CachedTokens == b.usage.PromptTokensDetails.CachedTokens
+	}
+
+	data := []byte(stream)
+	want := feed(t, data)
+	if want.content != "Hello world" || want.finish != "stop" || want.done != 1 ||
+		want.usage.PromptTokens != 188607 || want.usage.PromptTokensDetails == nil ||
+		want.usage.PromptTokensDetails.CachedTokens != 188086 {
+		t.Fatalf("unexpected baseline: %+v", want)
+	}
+
+	for i := 0; i <= len(data); i++ {
+		// Copy into fresh slices to catch any aliasing of the caller's buffer.
+		a := append([]byte(nil), data[:i]...)
+		b := append([]byte(nil), data[i:]...)
+		if got := feed(t, a, b); !equal(got, want) {
+			t.Fatalf("split at %d: got %+v, want %+v", i, got, want)
+		}
+	}
+
+	bytesParts := make([][]byte, len(data))
+	for i := range data {
+		bytesParts[i] = []byte{data[i]}
+	}
+	if got := feed(t, bytesParts...); !equal(got, want) {
+		t.Fatalf("1-byte chunks: got %+v, want %+v", got, want)
+	}
+}
+
+func TestTranslateStreamChunk_OversizedPartialDropped(t *testing.T) {
+	translator := &AnthropicFormatTranslator{}
+	var state StreamState
+
+	big := bytes.Repeat([]byte("x"), maxStreamPartialLine+1)
+	out, err := translator.TranslateStreamChunk(big, "claude-sonnet-4-20250514", &state)
+	if err != nil {
+		t.Fatalf("TranslateStreamChunk failed: %v", err)
+	}
+	if len(out) != 0 {
+		t.Errorf("expected no output, got %d bytes", len(out))
+	}
+	if state.partial != nil {
+		t.Errorf("partial = %d bytes, want reset", len(state.partial))
+	}
+
+	out, err = translator.TranslateStreamChunk([]byte("data: {\"type\":\"message_stop\"}\n"), "claude-sonnet-4-20250514", &state)
+	if err != nil {
+		t.Fatalf("TranslateStreamChunk failed: %v", err)
+	}
+	if !strings.Contains(string(out), "data: [DONE]") {
+		t.Errorf("expected stream to recover after reset, got %q", out)
+	}
+}
+
+func int64Ptr(v int64) *int64 { return &v }
+
+func parseSSEPayloads(t *testing.T, out []byte) []map[string]json.RawMessage {
+	t.Helper()
+	var payloads []map[string]json.RawMessage
+	for _, line := range strings.Split(string(out), "\n") {
+		if !strings.HasPrefix(line, "data: ") {
+			continue
+		}
+		payload := strings.TrimPrefix(line, "data: ")
+		if payload == "[DONE]" {
+			continue
+		}
+		var obj map[string]json.RawMessage
+		if err := json.Unmarshal([]byte(payload), &obj); err != nil {
+			t.Fatalf("failed to parse translated chunk %q: %v", payload, err)
+		}
+		payloads = append(payloads, obj)
+	}
+	return payloads
+}
+
+func assertUsage(t *testing.T, got *openAIUsage, prompt, completion, total int64, cached *int64) {
+	t.Helper()
+	if got == nil {
+		t.Fatal("usage is nil")
+	}
+	if got.PromptTokens != prompt {
+		t.Errorf("prompt_tokens = %d, want %d", got.PromptTokens, prompt)
+	}
+	if got.CompletionTokens != completion {
+		t.Errorf("completion_tokens = %d, want %d", got.CompletionTokens, completion)
+	}
+	if got.TotalTokens != total {
+		t.Errorf("total_tokens = %d, want %d", got.TotalTokens, total)
+	}
+	switch {
+	case cached == nil && got.PromptTokensDetails != nil:
+		t.Errorf("prompt_tokens_details = %+v, want nil", got.PromptTokensDetails)
+	case cached != nil && got.PromptTokensDetails == nil:
+		t.Errorf("prompt_tokens_details = nil, want cached_tokens %d", *cached)
+	case cached != nil && got.PromptTokensDetails.CachedTokens != *cached:
+		t.Errorf("cached_tokens = %d, want %d", got.PromptTokensDetails.CachedTokens, *cached)
 	}
 }

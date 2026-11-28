@@ -143,3 +143,30 @@ func TestThoughtSignature_StoreFromGoogleStreamArray(t *testing.T) {
 		t.Fatalf("google stream failed %q %v", sig, ok)
 	}
 }
+
+func TestThoughtSignature_StoreFromGoogleStreamSSE(t *testing.T) {
+	s := NewThoughtSignatureStore(0)
+	stream := []byte("data: {\"candidates\":[{\"content\":{\"parts\":[{\"functionCall\":{\"name\":\"bash\",\"args\":{},\"thoughtSignature\":\"GSIGSSE\",\"id\":\"call_gs_sse\"}}]}}]}\n\n")
+	s.ExtractAndStoreFromStream(stream, "gemini-vertex")
+	if sig, ok := s.Load("call_gs_sse"); !ok || sig != "GSIGSSE" {
+		t.Fatalf("google SSE stream extract failed %q %v", sig, ok)
+	}
+}
+
+func TestThoughtSignature_StoreFromGoogleStreamSSE_Unspaced(t *testing.T) {
+	s := NewThoughtSignatureStore(0)
+	stream := []byte("data:{\"candidates\":[{\"content\":{\"parts\":[{\"functionCall\":{\"name\":\"bash\",\"args\":{},\"thoughtSignature\":\"GSIGSSE_UNSPACED\",\"id\":\"call_gs_sse_unspaced\"}}]}}]}\n\n")
+	s.ExtractAndStoreFromStream(stream, "gemini-vertex")
+	if sig, ok := s.Load("call_gs_sse_unspaced"); !ok || sig != "GSIGSSE_UNSPACED" {
+		t.Fatalf("unspaced google SSE stream extract failed %q %v", sig, ok)
+	}
+}
+
+func TestThoughtSignature_StoreFromGoogleStreamArray_WithDataColonText(t *testing.T) {
+	s := NewThoughtSignatureStore(0)
+	stream := []byte(`[{"candidates":[{"content":{"parts":[{"text":"metadata:123"},{"functionCall":{"name":"bash","args":{},"thoughtSignature":"GSIGARRAY","id":"call_gs_arr_datacolon"}}]}}]}]`)
+	s.ExtractAndStoreFromStream(stream, "google")
+	if sig, ok := s.Load("call_gs_arr_datacolon"); !ok || sig != "GSIGARRAY" {
+		t.Fatalf("google array with data: text extract failed %q %v", sig, ok)
+	}
+}

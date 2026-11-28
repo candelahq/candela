@@ -1247,7 +1247,7 @@ func main() {
 		Handler:           candelaotel.HTTPMiddleware(handler),
 		Protocols:         &protocols,
 		ReadHeaderTimeout: 10 * time.Second,
-		WriteTimeout:      10 * time.Minute, // generous for streaming LLM responses
+		WriteTimeout:      60 * time.Minute, // generous for long-running streaming LLM responses (Enterprise Gateway 60m requirement)
 		IdleTimeout:       120 * time.Second,
 	}
 

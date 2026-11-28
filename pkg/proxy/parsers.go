@@ -360,71 +360,85 @@ func (p *googleParser) ParseResponse(body []byte) (content string, inputTokens, 
 	return
 }
 
-func (p *googleParser) ParseStreamingResponse(data []byte) (content string, inputTokens, outputTokens int64) {
-	// Google streaming (streamGenerateContent) returns newline-delimited JSON
-	// objects, not SSE. The usage metadata appears in the LAST chunk only.
-	// Try parsing the accumulated data as a single response first (works if
-	// only one chunk was buffered), then fall back to scanning for the last
-	// usageMetadata block in the concatenated stream.
-	content, inputTokens, outputTokens = p.ParseResponse(data)
-	if inputTokens > 0 || outputTokens > 0 {
-		return
+// extractGoogleSSEChunks parses Google Gemini SSE streams (?alt=sse),
+// where each event payload is a JSON object prefixed with "data:" and an optional single space.
+func extractGoogleSSEChunks(data []byte) []map[string]interface{} {
+	if !bytes.Contains(data, []byte("data:")) {
+		return nil
 	}
-
-	// Google streaming (streamGenerateContent) returns a JSON array:
-	// [{chunk1},{chunk2},...] where objects can span multiple lines.
-	// Use json.Decoder to correctly parse multi-line JSON objects.
-	var lastMeta map[string]interface{}
-	var contentBuilder strings.Builder
-
-	// First try: parse as a JSON array of objects.
 	var chunks []map[string]interface{}
-	if err := json.Unmarshal(data, &chunks); err == nil && len(chunks) > 0 {
-		for _, chunk := range chunks {
-			if meta, ok := chunk["usageMetadata"].(map[string]interface{}); ok {
-				lastMeta = meta
-			}
-			if candidates, ok := chunk["candidates"].([]interface{}); ok && len(candidates) > 0 {
-				if c, ok := candidates[0].(map[string]interface{}); ok {
-					if cont, ok := c["content"].(map[string]interface{}); ok {
-						if parts, ok := cont["parts"].([]interface{}); ok {
-							for _, p := range parts {
-								if part, ok := p.(map[string]interface{}); ok {
-									if text, ok := part["text"].(string); ok {
-										contentBuilder.WriteString(text)
-									}
-								}
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if !strings.HasPrefix(line, "data:") {
+			continue
+		}
+		payload := strings.TrimPrefix(strings.TrimPrefix(line, "data:"), " ")
+		if payload == "" || payload == "[DONE]" {
+			continue
+		}
+		var chunk map[string]interface{}
+		if err := json.Unmarshal([]byte(payload), &chunk); err == nil && chunk != nil {
+			chunks = append(chunks, chunk)
+		}
+	}
+	return chunks
+}
+
+func accumulateGoogleChunk(chunk map[string]interface{}, contentBuilder *strings.Builder, lastMeta *map[string]interface{}) {
+	if meta, ok := chunk["usageMetadata"].(map[string]interface{}); ok {
+		*lastMeta = meta
+	}
+	if candidates, ok := chunk["candidates"].([]interface{}); ok && len(candidates) > 0 {
+		if c, ok := candidates[0].(map[string]interface{}); ok {
+			if cont, ok := c["content"].(map[string]interface{}); ok {
+				if parts, ok := cont["parts"].([]interface{}); ok {
+					for _, p := range parts {
+						if part, ok := p.(map[string]interface{}); ok {
+							if text, ok := part["text"].(string); ok {
+								contentBuilder.WriteString(text)
 							}
 						}
 					}
 				}
 			}
 		}
+	}
+}
+
+func (p *googleParser) ParseStreamingResponse(data []byte) (content string, inputTokens, outputTokens int64) {
+	// Google streaming (streamGenerateContent) returns SSE (?alt=sse), a JSON
+	// array, or newline-delimited JSON objects. The usage metadata typically
+	// appears in the LAST chunk.
+	// Try parsing the accumulated data as a single response first (works if
+	// only one chunk was buffered), then fall back to SSE / array / NDJSON.
+	content, inputTokens, outputTokens = p.ParseResponse(data)
+	if inputTokens > 0 || outputTokens > 0 {
+		return
+	}
+
+	var lastMeta map[string]interface{}
+	var contentBuilder strings.Builder
+
+	if sseChunks := extractGoogleSSEChunks(data); len(sseChunks) > 0 {
+		for _, chunk := range sseChunks {
+			accumulateGoogleChunk(chunk, &contentBuilder, &lastMeta)
+		}
 	} else {
-		// Fallback: try json.Decoder for newline-delimited JSON objects.
-		dec := json.NewDecoder(bytes.NewReader(data))
-		for dec.More() {
-			var chunk map[string]interface{}
-			if err := dec.Decode(&chunk); err != nil {
-				break
+		// Try as a JSON array of objects.
+		var chunks []map[string]interface{}
+		if err := json.Unmarshal(data, &chunks); err == nil && len(chunks) > 0 {
+			for _, chunk := range chunks {
+				accumulateGoogleChunk(chunk, &contentBuilder, &lastMeta)
 			}
-			if meta, ok := chunk["usageMetadata"].(map[string]interface{}); ok {
-				lastMeta = meta
-			}
-			if candidates, ok := chunk["candidates"].([]interface{}); ok && len(candidates) > 0 {
-				if c, ok := candidates[0].(map[string]interface{}); ok {
-					if cont, ok := c["content"].(map[string]interface{}); ok {
-						if parts, ok := cont["parts"].([]interface{}); ok {
-							for _, p := range parts {
-								if part, ok := p.(map[string]interface{}); ok {
-									if text, ok := part["text"].(string); ok {
-										contentBuilder.WriteString(text)
-									}
-								}
-							}
-						}
-					}
+		} else {
+			// Fallback: try json.Decoder for newline-delimited JSON objects.
+			dec := json.NewDecoder(bytes.NewReader(data))
+			for dec.More() {
+				var chunk map[string]interface{}
+				if err := dec.Decode(&chunk); err != nil {
+					break
 				}
+				accumulateGoogleChunk(chunk, &contentBuilder, &lastMeta)
 			}
 		}
 	}
@@ -515,7 +529,15 @@ func extractModelFromResponse(provider string, body []byte) string {
 func extractModelFromStreamingResponse(provider string, data []byte) string {
 	switch provider {
 	case "google", "gemini-vertex":
-		// Google streaming: look for modelVersion in any JSON chunk.
+		// Google streaming: look for modelVersion in SSE (?alt=sse), JSON array,
+		// single JSON object, or raw stream data.
+		if sseChunks := extractGoogleSSEChunks(data); len(sseChunks) > 0 {
+			for i := len(sseChunks) - 1; i >= 0; i-- {
+				if mv, ok := sseChunks[i]["modelVersion"].(string); ok && mv != "" {
+					return mv
+				}
+			}
+		}
 		// It's typically in the last chunk alongside usageMetadata.
 		var arr []map[string]interface{}
 		if json.Unmarshal(data, &arr) == nil {
@@ -703,10 +725,18 @@ func extractOpenAIStreamingCache(data []byte) CacheTokens {
 
 func extractGoogleStreamingCache(data []byte) CacheTokens {
 	var ct CacheTokens
-	// Google streaming returns JSON array or newline-delimited JSON.
-	// The last chunk contains usageMetadata. Try JSON array first.
+	// Google streaming returns SSE (?alt=sse), JSON array, or newline-delimited JSON.
+	// The last chunk contains usageMetadata.
 	var chunks []map[string]interface{}
-	if err := json.Unmarshal(data, &chunks); err == nil {
+	if sseChunks := extractGoogleSSEChunks(data); len(sseChunks) > 0 {
+		for _, chunk := range sseChunks {
+			if meta, ok := chunk["usageMetadata"].(map[string]interface{}); ok {
+				if v := toInt64(meta["cachedContentTokenCount"]); v > 0 {
+					ct.CacheReadTokens = v
+				}
+			}
+		}
+	} else if err := json.Unmarshal(data, &chunks); err == nil {
 		for _, chunk := range chunks {
 			if meta, ok := chunk["usageMetadata"].(map[string]interface{}); ok {
 				ct.CacheReadTokens = toInt64(meta["cachedContentTokenCount"])

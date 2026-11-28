@@ -1157,7 +1157,7 @@ func runForeground() {
 		Addr:              addr,
 		Handler:           mux,
 		ReadHeaderTimeout: 10 * time.Second,
-		WriteTimeout:      10 * time.Minute, // generous for streaming LLM responses
+		WriteTimeout:      60 * time.Minute, // generous for streaming LLM responses (Enterprise Gateway 60m)
 		IdleTimeout:       120 * time.Second,
 	}
 
@@ -1245,7 +1245,7 @@ func runForeground() {
 		Addr:              lmAddr,
 		Handler:           lmH,
 		ReadHeaderTimeout: 10 * time.Second,
-		WriteTimeout:      10 * time.Minute,
+		WriteTimeout:      60 * time.Minute,
 		IdleTimeout:       120 * time.Second,
 	}
 	go func() {

@@ -76,6 +76,13 @@ type PathRewriter interface {
 	RewritePath(model string, streaming bool) string
 }
 
+// ActionPathRewriter is an optional extension of PathRewriter for providers
+// whose upstream URL path depends on the incoming path (e.g. preserving
+// API version v1beta1 or non-generative actions like :countTokens).
+type ActionPathRewriter interface {
+	RewritePathForRequest(origPath, model string, streaming bool) string
+}
+
 // DefaultVertexAnthropicVersion is the API version required by Vertex AI rawPredict
 // for Anthropic models. Override via Provider.AnthropicVersion if Vertex AI
 // introduces a newer version.
@@ -84,7 +91,7 @@ const DefaultVertexAnthropicVersion = "vertex-2023-10-16"
 // maxStreamDuration is the maximum duration for a streaming upstream request,
 // even when using a detached context (context.WithoutCancel). This prevents
 // unbounded goroutine/connection leaks if upstream goes silent.
-const maxStreamDuration = 15 * time.Minute
+const maxStreamDuration = 60 * time.Minute
 
 // Provider defines an LLM API provider configuration.
 type Provider struct {
@@ -417,7 +424,11 @@ func newUpstreamHTTPClient(cfg Config) *http.Client {
 	)
 
 	return &http.Client{
-		Timeout: 5 * time.Minute, // LLM calls can be slow
+		// Do not set http.Client.Timeout here: it caps the entire response body
+		// read, which kills long-running SSE streams. TTFB is bounded by
+		// Transport.ResponseHeaderTimeout (2m), and overall stream lifetime is
+		// bounded by upstreamCtx (maxStreamDuration = 60m).
+		Timeout: 0,
 		Transport: &http.Transport{
 			DialContext:           (&net.Dialer{Timeout: 10 * time.Second}).DialContext,
 			TLSHandshakeTimeout:   10 * time.Second,
@@ -1047,6 +1058,17 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Antigravity Enterprise Gateway sends background telemetry calls to
+	// POST /v1beta:* (or /v1beta1:*). Acknowledge with 200 OK ({}) without
+	// forwarding to Vertex AI (which would 404 and trip circuit breakers).
+	if r.Method == http.MethodPost && (providerName == "google" || providerName == "gemini-vertex") && isGoogleTelemetryPath(upstreamPath) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("X-Request-ID", requestID)
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("{}"))
+		return
+	}
+
 	// Read the request body (capped at 10MB — returns 413 if exceeded).
 	reqBody, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 10<<20))
 	if err != nil {
@@ -1609,7 +1631,11 @@ skipBudget:
 				return
 			}
 			if attemptProvider.PathRewriter != nil && modelForPath != "" {
-				upstreamPath2 = attemptProvider.PathRewriter.RewritePath(modelForPath, isStreaming)
+				if apr, ok := attemptProvider.PathRewriter.(ActionPathRewriter); ok {
+					upstreamPath2 = apr.RewritePathForRequest(upstreamPath, modelForPath, isStreaming)
+				} else {
+					upstreamPath2 = attemptProvider.PathRewriter.RewritePath(modelForPath, isStreaming)
+				}
 			}
 
 			// --- Stream usage injection ---
@@ -1619,8 +1645,9 @@ skipBudget:
 
 			// Build the upstream request.
 			upstreamURL := attemptProvider.UpstreamURL + upstreamPath2
-			if r.URL.RawQuery != "" && attemptProvider.TokenSource == nil && attemptProvider.RequestSigner == nil {
-				upstreamURL += "?" + r.URL.RawQuery
+			managedAuth := attemptProvider.TokenSource != nil || attemptProvider.RequestSigner != nil
+			if q := sanitizedQuery(r.URL.RawQuery, managedAuth); q != "" {
+				upstreamURL += "?" + q
 			}
 
 			upstreamCtx, streamCancel := context.WithTimeout(context.WithoutCancel(r.Context()), maxStreamDuration)
@@ -2777,8 +2804,15 @@ func forwardHeaders(src *http.Request, dst *http.Request, provider string, manag
 		// - anthropic_version is set in the body (vertex-2023-10-16)
 		// - Anthropic-Beta headers cause Vertex AI to reject or silently
 		//   ignore features like prompt caching.
-	case "google":
-		// Google uses API key in query params or Authorization header — both forwarded.
+	case "google", "gemini-vertex", "gemini-oai":
+		// Preserve Google/Antigravity client attribution headers required by
+		// Gemini Enterprise Gateway (User-Agent, X-Goog-Api-Client) and
+		// enterprise cost attribution headers (X-Cost-Center).
+		for _, h := range []string{"User-Agent", "X-Goog-Api-Client", "X-Cost-Center"} {
+			if v := src.Header.Get(h); v != "" {
+				dst.Header.Set(h, v)
+			}
+		}
 	}
 }
 
@@ -2822,12 +2856,42 @@ func toInt64(v interface{}) int64 {
 	return result
 }
 
+// isGoogleTelemetryPath matches background telemetry/metrics endpoints
+// called by Antigravity Enterprise Gateway clients (e.g. POST /v1beta:recordMetrics).
+func isGoogleTelemetryPath(path string) bool {
+	return strings.HasPrefix(path, "/v1beta:") || strings.HasPrefix(path, "/v1beta1:")
+}
+
+// sanitizedQuery returns the query string to forward upstream.
+// For passthrough providers (managedAuth == false), the raw query is
+// preserved intact (e.g. ?key=... for gemini-direct).
+// For managed-auth providers (ADC / SigV4), credentials like ?key= are
+// stripped, while safe protocol parameters (such as alt=sse for Gemini
+// streaming) are preserved.
+func sanitizedQuery(rawQuery string, managedAuth bool) string {
+	if rawQuery == "" {
+		return ""
+	}
+	if !managedAuth {
+		return rawQuery
+	}
+	vals, err := url.ParseQuery(rawQuery)
+	if err != nil {
+		return ""
+	}
+	if alt := vals.Get("alt"); alt != "" {
+		return "alt=" + url.QueryEscape(alt)
+	}
+	return ""
+}
+
 // isUtilityEndpoint returns true for API paths that are non-generative
 // utility calls (e.g. count_tokens, tokenize). These endpoints don't
 // produce chat completions, so parsing their response as one yields
 // misleading 0-token spans. The proxy still forwards them transparently.
 func isUtilityEndpoint(path string) bool {
 	return strings.HasSuffix(path, "/count_tokens") ||
+		strings.HasSuffix(path, ":countTokens") ||
 		strings.HasSuffix(path, "/tokenize") ||
 		strings.HasSuffix(path, "/models") ||
 		path == "/v1/models"

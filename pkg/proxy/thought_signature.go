@@ -253,7 +253,8 @@ func (s *ThoughtSignatureStore) ExtractAndStoreFromStream(data []byte, provider 
 			if err := json.Unmarshal(payload, &chunk); err != nil {
 				continue
 			}
-			// Reuse OpenAI extraction on a fake wrapper with choices
+			// Reuse OpenAI extraction and Google native candidate extraction (?alt=sse)
+			s.extractFromGoogleCandidates(chunk)
 			s.extractFromOpenAIChoices(chunk)
 		}
 		return

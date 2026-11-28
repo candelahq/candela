@@ -143,3 +143,12 @@ func TestThoughtSignature_StoreFromGoogleStreamArray(t *testing.T) {
 		t.Fatalf("google stream failed %q %v", sig, ok)
 	}
 }
+
+func TestThoughtSignature_StoreFromGoogleStreamSSE(t *testing.T) {
+	s := NewThoughtSignatureStore(0)
+	stream := []byte("data: {\"candidates\":[{\"content\":{\"parts\":[{\"functionCall\":{\"name\":\"bash\",\"args\":{},\"thoughtSignature\":\"GSIGSSE\",\"id\":\"call_gs_sse\"}}]}}]}\n\n")
+	s.ExtractAndStoreFromStream(stream, "gemini-vertex")
+	if sig, ok := s.Load("call_gs_sse"); !ok || sig != "GSIGSSE" {
+		t.Fatalf("google SSE stream extract failed %q %v", sig, ok)
+	}
+}

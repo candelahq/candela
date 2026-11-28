@@ -755,6 +755,23 @@ func (r *VertexAIGooglePathRewriter) RewritePath(model string, streaming bool) s
 		r.ProjectID, r.Region, model, method)
 }
 
+// RewritePathForRequest preserves the Vertex AI v1beta1 version when
+// explicitly requested and retains non-generative actions like :countTokens.
+func (r *VertexAIGooglePathRewriter) RewritePathForRequest(origPath, model string, streaming bool) string {
+	apiVersion := "v1"
+	if strings.HasPrefix(origPath, "/v1beta1/") {
+		apiVersion = "v1beta1"
+	}
+	action := "generateContent"
+	if strings.HasSuffix(origPath, ":countTokens") {
+		action = "countTokens"
+	} else if streaming {
+		action = "streamGenerateContent"
+	}
+	return fmt.Sprintf("/%s/projects/%s/locations/%s/publishers/google/models/%s:%s",
+		apiVersion, r.ProjectID, r.Region, model, action)
+}
+
 // ====================================================================
 // Shared types for OpenAI ↔ Anthropic translation
 // ====================================================================

@@ -165,6 +165,12 @@
     "fallback_output_per_million": 20
   },
   {
+    "model": "gemini-4-neon",
+    "provider": "google",
+    "input_per_million": 3,
+    "output_per_million": 15
+  },
+  {
     "model": "imagen-3.0-generate-002",
     "provider": "google",
     "input_per_million": 25,

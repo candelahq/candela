@@ -8,8 +8,8 @@ import (
 
 func TestNewUpstreamHTTPClient_Defaults(t *testing.T) {
 	client := newUpstreamHTTPClient(Config{})
-	if client.Timeout != 5*time.Minute {
-		t.Errorf("Timeout = %v, want 5m", client.Timeout)
+	if client.Timeout != 0 {
+		t.Errorf("Timeout = %v, want 0 (unbounded for SSE; bounded by ResponseHeaderTimeout + stream ctx)", client.Timeout)
 	}
 	tr, ok := client.Transport.(*http.Transport)
 	if !ok {

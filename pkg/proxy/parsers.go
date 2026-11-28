@@ -361,18 +361,18 @@ func (p *googleParser) ParseResponse(body []byte) (content string, inputTokens, 
 }
 
 // extractGoogleSSEChunks parses Google Gemini SSE streams (?alt=sse),
-// where each event payload is a JSON object prefixed with "data: ".
+// where each event payload is a JSON object prefixed with "data:" and an optional single space.
 func extractGoogleSSEChunks(data []byte) []map[string]interface{} {
-	if !bytes.Contains(data, []byte("data: ")) {
+	if !bytes.Contains(data, []byte("data:")) {
 		return nil
 	}
 	var chunks []map[string]interface{}
 	for _, line := range strings.Split(string(data), "\n") {
 		line = strings.TrimSpace(line)
-		if !strings.HasPrefix(line, "data: ") {
+		if !strings.HasPrefix(line, "data:") {
 			continue
 		}
-		payload := strings.TrimPrefix(line, "data: ")
+		payload := strings.TrimPrefix(strings.TrimPrefix(line, "data:"), " ")
 		if payload == "" || payload == "[DONE]" {
 			continue
 		}

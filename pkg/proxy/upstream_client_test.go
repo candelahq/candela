@@ -61,3 +61,12 @@ func TestNewUpstreamHTTPClient_ZeroValuesGetDefaults(t *testing.T) {
 		t.Errorf("MaxConnsPerHost = %d, want 100", tr.MaxConnsPerHost)
 	}
 }
+
+func TestUpstreamRequestTimeout(t *testing.T) {
+	if got := upstreamRequestTimeout(true); got != 60*time.Minute {
+		t.Errorf("upstreamRequestTimeout(true) = %v, want 60m", got)
+	}
+	if got := upstreamRequestTimeout(false); got != 5*time.Minute {
+		t.Errorf("upstreamRequestTimeout(false) = %v, want 5m", got)
+	}
+}

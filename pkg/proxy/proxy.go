@@ -93,6 +93,18 @@ const DefaultVertexAnthropicVersion = "vertex-2023-10-16"
 // unbounded goroutine/connection leaks if upstream goes silent.
 const maxStreamDuration = 60 * time.Minute
 
+// maxNonStreamDuration is the maximum duration for a non-streaming upstream
+// request, preserving the previous 5-minute ceiling so an upstream that stalls
+// after sending headers cannot hold connections or budget reservations for an hour.
+const maxNonStreamDuration = 5 * time.Minute
+
+func upstreamRequestTimeout(isStreaming bool) time.Duration {
+	if isStreaming {
+		return maxStreamDuration
+	}
+	return maxNonStreamDuration
+}
+
 // Provider defines an LLM API provider configuration.
 type Provider struct {
 	Name        string `yaml:"name"`     // "openai", "google", "anthropic", "gemini-oai", "anthropic-bedrock"
@@ -426,8 +438,9 @@ func newUpstreamHTTPClient(cfg Config) *http.Client {
 	return &http.Client{
 		// Do not set http.Client.Timeout here: it caps the entire response body
 		// read, which kills long-running SSE streams. TTFB is bounded by
-		// Transport.ResponseHeaderTimeout (2m), and overall stream lifetime is
-		// bounded by upstreamCtx (maxStreamDuration = 60m).
+		// Transport.ResponseHeaderTimeout (2m), and overall request lifetime is
+		// bounded by upstreamCtx (maxStreamDuration = 60m for streaming,
+		// maxNonStreamDuration = 5m for non-streaming).
 		Timeout: 0,
 		Transport: &http.Transport{
 			DialContext:           (&net.Dialer{Timeout: 10 * time.Second}).DialContext,
@@ -1650,7 +1663,7 @@ skipBudget:
 				upstreamURL += "?" + q
 			}
 
-			upstreamCtx, streamCancel := context.WithTimeout(context.WithoutCancel(r.Context()), maxStreamDuration)
+			upstreamCtx, streamCancel := context.WithTimeout(context.WithoutCancel(r.Context()), upstreamRequestTimeout(isStreaming))
 			upstreamReq, reqErr := http.NewRequestWithContext(upstreamCtx, r.Method, upstreamURL, bytes.NewReader(upstreamBody))
 			if reqErr != nil {
 				streamCancel()

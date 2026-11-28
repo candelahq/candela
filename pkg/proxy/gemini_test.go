@@ -507,3 +507,29 @@ func TestGeminiParser_Streaming_SSE(t *testing.T) {
 		t.Errorf("CacheReadTokens = %d, want 80", ct.CacheReadTokens)
 	}
 }
+
+func TestGeminiParser_Streaming_SSE_Unspaced(t *testing.T) {
+	sse := []byte("data:{\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"Hello \"}]}}],\"modelVersion\":\"gemini-4-neon\"}\n\n" +
+		"data:{\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"world!\"}]}}],\"modelVersion\":\"gemini-4-neon\",\"usageMetadata\":{\"promptTokenCount\":120,\"cachedContentTokenCount\":80,\"candidatesTokenCount\":15,\"thoughtsTokenCount\":25,\"totalTokenCount\":160}}\n\n")
+
+	parser := &googleParser{}
+	content, in, out := parser.ParseStreamingResponse(sse)
+	if content != "Hello world!" {
+		t.Errorf("content = %q, want %q", content, "Hello world!")
+	}
+	if in != 120 {
+		t.Errorf("inputTokens = %d, want 120", in)
+	}
+	if out != 40 {
+		t.Errorf("outputTokens = %d, want 40", out)
+	}
+
+	if model := extractModelFromStreamingResponse("gemini-vertex", sse); model != "gemini-4-neon" {
+		t.Errorf("extractModelFromStreamingResponse = %q, want gemini-4-neon", model)
+	}
+
+	ct := extractStreamingCacheTokens("gemini-vertex", sse)
+	if ct.CacheReadTokens != 80 {
+		t.Errorf("CacheReadTokens = %d, want 80", ct.CacheReadTokens)
+	}
+}

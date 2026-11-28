@@ -238,15 +238,17 @@ func (s *ThoughtSignatureStore) ExtractAndStoreFromStream(data []byte, provider 
 	if len(data) == 0 || s == nil {
 		return
 	}
-	// Try as OpenAI SSE (data: lines)
-	if bytes.Contains(data, []byte("data: ")) {
+	// Try as SSE (data: lines, with or without an optional space after the colon)
+	matchedSSE := false
+	if bytes.Contains(data, []byte("data:")) {
 		for _, line := range bytes.Split(data, []byte("\n")) {
 			line = bytes.TrimSpace(line)
-			if !bytes.HasPrefix(line, []byte("data: ")) {
+			if !bytes.HasPrefix(line, []byte("data:")) {
 				continue
 			}
-			payload := bytes.TrimPrefix(line, []byte("data: "))
-			if string(payload) == "[DONE]" {
+			matchedSSE = true
+			payload := bytes.TrimPrefix(bytes.TrimPrefix(line, []byte("data:")), []byte(" "))
+			if len(payload) == 0 || string(payload) == "[DONE]" {
 				continue
 			}
 			var chunk map[string]interface{}
@@ -257,7 +259,9 @@ func (s *ThoughtSignatureStore) ExtractAndStoreFromStream(data []byte, provider 
 			s.extractFromGoogleCandidates(chunk)
 			s.extractFromOpenAIChoices(chunk)
 		}
-		return
+		if matchedSSE {
+			return
+		}
 	}
 	// Try as Google JSON array (streamGenerateContent)
 	var arr []map[string]interface{}
@@ -275,7 +279,7 @@ func (s *ThoughtSignatureStore) ExtractAndStoreFromStream(data []byte, provider 
 		s.extractFromOpenAIChoices(single)
 	}
 	// Fallback: try line-delimited JSON (Google NDJSON)
-	if !bytes.Contains(data, []byte("data: ")) {
+	if !matchedSSE {
 		dec := json.NewDecoder(bytes.NewReader(data))
 		for dec.More() {
 			var chunk map[string]interface{}
